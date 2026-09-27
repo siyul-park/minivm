@@ -36,7 +36,9 @@ type lowering struct {
 	// stalls holds each exit's remat constants, materialized at its stub.
 	stalls [][]stall
 	// memo is each ExitCall map's one register per remat constant.
-	memo   map[int]map[ssa.Value]asm.VReg
+	memo map[int]map[ssa.Value]asm.VReg
+	// deopts holds the deopt stubs placed since the last terminator that
+	// does not fall through, where deopt emits them.
 	deopts []stub
 	edges  []edge
 	stubs  []stub
@@ -58,6 +60,13 @@ type lowering struct {
 	// parameter (see args): already the raw unboxed payload, so its
 	// guard.kind moves instead of unboxing it.
 	param map[ssa.Value]bool
+
+	// uses counts each value's uses: operation, terminator, and edge
+	// arguments, and the frames of every state.
+	uses map[ssa.Value]int
+	// fuse is the condition of the OpBranch ending the block being lowered
+	// when the block's last operation defines it and nothing else uses it.
+	fuse ssa.Value
 
 	// op is the operation or terminator being lowered.
 	op ssa.Operation
@@ -141,7 +150,7 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 		states: map[ssa.Value]ssa.Operation{}, consts: map[ssa.Value]uint64{}, raw: map[ssa.Value]bool{},
 		homes: homes, tmp: int32(f.Values()) + 4,
 		memo: map[int]map[ssa.Value]asm.VReg{}, remats: map[ssa.Value]bool{},
-		param: map[ssa.Value]bool{},
+		param: map[ssa.Value]bool{}, uses: map[ssa.Value]int{},
 	}
 	// A scalar or ref constant is rematerialized when f has a call and no
 	// loop block uses it: a loop keeps its constants in registers.
@@ -155,8 +164,9 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 	for id := 0; id < f.Len(); id++ {
 		b := f.Block(id)
 		mark := func(args []ssa.Value) {
-			if loops[id] {
-				for _, v := range args {
+			for _, v := range args {
+				l.uses[v]++
+				if loops[id] {
 					looped[v] = true
 				}
 			}
@@ -164,6 +174,14 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 		for _, op := range b.Operations {
 			caller = caller || op.Op == ssa.OpExec && op.Code == instr.CALL
 			mark(op.Args)
+			for _, frame := range op.Frames {
+				for _, o := range frame.Stack {
+					l.uses[o.Value]++
+				}
+				for _, local := range frame.Locals {
+					l.uses[local.Value]++
+				}
+			}
 		}
 		mark(b.Terminator.Args)
 		for _, e := range b.Terminator.Edges {
@@ -234,12 +252,18 @@ func (l *lowering) Slot(slot ssa.Slot) ssa.Type {
 	return 0
 }
 
-// Deopt places a deopt stub at the current state.
+// Fuse reports whether v is the condition of the OpBranch ending the block
+// being lowered, defined by the block's last operation and used nowhere else.
+func (l *lowering) Fuse(v ssa.Value) bool {
+	return v == l.fuse
+}
+
+// Deopt places a deopt stub at the current state, out of line after the
+// next terminator that does not fall through.
 func (l *lowering) Deopt() asm.Label {
-	id := l.exit(jit.ExitDeopt)
-	label := l.a.Label()
-	l.deopts = append(l.deopts, stub{label: label, id: id})
-	return label
+	s := stub{label: l.a.Label(), id: l.exit(jit.ExitDeopt)}
+	l.deopts = append(l.deopts, s)
+	return s.label
 }
 
 // Release places a release stub for ref.
@@ -313,9 +337,15 @@ func (l *lowering) function() error {
 			return err
 		}
 	}
-	for _, block := range order {
+	for i, block := range order {
 		b := l.f.Block(block)
 		l.a.Bind(labels[block])
+		l.fuse = ssa.NoValue
+		if n := len(b.Operations); n > 0 && b.Terminator.Op == ssa.OpBranch {
+			if results := b.Operations[n-1].Results; len(results) == 1 && results[0] == b.Terminator.Args[0] && l.uses[results[0]] == 1 {
+				l.fuse = results[0]
+			}
+		}
 		counted := !slices.Contains(headers, block)
 		for _, op := range b.Operations {
 			if !counted && op.State != ssa.NoValue {
@@ -332,7 +362,11 @@ func (l *lowering) function() error {
 		if !counted {
 			return fmt.Errorf("%w: loop header %d without state", ErrUnsupported, block)
 		}
-		if err := l.terminator(b.Terminator, labels); err != nil {
+		next := l.a.Label()
+		if i+1 < len(order) {
+			next = labels[order[i+1]]
+		}
+		if err := l.terminator(b.Terminator, labels, next); err != nil {
 			return err
 		}
 		l.args = nil
@@ -340,13 +374,13 @@ func (l *lowering) function() error {
 	for _, e := range l.edges {
 		l.a.Bind(e.label)
 		l.shuffle(e.moves)
-		l.m.Branch(l.a, ssa.Terminator{Op: ssa.OpJump}, l, []asm.Label{labels[e.block]})
+		l.jump(labels[e.block])
 	}
 	for _, s := range l.stubs {
 		l.a.Bind(s.label)
 		l.emit(s.id)
 		if l.exits[s.id].Kind.Resumes() {
-			l.m.Branch(l.a, ssa.Terminator{Op: ssa.OpJump}, l, []asm.Label{s.resume})
+			l.jump(s.resume)
 		}
 	}
 	l.m.Epilogue(l.a)
@@ -448,7 +482,6 @@ func (l *lowering) operation(op ssa.Operation) error {
 			return l.call(op)
 		}
 		if l.m.Lower(l.a, op, l) {
-			l.deopt()
 			return l.err
 		}
 		results := make([]asm.VReg, len(op.Results))
@@ -470,7 +503,6 @@ func (l *lowering) operation(op ssa.Operation) error {
 	if !l.m.Lower(l.a, op, l) {
 		return fmt.Errorf("%w: %s", ErrUnsupported, op.Op)
 	}
-	l.deopt()
 	return l.err
 }
 
@@ -483,23 +515,9 @@ func (l *lowering) argument(slot ssa.Slot) (int, bool) {
 	return slot.Index, l.args[slot.Index] != asm.VReg{}
 }
 
-func (l *lowering) deopt() {
-	if len(l.deopts) == 0 {
-		return
-	}
-	resume := l.a.Label()
-	l.m.Branch(l.a, ssa.Terminator{Op: ssa.OpJump}, l, []asm.Label{resume})
-	for _, stub := range l.deopts {
-		l.a.Bind(stub.label)
-		l.emit(stub.id)
-	}
-	l.a.Bind(resume)
-	l.deopts = nil
-}
-
-// terminator lowers t. An edge that moves values gets a stub of its own, so
-// the branch itself never moves anything.
-func (l *lowering) terminator(t ssa.Terminator, labels []asm.Label) error {
+// terminator lowers t, which falls through to next. An edge that moves
+// values gets a stub of its own, so the branch itself never moves anything.
+func (l *lowering) terminator(t ssa.Terminator, labels []asm.Label, next asm.Label) error {
 	var args []ssa.Value
 	for _, e := range t.Edges {
 		args = append(args, e.Args...)
@@ -523,6 +541,7 @@ func (l *lowering) terminator(t ssa.Terminator, labels []asm.Label) error {
 	case ssa.OpExit:
 		id := l.exit(jit.ExitDeopt)
 		l.emit(id)
+		l.deopt()
 		return l.err
 	case ssa.OpJump, ssa.OpBranch, ssa.OpTable:
 	default:
@@ -543,7 +562,10 @@ func (l *lowering) terminator(t ssa.Terminator, labels []asm.Label) error {
 	}
 	if len(edges) == 1 {
 		l.shuffle(edges[0].moves)
-		l.m.Branch(l.a, t, l, []asm.Label{edges[0].label})
+		l.m.Branch(l.a, t, l, []asm.Label{edges[0].label}, next)
+		if edges[0].label != next {
+			l.deopt()
+		}
 		return nil
 	}
 	targets := make([]asm.Label, len(edges))
@@ -553,11 +575,32 @@ func (l *lowering) terminator(t ssa.Terminator, labels []asm.Label) error {
 		}
 		targets[i] = edges[i].label
 	}
-	l.m.Branch(l.a, t, l, targets)
+	l.m.Branch(l.a, t, l, targets, next)
 	if moved {
 		l.edges = append(l.edges, edges...)
 	}
+	if !slices.Contains(targets, next) {
+		l.deopt()
+	}
 	return nil
+}
+
+// deopt emits the pending deopt stubs where no row falls through into them:
+// near the checks that take them, so the values their maps name stay live
+// only that far.
+func (l *lowering) deopt() {
+	for _, s := range l.deopts {
+		l.a.Bind(s.label)
+		l.emit(s.id)
+	}
+	l.deopts = nil
+}
+
+// jump branches to label from stub code, whose next row is never label.
+func (l *lowering) jump(label asm.Label) {
+	next := l.a.Label()
+	l.m.Branch(l.a, ssa.Terminator{Op: ssa.OpJump}, l, []asm.Label{label}, next)
+	l.a.Bind(next)
 }
 
 // fresh returns an unshared register of type t.

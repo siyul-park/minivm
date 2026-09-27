@@ -31,8 +31,9 @@ type Machine interface {
 	Enter(a *asm.Assembler, l Layout) asm.Label
 	// Lower emits op and reports false when the target cannot lower it.
 	Lower(a *asm.Assembler, op ssa.Operation, s Site) bool
-	// Branch transfers control to labels, one per edge of t.
-	Branch(a *asm.Assembler, t ssa.Terminator, s Site, labels []asm.Label)
+	// Branch transfers control to labels, one per edge of t. next is the
+	// label bound right after the branch: an edge to it falls through.
+	Branch(a *asm.Assembler, t ssa.Terminator, s Site, labels []asm.Label, next asm.Label)
 	// Return ends the function with an OpReturn or OpComplete t.
 	Return(a *asm.Assembler, t ssa.Terminator, s Site)
 	// Budget counts one loop iteration down and branches to safepoint when
@@ -81,6 +82,10 @@ type Site interface {
 	Type(v ssa.Value) ssa.Type
 	// Slot returns the static type of slot.
 	Slot(slot ssa.Slot) ssa.Type
+	// Fuse reports whether v's only use is the condition of the OpBranch
+	// right after its operation, so the machine may leave v in condition
+	// flags instead of a register.
+	Fuse(v ssa.Value) bool
 	// Deopt returns the label of an exit that abandons native code at the
 	// interpreter state of the operation.
 	Deopt() asm.Label

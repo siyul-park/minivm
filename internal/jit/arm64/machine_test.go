@@ -36,11 +36,19 @@ func (r regs) Slot(s ssa.Slot) ssa.Type {
 	return 0
 }
 
+func (r regs) Fuse(ssa.Value) bool { return false }
+
 func (r regs) Deopt() asm.Label { return exit }
 
 func (r regs) Release(asm.VReg) (asm.Label, asm.Label) { return exit, resume }
 
 func (r regs) Box(asm.VReg) (asm.Label, asm.Label) { return exit, resume }
+
+// fused is regs whose every value is the condition of the branch right
+// after its operation.
+type fused struct{ regs }
+
+func (fused) Fuse(ssa.Value) bool { return true }
 
 func (r regs) Reg(v ssa.Value) asm.VReg {
 	switch r[v] {
@@ -312,6 +320,9 @@ func TestMachine_Lower(t *testing.T) {
 		// own rows can assume it already ran.
 		guard *ssa.Operation
 		op    ssa.Operation
+		// fuse lowers op through a Site that fuses its result into the
+		// branch right after it.
+		fuse  bool
 		rows  []asm.Instruction
 		lower bool
 	}
@@ -383,38 +394,24 @@ func TestMachine_Lower(t *testing.T) {
 			rows: []asm.Instruction{target.CMP(reg(c.typ, 1), reg(c.typ, 2)), target.CSET(reg(ssa.TypeI1, 3), c.cond)}, lower: true,
 		})
 	}
-	flag := reg(ssa.TypeI1, 3)
 	for _, c := range []struct {
 		code instr.Opcode
 		typ  ssa.Type
-		rows []asm.Instruction
+		cond uint8
 	}{
-		{instr.F32_EQ, f32, []asm.Instruction{
-			target.FCMP(reg(f32, 1), reg(f32, 2)), target.CSET(flag, target.CondEQ), target.CSETM(target.W16, target.CondVS), target.BIC(flag, flag, target.W16),
-		}},
-		{instr.F32_NE, f32, []asm.Instruction{
-			target.FCMP(reg(f32, 1), reg(f32, 2)), target.CSET(flag, target.CondNE), target.CSET(target.W16, target.CondVS), target.ORR(flag, flag, target.W16),
-		}},
-		{instr.F32_LT, f32, []asm.Instruction{target.FCMP(reg(f32, 1), reg(f32, 2)), target.CSET(flag, target.CondMI)}},
-		{instr.F32_GT, f32, []asm.Instruction{target.FCMP(reg(f32, 1), reg(f32, 2)), target.CSET(flag, target.CondGT)}},
-		{instr.F32_LE, f32, []asm.Instruction{
-			target.FCMP(reg(f32, 1), reg(f32, 2)), target.CSET(flag, target.CondLS), target.CSETM(target.W16, target.CondVS), target.BIC(flag, flag, target.W16),
-		}},
-		{instr.F32_GE, f32, []asm.Instruction{target.FCMP(reg(f32, 1), reg(f32, 2)), target.CSET(flag, target.CondGE)}},
-		{instr.F64_EQ, f64, []asm.Instruction{
-			target.FCMP(reg(f64, 1), reg(f64, 2)), target.CSET(flag, target.CondEQ), target.CSETM(target.W16, target.CondVS), target.BIC(flag, flag, target.W16),
-		}},
-		{instr.F64_NE, f64, []asm.Instruction{
-			target.FCMP(reg(f64, 1), reg(f64, 2)), target.CSET(flag, target.CondNE), target.CSET(target.W16, target.CondVS), target.ORR(flag, flag, target.W16),
-		}},
-		{instr.F64_LT, f64, []asm.Instruction{target.FCMP(reg(f64, 1), reg(f64, 2)), target.CSET(flag, target.CondMI)}},
-		{instr.F64_GT, f64, []asm.Instruction{target.FCMP(reg(f64, 1), reg(f64, 2)), target.CSET(flag, target.CondGT)}},
-		{instr.F64_LE, f64, []asm.Instruction{
-			target.FCMP(reg(f64, 1), reg(f64, 2)), target.CSET(flag, target.CondLS), target.CSETM(target.W16, target.CondVS), target.BIC(flag, flag, target.W16),
-		}},
-		{instr.F64_GE, f64, []asm.Instruction{target.FCMP(reg(f64, 1), reg(f64, 2)), target.CSET(flag, target.CondGE)}},
+		{instr.F32_EQ, f32, target.CondEQ}, {instr.F32_NE, f32, target.CondNE},
+		{instr.F32_LT, f32, target.CondMI}, {instr.F32_GT, f32, target.CondGT},
+		{instr.F32_LE, f32, target.CondLS}, {instr.F32_GE, f32, target.CondGE},
+		{instr.F64_EQ, f64, target.CondEQ}, {instr.F64_NE, f64, target.CondNE},
+		{instr.F64_LT, f64, target.CondMI}, {instr.F64_GT, f64, target.CondGT},
+		{instr.F64_LE, f64, target.CondLS}, {instr.F64_GE, f64, target.CondGE},
 	} {
-		tests = append(tests, test{name: instr.TypeOf(c.code).Mnemonic, regs: regs{1: c.typ, 2: c.typ, 3: ssa.TypeI1}, op: exec(c.code, 1, 2), rows: c.rows, lower: true})
+		tests = append(tests, test{
+			name: instr.TypeOf(c.code).Mnemonic,
+			regs: regs{1: c.typ, 2: c.typ, 3: ssa.TypeI1},
+			op:   exec(c.code, 1, 2),
+			rows: []asm.Instruction{target.FCMP(reg(c.typ, 1), reg(c.typ, 2)), target.CSET(reg(ssa.TypeI1, 3), c.cond)}, lower: true,
+		})
 	}
 	for _, c := range []struct {
 		code     instr.Opcode
@@ -466,6 +463,24 @@ func TestMachine_Lower(t *testing.T) {
 	x := func(v ssa.Value) asm.VReg { return reg(i64, v) }
 	w := func(v ssa.Value) asm.VReg { return reg(i32, v) }
 	tests = append(tests, []test{
+		{
+			name: "i32.lt_s leaves a fused condition in the flags",
+			regs: regs{1: i32, 2: i32, 3: ssa.TypeI1},
+			op:   exec(instr.I32_LT_S, 1, 2), fuse: true,
+			rows: []asm.Instruction{target.CMP(reg(i32, 1), reg(i32, 2))}, lower: true,
+		},
+		{
+			name: "f64.le leaves a fused condition in the flags",
+			regs: regs{1: f64, 2: f64, 3: ssa.TypeI1},
+			op:   exec(instr.F64_LE, 1, 2), fuse: true,
+			rows: []asm.Instruction{target.FCMP(reg(f64, 1), reg(f64, 2))}, lower: true,
+		},
+		{
+			name: "i64.eqz leaves a fused condition in the flags",
+			regs: regs{1: i64, 2: ssa.TypeI1},
+			op:   exec(instr.I64_EQZ, 1), fuse: true,
+			rows: []asm.Instruction{target.CMPI(reg(i64, 1), 0)}, lower: true,
+		},
 		{
 			name: "i64.div_s fails on a zero divisor",
 			regs: regs{1: i64, 2: i64, 3: i64},
@@ -854,8 +869,7 @@ func TestMachine_Lower(t *testing.T) {
 				target.LDR(vr(4), vr(3), 0),
 				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
 				target.SXTW(vr(6), reg(i32, 3)),
-				target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
-				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
 				target.LSLI(vr(7), vr(6), 2), target.ADD(vr(7), vr(4), vr(7)),
 				target.LDR(reg(i32, 4), vr(7), 0),
 			},
@@ -874,8 +888,7 @@ func TestMachine_Lower(t *testing.T) {
 				target.LDR(vr(4), vr(3), 0),
 				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
 				target.SXTW(vr(6), reg(i32, 3)),
-				target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
-				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
 				target.ADD(vr(7), vr(4), vr(6)),
 				target.LDRSB(reg(ssa.TypeI8, 4), vr(7), 0),
 			},
@@ -896,8 +909,7 @@ func TestMachine_Lower(t *testing.T) {
 					target.LDR(vr(4), vr(3), 0),
 					target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
 					target.SXTW(vr(6), reg(i32, 3)),
-					target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
-					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
 					target.LSLI(vr(7), vr(6), 3), target.ADD(vr(7), vr(4), vr(7)),
 					target.LDR(reg(ssa.TypeRef, 4), vr(7), 0),
 				}
@@ -920,8 +932,7 @@ func TestMachine_Lower(t *testing.T) {
 					target.LDR(vr(4), vr(3), 0),
 					target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
 					target.SXTW(vr(6), reg(i32, 3)),
-					target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
-					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
 					target.LSLI(vr(7), vr(6), 3), target.ADD(vr(7), vr(4), vr(7)),
 					target.LDR(vr(8), vr(7), 0),
 					target.STR(reg(ssa.TypeRef, 4), vr(7), 0),
@@ -945,8 +956,7 @@ func TestMachine_Lower(t *testing.T) {
 					target.LDR(vr(4), vr(3), 0),
 					target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
 					target.SXTW(vr(6), reg(i32, 3)),
-					target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
-					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
 					target.LSLI(vr(7), vr(6), 3), target.ADD(vr(7), vr(4), vr(7)),
 					target.UXTW(target.X16, reg(i32, 4)),
 				}
@@ -973,8 +983,7 @@ func TestMachine_Lower(t *testing.T) {
 				target.LDR(vr(4), vr(3), 0),
 				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
 				target.SXTW(vr(6), reg(i32, 3)),
-				target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
-				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
 				target.LSLI(vr(7), vr(6), 2), target.ADD(vr(7), vr(4), vr(7)),
 				target.STRW(reg(i32, 4), vr(7), 0),
 			},
@@ -993,8 +1002,7 @@ func TestMachine_Lower(t *testing.T) {
 				target.LDR(vr(4), vr(3), 0),
 				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
 				target.SXTW(vr(6), reg(i32, 3)),
-				target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
-				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
 				target.ADD(vr(7), vr(4), vr(6)),
 				target.STRB(reg(ssa.TypeI8, 4), vr(7), 0),
 			},
@@ -1013,8 +1021,7 @@ func TestMachine_Lower(t *testing.T) {
 				target.LDR(vr(4), vr(3), 0),
 				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
 				target.SXTW(vr(6), reg(i32, 3)),
-				target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
-				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
 				target.ADD(vr(7), vr(4), vr(6)),
 				target.CMPI(reg(i32, 4), 0), target.CSET(vr(8), target.CondNE),
 				target.STRB(vr(8), vr(7), 0),
@@ -1077,8 +1084,7 @@ func TestMachine_Lower(t *testing.T) {
 					target.LDR(vr(4), vr(3), int16(jit.OffsetStructTyp)),
 					target.LDR(vr(5), vr(4), int16(jit.OffsetStructTypeFields+jit.OffsetSliceLen)),
 					target.SXTW(vr(6), reg(i32, 3)),
-					target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
-					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
 					target.LDR(vr(7), vr(4), int16(jit.OffsetStructTypeFields)),
 				}
 				rows = append(rows, target.LDI(target.X16, uint64(jit.SizeofStructField))...)
@@ -1108,8 +1114,7 @@ func TestMachine_Lower(t *testing.T) {
 					target.LDR(vr(4), vr(3), int16(jit.OffsetStructTyp)),
 					target.LDR(vr(5), vr(4), int16(jit.OffsetStructTypeFields+jit.OffsetSliceLen)),
 					target.SXTW(vr(6), reg(i32, 3)),
-					target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
-					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
 					target.LDR(vr(7), vr(4), int16(jit.OffsetStructTypeFields)),
 				}
 				rows = append(rows, target.LDI(target.X16, uint64(jit.SizeofStructField))...)
@@ -1139,8 +1144,7 @@ func TestMachine_Lower(t *testing.T) {
 					target.LDR(vr(4), vr(3), int16(jit.OffsetStructTyp)),
 					target.LDR(vr(5), vr(4), int16(jit.OffsetStructTypeFields+jit.OffsetSliceLen)),
 					target.SXTW(vr(6), reg(i32, 3)),
-					target.CMPI(vr(6), 0), target.BCondLabel(target.OpBLT, exit),
-					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBGE, exit),
+					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
 					target.LDR(vr(7), vr(4), int16(jit.OffsetStructTypeFields)),
 				}
 				rows = append(rows, target.LDI(target.X16, uint64(jit.SizeofStructField))...)
@@ -1177,8 +1181,12 @@ func TestMachine_Lower(t *testing.T) {
 			if tt.guard != nil {
 				require.True(t, m.Lower(a, *tt.guard, tt.regs))
 			}
+			var s compile.Site = tt.regs
+			if tt.fuse {
+				s = fused{tt.regs}
+			}
 			start := len(a.Rows())
-			require.Equal(t, tt.lower, m.Lower(a, tt.op, tt.regs))
+			require.Equal(t, tt.lower, m.Lower(a, tt.op, s))
 			if tt.lower {
 				require.Equal(t, tt.rows, a.Rows()[start:])
 			}
@@ -1189,23 +1197,77 @@ func TestMachine_Lower(t *testing.T) {
 func TestMachine_Branch(t *testing.T) {
 	r := regs{1: ssa.TypeI32}
 	index := r.Reg(1)
+	br := ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{1}}
+
+	t.Run("jumps to a label that is not next", func(t *testing.T) {
+		a := asm.New(target.New())
+		to, next := a.Label(), a.Label()
+		arm64.New().Branch(a, ssa.Terminator{Op: ssa.OpJump}, r, []asm.Label{to}, next)
+		require.Equal(t, []asm.Instruction{target.BLabel(to)}, a.Rows())
+	})
+
+	t.Run("falls through a jump to next", func(t *testing.T) {
+		a := asm.New(target.New())
+		next := a.Label()
+		arm64.New().Branch(a, ssa.Terminator{Op: ssa.OpJump}, r, []asm.Label{next}, next)
+		require.Empty(t, a.Rows())
+	})
 
 	t.Run("takes the first label on nonzero", func(t *testing.T) {
 		a := asm.New(target.New())
-		yes, no := a.Label(), a.Label()
-		arm64.New().Branch(a, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{1}}, r, []asm.Label{yes, no})
+		yes, no, next := a.Label(), a.Label(), a.Label()
+		arm64.New().Branch(a, br, r, []asm.Label{yes, no}, next)
 		require.Equal(t, []asm.Instruction{target.CBNZLabel(index, yes), target.BLabel(no)}, a.Rows())
+	})
+
+	t.Run("falls through to the zero label", func(t *testing.T) {
+		a := asm.New(target.New())
+		yes, no := a.Label(), a.Label()
+		arm64.New().Branch(a, br, r, []asm.Label{yes, no}, no)
+		require.Equal(t, []asm.Instruction{target.CBNZLabel(index, yes)}, a.Rows())
+	})
+
+	t.Run("inverts to fall through to the nonzero label", func(t *testing.T) {
+		a := asm.New(target.New())
+		yes, no := a.Label(), a.Label()
+		arm64.New().Branch(a, br, r, []asm.Label{yes, no}, yes)
+		require.Equal(t, []asm.Instruction{target.CBZLabel(index, no)}, a.Rows())
+	})
+
+	t.Run("branches on the flags of a fused compare", func(t *testing.T) {
+		m, a := arm64.New(), asm.New(target.New())
+		s := fused{regs{1: ssa.TypeI1, 2: ssa.TypeI32, 3: ssa.TypeI32}}
+		yes, no := a.Label(), a.Label()
+		require.True(t, m.Lower(a, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{2, 3}, Results: []ssa.Value{1}}, s))
+		m.Branch(a, br, s, []asm.Label{yes, no}, no)
+		require.Equal(t, []asm.Instruction{target.CMP(s.Reg(2), s.Reg(3)), target.BCondLabel(target.OpBLT, yes)}, a.Rows())
+	})
+
+	t.Run("inverts the flags of a fused compare to fall through to the nonzero label", func(t *testing.T) {
+		m, a := arm64.New(), asm.New(target.New())
+		s := fused{regs{1: ssa.TypeI1, 2: ssa.TypeF64, 3: ssa.TypeF64}}
+		yes, no := a.Label(), a.Label()
+		require.True(t, m.Lower(a, ssa.Operation{Op: ssa.OpExec, Code: instr.F64_LT, Args: []ssa.Value{2, 3}, Results: []ssa.Value{1}}, s))
+		m.Branch(a, br, s, []asm.Label{yes, no}, yes)
+		require.Equal(t, []asm.Instruction{target.FCMP(s.Reg(2), s.Reg(3)), target.BCondLabel(target.OpBPL, no)}, a.Rows())
 	})
 
 	t.Run("takes the last label for an index out of range", func(t *testing.T) {
 		a := asm.New(target.New())
-		first, second, rest := a.Label(), a.Label(), a.Label()
-		arm64.New().Branch(a, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{1}}, r, []asm.Label{first, second, rest})
+		first, second, rest, next := a.Label(), a.Label(), a.Label(), a.Label()
+		arm64.New().Branch(a, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{1}}, r, []asm.Label{first, second, rest}, next)
 		require.Equal(t, []asm.Instruction{
 			target.CMPI(index, 0), target.BCondLabel(target.OpBEQ, first),
 			target.CMPI(index, 1), target.BCondLabel(target.OpBEQ, second),
 			target.BLabel(rest),
 		}, a.Rows())
+	})
+
+	t.Run("falls through to the out-of-range label", func(t *testing.T) {
+		a := asm.New(target.New())
+		first, rest := a.Label(), a.Label()
+		arm64.New().Branch(a, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{1}}, r, []asm.Label{first, rest}, rest)
+		require.Equal(t, []asm.Instruction{target.CMPI(index, 0), target.BCondLabel(target.OpBEQ, first)}, a.Rows())
 	})
 
 	t.Run("loads a case index through a register past CMPI's imm12 range", func(t *testing.T) {
@@ -1214,7 +1276,7 @@ func TestMachine_Branch(t *testing.T) {
 		for i := range labels {
 			labels[i] = a.Label()
 		}
-		arm64.New().Branch(a, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{1}}, r, labels)
+		arm64.New().Branch(a, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{1}}, r, labels, a.Label())
 		rows := a.Rows()
 		want := append([]asm.Instruction{target.MOVZ(target.W16, 0x1000, 0)},
 			target.CMP(index, target.W16), target.BCondLabel(target.OpBEQ, labels[0x1000]),

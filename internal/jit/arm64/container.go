@@ -291,12 +291,12 @@ func (m *Machine) slice(a *asm.Assembler, ref asm.Reg, shape ssa.Shape) (ptr, ln
 }
 
 // index sign-extends a native i32 index and deopts unless it is within
-// [0, length), matching an array or struct bounds guard.
+// [0, length), matching an array or struct bounds guard: one unsigned
+// compare, since a negative index extends to above any length.
 func (m *Machine) index(a *asm.Assembler, s compile.Site, at, length asm.Reg) asm.VReg {
 	idx := m.vreg()
 	a.Emit(target.SXTW(idx, at))
-	a.Emit(target.CMPI(idx, 0), target.BCondLabel(target.OpBLT, s.Deopt()))
-	a.Emit(target.CMP(idx, length), target.BCondLabel(target.OpBGE, s.Deopt()))
+	a.Emit(target.CMP(idx, length), target.BCondLabel(target.OpBCS, s.Deopt()))
 	return idx
 }
 

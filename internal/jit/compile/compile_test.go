@@ -2,6 +2,7 @@ package compile_test
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -30,6 +31,10 @@ type machine struct {
 	spills    []int
 	sites     []compile.Call
 	consts    []uint64
+	// falls records, per Branch, whether one of its labels is next.
+	falls []bool
+	// fused records every result Site.Fuse admitted.
+	fused []ssa.Value
 }
 
 func (m *machine) Arch() asm.Arch      { return arm64.New() }
@@ -76,14 +81,18 @@ func (m *machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 		a.Bind(resume)
 	}
 	for _, v := range op.Results {
+		if s.Fuse(v) {
+			m.fused = append(m.fused, v)
+		}
 		m.regs[v] = s.Reg(v)
 		a.Emit(arm64.LDI(s.Reg(v), 0)...)
 	}
 	return true
 }
 
-func (m *machine) Branch(a *asm.Assembler, t ssa.Terminator, s compile.Site, labels []asm.Label) {
+func (m *machine) Branch(a *asm.Assembler, t ssa.Terminator, s compile.Site, labels []asm.Label, next asm.Label) {
 	m.calls = append(m.calls, t.Op.String())
+	m.falls = append(m.falls, slices.Contains(labels, next))
 	if t.Op != ssa.OpJump {
 		a.Emit(arm64.CBNZLabel(s.Reg(t.Args[0]), labels[0]))
 		labels = labels[1:]
@@ -254,6 +263,44 @@ func TestLower(t *testing.T) {
 		_, _, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
 		require.Equal(t, []string{"prologue", "const", "br", "jump", "jump", "complete", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []bool{true, false, true}, m.falls)
+	})
+
+	t.Run("fuses a compare whose only use is the branch right after it", func(t *testing.T) {
+		b := ssa.New("f")
+		entry, left, right := b.Block(), b.Block(), b.Block()
+		x := constant(b, entry, types.BoxI32(1))
+		y := constant(b, entry, types.BoxI32(2))
+		at := state(b, entry, 0, ssa.Operand{Value: x}, ssa.Operand{Value: y})
+		less := b.Value(ssa.TypeI1)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{x, y}, State: at, Results: []ssa.Value{less}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{less}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
+		b.Term(left, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(right, ssa.Terminator{Op: ssa.OpComplete})
+
+		m := new(machine)
+		_, _, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		require.NoError(t, err)
+		require.Equal(t, []ssa.Value{less}, m.fused)
+	})
+
+	t.Run("keeps a compare a state also names in its register", func(t *testing.T) {
+		b := ssa.New("f")
+		entry, left, right := b.Block(), b.Block(), b.Block()
+		x := constant(b, entry, types.BoxI32(1))
+		y := constant(b, entry, types.BoxI32(2))
+		at := state(b, entry, 0, ssa.Operand{Value: x}, ssa.Operand{Value: y})
+		less := b.Value(ssa.TypeI1)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{x, y}, State: at, Results: []ssa.Value{less}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{less}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
+		b.Term(left, ssa.Terminator{Op: ssa.OpComplete})
+		after := state(b, right, 4, ssa.Operand{Value: less})
+		b.Term(right, ssa.Terminator{Op: ssa.OpComplete, State: after})
+
+		m := new(machine)
+		_, _, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		require.NoError(t, err)
+		require.Empty(t, m.fused)
 	})
 
 	t.Run("moves each edge into its own successor's parameters", func(t *testing.T) {
@@ -341,10 +388,28 @@ func TestLower(t *testing.T) {
 		m := new(machine)
 		_, exits, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
-		require.Equal(t, []string{"prologue", "const", "const", "exec", "jump", "exit 0 0", "return", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "const", "const", "exec", "return", "exit 0 0", "epilogue", "enter"}, m.calls)
 		require.Len(t, exits, 1)
 		require.Equal(t, jit.ExitDeopt, exits[0].Kind)
 		require.Equal(t, 3, exits[0].Frame.IP)
+	})
+
+	t.Run("places a deopt stub after the next terminator that does not fall through", func(t *testing.T) {
+		b := ssa.New("f")
+		entry, left, right := b.Block(), b.Block(), b.Block()
+		x := constant(b, entry, types.BoxI32(6))
+		y := constant(b, entry, types.BoxI32(0))
+		at := state(b, entry, 3, ssa.Operand{Value: x}, ssa.Operand{Value: y})
+		q := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_DIV_S, Args: []ssa.Value{x, y}, State: at, Results: []ssa.Value{q}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{q}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
+		b.Term(left, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{x}})
+		b.Term(right, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{y}})
+
+		m := new(machine)
+		_, _, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		require.NoError(t, err)
+		require.Equal(t, []string{"prologue", "const", "const", "exec", "br", "return", "exit 0 0", "return", "epilogue", "enter"}, m.calls)
 	})
 
 	t.Run("resumes after a release exit", func(t *testing.T) {

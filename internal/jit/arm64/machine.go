@@ -37,6 +37,21 @@ type Machine struct {
 	// threaded CALL pushed it owned; a native caller lent it instead. Empty
 	// for an OSR unit, whose threaded-entered frame owns every slot.
 	borrows []bool
+	// flag is the compare Site.Fuse left in the condition flags, true
+	// under cond, for the OpBranch right after it.
+	flag ssa.Value
+	cond uint8
+}
+
+// jumps is the conditional branch taken under each condition code.
+var jumps = [...]target.Op{
+	target.CondEQ: target.OpBEQ, target.CondNE: target.OpBNE,
+	target.CondCS: target.OpBCS, target.CondCC: target.OpBCC,
+	target.CondMI: target.OpBMI, target.CondPL: target.OpBPL,
+	target.CondVS: target.OpBVS, target.CondVC: target.OpBVC,
+	target.CondHI: target.OpBHI, target.CondLS: target.OpBLS,
+	target.CondGE: target.OpBGE, target.CondLT: target.OpBLT,
+	target.CondGT: target.OpBGT, target.CondLE: target.OpBLE,
 }
 
 // recordShift is jit.Record's size expressed as a left-shift amount, so the
@@ -198,13 +213,29 @@ func (m *Machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 }
 
 // Branch transfers control to labels: OpBranch takes labels[0] on nonzero,
-// OpTable takes labels[i] for index i and the last label out of range.
-func (m *Machine) Branch(a *asm.Assembler, t ssa.Terminator, s compile.Site, labels []asm.Label) {
+// OpTable takes labels[i] for index i and the last label out of range. An
+// edge to next falls through; an OpBranch whose nonzero edge is next
+// branches on the inverted condition instead. A fused compare's condition
+// is read from the flags.
+func (m *Machine) Branch(a *asm.Assembler, t ssa.Terminator, s compile.Site, labels []asm.Label, next asm.Label) {
 	switch t.Op {
 	case ssa.OpJump:
-		a.Emit(target.BLabel(labels[0]))
 	case ssa.OpBranch:
-		a.Emit(target.CBNZLabel(s.Reg(t.Args[0]), labels[0]), target.BLabel(labels[1]))
+		yes, no, invert := labels[0], labels[1], labels[0] == next
+		if invert {
+			yes, no = no, yes
+		}
+		switch {
+		case t.Args[0] == m.flag && invert:
+			a.Emit(target.BCondLabel(jumps[m.cond^1], yes))
+		case t.Args[0] == m.flag:
+			a.Emit(target.BCondLabel(jumps[m.cond], yes))
+		case invert:
+			a.Emit(target.CBZLabel(s.Reg(t.Args[0]), yes))
+		default:
+			a.Emit(target.CBNZLabel(s.Reg(t.Args[0]), yes))
+		}
+		labels = []asm.Label{no}
 	case ssa.OpTable:
 		index := s.Reg(t.Args[0])
 		scratch := target.X16
@@ -220,7 +251,9 @@ func (m *Machine) Branch(a *asm.Assembler, t ssa.Terminator, s compile.Site, lab
 				a.Emit(target.CMP(index, scratch), target.BCondLabel(target.OpBEQ, label))
 			}
 		}
-		a.Emit(target.BLabel(labels[len(labels)-1]))
+	}
+	if last := labels[len(labels)-1]; last != next {
+		a.Emit(target.BLabel(last))
 	}
 }
 
@@ -845,11 +878,12 @@ func (m *Machine) eqz(a *asm.Assembler, op ssa.Operation, s compile.Site, width 
 	if src.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt || src.Width() != width || dst.Width() != asm.Width32 {
 		return false
 	}
-	a.Emit(target.CMPI(src, 0), target.CSET(dst, target.CondEQ))
+	a.Emit(target.CMPI(src, 0))
+	m.set(a, s, op.Results[0], dst, target.CondEQ)
 	return true
 }
 
-// compare lowers integer comparisons and masks unordered float results.
+// compare lowers integer and float comparisons.
 func (m *Machine) compare(a *asm.Assembler, op ssa.Operation, s compile.Site, cond uint8, width asm.RegWidth) bool {
 	if len(op.Args) != 2 || len(op.Results) != 1 {
 		return false
@@ -858,24 +892,28 @@ func (m *Machine) compare(a *asm.Assembler, op ssa.Operation, s compile.Site, co
 	if x.Type() != y.Type() || dst.Type() != asm.RegTypeInt || x.Width() != width || y.Width() != width || dst.Width() != asm.Width32 {
 		return false
 	}
-	if x.Type() == asm.RegTypeFloat {
+	switch x.Type() {
+	case asm.RegTypeFloat:
+		// FCMP sets NZCV to 0011 on unordered, where every cond but NE
+		// reads false, as the comparison requires.
 		a.Emit(target.FCMP(x, y))
-		// FCMP marks unordered with VS; EQ/LE otherwise read unordered as true.
-		switch cond {
-		case target.CondEQ, target.CondLS:
-			a.Emit(target.CSET(dst, cond), target.CSETM(target.W16, target.CondVS), target.BIC(dst, dst, target.W16))
-		case target.CondNE:
-			a.Emit(target.CSET(dst, cond), target.CSET(target.W16, target.CondVS), target.ORR(dst, dst, target.W16))
-		default:
-			a.Emit(target.CSET(dst, cond))
-		}
-		return true
-	}
-	if x.Type() != asm.RegTypeInt {
+	case asm.RegTypeInt:
+		a.Emit(target.CMP(x, y))
+	default:
 		return false
 	}
-	a.Emit(target.CMP(x, y), target.CSET(dst, cond))
+	m.set(a, s, op.Results[0], dst, cond)
 	return true
+}
+
+// set materializes cond into dst, v's register, unless v is fused into the
+// branch right after it: then the flags carry cond to Branch.
+func (m *Machine) set(a *asm.Assembler, s compile.Site, v ssa.Value, dst asm.VReg, cond uint8) {
+	if s.Fuse(v) {
+		m.flag, m.cond = v, cond
+		return
+	}
+	a.Emit(target.CSET(dst, cond))
 }
 
 func (m *Machine) convert(a *asm.Assembler, op ssa.Operation, s compile.Site, emit func(dst, src asm.Reg) asm.Instruction) bool {

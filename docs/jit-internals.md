@@ -51,7 +51,7 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 | Translate | bytecode → SSA; attach interpreter state to each `OpExec`, return, and completion; block 0 has no predecessors |
 | Baseline | fold → DCE |
 | Optimized | fold → forward → CSE → guard → hoist → DCE → promote → DCE |
-| Lower | assign registers by SSA type, including register-passed parameters the machine prologue fills, order blocks in reverse postorder, resolve block parameters with edge moves |
+| Lower | assign registers by SSA type, including register-passed parameters the machine prologue fills, order blocks in reverse postorder with an edge to the next block falling through, resolve block parameters with edge moves, fuse a compare into the branch right after it when nothing else uses it |
 | Build | assemble, allocate, encode, publish through `jit.Code` |
 
 A loop header `MUST` have state before its budget check. An OSR unit loads block-0 parameters from the current operand stack and clears no locals.
@@ -91,6 +91,8 @@ A reference parameter its function never writes (`transform.Borrows`) is borrowe
 | `ExitRelease` | dropping a last reference | yes |
 | `ExitCall` | `CALL` that cannot run natively | no |
 | `ExitBox` | a wide (> 49-bit) i64 at a store, slot return, call argument, or `OpComplete` | yes |
+
+A deopt stub sits out of line after the next terminator that does not fall through, so the values its map names stay live only that far. Safepoint, release, box, and call stubs follow the body; a bridge and `OpExit` exit inline.
 
 `jit.Kind.Resumes` owns the "Resumes native" column above; `compile.stub`/`function` and `arm64.Machine.Exit` all read it instead of comparing kinds themselves. A non-resuming exit's stub ends in `BRK` and skips the `X24` (`Budget`) reload, since native code never runs past it; it materializes native activations outermost-first, then continues threaded, and `jit.Enter` never nests.
 
