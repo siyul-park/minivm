@@ -202,6 +202,7 @@ func TestMachine_Enter(t *testing.T) {
 			target.SUBI(target.SP, target.SP, 16),
 			target.STR(target.LR, target.SP, 8),
 			target.BLLabel(entry),
+			target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 			target.LDR(target.LR, target.SP, 8),
 			target.ADDI(target.SP, target.SP, 16),
 			target.RET(),
@@ -229,6 +230,7 @@ func TestMachine_Enter(t *testing.T) {
 			target.SUBI(target.SP, target.SP, 16),
 			target.STR(target.LR, target.SP, 8),
 			target.BLLabel(1),
+			target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 			target.UXTW(target.X16, target.X0),
 		}
 		want = append(want, target.LDI(target.X17, types.Tag(types.KindI32))...)
@@ -250,7 +252,19 @@ func TestMachine_Enter(t *testing.T) {
 		start := len(a.Rows())
 		m.Enter(a, compile.Layout{Results: []types.Kind{types.KindF64}})
 
-		require.Equal(t, target.STR(target.X0, target.X25, 0), a.Rows()[start+6])
+		require.Equal(t, []asm.Instruction{
+			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
+			target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+			target.SUBI(target.SP, target.SP, 16),
+			target.STR(target.LR, target.SP, 8),
+			target.BLLabel(1),
+			target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+			target.STR(target.X0, target.X25, 0),
+			target.LDR(target.LR, target.SP, 8),
+			target.ADDI(target.SP, target.SP, 16),
+			target.RET(),
+		}, a.Rows()[start:])
 	})
 
 	t.Run("stores an i64 result raw", func(t *testing.T) {
@@ -260,7 +274,19 @@ func TestMachine_Enter(t *testing.T) {
 		start := len(a.Rows())
 		m.Enter(a, compile.Layout{Results: []types.Kind{types.KindI64}})
 
-		require.Equal(t, target.STR(target.X0, target.X25, 0), a.Rows()[start+6])
+		require.Equal(t, []asm.Instruction{
+			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
+			target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+			target.SUBI(target.SP, target.SP, 16),
+			target.STR(target.LR, target.SP, 8),
+			target.BLLabel(1),
+			target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+			target.STR(target.X0, target.X25, 0),
+			target.LDR(target.LR, target.SP, 8),
+			target.ADDI(target.SP, target.SP, 16),
+			target.RET(),
+		}, a.Rows()[start:])
 	})
 
 	t.Run("loads and unboxes register-passed parameters from their slots before the body", func(t *testing.T) {
@@ -279,6 +305,7 @@ func TestMachine_Enter(t *testing.T) {
 			target.SUBI(target.SP, target.SP, 16),
 			target.STR(target.LR, target.SP, 8),
 			target.BLLabel(1),
+			target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 			target.LDR(target.LR, target.SP, 8),
 			target.ADDI(target.SP, target.SP, 16),
 			target.RET(),
@@ -301,6 +328,7 @@ func TestMachine_Enter(t *testing.T) {
 			target.SUBI(target.SP, target.SP, 16),
 			target.STR(target.LR, target.SP, 8),
 			target.BLLabel(1),
+			target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 			target.LDR(target.LR, target.SP, 8),
 			target.ADDI(target.SP, target.SP, 16),
 			target.RET(),
@@ -323,6 +351,7 @@ func TestMachine_Enter(t *testing.T) {
 			target.SUBI(target.SP, target.SP, 16),
 			target.STR(target.LR, target.SP, 8),
 			target.BLLabel(1),
+			target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 			target.LDR(target.LR, target.SP, 8),
 			target.ADDI(target.SP, target.SP, 16),
 			target.RET(),
@@ -1310,7 +1339,7 @@ func TestMachine_Return(t *testing.T) {
 	rows := func(slot int16) []asm.Instruction {
 		rows := []asm.Instruction{target.UXTW(target.X16, r.Reg(1))}
 		rows = append(rows, target.LDI(target.X17, types.Tag(types.KindI32))...)
-		return append(rows, target.ORR(target.X16, target.X16, target.X17), target.STR(target.X16, target.X25, slot), target.BLabel(0))
+		return append(rows, target.ORR(target.X16, target.X16, target.X17), target.STR(target.X16, target.X25, slot), target.SUBI(target.X24, target.X24, 1), target.BLabel(0))
 	}
 	scalars := []types.Kind{types.KindI32, types.KindF64}
 
@@ -1402,7 +1431,7 @@ func TestMachine_Return(t *testing.T) {
 			[]asm.Instruction{target.LDR(word3, target.X25, 8)},
 			release(word3),
 			[]asm.Instruction{target.STR(target.XZR, target.X25, 8)},
-			[]asm.Instruction{target.BLabel(0)},
+			[]asm.Instruction{target.SUBI(target.X24, target.X24, 1), target.BLabel(0)},
 		), a.Rows()[start:])
 	})
 
@@ -1414,7 +1443,7 @@ func TestMachine_Return(t *testing.T) {
 		m.Prologue(a, 0, true, compile.Layout{Kinds: []types.Kind{types.KindI32}, Borrows: []bool{false}}, nil)
 		start := len(a.Rows())
 		m.Return(a, ssa.Terminator{Op: ssa.OpReturn}, r)
-		require.Equal(t, []asm.Instruction{target.BLabel(0)}, a.Rows()[start:])
+		require.Equal(t, []asm.Instruction{target.SUBI(target.X24, target.X24, 1), target.BLabel(0)}, a.Rows()[start:])
 	})
 
 	t.Run("moves one register-convention result to X0 instead of boxing it", func(t *testing.T) {
@@ -1425,6 +1454,7 @@ func TestMachine_Return(t *testing.T) {
 		require.Equal(t, []asm.Instruction{
 			target.MOV(target.W0, r.Reg(1)),
 			target.USE(target.X0),
+			target.SUBI(target.X24, target.X24, 1),
 			target.BLabel(0),
 		}, a.Rows()[start:])
 	})
@@ -1440,6 +1470,7 @@ func TestMachine_Return(t *testing.T) {
 			target.MOV(target.X1, r2.Reg(2)),
 			target.USE(target.X0),
 			target.USE(target.X1),
+			target.SUBI(target.X24, target.X24, 1),
 			target.BLabel(0),
 		}, a.Rows()[start:])
 	})
@@ -1462,10 +1493,11 @@ func TestMachine_Call(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
 		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		bridge := a.Label()
+		safe, next := a.Label(), a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
 			Address: 5, Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
-			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Owned: true,
+			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Safepoint: safe, Resume: next, Owned: true,
 		}, r))
 
 		code := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
@@ -1497,6 +1529,8 @@ func TestMachine_Call(t *testing.T) {
 			target.LDI(target.X17, 7),
 			[]asm.Instruction{
 				target.STR(target.X17, target.X16, record(jit.RecordExit)),
+				target.SUBSI(target.X24, target.X24, 1),
+				target.BCondLabel(target.OpBLE, safe),
 				target.ADDI(target.X25, target.X25, 32),
 				target.BLR(code),
 				target.USE(live),
@@ -1526,10 +1560,11 @@ func TestMachine_Call(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
 		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		bridge := a.Label()
+		safe, next := a.Label(), a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
 			Address: 5, Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
-			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge,
+			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Safepoint: safe, Resume: next,
 		}, r))
 
 		code := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
@@ -1560,6 +1595,8 @@ func TestMachine_Call(t *testing.T) {
 			target.LDI(target.X17, 7),
 			[]asm.Instruction{
 				target.STR(target.X17, target.X16, record(jit.RecordExit)),
+				target.SUBSI(target.X24, target.X24, 1),
+				target.BCondLabel(target.OpBLE, safe),
 				target.ADDI(target.X25, target.X25, 32),
 				target.BLR(code),
 				target.USE(live),
@@ -1573,10 +1610,11 @@ func TestMachine_Call(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
 		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		bridge := a.Label()
+		safe, next := a.Label(), a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
 			Address: 5, Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
-			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge,
+			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Safepoint: safe, Resume: next,
 			Registers: []types.Kind{types.KindF64},
 		}, r))
 
@@ -1608,6 +1646,8 @@ func TestMachine_Call(t *testing.T) {
 			target.LDI(target.X17, 7),
 			[]asm.Instruction{
 				target.STR(target.X17, target.X16, record(jit.RecordExit)),
+				target.SUBSI(target.X24, target.X24, 1),
+				target.BCondLabel(target.OpBLE, safe),
 				target.ADDI(target.X25, target.X25, 32),
 				target.BLR(code),
 				target.DEF(target.X0),
@@ -1622,10 +1662,11 @@ func TestMachine_Call(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
 		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		bridge := a.Label()
+		safe, next := a.Label(), a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
 			Address: 5, Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
-			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Owned: true, Self: true,
+			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Safepoint: safe, Resume: next, Owned: true, Self: true,
 		}, r))
 
 		// entry is Prologue's own label, bound before any other row: the
@@ -1653,6 +1694,8 @@ func TestMachine_Call(t *testing.T) {
 			target.LDI(target.X17, 7),
 			[]asm.Instruction{
 				target.STR(target.X17, target.X16, record(jit.RecordExit)),
+				target.SUBSI(target.X24, target.X24, 1),
+				target.BCondLabel(target.OpBLE, safe),
 				target.ADDI(target.X25, target.X25, 32),
 				target.BLLabel(entry),
 				target.USE(live),
@@ -1682,10 +1725,11 @@ func TestMachine_Call(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
 		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		bridge := a.Label()
+		safe, next := a.Label(), a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
 			Address: 5, Callee: 2, Args: []ssa.Value{1, 3}, Base: 4, Size: 3, Exit: 7,
-			Bridge: bridge, Self: true,
+			Bridge: bridge, Safepoint: safe, Resume: next, Self: true,
 			Arguments: []types.Kind{types.KindI32, types.KindF64},
 		}, r))
 
@@ -1714,6 +1758,8 @@ func TestMachine_Call(t *testing.T) {
 			target.LDI(target.X17, 7),
 			[]asm.Instruction{
 				target.STR(target.X17, target.X16, record(jit.RecordExit)),
+				target.SUBSI(target.X24, target.X24, 1),
+				target.BCondLabel(target.OpBLE, safe),
 				target.ADDI(target.X25, target.X25, 32),
 				target.MOV(asm.NewPReg(target.X0.ID(), asm.RegTypeInt, asm.Width32), r.Reg(1)),
 				target.FMOV(target.X1, r.Reg(3)),
@@ -1730,10 +1776,11 @@ func TestMachine_Call(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
 		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		bridge := a.Label()
+		safe, next := a.Label(), a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
 			Address: 5, Callee: 2, Args: []ssa.Value{1}, Base: 4, Size: 3, Exit: 7,
-			Bridge: bridge, Self: true,
+			Bridge: bridge, Safepoint: safe, Resume: next, Self: true,
 			Arguments: []types.Kind{types.KindI64},
 		}, r64))
 
@@ -1767,6 +1814,8 @@ func TestMachine_Call(t *testing.T) {
 			target.LDI(target.X17, 7),
 			[]asm.Instruction{
 				target.STR(target.X17, target.X16, record(jit.RecordExit)),
+				target.SUBSI(target.X24, target.X24, 1),
+				target.BCondLabel(target.OpBLE, safe),
 				target.ADDI(target.X25, target.X25, 32),
 				target.MOV(target.X0, r64.Reg(1)),
 				target.USE(target.X0),

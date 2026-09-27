@@ -36,11 +36,9 @@ type site struct {
 	// until then, and again once the site fails.
 	code   *jit.Code
 	deopts int
-	// bridged counts resumed bridges unamortized by real native work since
-	// the last one that was (see native.go's resume/amortize); it does not
-	// share native.bridged, since a site's own retirement is independent of
-	// any CALL entry at the same address.
-	bridged int
+	// bridge carries this site's unamortized bridge work independently of
+	// native CALL entries at the same address.
+	bridge bridge
 }
 
 // interval is how many back edges pass — once a header site has crossed
@@ -122,17 +120,20 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 	}
 }
 
-// enter runs the current frame as s's cached OSR activation. A cache hit
-// enters directly; queue publication and native-only promotion are drained
-// at OSR submission checks and native safepoints. Loop-free code reaches no
-// safepoint, so an entry site declines a cancelled Run, leaving threaded
-// code to report it, and drains before entering: a callee it alone calls
-// would otherwise never tier up.
+// enter runs the current frame as s's cached OSR activation. It drains at
+// s's lookup cadence, counting entries: a callee called only from native
+// code would otherwise tier up only at a safepoint. Loop-free code reaches
+// no safepoint, so an entry site declines a cancelled Run, leaving threaded
+// code to report it.
 func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner func(*Interpreter)) bool {
+	every := int64(interval)
 	if s.entry {
 		if cancelled(i) {
 			return false
 		}
+		every = 1
+	}
+	if s.count++; s.count%every == 0 {
 		n.drain(i)
 	}
 	n.store.Enter()
@@ -164,7 +165,7 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 
 	ok, retire := true, false
 	if trap := jit.Enter(c.Entry(), ctx); trap != jit.TrapReturn {
-		ok, retire = n.settle(i, c, trap, &s.bridged,
+		ok, retire = n.settle(i, c, trap, &s.bridge,
 			// An OSR activation is entered without a call, so there is no
 			// caller frame above it in Records to preserve: rebuild rewrites
 			// the current frame in place instead of pushing a new one.

@@ -679,6 +679,8 @@ func (l *lowering) call(op ssa.Operation) error {
 		}
 	}
 	bridge, _ := l.stub(id)
+	sid := l.exit(jit.ExitSafepoint)
+	safepoint, resume := l.stub(sid)
 	site := Call{
 		Address:   ref,
 		Callee:    callee,
@@ -689,6 +691,8 @@ func (l *lowering) call(op ssa.Operation) error {
 		Exit:      id,
 		Live:      l.live(id),
 		Bridge:    bridge,
+		Safepoint: safepoint,
+		Resume:    resume,
 		Owned:     owned,
 		Self:      !l.osr && ref == l.address,
 		Registers: registers(target),
@@ -766,9 +770,9 @@ func (l *lowering) exit(k jit.Kind) int {
 	for j, local := range frame.Locals {
 		to := &f.Locals[j]
 		to.Index = local.Index
-		// A call's map also describes the caller while a callee runs, so
-		// its promoted locals must stay live across the call itself.
-		if k == jit.ExitCall || slices.Contains(l.op.Args, local.Value) {
+		// A call and a resumable safepoint keep promoted locals live across
+		// the native round trip; deopt-only exits can restore them from homes.
+		if k == jit.ExitCall || k == jit.ExitSafepoint || slices.Contains(l.op.Args, local.Value) {
 			l.place(id, &to.Value, local.Value)
 			continue
 		}

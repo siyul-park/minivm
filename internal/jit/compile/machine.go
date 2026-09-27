@@ -121,6 +121,10 @@ type Call struct {
 	// the activation is too deep, or the frame does not fit. The interpreter
 	// replays the call itself; Bridge never returns to native code.
 	Bridge asm.Label
+	// Safepoint is taken when the call spends the last budget unit.
+	Safepoint asm.Label
+	// Resume is the call site after the safepoint check.
+	Resume asm.Label
 	// Owned reports whether the call's state owns Callee's reference, so
 	// the call releases it once the callee returns.
 	Owned bool

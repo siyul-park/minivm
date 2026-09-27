@@ -37,11 +37,11 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 | `jit.Code` | One unit's native code at one tier. `Free` unmaps once. |
 | `jit.Store` | Published code and `Context.Natives`. |
 
-- Native code never runs on a goroutine stack; async preemption cannot reach it, so loops poll `Budget`.
+- Native code never runs on a goroutine stack; async preemption cannot reach it, so back edges, calls, and returns spend `Budget` explicitly. Back edges and calls branch to safepoint on exhaustion; returns only credit the work.
 - Native code writes no Go pointer. It reads heap interface words through `Context.Heap` and object fields at `jit.Offset*`.
-- Registers: X24 loop budget, X25 frame base, X27 activation depth, X26 context, X16/X17 scratch, X18/X28 untouched. Allocatable: X0–X15, X19–X23, D0–D31.
-- X24 mirrors `Context.Budget`: exits store it, resumed exits and the Go entry stub load it.
-- Allocation: linear scan, no splitting; a value live across a call or under pressure spills for its whole life. Calls clobber every allocatable register. Exit maps keep ordinary mapped values live through their stubs. Promoted locals are deopt-only state: a call keeps them live across itself; any other exit saves a non-live one on its cold path into a fixed spill home.
+- Registers: X24 budget, X25 frame base, X27 activation depth, X26 context, X16/X17 scratch, X18/X28 untouched. Allocatable: X0–X15, X19–X23, D0–D31.
+- X24 mirrors `Context.Budget`: exits store it, resumed exits reload it, and a normal Go entry stores it back after native return.
+- Allocation: linear scan, no splitting; a value live across a call or under pressure spills for its whole life. Calls clobber every allocatable register. Exit maps keep ordinary mapped values live through their stubs. Promoted locals are deopt-only state: calls and safepoints keep them live across resumption; other exits save a non-live one on their cold path into a fixed spill home.
 - In a function with a call, a scalar or ref constant no loop block uses is loaded at each use and at each exit stub instead of spilled; an `ExitCall` map keeps its constants live across the call, since a deeper trap reads them from spill slots. Other constants keep one register.
 
 ## Pipeline
@@ -77,7 +77,7 @@ A reference parameter its function never writes (`transform.Borrows`) is borrowe
 | X27 | activation depth; prologue/epilogue step it; exits store exact depth to `Context.Depth` |
 | X0/X1 results | one or two results, including i64; native-to-native i64 stays raw |
 | X0/X1 arguments | one or two parameters, including i64; each still has a boxed slot |
-| Go entry | loads X25/X27, reads argument slots, calls body, then boxes register results |
+| Go entry | loads X25/X27, reads argument slots, calls body, stores X24 to `Context.Budget`, then boxes register results |
 
 `Code.Native()` is the body at offset 0; `Code.Entry()` is the Go stub after the epilogue. i64 entry arguments are unboxed with `SBFX #0,#49`; a threaded caller whose slot holds a heap i64 ref declines native entry. OSR reads slots.
 
@@ -87,7 +87,7 @@ A reference parameter its function never writes (`transform.Borrows`) is borrowe
 |---|---|---|
 | `ExitDeopt` | failed check, `OpExit` | no |
 | `ExitBridge` | unlowered `OpExec` | yes, when `bridgeable` |
-| `ExitSafepoint` | loop header, `Budget` spent | yes |
+| `ExitSafepoint` | loop header or native call when `Budget` is spent | yes |
 | `ExitRelease` | dropping a last reference | yes |
 | `ExitCall` | `CALL` that cannot run natively | no |
 | `ExitBox` | a wide (> 49-bit) i64 at a store, slot return, call argument, or `OpComplete` | yes |
@@ -116,15 +116,15 @@ A bridge receives only its lowered `SSA Args` through `Exit.Pops`; it uses a scr
 | Reclaim | `Reclaim` frees code only after no interpreter remains native. |
 | Promotion | Baseline entries count calls; a live Baseline reaching the interpreter's graduate threshold queues Optimized. Optimized/OSR entries do not count. |
 | Failure | Repeated deopts retire that tier once they reach the interpreter's refute threshold. A compile failure is permanent only when feedback is unchanged from its snapshot. |
-| Bridges | Repeated unamortized bridges retire the site after `amortize` work is absent between resumes. They count against the entry that entered native code; an amortized bridge also clears its own function's count, so a callee's native-called work pays for its threaded entries. |
-| Async | `compile.Queue` compiles one unit per address; publication is drained at the next call, OSR observation, module entry, or safepoint. |
+| Bridges | Each code address/site keeps its unamortized bridge count and native work across entries. A bridge is amortized when work since the previous served bridge reaches `amortize` (4); TrapReturn finalizes the last work segment. That clears the site's count and the bridged function's own count. Calls, returns, back edges, and native callees all contribute to the work. |
+| Async | `compile.Queue` compiles one unit per address; publication is drained at the next call, OSR observation or entry, or safepoint. |
 | Pool | `Pool` shares `Store`, `Queue`, module data, and the Baseline promotion candidate list; each interpreter keeps its own `jit.Context`, feedback, counters, and failure marks. A pooled interpreter whose entries reach the graduate threshold requests Optimized even if a different interpreter drained its Baseline job. A pooled interpreter whose deopts refute shared code retires it for the pool and blocks only its own tier. |
 
 ## OSR
 
 Every loop header, including module code, has an observer. After the threshold it queues an Optimized unit and checks `Store.CodeAt` every 256 back edges. Compile failure or refutation restores the threaded handler and disables that observer.
 
-Loop-free module code has one observer at ip 0 instead, sharing the same entry, exit, retirement, and refutation. It counts runs, queues on the second run at the earliest, and checks `Store.CodeAt` every run. Loop-free code reaches no safepoint, so each entry first drains the queue and declines a cancelled run, leaving threaded code to report it. Module code with a loop has no ip-0 observer: its unit would take the address's one queue slot ahead of the header units.
+Loop-free module code has one observer at ip 0 instead, sharing the same entry, exit, retirement, and refutation. It counts runs, queues on the second run at the earliest, and checks `Store.CodeAt` every run. Loop-free code reaches no safepoint, so its entry declines a cancelled run, leaving threaded code to report it. Module code with a loop has no ip-0 observer: its unit would take the address's one queue slot ahead of the header units.
 
 Entry reuses the current frame (`FB = bp`, `Depth = 0`); exits rewrite it in place. Materialized frames finish threaded execution without observers.
 

@@ -32,10 +32,9 @@ type native struct {
 	// native-to-native entries.
 	entries []int64
 	deopts  []int
-	// bridged counts resumed bridges unamortized by real native work since
-	// the last one that was, per address (see resume/amortize); reaching
-	// resume retires the address.
-	bridged []int
+	// bridges carries each address's unamortized bridge count and native work
+	// across entries.
+	bridges []bridge
 	// failed records permanent compile failure per address and tier.
 	failed [][2]bool
 	// sites indexes every observed OSR site by (address, ip): drain looks a
@@ -56,6 +55,18 @@ type native struct {
 	// Calling i.compile here directly creates the threaded/fusions
 	// initialization cycle.
 	compile func(fn *types.Function, exact bool) []func(*Interpreter)
+}
+
+// bridge carries unamortized work for one CALL address or OSR site across entries.
+type bridge struct {
+	count int
+	work  int64
+	mark  int64
+}
+
+func (b *bridge) spend(ctx *jit.Context) {
+	b.work += b.mark - ctx.Budget
+	b.mark = ctx.Budget
 }
 
 // shared contains the pool-shareable native runtime: Store, Queue, and Module.
@@ -118,9 +129,10 @@ const refute = 8
 // It uses the same retry count as refute: native work must pay for the Go round trip.
 const resume = refute
 
-// amortize is the minimum back-edge work between bridges that makes the
-// next bridge count as paid-for native work rather than against resume.
-const amortize = 2
+// amortize is the native work (back edges, calls, returns) since the
+// previous bridge that makes the next one count as paid for rather than
+// against resume.
+const amortize = 4
 
 // graduate is the Baseline entry count that tiers an address to Optimized.
 const graduate = 1024
@@ -221,7 +233,7 @@ func newNative(i *Interpreter, threshold int) *native {
 		calls:     make([]int, len(i.code)),
 		entries:   make([]int64, len(i.code)),
 		deopts:    make([]int, len(i.code)),
-		bridged:   make([]int, len(i.code)),
+		bridges:   make([]bridge, len(i.code)),
 		failed:    make([][2]bool, len(i.code)),
 		exact:     make([][]func(*Interpreter), len(i.code)),
 		sites:     map[key]*site{},
@@ -300,7 +312,7 @@ func (n *native) attempt(i *Interpreter, addr int, fn *types.Function, release b
 		// The unchanged input has no new feedback for a recompile at this tier.
 		n.markFailed(addr, code.Tier)
 		// Counters restart; the failed tier stays blocked.
-		n.calls[addr], n.entries[addr], n.deopts[addr], n.bridged[addr] = 0, 0, 0, 0
+		n.calls[addr], n.entries[addr], n.deopts[addr], n.bridges[addr] = 0, 0, 0, bridge{}
 	}
 	_ = n.store.Reclaim()
 	return true
@@ -421,14 +433,18 @@ func (n *native) drain(i *Interpreter) {
 }
 
 // settle serves exits from trap through safepoints, releases, and bridges.
-// ok reports that the activation reached TrapReturn; otherwise deopt has
-// rebuilt a failing exit and retire reports whether the code retires.
-// bridged is the activation's bridge-retry counter.
-func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, bridged *int, deopt func(jit.Exit), refute func() bool) (ok, retire bool) {
+// ok reports that the activation reached TrapReturn; retire reports whether
+// the code retires.
+func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, account *bridge, deopt func(jit.Exit), refute func() bool) (ok, retire bool) {
 	ctx := n.ctx
-	mark := int64(budget)
+	account.mark = budget
 	for {
 		if trap == jit.TrapReturn {
+			account.spend(ctx)
+			if account.work >= amortize {
+				account.count = 0
+				account.work = 0
+			}
 			return true, false
 		}
 
@@ -443,6 +459,7 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, bridged *
 		}
 		switch exit.Kind {
 		case jit.ExitSafepoint:
+			account.spend(ctx)
 			if cancelled(i) {
 				// Threaded code reports the cancellation at its next safepoint,
 				// as an error no guest handler can catch.
@@ -452,7 +469,7 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, bridged *
 			ctx.Heap = heapBase(i.heap)
 			ctx.RC = rcBase(i.rc)
 			ctx.Budget = budget
-			mark = ctx.Budget
+			account.mark = ctx.Budget
 			n.drain(i)
 			trap = jit.Resume(ctx)
 		case jit.ExitRelease:
@@ -463,9 +480,10 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, bridged *
 			ctx.RC = rcBase(i.rc)
 			trap = jit.Resume(ctx)
 		case jit.ExitBridge, jit.ExitBox:
+			account.spend(ctx)
 			// Checked before serving: a deopt after a bridge would run the op twice.
 			served := false
-			if *bridged < resume {
+			if account.count < resume {
 				if exit.Kind == jit.ExitBox {
 					served = n.widen(i, exit)
 				} else {
@@ -473,25 +491,21 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, bridged *
 				}
 			}
 			if served {
-				// Enough native work since the last bridge pays for this one.
-				// A natively called activation counts against its caller's
-				// entry, so its work also clears its own function's count.
-				if mark-ctx.Budget >= amortize {
-					*bridged = 0
-					n.bridged[exit.Frame.Address] = 0
+				if account.work >= amortize {
+					account.count = 0
+					n.bridges[exit.Frame.Address] = bridge{}
 				} else {
-					*bridged++
+					account.count++
 				}
-				mark = ctx.Budget
+				account.work = 0
+				account.mark = ctx.Budget
 				ctx.Heap = heapBase(i.heap)
 				ctx.RC = rcBase(i.rc)
 				trap = jit.Resume(ctx)
 				continue
 			}
 			deopt(exit)
-			if *bridged >= resume {
-				// The site bridged every native entry with nothing else
-				// between: retire rather than pay the round trip forever.
+			if account.count >= resume {
 				return false, true
 			}
 			return false, refute()
@@ -524,7 +538,7 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	}
 
 	if trap := jit.Enter(code.Entry(), ctx); trap != jit.TrapReturn {
-		ok, retire := n.settle(i, code, trap, &n.bridged[addr],
+		ok, retire := n.settle(i, code, trap, &n.bridges[addr],
 			// ip advances the entering (pre-rebuild) frame, which rebuild
 			// never writes, so it applies before rebuild retargets i.fr.
 			func(exit jit.Exit) { i.fr.ip += advance; n.rebuild(i, exit, i.fp, release) },

@@ -1297,6 +1297,127 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, want, result)
 	})
 
+	t.Run("keeps a loop-free bridged module native across entries", func(t *testing.T) {
+		native(t)
+		record := node()
+		b := instr.NewBuilder()
+		b.Emit(instr.STRUCT_NEW_DEFAULT, 0).Emit(instr.DROP)
+		for range 16 {
+			b.Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+		}
+		b.Emit(instr.I32_CONST, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithTypes(record), program.WithConstants(incFunction()))
+		want := runProgram(t, prog)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+
+		var result types.Value
+		var runErr, popErr error
+		var entries float64
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			result, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Reset()
+			vm.Flush()
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+			return entries >= 64
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, result)
+		require.GreaterOrEqual(t, entries, float64(64))
+
+		recent := make([]float64, 0, 32)
+		for range 32 {
+			require.NoError(t, vm.Run(context.Background()))
+			result, err = vm.Pop()
+			require.NoError(t, err)
+			vm.Flush()
+			count, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+			recent = append(recent, count)
+			vm.Reset()
+		}
+		require.Equal(t, want, result)
+		for i := 1; i < len(recent); i++ {
+			require.Greater(t, recent[i], recent[i-1])
+		}
+		deopts, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+		require.Zero(t, deopts)
+	})
+
+	t.Run("retires a loop that bridges every iteration with only a call between", func(t *testing.T) {
+		native(t)
+		record := node()
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 100).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.STRUCT_NEW_DEFAULT, 0).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithTypes(record), program.WithConstants(incFunction()))
+		want := runProgram(t, prog)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+
+		var result types.Value
+		var runErr, popErr error
+		var bridges float64
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			result, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Reset()
+			vm.Flush()
+			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+			return bridges > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, result)
+		require.Greater(t, bridges, float64(0))
+
+		for range 32 {
+			require.NoError(t, vm.Run(context.Background()))
+			result, err = vm.Pop()
+			require.NoError(t, err)
+			vm.Reset()
+		}
+		vm.Flush()
+		before, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+		for range 32 {
+			require.NoError(t, vm.Run(context.Background()))
+			result, err = vm.Pop()
+			require.NoError(t, err)
+			vm.Reset()
+		}
+		vm.Flush()
+		after, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+		require.Equal(t, want, result)
+		require.Equal(t, before, after)
+	})
+
 	t.Run("a loop function reaches a safepoint and refills its budget", func(t *testing.T) {
 		native(t)
 		prog := sumWarmProgram(t, 1000, 200000)
@@ -3131,6 +3252,50 @@ func TestWithThreshold(t *testing.T) {
 		// only possible if fib, called solely from that native loop, also
 		// reached the promote threshold.
 		compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+		require.GreaterOrEqual(t, compiles, float64(2))
+	})
+
+	t.Run("a callee reached only from native code tiers up across Runs too short to reach a safepoint", func(t *testing.T) {
+		native(t)
+		// inc is entered once per iteration: its 1024 Baseline entries
+		// arrive only after the loop itself runs natively.
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 100).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(incFunction()))
+		want := runProgram(t, prog)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+
+		var got types.Value
+		var runErr, popErr error
+		var compiles float64
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Reset()
+			vm.Flush()
+			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+			return compiles >= 2
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, got)
 		require.GreaterOrEqual(t, compiles, float64(2))
 	})
 

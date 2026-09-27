@@ -138,6 +138,7 @@ func (m *machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 		a.Emit(arm64.USE(u))
 	}
 	a.Emit(arm64.BLabel(c.Bridge))
+	a.Bind(c.Resume)
 	for _, v := range c.Results {
 		a.Emit(arm64.LDI(s.Reg(v), 0)...)
 	}
@@ -483,23 +484,35 @@ func TestLower(t *testing.T) {
 		caller := function(1, 1, instr.New(instr.CALL))
 		_, exits, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
 		require.NoError(t, err)
-		require.Equal(t, []string{"prologue", "const", "call", "return", "exit 0 4", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "const", "call", "return", "exit 0 4", "const", "const", "const", "exit 1 2", "jump", "epilogue", "enter"}, m.calls)
 		site := m.sites[0]
 		site.Bridge = 0
+		site.Safepoint = 0
+		site.Resume = 0
 		require.Equal(t, compile.Call{
 			Address: 2, Callee: callee, Args: []ssa.Value{arg}, Results: []ssa.Value{got},
 			Base: 3, Size: 3, Exit: 0, Live: []asm.VReg{i32(11)}, Owned: false,
 			Registers: []types.Kind{types.KindI32},
 			Arguments: []types.Kind{types.KindI32},
 		}, site)
-		require.Equal(t, []jit.Exit{{
-			Kind:   jit.ExitCall,
-			Callee: 2,
-			Owned:  false,
-			Frame: jit.Frame{Address: 1, IP: 1, Returns: 1, Stack: []jit.Operand{
-				{Value: jit.Value{Kind: types.KindI32, Loc: asm.Loc{Reg: arm64.W0}}},
-			}},
-		}}, exits)
+		require.Equal(t, []jit.Exit{
+			{
+				Kind:   jit.ExitCall,
+				Callee: 2,
+				Owned:  false,
+				Frame: jit.Frame{Address: 1, IP: 1, Returns: 1, Stack: []jit.Operand{
+					{Value: jit.Value{Kind: types.KindI32, Loc: asm.Loc{Reg: arm64.W0}}},
+				}},
+			},
+			{
+				Kind: jit.ExitSafepoint,
+				Frame: jit.Frame{Address: 1, IP: 0, Returns: 1, Stack: []jit.Operand{
+					{Value: jit.Value{Kind: types.KindI32, Loc: asm.Loc{Reg: arm64.W0}}},
+					{Value: jit.Value{Kind: types.KindI32, Loc: asm.Loc{Reg: arm64.W1}}},
+					{Value: jit.Value{Kind: types.KindRef, Loc: asm.Loc{Reg: arm64.X2}}},
+				}},
+			},
+		}, exits)
 	})
 
 	t.Run("lends a borrowed argument its state does not own", func(t *testing.T) {
@@ -561,7 +574,7 @@ func TestLower(t *testing.T) {
 		caller := function(1, 1, instr.New(instr.CALL))
 		_, exits, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
 		require.NoError(t, err)
-		require.Equal(t, []string{"prologue", "retain", "call", "return", "exit 0 4", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "retain", "call", "return", "exit 0 4", "const", "const", "exit 1 2", "jump", "epilogue", "enter"}, m.calls)
 		require.True(t, m.sites[0].Owned)
 		require.True(t, exits[0].Owned)
 	})

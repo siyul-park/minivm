@@ -175,6 +175,7 @@ func (m *Machine) Enter(a *asm.Assembler, l compile.Layout) asm.Label {
 		target.SUBI(target.SP, target.SP, 16),
 		target.STR(target.LR, target.SP, 8),
 		target.BLLabel(m.entry),
+		target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 	)
 	for i, k := range l.Results {
 		src := register(i)
@@ -321,13 +322,13 @@ func (m *Machine) Return(a *asm.Assembler, t ssa.Terminator, s compile.Site) {
 		if len(t.Args) > 1 {
 			a.Emit(target.USE(target.X1))
 		}
-		a.Emit(target.BLabel(m.end))
+		a.Emit(target.SUBI(target.X24, target.X24, 1), target.BLabel(m.end))
 		return
 	}
 	for i, v := range t.Args {
 		a.Emit(target.STR(m.box(a, s, v), target.X25, int16((base+i)*8)))
 	}
-	a.Emit(target.BLabel(m.end))
+	a.Emit(target.SUBI(target.X24, target.X24, 1), target.BLabel(m.end))
 }
 
 // Budget counts X24, the pinned budget, down and branches to safepoint when
@@ -420,10 +421,11 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 		target.STR(target.X17, target.X16, record(jit.RecordSP)),
 	)
 	a.Emit(target.LDI(target.X17, uint64(c.Exit))...)
-	a.Emit(
-		target.STR(target.X17, target.X16, record(jit.RecordExit)),
-		target.ADDI(target.X25, target.X25, uint16(8*c.Base)),
-	)
+	a.Emit(target.STR(target.X17, target.X16, record(jit.RecordExit)))
+	// Spend before changing X25 so a safepoint resumes with the caller frame.
+	a.Emit(target.SUBSI(target.X24, target.X24, 1), target.BCondLabel(target.OpBLE, c.Safepoint))
+	a.Bind(c.Resume)
+	a.Emit(target.ADDI(target.X25, target.X25, uint16(8*c.Base)))
 	// A register-passed argument also moves into X0/X1 raw, on top of its
 	// boxed slot store (exits read only the slot). The moves sit right
 	// before the branch so no other value is allocated X0/X1 in between.
