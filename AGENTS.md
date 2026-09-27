@@ -25,6 +25,7 @@
 6. Generated files `MUST NOT` be edited directly; the agent `MUST` change them only through their generator and `MUST` run `make generate` and `make check-generated`.
 7. The agent `MUST` keep one canonical owner per topic. Canonical topic docs `MUST` state only necessary current facts: no history, duplication, or narrative. Guides `MUST` describe procedures; plans and audits `MAY` preserve history or future work. The agent `MUST NOT` duplicate a contract owned elsewhere; it `MUST` link to the owner instead.
 8. A non-trivial structural change (package/type boundary, ownership, lifecycle, control flow, abstraction, public contract, or performance-sensitive structure) `MUST` apply `docs/refactoring.md` until the simplification fixed point is reached.
+9. Every document the agent writes (docs, guides, plans, briefs, reports) `MUST` be valid Markdown and `MUST` present its core point in the form that best delivers it to the reader: key fact first, tables for comparisons or per-case rules, lists for sets and steps, code blocks for commands and code, short prose only for rationale.
 
 ## Delegation
 
