@@ -37,11 +37,13 @@ type value struct {
 	width   RegWidth
 }
 
-// interval is the range of rows a value occupies, and, for a virtual value,
-// whether it is live across a call.
+// interval is the range of rows a value occupies, the disjoint row ranges
+// within it where the value is live, and, for a virtual value, whether it
+// is live across a call.
 type interval struct {
 	value      value
 	start, end int
+	ranges     [][2]int
 	call       bool
 }
 
@@ -88,19 +90,13 @@ func (a *allocator) allocate() ([]Instruction, map[Label]int, error) {
 	}
 }
 
-// intervals computes whole-life ranges used by unsplit linear scan.
+// intervals computes each value's whole-life range and the rows within it
+// where the value is live: a value holds one register for its whole life,
+// but another value may share it through the holes.
 func (a *allocator) intervals() []interval {
 	blocks, out := a.liveness()
-	ivs := map[value]*interval{}
-	occupy := func(v value, row int) {
-		iv, ok := ivs[v]
-		if !ok {
-			iv = &interval{value: v, start: row, end: row}
-			ivs[v] = iv
-		}
-		iv.start = min(iv.start, row)
-		iv.end = max(iv.end, row)
-	}
+	rows := map[value][]int{}
+	calls := map[value]bool{}
 	for b, blk := range blocks {
 		after := out[b]
 		for row := blk[1] - 1; row >= blk[0]; row-- {
@@ -110,25 +106,35 @@ func (a *allocator) intervals() []interval {
 				live[v] = true
 			}
 			for _, v := range writes {
-				occupy(v, row)
+				rows[v] = append(rows[v], row)
 				delete(live, v)
 			}
 			for _, v := range reads {
 				live[v] = true
 			}
 			for v := range live {
-				occupy(v, row)
+				rows[v] = append(rows[v], row)
 				if v.virtual && after[v] && a.frame.Flow(a.insts[row]) == FlowCall {
-					ivs[v].call = true
+					calls[v] = true
 				}
 			}
 			after = live
 		}
 	}
 
-	result := make([]interval, 0, len(ivs))
-	for _, iv := range ivs {
-		result = append(result, *iv)
+	result := make([]interval, 0, len(rows))
+	for v, occupied := range rows {
+		slices.Sort(occupied)
+		iv := interval{value: v, call: calls[v]}
+		for _, row := range slices.Compact(occupied) {
+			if n := len(iv.ranges); n > 0 && iv.ranges[n-1][1] == row-1 {
+				iv.ranges[n-1][1] = row
+			} else {
+				iv.ranges = append(iv.ranges, [2]int{row, row})
+			}
+		}
+		iv.start, iv.end = iv.ranges[0][0], iv.ranges[len(iv.ranges)-1][1]
+		result = append(result, iv)
 	}
 	slices.SortFunc(result, func(x, y interval) int {
 		if x.start != y.start {
@@ -272,8 +278,9 @@ func (a *allocator) value(r Reg) (value, bool) {
 	}
 }
 
-// scan assigns registers in start order. Call-live values spill first; under
-// pressure it evicts the longest-lived non-tiny value.
+// scan assigns registers in start order; values whose live rows never meet
+// share a register. Call-live values spill first; under pressure it evicts
+// the longest-lived non-tiny value live alongside the one being assigned.
 func (a *allocator) scan(ivs []interval) (map[value]PReg, []value, error) {
 	var spilled []value
 	fixed := map[value][]interval{}
@@ -318,12 +325,13 @@ func (a *allocator) scan(ivs []interval) (map[value]PReg, []value, error) {
 	return assigned, spilled, nil
 }
 
-// free returns the first register of iv's bank that no active interval holds
-// and no fixed interval occupies anywhere within iv.
+// free returns the first register of iv's bank that no active interval live
+// at one of iv's rows holds and no fixed interval occupies anywhere within
+// iv.
 func (a *allocator) free(iv interval, active []interval, assigned map[value]PReg, fixed map[value][]interval) (PReg, bool) {
 	held := map[uint8]bool{}
 	for _, o := range active {
-		if r, ok := assigned[o.value]; ok && o.value.typ == iv.value.typ {
+		if r, ok := assigned[o.value]; ok && o.value.typ == iv.value.typ && iv.overlaps(o) {
 			held[r.ID()] = true
 		}
 	}
@@ -343,7 +351,7 @@ next:
 }
 
 // victim picks the non-tiny interval among iv and the actives of its bank
-// that ends last.
+// live at one of iv's rows that ends last.
 func (a *allocator) victim(iv interval, active []interval) (interval, bool) {
 	best, ok := interval{}, false
 	consider := func(o interval) {
@@ -356,9 +364,28 @@ func (a *allocator) victim(iv interval, active []interval) (interval, bool) {
 	}
 	consider(iv)
 	for _, o := range active {
-		consider(o)
+		if iv.overlaps(o) {
+			consider(o)
+		}
 	}
 	return best, ok
+}
+
+// overlaps reports whether iv and o are live at a common row.
+func (iv interval) overlaps(o interval) bool {
+	i, j := 0, 0
+	for i < len(iv.ranges) && j < len(o.ranges) {
+		x, y := iv.ranges[i], o.ranges[j]
+		if x[0] <= y[1] && y[0] <= x[1] {
+			return true
+		}
+		if x[1] < y[1] {
+			i++
+		} else {
+			j++
+		}
+	}
+	return false
 }
 
 // rewrite surrounds spilled reads/writes with reload/park rows using fresh

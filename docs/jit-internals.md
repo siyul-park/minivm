@@ -42,7 +42,7 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 - Native code writes no Go pointer. It reads heap interface words through `Context.Heap` and object fields at `jit.Offset*`.
 - Registers: X24 budget, X25 frame base, X27 activation depth, X26 context, X16/X17 scratch, X18/X28 untouched. Allocatable: X0–X15, X19–X23, D0–D31.
 - X24 mirrors `Context.Budget`: exits store it, resumed exits reload it, and a normal Go entry stores it back after native return.
-- Allocation: linear scan, no splitting; a value live across a call or under pressure spills for its whole life. Calls clobber every allocatable register. Exit maps keep ordinary mapped values live through their stubs. Promoted locals are deopt-only state: calls and safepoints keep them live across resumption; other exits save a non-live one on their cold path into a fixed spill home.
+- Allocation: linear scan, no splitting; a value live across a call or under pressure spills for its whole life. Values whose live rows never meet share a register: a value does not hold its register through a block it is dead in, such as a later loop laid out before its out-of-line stubs. Calls clobber every allocatable register. Exit maps keep ordinary mapped values live through their stubs. Promoted locals are deopt-only state: calls and safepoints keep them live across resumption; other exits save a non-live one on their cold path into a fixed spill home.
 - In a function with a call, a scalar or ref constant no loop block uses is loaded at each use and at each exit stub instead of spilled; an `ExitCall` map keeps its constants live across the call, since a deeper trap reads them from spill slots. Other constants keep one register.
 
 ## Pipeline

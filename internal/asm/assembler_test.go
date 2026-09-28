@@ -154,6 +154,46 @@ func TestAssembler_Build(t *testing.T) {
 		require.Equal(t, encode(t, want...), code)
 	})
 
+	t.Run("keeps a value in its register through a block it is dead in", func(t *testing.T) {
+		regs := arm64.New().Registers(asm.RegTypeInt)
+		a := asm.New(arm64.New())
+		cold, use := a.Label(), a.Label()
+		a.Emit(slots(arm64.OpSUBI), arm64.MOVI(vint(0), 7), arm64.CBZLabel(arm64.X1, cold), arm64.BLabel(use))
+		a.Bind(cold)
+		for i := range int32(len(regs)) {
+			a.Emit(arm64.MOVI(vint(1+i), int64(i)))
+		}
+		for i := int32(len(regs)) - 1; i >= 0; i-- {
+			a.Emit(arm64.STR(vint(1+i), arm64.Ctx, int16(8*i)))
+		}
+		a.Emit(slots(arm64.OpADDI), arm64.RET())
+		a.Bind(use)
+		a.Emit(arm64.STR(vint(0), arm64.Ctx, 200), slots(arm64.OpADDI), arm64.RET())
+
+		code, err := a.Build()
+		require.NoError(t, err)
+		want := []asm.Instruction{
+			arm64.SUBI(arm64.SP, arm64.SP, 0),
+			arm64.MOVI(arm64.X0, 7),
+			arm64.CBZ(arm64.X1, 8),
+			arm64.B(int32(4 * (2*len(regs) + 3))),
+		}
+		for i, r := range regs {
+			want = append(want, arm64.MOVI(r, int64(i)))
+		}
+		for i := len(regs) - 1; i >= 0; i-- {
+			want = append(want, arm64.STR(regs[i], arm64.Ctx, int16(8*i)))
+		}
+		want = append(want,
+			arm64.ADDI(arm64.SP, arm64.SP, 0),
+			arm64.RET(),
+			arm64.STR(arm64.X0, arm64.Ctx, 200),
+			arm64.ADDI(arm64.SP, arm64.SP, 0),
+			arm64.RET(),
+		)
+		require.Equal(t, encode(t, want...), code)
+	})
+
 	t.Run("keeps a loop-carried value in one register", func(t *testing.T) {
 		a := asm.New(arm64.New())
 		loop := a.Label()
