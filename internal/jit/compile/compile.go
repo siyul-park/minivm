@@ -834,6 +834,7 @@ func (l *lowering) exit(k jit.Kind) int {
 	if k == jit.ExitBridge {
 		e.Code = l.op.Code
 		e.Pops = len(l.op.Args)
+		e.Adopts = transform.Adopts(l.op.Code, len(l.op.Args), len(l.op.Results))
 		for _, v := range l.op.Results {
 			e.Results = append(e.Results, l.f.Type(v).Kind())
 		}

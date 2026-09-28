@@ -45,6 +45,7 @@ type fact struct {
 	referenceKnown bool
 	structType     *types.StructType
 	arrayType      *types.ArrayType
+	mapType        *types.MapType
 	value          int32
 	valueKnown     bool
 }
@@ -175,6 +176,10 @@ func (f *fact) merge(src fact) (bool, bool) {
 		f.arrayType = nil
 		changed = true
 	}
+	if f.mapType != nil && f.mapType != src.mapType {
+		f.mapType = nil
+		changed = true
+	}
 	if f.valueKnown && (!src.valueKnown || f.value != src.value) {
 		f.value, f.valueKnown = 0, false
 		changed = true
@@ -206,6 +211,7 @@ func holds(t types.Type) fact {
 	f := fact{kind: t.Kind()}
 	f.structType, _ = t.(*types.StructType)
 	f.arrayType, _ = t.(*types.ArrayType)
+	f.mapType, _ = t.(*types.MapType)
 	return f
 }
 

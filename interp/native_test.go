@@ -1391,7 +1391,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Reset()
 			vm.Flush()
 			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
-			return bridges > 0
+			return bridges > 1
 		}, 5*time.Second, time.Millisecond)
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
@@ -1647,7 +1647,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
 			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
-			return bridges > 0
+			return bridges > 1
 		}, 5*time.Second, time.Millisecond)
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
@@ -1680,7 +1680,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
 			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
-			return bridges > 0
+			return bridges > 1
 		}, 5*time.Second, time.Millisecond)
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
@@ -1710,7 +1710,7 @@ func TestWithThreshold(t *testing.T) {
 			}
 			vm.Flush()
 			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
-			return bridges > 0
+			return bridges > 1
 		}, 5*time.Second, time.Millisecond)
 		require.Error(t, gotErr)
 		require.True(t, errorsEqual(gotErr, wantErr))
@@ -1792,6 +1792,188 @@ func TestWithThreshold(t *testing.T) {
 		require.True(t, errorsEqual(gotErr, wantErr), "got %v, want %v", gotErr, wantErr)
 		require.NoError(t, constErr)
 		require.Equal(t, wantConst, constCount)
+	})
+
+	t.Run("unlowered operators in a loop bridge and resume native code, matching threaded including RefCount", func(t *testing.T) {
+		native(t)
+		dict, list := types.NewMapType(types.TypeI32, types.TypeI32), types.NewArrayType(types.TypeI32)
+		wide, named := types.NewMapType(types.TypeI32, types.TypeI64), types.NewMapType(types.TypeString, types.TypeI32)
+		b := instr.NewBuilder()
+		loop, done, first, firstDone, second, secondDone, third, thirdDone := b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.MAP_NEW_DEFAULT, 0).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.MAP_NEW_DEFAULT, 3).Emit(instr.LOCAL_SET, 5)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.MAP_NEW_DEFAULT, 4).Emit(instr.LOCAL_SET, 6)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_NEW_DEFAULT, 1).Emit(instr.LOCAL_SET, 3)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 300).Emit(instr.I32_GE_S).BrIf(done)
+		// Each group of bridges follows an inner loop's native work.
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(first)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(firstDone)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).Br(first)
+		b.Bind(firstDone)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_SET)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_GET)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_APPEND).Emit(instr.LOCAL_SET, 3)
+		b.Emit(instr.CONST_GET, 0).Emit(instr.CONST_GET, 1).Emit(instr.STRING_EQ)
+		b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 4)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_LOOKUP).Emit(instr.I32_ADD)
+		b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 4)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SLICE).Emit(instr.ARRAY_LEN)
+		b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 4)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(second)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(secondDone)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).Br(second)
+		b.Bind(secondDone)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_FILL)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_COPY)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_DELETE)
+		b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 4)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 7).Emit(instr.ERROR_NEW).Emit(instr.ERROR_CODE)
+		b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 4)
+		b.Emit(instr.CONST_GET, 0).Emit(instr.REF_TEST, 2)
+		b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 4)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 3).Emit(instr.REF_EQ)
+		b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 4)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_DELETE)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(third)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(thirdDone)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).Br(third)
+		b.Bind(thirdDone)
+		// A wide i64 crosses the bridge boxed on the heap both ways.
+		b.Emit(instr.LOCAL_GET, 5).Emit(instr.LOCAL_GET, 0).Emit(instr.I64_CONST, 1<<60).Emit(instr.MAP_SET)
+		b.Emit(instr.LOCAL_GET, 5).Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_GET)
+		b.Emit(instr.I64_CONST, 58).Emit(instr.I64_SHR_U).Emit(instr.I64_TO_I32)
+		b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 4)
+		b.Emit(instr.LOCAL_GET, 5).Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_DELETE)
+		// map.delete adopts its key: native code hands it the reference.
+		b.Emit(instr.LOCAL_GET, 6).Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_SET)
+		b.Emit(instr.LOCAL_GET, 6).Emit(instr.CONST_GET, 0).Emit(instr.MAP_DELETE)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 4).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_APPEND)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code,
+			program.WithLocals(types.TypeI32, types.TypeI32, dict, list, types.TypeI32, wide, named),
+			program.WithTypes(dict, list, types.TypeString, wide, named),
+			program.WithConstants(types.String("x"), types.String("y")))
+
+		threaded := interp.New(prog)
+		require.NoError(t, threaded.Run(context.Background()))
+		boxed, err := threaded.PopBoxed()
+		require.NoError(t, err)
+		want, err := threaded.Load(boxed.Ref())
+		require.NoError(t, err)
+		wantCount, err := threaded.RefCount(boxed.Ref())
+		require.NoError(t, err)
+		x, err := threaded.Const(0)
+		require.NoError(t, err)
+		wantConst, err := threaded.RefCount(x.Ref())
+		require.NoError(t, err)
+		require.NoError(t, threaded.Close())
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		metric := func(name, key, value string) float64 {
+			vm.Flush()
+			v, _ := profiler.Metric(name, prof.Label{Key: key, Value: value})
+			return v
+		}
+
+		var runErr error
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			vm.Reset()
+			return runErr != nil || metric("vm_jit_entries_total", "tier", "optimized") > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+
+		entries := metric("vm_jit_entries_total", "tier", "optimized")
+		bridges := metric("vm_jit_exits_total", "kind", "bridge")
+		for range 8 {
+			require.NoError(t, vm.Run(context.Background()))
+			boxed, err := vm.PopBoxed()
+			require.NoError(t, err)
+			got, err := vm.Load(boxed.Ref())
+			require.NoError(t, err)
+			count, err := vm.RefCount(boxed.Ref())
+			require.NoError(t, err)
+			constCount, err := vm.RefCount(x.Ref())
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			require.Equal(t, wantCount, count)
+			require.Equal(t, wantConst, constCount)
+			vm.Reset()
+		}
+		require.Greater(t, metric("vm_jit_entries_total", "tier", "optimized"), entries)
+		require.Greater(t, metric("vm_jit_exits_total", "kind", "bridge"), bridges)
+		require.Zero(t, metric("vm_jit_exits_total", "kind", "deopt"))
+	})
+
+	t.Run("an unlowered operator that traps deoptimizes and reports threaded's error and RefCount", func(t *testing.T) {
+		native(t)
+		const warm = 4000
+		b := instr.NewBuilder()
+		loop, done, inner, innerDone, same := b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
+		b.Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2*warm).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(inner)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(innerDone)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).Br(inner)
+		b.Bind(innerDone)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, warm).Emit(instr.I32_NE).BrIf(same)
+		b.Emit(instr.CONST_GET, 1).Emit(instr.LOCAL_SET, 2)
+		b.Bind(same)
+		// string.eq releases "x" before it finds the array at iteration warm.
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.CONST_GET, 0).Emit(instr.STRING_EQ).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code,
+			program.WithLocals(types.TypeI32, types.TypeI32, types.TypeAny),
+			program.WithConstants(types.String("x"), types.TypedArray[int32]{1}))
+
+		threaded := interp.New(prog)
+		wantErr := threaded.Run(context.Background())
+		require.ErrorIs(t, wantErr, interp.ErrTypeMismatch)
+		x, err := threaded.Const(0)
+		require.NoError(t, err)
+		array, err := threaded.Const(1)
+		require.NoError(t, err)
+		wantX, err := threaded.RefCount(x.Ref())
+		require.NoError(t, err)
+		wantArray, err := threaded.RefCount(array.Ref())
+		require.NoError(t, err)
+		require.NoError(t, threaded.Close())
+
+		var gotErr, xErr, arrayErr error
+		var gotX, gotArray int
+		var bridges float64
+		require.Eventually(t, func() bool {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			defer vm.Close()
+			gotErr = vm.Run(context.Background())
+			gotX, xErr = vm.RefCount(x.Ref())
+			gotArray, arrayErr = vm.RefCount(array.Ref())
+			vm.Flush()
+			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+			return bridges > 1
+		}, 5*time.Second, time.Millisecond)
+		// A bridge that deoptimizes leaves native code for the rest of the Run.
+		require.Greater(t, bridges, float64(1))
+		require.True(t, errorsEqual(gotErr, wantErr), "got %v, want %v", gotErr, wantErr)
+		require.NoError(t, xErr)
+		require.NoError(t, arrayErr)
+		require.Equal(t, wantX, gotX)
+		require.Equal(t, wantArray, gotArray)
 	})
 
 	t.Run("a callee's unamortized threaded-entry bridges do not retire it while its native calls amortize theirs", func(t *testing.T) {
@@ -4217,7 +4399,7 @@ func TestWithThreshold(t *testing.T) {
 		fb.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.LOCAL_SET, 0)).Br(loop)
 		fb.Bind(done).Emit(instr.New(instr.LOCAL_GET, 1)).BrIf(slow)
 		fb.Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.RETURN))
-		fb.Bind(slow).Emit(instr.New(instr.REF_NULL), instr.New(instr.REF_NULL), instr.New(instr.REF_EQ))
+		fb.Bind(slow).Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW, 0), instr.New(instr.ARRAY_LEN))
 		fb.Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_ADD), instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
 		gb := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Locals(types.TypeAny, types.TypeI32, types.TypeI32)
 		loop, done = gb.Label(), gb.Label()
@@ -4231,7 +4413,7 @@ func TestWithThreshold(t *testing.T) {
 		b.Emit(instr.CONST_GET, 1).Emit(instr.CALL)
 		code, err := b.Assemble()
 		require.NoError(t, err)
-		prog := program.New(code, program.WithConstants(fb.MustBuild(), gb.MustBuild()))
+		prog := program.New(code, program.WithConstants(fb.MustBuild(), gb.MustBuild()), program.WithTypes(types.NewArrayType(types.TypeI32)))
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
@@ -4259,7 +4441,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Reset()
 			vm.Flush()
 			// With the caller entered natively and no call exit, every
-			// closure call ran natively, the last one into REF_EQ, whose
+			// closure call ran natively, the last one into ARRAY_NEW, whose
 			// bridge never resumes.
 			compiled = metric("vm_jit_compiles_total", baseline, prof.Label{Key: "outcome", Value: "ok"})
 			entries, called = metric("vm_jit_entries_total", baseline)-entered, metric("vm_jit_exits_total", call)-exited
@@ -4761,7 +4943,7 @@ func runModuleDivCaught(t *testing.T, prog *program.Program) (int, types.Boxed) 
 	return count, code
 }
 
-// bridge loops n times at module level over STRING_EQ, which native code
+// bridge loops n times at module level over MAP_KEYS, which native code
 // neither lowers nor resumes: every native entry of its header bridges.
 func bridge(t *testing.T, n int) *program.Program {
 	t.Helper()
@@ -4770,13 +4952,13 @@ func bridge(t *testing.T, n int) *program.Program {
 	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0) // i = 0
 	b.Bind(header)
 	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
-	b.Emit(instr.CONST_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.STRING_EQ).Emit(instr.DROP)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.MAP_NEW_DEFAULT, 0).Emit(instr.MAP_KEYS).Emit(instr.DROP)
 	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
 	b.Br(header)
 	b.Bind(done).Emit(instr.LOCAL_GET, 0)
 	code, err := b.Assemble()
 	require.NoError(t, err)
-	return program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(types.String("x")))
+	return program.New(code, program.WithLocals(types.TypeI32), program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)))
 }
 
 // emptyHeaderProgram loops n times purely on raw local reads at its own

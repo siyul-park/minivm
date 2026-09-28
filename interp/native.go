@@ -88,6 +88,11 @@ func (b *bridge) spend(ctx *jit.Context) {
 	b.mark = ctx.Budget
 }
 
+// hold is one heap operand of a bridge attempt and its count before it.
+type hold struct {
+	ref, count int
+}
+
 // shared contains the pool-shareable native runtime: Store, Queue, and Module.
 // refs closes it after the last interpreter releases it.
 type shared struct {
@@ -524,7 +529,7 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, account *
 				if exit.Kind == jit.ExitBox {
 					served = n.widen(i, exit)
 				} else {
-					served = bridgeable(exit.Code) && n.bridge(i, exit)
+					served = bridgeable[exit.Code] && n.bridge(i, exit)
 				}
 			}
 			if served {
@@ -627,25 +632,39 @@ func boxRegisters(i *Interpreter, code *jit.Code, bp int) {
 	}
 }
 
-// bridgeable selects handlers that can execute once in place and safely decline.
-// The allowlist excludes handlers whose runtime pop count exceeds the recorded
-// SSA arguments, that write their argument slots before they can panic, or
-// that do anything but release their operands before they can panic.
-func bridgeable(code instr.Opcode) bool {
-	switch code {
-	case instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT, instr.ARRAY_NEW_DEFAULT, instr.CLOSURE_NEW,
-		instr.STRING_NEW_UTF32, instr.STRING_ENCODE_UTF32, instr.STRING_LEN, instr.STRING_CONCAT,
-		instr.F32_REM, instr.F32_MOD, instr.F64_REM, instr.F64_MOD:
-		return true
-	default:
-		return false
+// bridgeable reports, by opcode, whether an ExitBridge for it runs its
+// threaded handler in Go and resumes native code; otherwise the exit
+// deoptimizes and threaded code runs the op once. It denies:
+//   - a control transfer (the op writes Branch): no next instruction to resume;
+//   - ARRAY_NEW: instr.Type declares two operands, not the 1+count it pops,
+//     so its SSA arguments do not cover its operands;
+//   - MAP_KEYS: it allocates every string or wide i64 key before the result
+//     array, so a heap-exhaustion trap between them would leave the keys a
+//     failed attempt allocated.
+//
+// It is a table because every bridge exit reads it.
+var bridgeable = func() (out [256]bool) {
+	for code := range out {
+		op := instr.Opcode(code)
+		out[code] = !op.Writes(instr.Branch) && op != instr.ARRAY_NEW && op != instr.MAP_KEYS
 	}
-}
+	return out
+}()
 
-// bridge runs the threaded handler once against boxed exit operands.
-// It leaves native registers untouched; asm.Resume restores them. A trap
-// declines through the existing deopt path so accounting and single execution
-// remain unchanged.
+// bridge runs exit's threaded handler once against its boxed operands and
+// reports whether native code resumes. It leaves native registers untouched;
+// asm.Resume restores them.
+//
+// A handler that panics declines: threaded code runs the op again after the
+// deopt and reports its trap. Before running it, bridge saves each heap
+// operand and its count and retains every ref operand for the handler; on a
+// panic it releases each back to its saved count, whatever the handler
+// released or overwrote. A declined attempt can leave changed only heap and
+// count storage growth, stack slots above the frame, and i.frames[i.fp]:
+// bridgeable admits no handler that writes heap contents, allocates, or
+// retains anything but its operands before its last panic point. An operand
+// that is a host view declines before the handler runs, since its
+// conversions are host code.
 func (n *native) bridge(i *Interpreter, exit jit.Exit) bool {
 	if i.fp >= len(i.frames) {
 		return false
@@ -658,21 +677,25 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) bool {
 	sp := bp + slots(i.function(m.Address))
 
 	tail := m.Stack[len(m.Stack)-exit.Pops:]
-	// counts are the ref operands' counts before any retain below: a handler
-	// that panics may already have released some of them.
-	var buf [8]int
-	counts := buf[:0]
+	var buf [8]hold
+	holds := buf[:0]
 	for j, o := range tail {
 		v := n.box(i, o.Value.Kind, ctx.Read(k, o.Value))
 		i.stack[sp+j] = v
+		if v.Kind() != types.KindRef {
+			continue
+		}
+		// A boxed wide i64 is fresh: the handler owns its one reference.
 		count := 0
 		if o.Value.Kind == types.KindRef {
+			if hosted(i.heap[v.Ref()]) {
+				restore(i, holds)
+				return false
+			}
 			count = i.rc[v.Ref()]
 		}
-		counts = append(counts, count)
+		holds = append(holds, hold{ref: v.Ref(), count: count})
 	}
-	// A boxed wide i64 is fresh and already owned; a ref is retained for the
-	// handler, so no handler release reclaims it.
 	for j, o := range tail {
 		if o.Value.Kind == types.KindRef {
 			i.retainBox(i.stack[sp+j])
@@ -685,49 +708,55 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) bool {
 	i.fr = f
 	i.sp = sp + len(tail)
 
-	ok := n.exec(i, f, exit.Results)
-
-	i.fr = savedFr
-	if !ok {
-		// A bridgeable handler never writes its argument slots before it can
-		// panic, so i.stack[sp+j] still holds each operand; releasing down to
-		// counts drops only the retains the handler did not consume.
-		for j, o := range tail {
-			if ref := i.stack[sp+j].Ref(); o.Value.Kind == types.KindRef && ref != 0 && i.rc[ref] > counts[j] {
-				i.release(ref)
+	ok := exec(i, f)
+	if ok {
+		for j, kind := range exit.Results {
+			ctx.Results[j] = n.unbox(i, kind, i.stack[i.sp-len(exit.Results)+j])
+		}
+		// Native code handed an adopted operand's own reference to the op;
+		// the handler consumed the retain above instead.
+		for _, o := range tail[len(tail)-exit.Adopts:] {
+			if o.Value.Kind == types.KindRef {
+				i.releaseBox(types.Boxed(ctx.Read(k, o.Value)))
 			}
 		}
-		i.sp = savedSP
+	} else {
+		restore(i, holds)
 	}
+	i.fr, i.sp = savedFr, savedSP
 	return ok
 }
 
-// exec runs f's own instruction and, on success, unboxes the len(results)
-// values it pushed into Context.Results as native words. A panic is
-// recovered and reported as a decline.
-func (n *native) exec(i *Interpreter, f *frame, results []types.Kind) (ok bool) {
+// restore releases each held operand back down to its saved count.
+func restore(i *Interpreter, holds []hold) {
+	for _, h := range holds {
+		for i.rc[h.ref] > h.count {
+			i.release(h.ref)
+		}
+	}
+}
+
+// exec runs f's own instruction and reports whether it completed; a panic is
+// recovered and reported as false.
+func exec(i *Interpreter, f *frame) (ok bool) {
 	defer func() {
 		if recover() != nil {
 			ok = false
 		}
 	}()
 	f.code[f.ip](i)
-	for j, kind := range results {
-		v := i.stack[i.sp-len(results)+j]
-		switch kind {
-		case types.KindRef:
-			n.ctx.Results[j] = uint64(v)
-		case types.KindI32:
-			n.ctx.Results[j] = uint64(uint32(v.I32()))
-		case types.KindF32:
-			n.ctx.Results[j] = uint64(math.Float32bits(v.F32()))
-		case types.KindF64:
-			n.ctx.Results[j] = math.Float64bits(v.F64())
-		default:
-			panic("interp: bridge result kind " + kind.String() + " has no native word")
-		}
-	}
 	return true
+}
+
+// hosted reports whether v is a host view: its operations run a Registry's
+// conversions, host code a declined attempt would run a second time.
+func hosted(v types.Value) bool {
+	switch v.(type) {
+	case *HostStruct, *HostArray, *HostMap:
+		return true
+	default:
+		return false
+	}
 }
 
 // rebuild materializes every native activation as a frame from start,
@@ -881,6 +910,23 @@ func (n *native) box(i *Interpreter, kind types.Kind, word uint64) types.Boxed {
 		return i.boxI64(int64(word))
 	default:
 		panic("interp: invalid native value kind " + kind.String())
+	}
+}
+
+// unbox converts v, a value a handler pushed, to the native word of kind,
+// consuming a heap-boxed i64's reference; box is its inverse.
+func (n *native) unbox(i *Interpreter, kind types.Kind, v types.Boxed) uint64 {
+	switch kind {
+	case types.KindI1, types.KindI8, types.KindI32:
+		return uint64(uint32(v.I32()))
+	case types.KindI64:
+		return uint64(i.unboxI64(v))
+	case types.KindF32:
+		return uint64(math.Float32bits(v.F32()))
+	case types.KindF64, types.KindRef:
+		return uint64(v)
+	default:
+		panic("interp: bridge result kind " + kind.String() + " has no native word")
 	}
 }
 

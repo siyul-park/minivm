@@ -730,6 +730,56 @@ blk0: ()
 	return v2 state v4
 `, ssa.Format(out))
 	})
+
+	t.Run("reads a map entry as its declared element kind", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{types.NewMapType(types.TypeI32, types.TypeI32)}, Returns: []types.Type{types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 3).Emit(instr.MAP_GET)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 4).Emit(instr.MAP_LOOKUP).Emit(instr.DROP)
+				b.Emit(instr.I32_ADD).Emit(instr.RETURN)
+			})}
+
+		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, `func 1:0
+blk0: ()
+	v1:ref = load local[0]
+	v2:i32 = const 3
+	v4:state = state {addr=1 base=0 ip=7 returns=1 stack=[v1, v2]}
+	v3:i32 = map.get v1, v2 state v4
+	v5:ref = load local[0]
+	v6:i32 = const 4
+	v9:state = state {addr=1 base=0 ip=15 returns=1 stack=[v3, v5, v6]}
+	v7:i32, v8:i1 = map.lookup v5, v6 state v9
+	v11:state = state {addr=1 base=0 ip=17 returns=1 stack=[v3, v7]}
+	v10:i32 = i32.add v3, v7 state v11
+	v12:state = state {addr=1 base=0 ip=18 returns=1 stack=[v10]}
+	return v10 state v12
+`, ssa.Format(out))
+	})
+}
+
+func TestAdopts(t *testing.T) {
+	tests := []struct {
+		name    string
+		code    instr.Opcode
+		pops    int
+		results int
+		want    int
+	}{
+		{name: "a call adopts every operand", code: instr.CALL, pops: 3, results: 1, want: 3},
+		{name: "a heap write with no result adopts the stored value", code: instr.MAP_SET, pops: 3, results: 0, want: 1},
+		{name: "a heap write with a result adopts nothing", code: instr.ARRAY_APPEND, pops: 3, results: 1, want: 0},
+		{name: "a heap read adopts nothing", code: instr.MAP_GET, pops: 2, results: 1, want: 0},
+		{name: "an allocation adopts nothing", code: instr.STRING_CONCAT, pops: 2, results: 1, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, transform.Adopts(tt.code, tt.pops, tt.results))
+		})
+	}
 }
 
 func TestBorrows(t *testing.T) {

@@ -28,13 +28,13 @@ The following rules `MUST` hold for every opcode:
 
 ## Native Status
 
-Threaded execution defines semantics. `internal/jit/arm64` lowers a subset when `WithThreshold` compiles a function. Unsupported operations become `ExitBridge`; `jit-internals.md` owns the allowlist that resumes native execution versus deoptimizing. `RETURN_CALL` deoptimizes directly. `YIELD` and `RESUME` make the translator decline the whole unit at compile time, so it never reaches native code (see `jit-internals.md`).
+Threaded execution defines semantics. `internal/jit/arm64` lowers a subset when `WithThreshold` compiles a function. Every other operation becomes an `ExitBridge`: Go runs its threaded handler and native code resumes, except for the operations whose note says they deoptimize (the rest of the call runs threaded). A bridged operation whose handler traps deoptimizes, and threaded code runs it again to report the trap; one with a host-view operand deoptimizes before Go runs it; `jit-internals.md` owns the bridge rules. `RETURN_CALL` deoptimizes directly. `YIELD` and `RESUME` make the translator decline the whole unit at compile time, so it never reaches native code.
 
 | Status | Meaning |
 |---|---|
 | ✅ | `internal/jit/arm64` lowers this opcode to native code |
 | ◐ | `internal/jit/arm64` lowers this opcode only for a subset of its cases; the rest bridge or deoptimize |
-| ⬜ | no ARM64 lowering; bridges or deoptimizes to threaded execution, or (`YIELD`/`RESUME`) makes the translator decline the whole unit at compile time |
+| ⬜ | no ARM64 lowering; the note says whether it bridges and resumes native code, deoptimizes, or makes the translator decline the whole unit |
 | 🔲 | backend unavailable (no encoder for that architecture) |
 
 AMD64 has no encoder (`internal/asm/`), so every opcode is 🔲 there regardless of ARM64 status.
@@ -83,7 +83,7 @@ One opcode per row, in opcode-value order.
 | Family | Opcode | Mnemonic | ARM64 | AMD64 | Notes |
 |---|---|---|---:|---:|---|
 | Stack | `NOP` | `nop` | ✅ | 🔲 | lowered on ARM64 |
-| Stack | `UNREACHABLE` | `unreachable` | ⬜ | 🔲 | bridges to threaded on ARM64 |
+| Stack | `UNREACHABLE` | `unreachable` | ⬜ | 🔲 | deoptimizes on ARM64: a control transfer |
 | Stack | `DROP` | `drop` | ✅ | 🔲 | lowered on ARM64 |
 | Stack | `DUP` | `dup` | ✅ | 🔲 | lowered on ARM64 |
 | Stack | `SWAP` | `swap` | ✅ | 🔲 | lowered on ARM64 |
@@ -96,8 +96,8 @@ One opcode per row, in opcode-value order.
 | Control | `RETURN_CALL` | `return_call` | ⬜ | 🔲 | deoptimizes directly on ARM64 |
 | Coroutines | `YIELD` | `yield` | ⬜ | 🔲 | makes the translator decline the whole unit; never reaches native code |
 | Coroutines | `RESUME` | `resume` | ⬜ | 🔲 | makes the translator decline the whole unit; never reaches native code |
-| Coroutines | `CORO_DONE` | `coro.done` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Coroutines | `CORO_VALUE` | `coro.value` | ⬜ | 🔲 | bridges to threaded on ARM64 |
+| Coroutines | `CORO_DONE` | `coro.done` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Coroutines | `CORO_VALUE` | `coro.value` | ⬜ | 🔲 | its result kind is not static: the translator declines the whole unit |
 | Variables | `GLOBAL_GET` | `global.get` | ✅ | 🔲 | lowered on ARM64 |
 | Variables | `GLOBAL_SET` | `global.set` | ✅ | 🔲 | lowered on ARM64 |
 | Variables | `GLOBAL_TEE` | `global.tee` | ✅ | 🔲 | lowered on ARM64 |
@@ -108,14 +108,14 @@ One opcode per row, in opcode-value order.
 | Variables | `UPVAL_GET` | `upval.get` | ✅ | 🔲 | lowered on ARM64 |
 | Variables | `UPVAL_SET` | `upval.set` | ✅ | 🔲 | lowered on ARM64 |
 | References | `REF_NULL` | `ref.null` | ✅ | 🔲 | lowered on ARM64 |
-| References | `REF_NEW` | `ref.new` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| References | `REF_GET` | `ref.get` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| References | `REF_SET` | `ref.set` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| References | `REF_TEST` | `ref.test` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| References | `REF_CAST` | `ref.cast` | ⬜ | 🔲 | bridges to threaded on ARM64 |
+| References | `REF_NEW` | `ref.new` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| References | `REF_GET` | `ref.get` | ⬜ | 🔲 | its result kind is not static: the translator declines the whole unit |
+| References | `REF_SET` | `ref.set` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| References | `REF_TEST` | `ref.test` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| References | `REF_CAST` | `ref.cast` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | References | `REF_IS_NULL` | `ref.is_null` | ✅ | 🔲 | |
-| References | `REF_EQ` | `ref.eq` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| References | `REF_NE` | `ref.ne` | ⬜ | 🔲 | bridges to threaded on ARM64 |
+| References | `REF_EQ` | `ref.eq` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| References | `REF_NE` | `ref.ne` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Integers | `I32_CONST` | `i32.const` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I32_ADD` | `i32.add` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I32_SUB` | `i32.sub` | ✅ | 🔲 | lowered on ARM64 |
@@ -199,8 +199,8 @@ One opcode per row, in opcode-value order.
 | Floating point | `F32_SUB` | `f32.sub` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F32_MUL` | `f32.mul` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F32_DIV` | `f32.div` | ✅ | 🔲 | lowered on ARM64 |
-| Floating point | `F32_REM` | `f32.rem` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
-| Floating point | `F32_MOD` | `f32.mod` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
+| Floating point | `F32_REM` | `f32.rem` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Floating point | `F32_MOD` | `f32.mod` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Floating point | `F32_ABS` | `f32.abs` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F32_NEG` | `f32.neg` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F32_SQRT` | `f32.sqrt` | ✅ | 🔲 | lowered on ARM64 |
@@ -228,8 +228,8 @@ One opcode per row, in opcode-value order.
 | Floating point | `F64_SUB` | `f64.sub` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_MUL` | `f64.mul` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_DIV` | `f64.div` | ✅ | 🔲 | lowered on ARM64 |
-| Floating point | `F64_REM` | `f64.rem` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
-| Floating point | `F64_MOD` | `f64.mod` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
+| Floating point | `F64_REM` | `f64.rem` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Floating point | `F64_MOD` | `f64.mod` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Floating point | `F64_ABS` | `f64.abs` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_NEG` | `f64.neg` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_SQRT` | `f64.sqrt` | ✅ | 🔲 | lowered on ARM64 |
@@ -252,46 +252,46 @@ One opcode per row, in opcode-value order.
 | Floating point | `F64_TO_I64_U` | `f64.to_i64_u` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_TO_F32` | `f64.to_f32` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_REINTERPRET_I64` | `f64.reinterpret_i64` | ✅ | 🔲 | lowered on ARM64 |
-| Strings | `STRING_NEW_UTF32` | `string.new_utf32` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
-| Strings | `STRING_LEN` | `string.len` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
-| Strings | `STRING_CONCAT` | `string.concat` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
-| Strings | `STRING_EQ` | `string.eq` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Strings | `STRING_NE` | `string.ne` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Strings | `STRING_LT` | `string.lt` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Strings | `STRING_GT` | `string.gt` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Strings | `STRING_LE` | `string.le` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Strings | `STRING_GE` | `string.ge` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Strings | `STRING_ENCODE_UTF32` | `string.encode_utf32` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
-| Arrays | `ARRAY_NEW` | `array.new` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Arrays | `ARRAY_NEW_DEFAULT` | `array.new_default` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
-| Arrays | `ARRAY_LEN` | `array.len` | ✅ | 🔲 | guarded, else bridges |
-| Arrays | `ARRAY_GET` | `array.get` | ✅ | 🔲 | guarded, else bridges |
-| Arrays | `ARRAY_SET` | `array.set` | ✅ | 🔲 | guarded, else bridges |
-| Arrays | `ARRAY_FILL` | `array.fill` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Arrays | `ARRAY_COPY` | `array.copy` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Arrays | `ARRAY_APPEND` | `array.append` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Arrays | `ARRAY_DELETE` | `array.delete` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Arrays | `ARRAY_SLICE` | `array.slice` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Structs | `STRUCT_NEW` | `struct.new` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
-| Structs | `STRUCT_NEW_DEFAULT` | `struct.new_default` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
-| Structs | `STRUCT_GET` | `struct.get` | ✅ | 🔲 | guarded, else bridges |
-| Structs | `STRUCT_SET` | `struct.set` | ✅ | 🔲 | guarded, else bridges |
-| Maps | `MAP_NEW` | `map.new` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Maps | `MAP_NEW_DEFAULT` | `map.new_default` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Maps | `MAP_LEN` | `map.len` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Maps | `MAP_GET` | `map.get` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Maps | `MAP_LOOKUP` | `map.lookup` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Maps | `MAP_SET` | `map.set` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Maps | `MAP_DELETE` | `map.delete` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Maps | `MAP_CLEAR` | `map.clear` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Maps | `MAP_KEYS` | `map.keys` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Closures | `CLOSURE_NEW` | `closure.new` | ⬜ | 🔲 | bridges to threaded on ARM64 and resumes native code |
-| Maps | `MAP_ITER` | `map.iter` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Structured errors | `THROW` | `throw` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Structured errors | `ERROR_NEW` | `error.new` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Structured errors | `ERROR_GET` | `error.get` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Structured errors | `ERROR_CODE` | `error.code` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Strings | `STRING_ITER` | `string.iter` | ⬜ | 🔲 | bridges to threaded on ARM64 |
+| Strings | `STRING_NEW_UTF32` | `string.new_utf32` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Strings | `STRING_LEN` | `string.len` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Strings | `STRING_CONCAT` | `string.concat` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Strings | `STRING_EQ` | `string.eq` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Strings | `STRING_NE` | `string.ne` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Strings | `STRING_LT` | `string.lt` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Strings | `STRING_GT` | `string.gt` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Strings | `STRING_LE` | `string.le` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Strings | `STRING_GE` | `string.ge` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Strings | `STRING_ENCODE_UTF32` | `string.encode_utf32` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Arrays | `ARRAY_NEW` | `array.new` | ⬜ | 🔲 | deoptimizes on ARM64: its declared two-operand arity does not cover the `1+count` it pops |
+| Arrays | `ARRAY_NEW_DEFAULT` | `array.new_default` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Arrays | `ARRAY_LEN` | `array.len` | ✅ | 🔲 | guarded, else bridges and resumes native code |
+| Arrays | `ARRAY_GET` | `array.get` | ✅ | 🔲 | guarded, else bridges and resumes native code |
+| Arrays | `ARRAY_SET` | `array.set` | ✅ | 🔲 | guarded, else bridges and resumes native code |
+| Arrays | `ARRAY_FILL` | `array.fill` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Arrays | `ARRAY_COPY` | `array.copy` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Arrays | `ARRAY_APPEND` | `array.append` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Arrays | `ARRAY_DELETE` | `array.delete` | ⬜ | 🔲 | bridges and resumes native code on ARM64; an array of unknown element type makes the translator decline the whole unit |
+| Arrays | `ARRAY_SLICE` | `array.slice` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Structs | `STRUCT_NEW` | `struct.new` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Structs | `STRUCT_NEW_DEFAULT` | `struct.new_default` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Structs | `STRUCT_GET` | `struct.get` | ✅ | 🔲 | guarded, else bridges and resumes native code |
+| Structs | `STRUCT_SET` | `struct.set` | ✅ | 🔲 | guarded, else bridges and resumes native code |
+| Maps | `MAP_NEW` | `map.new` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Maps | `MAP_NEW_DEFAULT` | `map.new_default` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Maps | `MAP_LEN` | `map.len` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Maps | `MAP_GET` | `map.get` | ⬜ | 🔲 | bridges and resumes native code on ARM64; a map of undeclared type makes the translator decline the whole unit |
+| Maps | `MAP_LOOKUP` | `map.lookup` | ⬜ | 🔲 | bridges and resumes native code on ARM64; a map of undeclared type makes the translator decline the whole unit |
+| Maps | `MAP_SET` | `map.set` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Maps | `MAP_DELETE` | `map.delete` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Maps | `MAP_CLEAR` | `map.clear` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Maps | `MAP_KEYS` | `map.keys` | ⬜ | 🔲 | deoptimizes on ARM64: it allocates every key before the result array, so a heap-exhaustion trap between them would repeat those allocations |
+| Closures | `CLOSURE_NEW` | `closure.new` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Maps | `MAP_ITER` | `map.iter` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Structured errors | `THROW` | `throw` | ⬜ | 🔲 | deoptimizes on ARM64: a control transfer |
+| Structured errors | `ERROR_NEW` | `error.new` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Structured errors | `ERROR_GET` | `error.get` | ⬜ | 🔲 | its result kind is not static: the translator declines the whole unit |
+| Structured errors | `ERROR_CODE` | `error.code` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Strings | `STRING_ITER` | `string.iter` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 
 ## Family Rules
 

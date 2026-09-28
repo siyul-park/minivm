@@ -4184,14 +4184,16 @@ var (
 					}
 					elems := make([]types.Boxed, end-start)
 					copy(elems, arr.Elems[start:end])
-					for _, v := range elems {
-						i.retainBox(v)
-					}
 					out = i.newArray(arr.Typ, elems)
 				default:
 					panic(ErrTypeMismatch)
 				}
 				newAddr := i.alloc(out)
+				if array, ok := out.(*types.Array); ok {
+					for _, v := range array.Elems {
+						i.retainBox(v)
+					}
+				}
 				i.release(addr)
 				i.sp -= 2
 				i.stack[i.sp-1] = types.BoxRef(newAddr)
@@ -4993,6 +4995,7 @@ var (
 				}
 				iter := types.NewMapIterator(types.Ref(addr), source)
 				iter.Next()
+				out := types.BoxRef(i.alloc(iter))
 				if !iter.Done() {
 					current := iter.Current()
 					switch current := current.(type) {
@@ -5002,7 +5005,7 @@ var (
 						i.retain(int(current))
 					}
 				}
-				i.stack[i.sp-1] = types.BoxRef(i.alloc(iter))
+				i.stack[i.sp-1] = out
 				i.fr.ip++
 			}
 		},

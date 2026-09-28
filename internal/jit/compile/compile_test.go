@@ -63,7 +63,7 @@ func (m *machine) Enter(a *asm.Assembler, l compile.Layout) asm.Label {
 }
 
 func (m *machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	if op.Op == ssa.OpExec && op.Code == instr.MAP_GET {
+	if op.Op == ssa.OpExec && (op.Code == instr.MAP_GET || op.Code == instr.MAP_SET) {
 		return false
 	}
 	m.calls = append(m.calls, op.Op.String())
@@ -376,6 +376,25 @@ func TestLower(t *testing.T) {
 			}},
 			Results: []types.Kind{types.KindRef},
 		}}, exits)
+	})
+
+	t.Run("bridges a heap write with the stored value it adopts", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		m1 := constant(b, entry, types.BoxRef(1))
+		key := constant(b, entry, types.BoxI32(2))
+		val := constant(b, entry, types.BoxRef(3))
+		at := state(b, entry, 7, ssa.Operand{Value: m1}, ssa.Operand{Value: key}, ssa.Operand{Value: val, Owned: true})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_SET, Args: []ssa.Value{m1, key, val}, State: at})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+
+		m := new(machine)
+		_, exits, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		require.NoError(t, err)
+		require.Len(t, exits, 1)
+		require.Equal(t, jit.ExitBridge, exits[0].Kind)
+		require.Equal(t, 3, exits[0].Pops)
+		require.Equal(t, 1, exits[0].Adopts)
 	})
 
 	t.Run("deopts a failed check at its operation's state", func(t *testing.T) {

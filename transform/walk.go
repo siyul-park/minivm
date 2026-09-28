@@ -306,8 +306,27 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		if idx := int(inst.Operand(0)); idx < len(w.types) {
 			cast.structType, _ = w.types[idx].(*types.StructType)
 			cast.arrayType, _ = w.types[idx].(*types.ArrayType)
+			cast.mapType, _ = w.types[idx].(*types.MapType)
 		}
 		return w.emit(operation, 1, []fact{cast})
+	case instr.MAP_GET, instr.MAP_LOOKUP:
+		if len(w.stack) < 2 {
+			return false
+		}
+		m := w.stack[len(w.stack)-2].mapType
+		if m == nil {
+			return false
+		}
+		results := []fact{{kind: m.ElemKind}}
+		if operation == instr.MAP_LOOKUP {
+			results = append(results, fact{kind: types.KindI1})
+		}
+		return w.emit(operation, 2, results)
+	case instr.MAP_NEW_DEFAULT:
+		if len(w.stack) == 0 {
+			return false
+		}
+		return w.emit(operation, 1, []fact{{kind: types.KindRef, mapType: w.declared(inst)}})
 
 	case instr.CALL:
 		if len(w.stack) == 0 {
@@ -373,7 +392,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		count := int(top.value)
 		switch operation {
 		case instr.MAP_NEW:
-			return w.emit(operation, 1+count*2, []fact{{kind: types.KindRef}})
+			return w.emit(operation, 1+count*2, []fact{{kind: types.KindRef, mapType: w.declared(inst)}})
 		case instr.ARRAY_APPEND:
 			return w.emit(operation, 2+count, []fact{{kind: types.KindRef}})
 		default:
@@ -393,6 +412,16 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		results[i] = fact{kind: types.Kind(kind)}
 	}
 	return w.emit(operation, len(effect.Pop), results)
+}
+
+// declared is the map type inst's type operand names, nil when it names none.
+func (w *walker) declared(inst instr.Instruction) *types.MapType {
+	idx := int(inst.Operand(0))
+	if idx >= len(w.types) {
+		return nil
+	}
+	t, _ := w.types[idx].(*types.MapType)
+	return t
 }
 
 // element resolves array's declared element kind, when known: the array's
@@ -590,11 +619,11 @@ func (w *walker) constant(word uint64, out fact) bool {
 	return true
 }
 
-// adopts returns the number of popped operands transferred to the destination:
-// every one when it enters a frame, the stored value when it overwrites heap
-// contents and yields nothing. A bridged op adopts none: the bridge retains
-// each operand for its handler.
-func adopts(code instr.Opcode, pops, results int) int {
+// Adopts returns the number of code's topmost popped operands whose
+// ownership it takes: every one when it enters a frame, the stored value
+// when it overwrites heap contents and yields nothing. The other operands
+// stay their owner's to release after code.
+func Adopts(code instr.Opcode, pops, results int) int {
 	switch {
 	case code.Writes(instr.Frame):
 		return pops
@@ -632,7 +661,7 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 		out[i] = w.builder.Value(t)
 	}
 
-	adopted := adopts(opcode, pops, len(results))
+	adopted := Adopts(opcode, pops, len(results))
 	var borrows []bool
 	var shape ssa.Shape
 	switch {

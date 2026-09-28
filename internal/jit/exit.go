@@ -14,6 +14,9 @@ type Exit struct {
 	// Pops is Code's own operand count: the number of Frame.Stack's own
 	// trailing entries, top frame, an ExitBridge resume reads as arguments.
 	Pops int
+	// Adopts is how many of those arguments, topmost, Code takes ownership
+	// of (transform.Adopts): native code hands each its own reference.
+	Adopts int
 	// Callee is the function address an ExitCall replays.
 	Callee int
 	// Closure is where an ExitCall's closure over Callee lives, nil when the
