@@ -4217,7 +4217,8 @@ func TestWithThreshold(t *testing.T) {
 		fb.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.LOCAL_SET, 0)).Br(loop)
 		fb.Bind(done).Emit(instr.New(instr.LOCAL_GET, 1)).BrIf(slow)
 		fb.Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.RETURN))
-		fb.Bind(slow).Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_POPCNT), instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
+		fb.Bind(slow).Emit(instr.New(instr.REF_NULL), instr.New(instr.REF_NULL), instr.New(instr.REF_EQ))
+		fb.Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_ADD), instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
 		gb := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Locals(types.TypeAny, types.TypeI32, types.TypeI32)
 		loop, done = gb.Label(), gb.Label()
 		gb.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.LOCAL_SET, 0))
@@ -4258,7 +4259,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Reset()
 			vm.Flush()
 			// With the caller entered natively and no call exit, every
-			// closure call ran natively, the last one into I32_POPCNT, whose
+			// closure call ran natively, the last one into REF_EQ, whose
 			// bridge never resumes.
 			compiled = metric("vm_jit_compiles_total", baseline, prof.Label{Key: "outcome", Value: "ok"})
 			entries, called = metric("vm_jit_entries_total", baseline)-entered, metric("vm_jit_exits_total", call)-exited
@@ -4448,6 +4449,97 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
+	})
+
+	t.Run("every primitive operator matches threaded bit for bit in native code", func(t *testing.T) {
+		native(t)
+		w32 := func(v int32) uint64 { return uint64(uint32(v)) }
+		w64 := func(v int64) uint64 { return uint64(v) }
+		f32 := func(v float32) uint64 { return uint64(math.Float32bits(v)) }
+		f64 := math.Float64bits
+		nan32, neg32 := float32(math.NaN()), float32(math.Copysign(0, -1))
+		i32, i64, t32, t64 := types.TypeI32, types.TypeI64, types.TypeF32, types.TypeF64
+
+		for _, c := range []struct {
+			code   instr.Opcode
+			params []types.Type
+			args   [][]uint64
+		}{
+			{instr.I32_CLZ, []types.Type{i32}, [][]uint64{{w32(0)}, {w32(-1)}, {w32(math.MinInt32)}}},
+			{instr.I32_CTZ, []types.Type{i32}, [][]uint64{{w32(0)}, {w32(-1)}, {w32(math.MinInt32)}}},
+			{instr.I32_POPCNT, []types.Type{i32}, [][]uint64{{w32(0)}, {w32(-1)}, {w32(0x55555555)}}},
+			{instr.I32_ROTL, []types.Type{i32, i32}, [][]uint64{{w32(0x12345678), w32(4)}, {w32(0x12345678), w32(-1)}, {w32(0x12345678), w32(37)}}},
+			{instr.I32_ROTR, []types.Type{i32, i32}, [][]uint64{{w32(0x12345678), w32(4)}, {w32(0x12345678), w32(-1)}, {w32(0x12345678), w32(37)}}},
+			{instr.I64_CLZ, []types.Type{i64}, [][]uint64{{w64(0)}, {w64(-1)}, {w64(1 << 47)}}},
+			{instr.I64_CTZ, []types.Type{i64}, [][]uint64{{w64(0)}, {w64(-1)}, {w64(1 << 47)}}},
+			{instr.I64_POPCNT, []types.Type{i64}, [][]uint64{{w64(0)}, {w64(-1)}, {w64(0x555555555555)}}},
+			{instr.I64_ROTL, []types.Type{i64, i64}, [][]uint64{{w64(0x123456789ABC), w64(4)}, {w64(0x123456789ABC), w64(-1)}, {w64(0x123456789ABC), w64(69)}}},
+			{instr.I64_ROTR, []types.Type{i64, i64}, [][]uint64{{w64(0x123456789ABC), w64(4)}, {w64(0x123456789ABC), w64(-1)}, {w64(0x123456789ABC), w64(69)}}},
+			{instr.F32_COPYSIGN, []types.Type{t32, t32}, [][]uint64{{f32(1.5), f32(-1)}, {f32(nan32), f32(-1)}, {f32(0), f32(neg32)}}},
+			{instr.F64_COPYSIGN, []types.Type{t64, t64}, [][]uint64{{f64(1.5), f64(-1)}, {f64(math.NaN()), f64(-1)}, {f64(0), f64(math.Copysign(0, -1))}}},
+			{instr.F32_REM, []types.Type{t32, t32}, [][]uint64{{f32(5.5), f32(2)}, {f32(-5.5), f32(2)}}},
+			{instr.F32_MOD, []types.Type{t32, t32}, [][]uint64{{f32(5.5), f32(2)}, {f32(-5.5), f32(2)}}},
+			{instr.F64_REM, []types.Type{t64, t64}, [][]uint64{{f64(5.5), f64(2)}, {f64(-5.5), f64(2)}}},
+			{instr.F64_MOD, []types.Type{t64, t64}, [][]uint64{{f64(5.5), f64(2)}, {f64(-5.5), f64(2)}}},
+		} {
+			fb := types.NewFunctionBuilder(&types.FunctionType{Params: c.params, Returns: c.params[:1]})
+			for i := range c.params {
+				fb.Emit(instr.New(instr.LOCAL_GET, uint64(i)))
+			}
+			fn := fb.Emit(instr.New(c.code), instr.New(instr.RETURN)).MustBuild()
+
+			for _, args := range c.args {
+				// The module calls fn with args 1000 times so fn compiles,
+				// then once more for the result.
+				b := instr.NewBuilder()
+				loop, done := b.Label(), b.Label()
+				call := func() {
+					for i, arg := range args {
+						b.Emit(map[types.Kind]instr.Opcode{types.KindI32: instr.I32_CONST, types.KindI64: instr.I64_CONST, types.KindF32: instr.F32_CONST, types.KindF64: instr.F64_CONST}[c.params[i].Kind()], arg)
+					}
+					b.Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+				}
+				b.Bind(loop).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1000).Emit(instr.I32_GE_S).BrIf(done)
+				call()
+				b.Emit(instr.DROP).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+				b.Bind(done)
+				call()
+				code, err := b.Assemble()
+				require.NoError(t, err)
+				prog := program.New(code, program.WithLocals(i32), program.WithConstants(fn))
+
+				// Boxed words compare bits: NaN payloads and the sign of zero.
+				threaded := interp.New(prog)
+				require.NoError(t, threaded.Run(context.Background()))
+				want, err := threaded.PopBoxed()
+				require.NoError(t, err)
+				require.NoError(t, threaded.Close())
+
+				var got types.Boxed
+				var entries, deopts float64
+				var runErr, popErr error
+				require.Eventually(t, func() bool {
+					profiler := prof.New()
+					vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+					defer vm.Close()
+					if runErr = vm.Run(context.Background()); runErr != nil {
+						return true
+					}
+					if got, popErr = vm.PopBoxed(); popErr != nil {
+						return true
+					}
+					vm.Flush()
+					entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+					deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+					return entries > 0
+				}, 5*time.Second, time.Millisecond)
+				require.NoError(t, runErr, "%s %x", c.code, args)
+				require.NoError(t, popErr, "%s %x", c.code, args)
+				require.Equal(t, want, got, "%s %x", c.code, args)
+				require.Positive(t, entries, "%s %x", c.code, args)
+				require.Zero(t, deopts, "%s %x", c.code, args)
+			}
+		}
 	})
 }
 

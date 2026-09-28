@@ -418,9 +418,11 @@ func TestMachine_Lower(t *testing.T) {
 		{instr.I32_ADD, i32, target.ADD}, {instr.I32_SUB, i32, target.SUB}, {instr.I32_MUL, i32, target.MUL},
 		{instr.I32_AND, i32, target.AND}, {instr.I32_OR, i32, target.ORR}, {instr.I32_XOR, i32, target.EOR},
 		{instr.I32_SHL, i32, target.LSL}, {instr.I32_SHR_S, i32, target.ASR}, {instr.I32_SHR_U, i32, target.LSR},
+		{instr.I32_ROTR, i32, target.ROR},
 		{instr.I64_ADD, i64, target.ADD}, {instr.I64_SUB, i64, target.SUB}, {instr.I64_MUL, i64, target.MUL},
 		{instr.I64_AND, i64, target.AND}, {instr.I64_OR, i64, target.ORR}, {instr.I64_XOR, i64, target.EOR},
 		{instr.I64_SHL, i64, target.LSL}, {instr.I64_SHR_S, i64, target.ASR}, {instr.I64_SHR_U, i64, target.LSR},
+		{instr.I64_ROTR, i64, target.ROR},
 		{instr.F32_ADD, f32, target.FADD}, {instr.F32_SUB, f32, target.FSUB}, {instr.F32_MUL, f32, target.FMUL},
 		{instr.F32_DIV, f32, target.FDIV}, {instr.F32_MIN, f32, target.FMIN}, {instr.F32_MAX, f32, target.FMAX},
 		{instr.F64_ADD, f64, target.FADD}, {instr.F64_SUB, f64, target.FSUB}, {instr.F64_MUL, f64, target.FMUL},
@@ -481,6 +483,7 @@ func TestMachine_Lower(t *testing.T) {
 		emit     emit2
 	}{
 		{instr.I32_EXTEND8_S, i32, i32, target.SXTB}, {instr.I32_EXTEND16_S, i32, i32, target.SXTH},
+		{instr.I32_CLZ, i32, i32, target.CLZ}, {instr.I64_CLZ, i64, i64, target.CLZ},
 		{instr.I64_EXTEND8_S, i64, i64, target.SXTB}, {instr.I64_EXTEND16_S, i64, i64, target.SXTH},
 		{instr.I64_EXTEND32_S, i64, i64, target.SXTW},
 		{instr.F32_ABS, f32, f32, target.FABS}, {instr.F32_NEG, f32, f32, target.FNEG}, {instr.F32_SQRT, f32, f32, target.FSQRT},
@@ -1304,6 +1307,86 @@ func TestMachine_Lower(t *testing.T) {
 			lower: true,
 		},
 	}...)
+
+	iv := func(n int, w asm.RegWidth) asm.VReg { return asm.NewVReg(int32(-2-n), asm.RegTypeInt, w) }
+	fv := func(n int, w asm.RegWidth) asm.VReg { return asm.NewVReg(int32(-2-n), asm.RegTypeFloat, w) }
+	for _, c := range []struct {
+		code  instr.Opcode
+		typ   ssa.Type
+		width asm.RegWidth
+	}{
+		{instr.I32_CTZ, i32, asm.Width32}, {instr.I64_CTZ, i64, asm.Width64},
+	} {
+		tests = append(tests, test{
+			name: instr.TypeOf(c.code).Mnemonic,
+			regs: regs{1: c.typ, 2: c.typ},
+			op:   exec(c.code, 1),
+			rows: []asm.Instruction{
+				target.RBIT(iv(0, c.width), reg(c.typ, 1)),
+				target.CLZ(reg(c.typ, 2), iv(0, c.width)),
+			}, lower: true,
+		})
+	}
+	for _, c := range []struct {
+		code  instr.Opcode
+		typ   ssa.Type
+		width asm.RegWidth
+	}{
+		{instr.I32_POPCNT, i32, asm.Width32}, {instr.I64_POPCNT, i64, asm.Width64},
+	} {
+		tests = append(tests, test{
+			name: instr.TypeOf(c.code).Mnemonic,
+			regs: regs{1: c.typ, 2: c.typ},
+			op:   exec(c.code, 1),
+			rows: []asm.Instruction{
+				target.FMOV(fv(0, c.width), reg(c.typ, 1)),
+				target.CNT(fv(1, c.width), fv(0, c.width)),
+				target.ADDV(fv(2, c.width), fv(1, c.width)),
+				target.FMOV(reg(c.typ, 2), fv(2, c.width)),
+			}, lower: true,
+		})
+	}
+	for _, c := range []struct {
+		code  instr.Opcode
+		typ   ssa.Type
+		width asm.RegWidth
+	}{
+		{instr.I32_ROTL, i32, asm.Width32}, {instr.I64_ROTL, i64, asm.Width64},
+	} {
+		tests = append(tests, test{
+			name: instr.TypeOf(c.code).Mnemonic,
+			regs: regs{1: c.typ, 2: c.typ, 3: c.typ},
+			op:   exec(c.code, 1, 2),
+			rows: []asm.Instruction{
+				target.NEG(iv(0, c.width), reg(c.typ, 2)),
+				target.ROR(reg(c.typ, 3), reg(c.typ, 1), iv(0, c.width)),
+			}, lower: true,
+		})
+	}
+	for _, c := range []struct {
+		code    instr.Opcode
+		typ     ssa.Type
+		width   asm.RegWidth
+		signBit uint64
+		magMask uint64
+	}{
+		{instr.F32_COPYSIGN, f32, asm.Width32, 1 << 31, 1<<31 - 1},
+		{instr.F64_COPYSIGN, f64, asm.Width64, 1 << 63, 1<<63 - 1},
+	} {
+		tests = append(tests, test{
+			name: instr.TypeOf(c.code).Mnemonic,
+			regs: regs{1: c.typ, 2: c.typ, 3: c.typ},
+			op:   exec(c.code, 1, 2),
+			rows: []asm.Instruction{
+				target.FMOV(iv(0, c.width), reg(c.typ, 1)),
+				target.FMOV(iv(1, c.width), reg(c.typ, 2)),
+				target.ANDI(iv(0, c.width), iv(0, c.width), c.magMask),
+				target.ANDI(iv(1, c.width), iv(1, c.width), c.signBit),
+				target.ORR(iv(0, c.width), iv(0, c.width), iv(1, c.width)),
+				target.FMOV(reg(c.typ, 3), iv(0, c.width)),
+			}, lower: true,
+		})
+	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

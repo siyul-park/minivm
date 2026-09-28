@@ -130,11 +130,11 @@ One opcode per row, in opcode-value order.
 | Integers | `I32_XOR` | `i32.xor` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I32_AND` | `i32.and` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I32_OR` | `i32.or` | ✅ | 🔲 | lowered on ARM64 |
-| Integers | `I32_CLZ` | `i32.clz` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Integers | `I32_CTZ` | `i32.ctz` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Integers | `I32_POPCNT` | `i32.popcnt` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Integers | `I32_ROTL` | `i32.rotl` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Integers | `I32_ROTR` | `i32.rotr` | ⬜ | 🔲 | bridges to threaded on ARM64 |
+| Integers | `I32_CLZ` | `i32.clz` | ✅ | 🔲 | lowered on ARM64 |
+| Integers | `I32_CTZ` | `i32.ctz` | ✅ | 🔲 | lowered on ARM64 |
+| Integers | `I32_POPCNT` | `i32.popcnt` | ✅ | 🔲 | lowered on ARM64 |
+| Integers | `I32_ROTL` | `i32.rotl` | ✅ | 🔲 | lowered on ARM64 |
+| Integers | `I32_ROTR` | `i32.rotr` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I32_EXTEND8_S` | `i32.extend8_s` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I32_EXTEND16_S` | `i32.extend16_s` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I32_EQZ` | `i32.eqz` | ✅ | 🔲 | lowered on ARM64 |
@@ -169,11 +169,11 @@ One opcode per row, in opcode-value order.
 | Integers | `I64_XOR` | `i64.xor` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I64_AND` | `i64.and` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I64_OR` | `i64.or` | ✅ | 🔲 | lowered on ARM64 |
-| Integers | `I64_CLZ` | `i64.clz` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Integers | `I64_CTZ` | `i64.ctz` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Integers | `I64_POPCNT` | `i64.popcnt` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Integers | `I64_ROTL` | `i64.rotl` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Integers | `I64_ROTR` | `i64.rotr` | ⬜ | 🔲 | bridges to threaded on ARM64 |
+| Integers | `I64_CLZ` | `i64.clz` | ✅ | 🔲 | lowered on ARM64 |
+| Integers | `I64_CTZ` | `i64.ctz` | ✅ | 🔲 | lowered on ARM64 |
+| Integers | `I64_POPCNT` | `i64.popcnt` | ✅ | 🔲 | lowered on ARM64 |
+| Integers | `I64_ROTL` | `i64.rotl` | ✅ | 🔲 | lowered on ARM64 |
+| Integers | `I64_ROTR` | `i64.rotr` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I64_EXTEND8_S` | `i64.extend8_s` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I64_EXTEND16_S` | `i64.extend16_s` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I64_EXTEND32_S` | `i64.extend32_s` | ✅ | 🔲 | lowered on ARM64 |
@@ -199,8 +199,8 @@ One opcode per row, in opcode-value order.
 | Floating point | `F32_SUB` | `f32.sub` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F32_MUL` | `f32.mul` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F32_DIV` | `f32.div` | ✅ | 🔲 | lowered on ARM64 |
-| Floating point | `F32_REM` | `f32.rem` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Floating point | `F32_MOD` | `f32.mod` | ⬜ | 🔲 | bridges to threaded on ARM64 |
+| Floating point | `F32_REM` | `f32.rem` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
+| Floating point | `F32_MOD` | `f32.mod` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
 | Floating point | `F32_ABS` | `f32.abs` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F32_NEG` | `f32.neg` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F32_SQRT` | `f32.sqrt` | ✅ | 🔲 | lowered on ARM64 |
@@ -210,7 +210,7 @@ One opcode per row, in opcode-value order.
 | Floating point | `F32_NEAREST` | `f32.nearest` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F32_MIN` | `f32.min` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F32_MAX` | `f32.max` | ✅ | 🔲 | lowered on ARM64 |
-| Floating point | `F32_COPYSIGN` | `f32.copysign` | ⬜ | 🔲 | bridges to threaded on ARM64 |
+| Floating point | `F32_COPYSIGN` | `f32.copysign` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F32_EQ` | `f32.eq` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F32_NE` | `f32.ne` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F32_LT` | `f32.lt` | ✅ | 🔲 | lowered on ARM64 |
@@ -228,8 +228,8 @@ One opcode per row, in opcode-value order.
 | Floating point | `F64_SUB` | `f64.sub` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_MUL` | `f64.mul` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_DIV` | `f64.div` | ✅ | 🔲 | lowered on ARM64 |
-| Floating point | `F64_REM` | `f64.rem` | ⬜ | 🔲 | bridges to threaded on ARM64 |
-| Floating point | `F64_MOD` | `f64.mod` | ⬜ | 🔲 | bridges to threaded on ARM64 |
+| Floating point | `F64_REM` | `f64.rem` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
+| Floating point | `F64_MOD` | `f64.mod` | ⬜ | 🔲 | bridges to threaded on ARM64; resumes native code (interp.bridgeable) |
 | Floating point | `F64_ABS` | `f64.abs` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_NEG` | `f64.neg` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_SQRT` | `f64.sqrt` | ✅ | 🔲 | lowered on ARM64 |
@@ -239,7 +239,7 @@ One opcode per row, in opcode-value order.
 | Floating point | `F64_NEAREST` | `f64.nearest` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_MIN` | `f64.min` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_MAX` | `f64.max` | ✅ | 🔲 | lowered on ARM64 |
-| Floating point | `F64_COPYSIGN` | `f64.copysign` | ⬜ | 🔲 | bridges to threaded on ARM64 |
+| Floating point | `F64_COPYSIGN` | `f64.copysign` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_EQ` | `f64.eq` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_NE` | `f64.ne` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_LT` | `f64.lt` | ✅ | 🔲 | lowered on ARM64 |

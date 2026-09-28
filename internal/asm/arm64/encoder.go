@@ -1576,14 +1576,17 @@ func encodeLogicalImm(val uint64, is64 bool) (immr, imms uint32, ok bool) {
 	return 0, 0, false
 }
 
-// rotateMask builds the canonical element: `ones` consecutive 1s rotated left by `rot`
-// within an `esize`-bit field.
+// rotateMask builds the canonical element: `ones` consecutive 1s at the lsb,
+// rotated right by `rot` within an `esize`-bit field, matching ARM64's
+// logical-immediate decode (DecodeBitMasks: wmask = ROR(welem, immr)).
 func rotateMask(esize, ones, rot uint) uint64 {
 	mask := uint64((1 << ones) - 1) // ones consecutive 1s at lsb
-	// rotate left by rot within esize bits
 	rot &= esize - 1
-	lo := mask << rot
-	hi := mask >> (esize - rot)
+	if rot == 0 {
+		return mask
+	}
+	hi := mask >> rot
+	lo := mask << (esize - rot)
 	result := (lo | hi) & ((1 << esize) - 1)
 	return result
 }

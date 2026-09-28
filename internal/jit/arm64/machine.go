@@ -732,6 +732,26 @@ func (m *Machine) exec(a *asm.Assembler, op ssa.Operation, s compile.Site) bool 
 		return m.convert(a, op, s, target.UCVTF)
 	case instr.I64_REINTERPRET_F64:
 		return m.reinterpret(a, op, s)
+	case instr.I32_CLZ:
+		return m.unary(a, op, s, target.CLZ)
+	case instr.I32_CTZ:
+		return m.ctz(a, op, s, asm.Width32)
+	case instr.I32_POPCNT:
+		return m.popcnt(a, op, s, asm.Width32)
+	case instr.I32_ROTL:
+		return m.rotl(a, op, s, asm.Width32)
+	case instr.I32_ROTR:
+		return m.binary(a, op, s, target.ROR)
+	case instr.I64_CLZ:
+		return m.unary(a, op, s, target.CLZ)
+	case instr.I64_CTZ:
+		return m.ctz(a, op, s, asm.Width64)
+	case instr.I64_POPCNT:
+		return m.popcnt(a, op, s, asm.Width64)
+	case instr.I64_ROTL:
+		return m.rotl(a, op, s, asm.Width64)
+	case instr.I64_ROTR:
+		return m.binary(a, op, s, target.ROR)
 
 	case instr.F32_ADD:
 		return m.binary(a, op, s, target.FADD)
@@ -759,6 +779,8 @@ func (m *Machine) exec(a *asm.Assembler, op ssa.Operation, s compile.Site) bool 
 		return m.binary(a, op, s, target.FMIN)
 	case instr.F32_MAX:
 		return m.binary(a, op, s, target.FMAX)
+	case instr.F32_COPYSIGN:
+		return m.copysign(a, op, s, asm.Width32)
 	case instr.F32_EQ:
 		return m.compare(a, op, s, target.CondEQ, asm.Width32)
 	case instr.F32_NE:
@@ -810,6 +832,8 @@ func (m *Machine) exec(a *asm.Assembler, op ssa.Operation, s compile.Site) bool 
 		return m.binary(a, op, s, target.FMIN)
 	case instr.F64_MAX:
 		return m.binary(a, op, s, target.FMAX)
+	case instr.F64_COPYSIGN:
+		return m.copysign(a, op, s, asm.Width64)
 	case instr.F64_EQ:
 		return m.compare(a, op, s, target.CondEQ, asm.Width64)
 	case instr.F64_NE:
@@ -874,6 +898,85 @@ func (m *Machine) unary(a *asm.Assembler, op ssa.Operation, s compile.Site, emit
 		return false
 	}
 	a.Emit(emit(dst, x))
+	return true
+}
+
+// ctz counts trailing zeros as RBIT then CLZ: bit-reversal turns the
+// trailing run into a leading one, matching bits.TrailingZeros for every
+// input including zero (RBIT(0)=0, CLZ(0)=width).
+func (m *Machine) ctz(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth) bool {
+	if len(op.Args) != 1 || len(op.Results) != 1 {
+		return false
+	}
+	x, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
+	if x.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt || x.Width() != width || dst.Width() != width {
+		return false
+	}
+	t := m.ivreg(width)
+	a.Emit(target.RBIT(t, x))
+	a.Emit(target.CLZ(dst, t))
+	return true
+}
+
+// popcnt counts set bits via the SIMD byte-wise CNT, summed by ADDV and
+// moved back through the general registers: ARM64 has no scalar popcount.
+func (m *Machine) popcnt(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth) bool {
+	if len(op.Args) != 1 || len(op.Results) != 1 {
+		return false
+	}
+	x, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
+	if x.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt || x.Width() != width || dst.Width() != width {
+		return false
+	}
+	v, c, sum := m.fvreg(width), m.fvreg(width), m.fvreg(width)
+	a.Emit(target.FMOV(v, x))
+	a.Emit(target.CNT(c, v))
+	a.Emit(target.ADDV(sum, c))
+	a.Emit(target.FMOV(dst, sum))
+	return true
+}
+
+// rotl rotates left by negating the count and reusing RORV: ARM64 has no
+// left-rotate register form, and RORV's right rotate by -k is a left
+// rotate by k mod width, matching bits.RotateLeft's own negation rule.
+func (m *Machine) rotl(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth) bool {
+	if len(op.Args) != 2 || len(op.Results) != 1 {
+		return false
+	}
+	x, y, dst := s.Reg(op.Args[0]), s.Reg(op.Args[1]), s.Reg(op.Results[0])
+	if x.Type() != asm.RegTypeInt || y.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt ||
+		x.Width() != width || y.Width() != width || dst.Width() != width {
+		return false
+	}
+	t := m.ivreg(width)
+	a.Emit(target.NEG(t, y))
+	a.Emit(target.ROR(dst, x, t))
+	return true
+}
+
+// copysign combines x's magnitude with y's sign through the integer
+// registers, the same bit trick math.Copysign uses, so it is exact for
+// every input including NaN payloads.
+func (m *Machine) copysign(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth) bool {
+	if len(op.Args) != 2 || len(op.Results) != 1 {
+		return false
+	}
+	x, y, dst := s.Reg(op.Args[0]), s.Reg(op.Args[1]), s.Reg(op.Results[0])
+	if x.Type() != asm.RegTypeFloat || y.Type() != asm.RegTypeFloat || dst.Type() != asm.RegTypeFloat ||
+		x.Width() != width || y.Width() != width || dst.Width() != width {
+		return false
+	}
+	signBit, magMask := uint64(1)<<63, uint64(1)<<63-1
+	if width == asm.Width32 {
+		signBit, magMask = uint64(1)<<31, uint64(1)<<31-1
+	}
+	mag, sign := m.ivreg(width), m.ivreg(width)
+	a.Emit(target.FMOV(mag, x))
+	a.Emit(target.FMOV(sign, y))
+	a.Emit(target.ANDI(mag, mag, magMask))
+	a.Emit(target.ANDI(sign, sign, signBit))
+	a.Emit(target.ORR(mag, mag, sign))
+	a.Emit(target.FMOV(dst, mag))
 	return true
 }
 
@@ -1114,9 +1217,19 @@ func (m *Machine) count(a *asm.Assembler, ref asm.VReg, skip asm.Label, null boo
 }
 
 // vreg is a fresh 64-bit register no SSA value names.
-func (m *Machine) vreg() asm.VReg {
+func (m *Machine) vreg() asm.VReg { return m.ivreg(asm.Width64) }
+
+// ivreg returns a fresh integer scratch register at width, tracked by the
+// allocator like any SSA temp.
+func (m *Machine) ivreg(width asm.RegWidth) asm.VReg {
 	m.temp--
-	return asm.NewVReg(m.temp, asm.RegTypeInt, asm.Width64)
+	return asm.NewVReg(m.temp, asm.RegTypeInt, width)
+}
+
+// fvreg returns a fresh float scratch register at width.
+func (m *Machine) fvreg(width asm.RegWidth) asm.VReg {
+	m.temp--
+	return asm.NewVReg(m.temp, asm.RegTypeFloat, width)
 }
 
 // box returns the register holding v as a boxed word. An i64 outside the

@@ -60,6 +60,12 @@ func TestEncoder_Encode(t *testing.T) {
 		{"SUBSI X1,X2,#42", arm64.SUBSI(arm64.X1, arm64.X2, 42), 0xF100A841},
 		{"ANDI X1,X2,#0xFF", arm64.ANDI(arm64.X1, arm64.X2, 0xFF), 0x92401C41},
 		{"ANDI repeated 16-bit element", arm64.ANDI(arm64.X1, arm64.X2, 0x00FF00FF00FF00FF), 0x92409C41},
+		// A single high bit needs a nonzero rotation (immr): the pattern
+		// regression-tests rotateMask's ROR direction (DecodeBitMasks
+		// rotates the lsb-aligned ones run right, not left).
+		{"ANDI W1,W2,#0x80000000", arm64.ANDI(arm64.W1, arm64.W2, 0x80000000), 0x12010041},
+		{"ANDI X1,X2,#0x8000000000000000", arm64.ANDI(arm64.X1, arm64.X2, 0x8000000000000000), 0x92410041},
+		{"ANDI W1,W2,#0x7FFFFFFF", arm64.ANDI(arm64.W1, arm64.W2, 0x7FFFFFFF), 0x12007841},
 		{"ANDSI X1,X2,#0xFF", arm64.ANDSI(arm64.X1, arm64.X2, 0xFF), 0xF2401C41},
 		{"ORRI X1,X2,#0xFF", arm64.ORRI(arm64.X1, arm64.X2, 0xFF), 0xB2401C41},
 		{"EORI X1,X2,#0xFF", arm64.EORI(arm64.X1, arm64.X2, 0xFF), 0xD2401C41},

@@ -634,7 +634,8 @@ func boxRegisters(i *Interpreter, code *jit.Code, bp int) {
 func bridgeable(code instr.Opcode) bool {
 	switch code {
 	case instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT, instr.ARRAY_NEW_DEFAULT, instr.CLOSURE_NEW,
-		instr.STRING_NEW_UTF32, instr.STRING_ENCODE_UTF32, instr.STRING_LEN, instr.STRING_CONCAT:
+		instr.STRING_NEW_UTF32, instr.STRING_ENCODE_UTF32, instr.STRING_LEN, instr.STRING_CONCAT,
+		instr.F32_REM, instr.F32_MOD, instr.F64_REM, instr.F64_MOD:
 		return true
 	default:
 		return false
@@ -718,6 +719,10 @@ func (n *native) exec(i *Interpreter, f *frame, results []types.Kind) (ok bool) 
 			n.ctx.Results[j] = uint64(v)
 		case types.KindI32:
 			n.ctx.Results[j] = uint64(uint32(v.I32()))
+		case types.KindF32:
+			n.ctx.Results[j] = uint64(math.Float32bits(v.F32()))
+		case types.KindF64:
+			n.ctx.Results[j] = math.Float64bits(v.F64())
 		default:
 			panic("interp: bridge result kind " + kind.String() + " has no native word")
 		}

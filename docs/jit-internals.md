@@ -117,7 +117,7 @@ A deopt stub sits out of line after the next terminator that does not fall throu
 
 | Exit | Resume rule |
 |---|---|
-| Bridge | Only `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, `ARRAY_NEW_DEFAULT`, `CLOSURE_NEW`, `STRING_NEW_UTF32`, `STRING_ENCODE_UTF32`, `STRING_LEN`, `STRING_CONCAT` run once through `native.bridge`; all other bridges deopt. |
+| Bridge | Only `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, `ARRAY_NEW_DEFAULT`, `CLOSURE_NEW`, `STRING_NEW_UTF32`, `STRING_ENCODE_UTF32`, `STRING_LEN`, `STRING_CONCAT`, `F32_REM`, `F32_MOD`, `F64_REM`, `F64_MOD` run once through `native.bridge`; all other bridges deopt. |
 | Release | `Exit.Word` identifies the last ref; interpreter owns reclamation, then native resumes. |
 | Box | `Exit.Word` carries the wide i64; interpreter allocates a boxed value, then native resumes. |
 | Trap | A bridge/box trap drops the retains its handler did not consume, restoring each operand's count, and follows normal deopt so the instruction executes once. |
