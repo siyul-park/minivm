@@ -2,6 +2,7 @@ package interp
 
 import (
 	"slices"
+	"sync/atomic"
 
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/internal/jit"
@@ -41,7 +42,11 @@ type site struct {
 	// submission, looks up published code, and drains on a cached entry.
 	threshold, cadence int64
 
-	count     int64
+	count int64
+	// total is s's pool-wide entry counter while unsubmitted. It is looked
+	// up on first observation: observe runs before Pool.share replaces the
+	// native's shared runtime.
+	total     *atomic.Int64
 	submitted bool
 	// code is the published code once a store lookup has found it; nil
 	// until then, and again once the site fails.
@@ -141,7 +146,11 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 		s.count++
 		switch {
 		case !s.submitted:
-			if s.count >= s.threshold && (s.count-s.threshold)%s.cadence == 0 && n.resolved(s.address, s.headers) {
+			if s.total == nil {
+				s.total = n.total(key{s.address, s.ip})
+			}
+			total := s.total.Add(1)
+			if total >= s.threshold && (total-s.threshold)%s.cadence == 0 && n.resolved(s.address, s.headers) {
 				// The queue accepts one unit per address; an entry-0 CALL
 				// compile of the same address may hold it, undrained,
 				// since its own last call.

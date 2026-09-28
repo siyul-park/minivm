@@ -25,8 +25,6 @@ type native struct {
 	*shared
 
 	threshold int
-	// Per-address tiering state is indexed by function address.
-	calls []int
 	// entries is native-writable: Context.Entries points at it, and every
 	// Baseline function prologue increments its own address there, including
 	// native-to-native entries.
@@ -85,7 +83,34 @@ type shared struct {
 	// every call's common case — takes no lock.
 	count atomic.Int64
 
+	// calls is the pool-wide CALL count per address, added to by every
+	// native sharing r while the address has no published code: a pooled
+	// workload's calls compile Baseline after about threshold total calls,
+	// not threshold calls to any one interpreter.
+	calls []atomic.Int64
+
+	// sites is the pool-wide entry count per OSR/entry site, added to by
+	// every native sharing r while the site is unsubmitted; built lazily
+	// under mu.
+	sites map[key]*atomic.Int64
+
 	refs atomic.Int64
+}
+
+// total returns r's pool-wide entry counter for the OSR/entry site k,
+// creating it for the first native that observes k.
+func (r *shared) total(k key) *atomic.Int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sites == nil {
+		r.sites = map[key]*atomic.Int64{}
+	}
+	t := r.sites[k]
+	if t == nil {
+		t = new(atomic.Int64)
+		r.sites[k] = t
+	}
+	return t
 }
 
 // nominate adds addr to r's candidates, once.
@@ -192,6 +217,7 @@ func newShared(i *Interpreter) *shared {
 		store:  jit.NewStore(len(i.code)),
 		queue:  compile.NewQueue(func() compile.Machine { return arm64.New() }, 1),
 		module: newModule(i),
+		calls:  make([]atomic.Int64, len(i.code)),
 	}
 	r.refs.Store(1)
 	return r
@@ -230,7 +256,6 @@ func newNative(i *Interpreter, threshold int) *native {
 		ctx:       ctx,
 		shared:    newShared(i),
 		threshold: threshold,
-		calls:     make([]int, len(i.code)),
 		entries:   make([]int64, len(i.code)),
 		deopts:    make([]int, len(i.code)),
 		bridges:   make([]bridge, len(i.code)),
@@ -316,16 +341,18 @@ func (n *native) attempt(i *Interpreter, addr int, fn *types.Function, release b
 		// The unchanged input has no new feedback for a recompile at this tier.
 		n.markFailed(addr, code.Tier)
 		// Counters restart; the failed tier stays blocked.
-		n.calls[addr], n.entries[addr], n.deopts[addr], n.bridges[addr] = 0, 0, 0, bridge{}
+		n.calls[addr].Store(0)
+		n.entries[addr], n.deopts[addr], n.bridges[addr] = 0, 0, bridge{}
 	}
 	_ = n.store.Reclaim()
 	return true
 }
 
-// count tracks cold calls and requests Baseline compilation.
+// count tracks cold calls, pool-wide, and requests Baseline compilation once
+// the total across every native sharing addr's code reaches threshold.
 func (n *native) count(i *Interpreter, addr int, fn *types.Function) {
-	n.calls[addr]++
-	if n.calls[addr] < n.threshold || n.hasFailed(addr, jit.Baseline) {
+	total := n.calls[addr].Add(1)
+	if total < int64(n.threshold) || n.hasFailed(addr, jit.Baseline) {
 		return
 	}
 	n.queue.Submit(compile.Unit{Address: addr, Function: fn, Module: n.feedback(addr), Tier: jit.Baseline})

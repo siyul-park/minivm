@@ -210,6 +210,72 @@ func TestPool_Get(t *testing.T) {
 		p.Put(first)
 		p.Put(second)
 	})
+
+	t.Run("pooled interpreters alternating Runs publish code after about threshold total entries", func(t *testing.T) {
+		native(t)
+		// Loop-free module code: its only OSR site is ip 0, entry-site
+		// threshold max(n, 2), cadence 1 (Entries table).
+		b := instr.NewBuilder()
+		big, done := b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 7).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 5).Emit(instr.I32_GT_S).BrIf(big)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.I32_MUL).Br(done)
+		b.Bind(big).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 3).Emit(instr.I32_MUL)
+		b.Bind(done)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32))
+
+		const threshold = 8
+		profiler := prof.New()
+		p := interp.NewPool(prog, 2, interp.WithThreshold(threshold), interp.WithProfiler(profiler))
+		defer p.Close()
+
+		a, err := p.Get(context.Background())
+		require.NoError(t, err)
+		b2, err := p.Get(context.Background())
+		require.NoError(t, err)
+
+		run := func(vm *interp.Interpreter) error {
+			if err := vm.Run(context.Background()); err != nil {
+				return err
+			}
+			_, err := vm.Pop()
+			vm.Reset()
+			vm.Flush()
+			return err
+		}
+
+		var runs int
+		var runErr error
+		var entries float64
+		require.Eventually(t, func() bool {
+			vm := a
+			if runs%2 == 1 {
+				vm = b2
+			}
+			runErr = run(vm)
+			runs++
+			if runErr != nil {
+				return true
+			}
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+			return entries > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.Greater(t, entries, float64(0))
+		// A single, unshared interpreter would need threshold Runs of its
+		// own; two alternating interpreters would need about 2x threshold
+		// total without pool-wide aggregation. The small constant covers
+		// strict alternation's worst case: only the interpreter whose turn
+		// crosses the total submits, so the other's turns are wasted retries
+		// until submission's owner returns to drain the compile (one turn)
+		// and then enter it (one more).
+		require.LessOrEqual(t, runs, threshold+8)
+
+		p.Put(a)
+		p.Put(b2)
+	})
 }
 
 func TestPool_Put(t *testing.T) {
