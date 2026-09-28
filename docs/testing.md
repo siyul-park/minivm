@@ -14,15 +14,24 @@ Feature contract tests `MUST` use only target-package public symbols and `MUST` 
 
 ### Readability
 
-Tests `MUST` stay clear, concise, and directly understandable. Each case `MUST` show one meaningful, representative usage of the symbol under test, with input, operation, and expected result visible. A case represents behavior, not a branch or implementation path.
+A test is the smallest specification of its target: it `MUST` show the target and state the behavior the target must have, with input, operation, and expected result visible in the case. A case represents behavior, not a branch or implementation path.
+
+Tests `MUST NOT` hide the behavior behind abstractions (wrappers, builders, or helpers that obscure the call under test) and `MUST NOT` mix different writing styles at one level.
 
 ### Organization
 
-Each public symbol `MUST` have one top-level test owner; its cases sit directly beneath it at one depth. A test function `MUST` use either direct cases or table-driven cases, never both, and `MUST NOT` mix abstraction levels.
+| Rule | Requirement |
+|---|---|
+| Owner | Each public symbol `MUST` have exactly one top-level test function. |
+| Depth | At most two levels: the test function and its `t.Run` cases. |
+| Same behavior, many inputs | An inline anonymous struct slice of named inputs and expected outputs; each entry runs as one `t.Run` case. |
+| Different scenarios | One `t.Run` case per scenario, named for the behavior it states. |
+| Similar cases | `MUST` be merged into one case or one table. |
+| Style | A test function uses either a table or scenario cases, never both, and never mixes abstraction levels. |
 
 `require.Eventually` callbacks `MUST` contain no assertions. They `MUST` capture results and errors, return only readiness conditions, and assert the captured state after polling.
 
-When multiple inputs and outputs express one usage pattern, an anonymous test-case struct slice `MAY` be used. The data and generation code `MUST` remain simple enough to read as specification.
+Table data and generation code `MUST` stay simple enough to read as specification.
 
 Tests `MUST` use only the code under test's public interface. Direct private-symbol reference indicates a design problem and `MUST` be resolved by changing the design so the behavior is specified through its proper boundary.
 
