@@ -359,20 +359,20 @@ func TestREPL_Run(t *testing.T) {
 			contains: []string{"(no locals)"},
 			excludes: []string{"error:"}}}
 
-	t.Run("REPL command corpus", func(t *testing.T) {
-		for _, tt := range tests {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			var out bytes.Buffer
 			r := cli.NewREPL(strings.NewReader(tt.input), &out, nil)
-			require.NoError(t, r.Run(context.Background()), tt.name)
+			require.NoError(t, r.Run(context.Background()))
 			output := out.String()
 			for _, s := range tt.contains {
-				require.Contains(t, output, s, tt.name)
+				require.Contains(t, output, s)
 			}
 			for _, s := range tt.excludes {
-				require.NotContains(t, output, s, tt.name)
+				require.NotContains(t, output, s)
 			}
-		}
-	})
+		})
+	}
 
 	t.Run("eof exits cleanly", func(t *testing.T) {
 		var out bytes.Buffer

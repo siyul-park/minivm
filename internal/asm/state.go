@@ -61,13 +61,13 @@ func (s *State) Abandon() {
 
 // Reg reports the saved value of r. r must be saved by the exit protocol.
 func (s *State) Reg(r PReg) uint64 {
-	return *s.slot(r)
+	return *s.cell(r)
 }
 
 // SetReg stores v in the saved register file for r. r must be saved by the
 // exit protocol.
 func (s *State) SetReg(r PReg, v uint64) {
-	*s.slot(r) = v
+	*s.cell(r) = v
 }
 
 // Slot reads spill slot n of the suspended native activation.
@@ -88,7 +88,7 @@ func (s *State) Word(addr uintptr) uint64 {
 	return s.stack[offset/8]
 }
 
-func (s *State) slot(r PReg) *uint64 {
+func (s *State) cell(r PReg) *uint64 {
 	if r.ID() >= uint8(len(s.regs)) {
 		panic("asm: invalid register")
 	}

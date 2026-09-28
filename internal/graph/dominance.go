@@ -38,6 +38,9 @@ func Frontier(g Graph, d *Dominance) [][]int {
 func NewDominance(g Graph) *Dominance {
 	order := Order(g)
 	rpoNum := make([]int, g.Len())
+	for i := range rpoNum {
+		rpoNum[i] = -1
+	}
 	for i, node := range order {
 		rpoNum[node] = i
 	}

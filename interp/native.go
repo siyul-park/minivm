@@ -55,6 +55,27 @@ type native struct {
 	compile func(fn *types.Function, exact bool) []func(*Interpreter)
 }
 
+// nativeStack is the native stack size per interpreter.
+const nativeStack = 1 << 20
+
+// budget is the back-edge count between safepoints.
+const budget = 1 << 16
+
+// refute is the deopt threshold that retires native code.
+const refute = 8
+
+// resume is the consecutive unamortized-bridge limit before a site retires.
+// It uses the same retry count as refute: native work must pay for the Go round trip.
+const resume = refute
+
+// amortize is the native work (back edges, calls, returns) since the
+// previous bridge that makes the next one count as paid for rather than
+// against resume.
+const amortize = 4
+
+// graduate is the Baseline entry count that tiers an address to Optimized.
+const graduate = 1024
+
 // bridge carries unamortized work for one CALL address or OSR site across entries.
 type bridge struct {
 	count int
@@ -140,27 +161,6 @@ func (r *shared) sweep(visit func(addr int) (live bool)) {
 	r.candidates = live
 	r.count.Store(int64(len(live)))
 }
-
-// nativeStack is the native stack size per interpreter.
-const nativeStack = 1 << 20
-
-// budget is the back-edge count between safepoints.
-const budget = 1 << 16
-
-// refute is the deopt threshold that retires native code.
-const refute = 8
-
-// resume is the consecutive unamortized-bridge limit before a site retires.
-// It uses the same retry count as refute: native work must pay for the Go round trip.
-const resume = refute
-
-// amortize is the native work (back edges, calls, returns) since the
-// previous bridge that makes the next one count as paid for rather than
-// against resume.
-const amortize = 4
-
-// graduate is the Baseline entry count that tiers an address to Optimized.
-const graduate = 1024
 
 // mixed marks a dynamic CALL site (native.callees) that has seen more than
 // one callee: it never speculates.

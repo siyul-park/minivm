@@ -80,7 +80,6 @@ type Interpreter struct {
 // Option configures an Interpreter or Pool at construction. Only the With
 // constructors produce one, so callers can name and collect options without
 // reaching the unexported state they configure.
-// Option configures an Interpreter.
 type Option func(*option)
 
 type option struct {
@@ -173,7 +172,6 @@ func WithFuel(val uint64) Option {
 // WithThreshold enables the JIT: n calls to a *types.Function before it is
 // compiled to native code. n < 0 disables it; this is the default. The JIT
 // also requires runtime.GOARCH == "arm64" and neither WithHook nor WithFuel.
-// WithThreshold sets the JIT compilation threshold.
 func WithThreshold(n int) Option {
 	return func(o *option) { o.threshold = n }
 }

@@ -84,6 +84,9 @@ func (m *Machine) Reserve() []asm.PReg {
 // sequence (a Queue worker reuses one), so Prologue resets all per-function
 // state.
 func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.Layout, args []asm.VReg) {
+	// upvals, flag, and cond restart zero, which is unreadable: the upval
+	// read guards on a nonzero VReg, and ssa.NoValue names no branch
+	// argument, so nothing observes them before this function writes them.
 	*m = Machine{kinds: l.Kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}, results: l.Results, borrows: l.Borrows}
 	a.Bind(m.entry)
 	a.Emit(

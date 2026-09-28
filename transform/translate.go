@@ -99,21 +99,21 @@ func Translate(module Module, address int, function *types.Function, entry int) 
 	return built, nil
 }
 
-// Borrows reports, per parameter, whether fn borrows it: a reference
-// parameter fn never writes. Its native caller keeps ownership for the
-// call; fn neither retains nor releases it.
-func Borrows(fn *types.Function) []bool {
-	if fn == nil || fn.Typ == nil {
+// Borrows reports, per parameter, whether function borrows it: a reference
+// parameter function never writes. Its native caller keeps ownership for the
+// call; function neither retains nor releases it.
+func Borrows(function *types.Function) []bool {
+	if function == nil || function.Typ == nil {
 		return nil
 	}
 	written := map[int]bool{}
-	for _, inst := range instr.Unmarshal(fn.Code) {
+	for _, inst := range instr.Unmarshal(function.Code) {
 		if inst.Opcode().Writes(instr.Local) {
 			written[int(inst.Operand(0))] = true
 		}
 	}
-	borrows := make([]bool, len(fn.Typ.Params))
-	for i, param := range fn.Typ.Params {
+	borrows := make([]bool, len(function.Typ.Params))
+	for i, param := range function.Typ.Params {
 		borrows[i] = param.Kind() == types.KindRef && !written[i]
 	}
 	return borrows

@@ -83,7 +83,7 @@ func TestPreheader(t *testing.T) {
 		preheader, ok := graph.Preheader(g, body, 3)
 
 		require.False(t, ok)
-		require.Zero(t, preheader)
+		require.Equal(t, -1, preheader)
 	})
 
 	t.Run("returns no preheader when the outside predecessor branches elsewhere", func(t *testing.T) {
@@ -94,7 +94,7 @@ func TestPreheader(t *testing.T) {
 		preheader, ok := graph.Preheader(g, body, 1)
 
 		require.False(t, ok)
-		require.Zero(t, preheader)
+		require.Equal(t, -1, preheader)
 	})
 
 	t.Run("returns no preheader for a loop rooted at the entry", func(t *testing.T) {
@@ -105,6 +105,6 @@ func TestPreheader(t *testing.T) {
 		preheader, ok := graph.Preheader(g, body, 0)
 
 		require.False(t, ok)
-		require.Zero(t, preheader)
+		require.Equal(t, -1, preheader)
 	})
 }

@@ -101,19 +101,19 @@ func (c *Code) Entry() uintptr {
 	return c.entry
 }
 
-// holds reports whether pc lies inside c's native code.
 // Retired reports whether Store has retired c: an interpreter that cached c
 // and called Store.Enter may still run it until then without a lookup.
 func (c *Code) Retired() bool {
 	return c.retired.Load()
 }
 
-func (c *Code) holds(pc uintptr) bool {
-	return pc >= c.native && pc < c.native+uintptr(c.size)
-}
-
 // Free unmaps c's executable memory; a second call is a no-op. Nothing may
 // run c's code after either call.
 func (c *Code) Free() error {
 	return c.buffer.Free()
+}
+
+// holds reports whether pc lies inside c's native code.
+func (c *Code) holds(pc uintptr) bool {
+	return pc >= c.native && pc < c.native+uintptr(c.size)
 }

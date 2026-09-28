@@ -2087,21 +2087,21 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, types.BoxI32(4*heapRunway), got)
 	})
 
-	t.Run("ref set and get round-trip", func(t *testing.T) {
-		for _, tt := range []struct {
-			name        string
-			typ         types.Type
-			initial     types.Boxed
-			replacement types.Boxed
-			want        types.Value
-		}{
-			{name: "i1", typ: types.TypeI1, initial: types.BoxI1(false), replacement: types.BoxI1(true), want: types.I1(true)},
-			{name: "i8", typ: types.TypeI8, initial: types.BoxI8(1), replacement: types.BoxI8(2), want: types.I8(2)},
-			{name: "i32", typ: types.TypeI32, initial: types.BoxI32(1), replacement: types.BoxI32(2), want: types.I32(2)},
-			{name: "i64", typ: types.TypeI64, initial: types.BoxI64(1), replacement: types.BoxI64(2), want: types.I64(2)},
-			{name: "f32", typ: types.TypeF32, initial: types.BoxF32(1), replacement: types.BoxF32(2), want: types.F32(2)},
-			{name: "f64", typ: types.TypeF64, initial: types.BoxF64(1), replacement: types.BoxF64(2), want: types.F64(2)},
-		} {
+	for _, tt := range []struct {
+		name        string
+		typ         types.Type
+		initial     types.Boxed
+		replacement types.Boxed
+		want        types.Value
+	}{
+		{name: "i1", typ: types.TypeI1, initial: types.BoxI1(false), replacement: types.BoxI1(true), want: types.I1(true)},
+		{name: "i8", typ: types.TypeI8, initial: types.BoxI8(1), replacement: types.BoxI8(2), want: types.I8(2)},
+		{name: "i32", typ: types.TypeI32, initial: types.BoxI32(1), replacement: types.BoxI32(2), want: types.I32(2)},
+		{name: "i64", typ: types.TypeI64, initial: types.BoxI64(1), replacement: types.BoxI64(2), want: types.I64(2)},
+		{name: "f32", typ: types.TypeF32, initial: types.BoxF32(1), replacement: types.BoxF32(2), want: types.F32(2)},
+		{name: "f64", typ: types.TypeF64, initial: types.BoxF64(1), replacement: types.BoxF64(2), want: types.F64(2)},
+	} {
+		t.Run("ref set and get round-trip/"+tt.name, func(t *testing.T) {
 			prog := program.New([]instr.Instruction{
 				instr.New(instr.GLOBAL_GET, 0),
 				instr.New(instr.REF_NEW),
@@ -2115,12 +2115,12 @@ func TestInterpreter_Run(t *testing.T) {
 			require.NoError(t, i.SetGlobal(0, tt.initial))
 			require.NoError(t, i.SetGlobal(1, tt.replacement))
 
-			require.NoError(t, i.Run(context.Background()), tt.name)
+			require.NoError(t, i.Run(context.Background()))
 			got, err := i.Pop()
-			require.NoError(t, err, tt.name)
-			require.Equal(t, tt.want, got, tt.name)
-		}
-	})
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
 
 	modes := []struct {
 		name string
@@ -2129,29 +2129,29 @@ func TestInterpreter_Run(t *testing.T) {
 		{name: "standalone", opts: []interp.Option{interp.WithTick(1)}},
 		{name: "fused", opts: []interp.Option{}},
 	}
-	t.Run("interpreter modes", func(t *testing.T) {
-		for _, tt := range runTests {
-			name := runTestName(tt.program)
-			for _, mode := range modes {
+	for _, tt := range runTests {
+		name := runTestName(tt.program)
+		for _, mode := range modes {
+			t.Run(name+"/"+mode.name, func(t *testing.T) {
 				i := interp.New(tt.program, mode.opts...)
 
 				err := i.Run(context.Background())
 				if tt.err != nil {
-					require.ErrorIs(t, err, tt.err, name+"/"+mode.name)
-					require.NoError(t, i.Close(), name+"/"+mode.name)
-					continue
+					require.ErrorIs(t, err, tt.err)
+					require.NoError(t, i.Close())
+					return
 				}
-				require.NoError(t, err, name+"/"+mode.name)
+				require.NoError(t, err)
 				for _, want := range tt.values {
 					got, err := i.Pop()
-					require.NoError(t, err, name+"/"+mode.name)
-					require.Equal(t, want, got, name+"/"+mode.name)
+					require.NoError(t, err)
+					require.Equal(t, want, got)
 				}
-				require.Equal(t, len(tt.program.Locals), i.Len(), name+"/"+mode.name)
-				require.NoError(t, i.Close(), name+"/"+mode.name)
-			}
+				require.Equal(t, len(tt.program.Locals), i.Len())
+				require.NoError(t, i.Close())
+			})
 		}
-	})
+	}
 
 	var benchmarkNumeric []instr.Instruction
 	for range 64 {
@@ -2253,12 +2253,12 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 		return result
 	}
-	t.Run("interpreter parity corpus", func(t *testing.T) {
-		for _, tt := range parityPrograms {
+	for _, tt := range parityPrograms {
+		t.Run(tt.name, func(t *testing.T) {
 			oracle := run(t, tt.prog, interp.WithTick(1))
-			require.Equal(t, oracle, run(t, tt.prog), tt.name)
-		}
-	})
+			require.Equal(t, oracle, run(t, tt.prog))
+		})
+	}
 
 	t.Run("entry frame yield resumes on the next Run call", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
@@ -2634,14 +2634,14 @@ func TestInterpreter_Run(t *testing.T) {
 		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
 
-	t.Run("host call releases the consumed callable ref", func(t *testing.T) {
-		for _, tt := range []struct {
-			name string
-			opts []interp.Option
-		}{
-			{name: "fused"},
-			{name: "generic", opts: []interp.Option{interp.WithTick(1)}},
-		} {
+	for _, tt := range []struct {
+		name string
+		opts []interp.Option
+	}{
+		{name: "fused"},
+		{name: "generic", opts: []interp.Option{interp.WithTick(1)}},
+	} {
+		t.Run("host call releases the consumed callable ref/"+tt.name, func(t *testing.T) {
 			hostFn := interp.NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
 				func(_ *interp.Interpreter, args []types.Boxed) ([]types.Boxed, error) {
 					return []types.Boxed{args[0]}, nil
@@ -2653,12 +2653,12 @@ func TestInterpreter_Run(t *testing.T) {
 			i := interp.New(prog, tt.opts...)
 			defer i.Close()
 
-			require.NoError(t, i.Run(context.Background()), tt.name)
+			require.NoError(t, i.Run(context.Background()))
 			rc, err := i.RefCount(1)
-			require.NoError(t, err, tt.name)
-			require.Equal(t, 1, rc, tt.name)
-		}
-	})
+			require.NoError(t, err)
+			require.Equal(t, 1, rc)
+		})
+	}
 
 	t.Run("generic host call can return the consumed callable ref", func(t *testing.T) {
 		hostFn := interp.NewHostFunction(&types.FunctionType{Returns: []types.Type{types.TypeAny}},
@@ -2883,8 +2883,8 @@ func TestInterpreter_Run(t *testing.T) {
 			}, program.WithConstants(types.TypedArray[int32]{1, 2, 3})),
 		},
 	}
-	t.Run("parity corpus", func(t *testing.T) {
-		for _, tt := range parity {
+	for _, tt := range parity {
+		t.Run(tt.name, func(t *testing.T) {
 			states := make([]parityState, 0, 2)
 			for _, opts := range [][]interp.Option{
 				{interp.WithTick(1)},
@@ -2893,9 +2893,9 @@ func TestInterpreter_Run(t *testing.T) {
 				i := interp.New(tt.prog, opts...)
 				err := i.Run(context.Background())
 				if tt.err == nil {
-					require.NoError(t, err, tt.name)
+					require.NoError(t, err)
 				} else {
-					require.ErrorIs(t, err, tt.err, tt.name)
+					require.ErrorIs(t, err, tt.err)
 				}
 
 				state := parityState{
@@ -2907,12 +2907,12 @@ func TestInterpreter_Run(t *testing.T) {
 				}
 				for idx := 0; idx < state.sp; idx++ {
 					v, peekErr := i.Peek(state.sp - 1 - idx)
-					require.NoError(t, peekErr, tt.name)
+					require.NoError(t, peekErr)
 					state.stack = append(state.stack, v)
 				}
 				for idx := range tt.prog.Globals {
 					v, globalErr := i.Global(idx)
-					require.NoError(t, globalErr, tt.name)
+					require.NoError(t, globalErr)
 					state.globals = append(state.globals, v)
 				}
 				for addr := 1; addr < i.HeapLen(); addr++ {
@@ -2923,11 +2923,11 @@ func TestInterpreter_Run(t *testing.T) {
 					state.rc[addr] = count
 				}
 				states = append(states, state)
-				require.NoError(t, i.Close(), tt.name)
+				require.NoError(t, i.Close())
 			}
-			require.Equal(t, states[0], states[1], tt.name)
-		}
-	})
+			require.Equal(t, states[0], states[1])
+		})
+	}
 
 	// Regression: fused rhs loaders must borrow promoted I64 values without
 	// releasing the reference owned by the source slot.
@@ -3069,17 +3069,17 @@ func TestInterpreter_Run(t *testing.T) {
 			want: types.I32(8),
 		},
 	}
-	t.Run("fusion cases", func(t *testing.T) {
-		for _, tt := range fusions {
+	for _, tt := range fusions {
+		t.Run(tt.name, func(t *testing.T) {
 			i := interp.New(tt.prog)
 			defer i.Close()
 
-			require.NoError(t, i.Run(context.Background()), tt.name)
+			require.NoError(t, i.Run(context.Background()))
 			got, err := i.Pop()
-			require.NoError(t, err, tt.name)
-			require.Equal(t, tt.want, got, tt.name)
-		}
-	})
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
 
 	refs := []struct {
 		name string
@@ -3137,15 +3137,15 @@ func TestInterpreter_Run(t *testing.T) {
 			refs: 1,
 		},
 	}
-	t.Run("reference cases", func(t *testing.T) {
-		for _, tt := range refs {
+	for _, tt := range refs {
+		t.Run(tt.name, func(t *testing.T) {
 			i := interp.New(tt.prog)
 			defer i.Close()
 
-			require.NoError(t, i.Run(context.Background()), tt.name)
+			require.NoError(t, i.Run(context.Background()))
 			got, err := i.Pop()
-			require.NoError(t, err, tt.name)
-			require.Equal(t, tt.want, got, tt.name)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
 			live := 0
 			for addr := 1; addr < i.HeapLen(); addr++ {
 				count, rcErr := i.RefCount(addr)
@@ -3154,9 +3154,9 @@ func TestInterpreter_Run(t *testing.T) {
 				}
 				live += count
 			}
-			require.Equal(t, tt.refs, live, tt.name)
-		}
-	})
+			require.Equal(t, tt.refs, live)
+		})
+	}
 
 	t.Run("global/upval pair fusion is disabled in exact mode and still computes correctly", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{

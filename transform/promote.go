@@ -105,7 +105,7 @@ func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function
 		if block == 0 {
 			state := ssa.NoValue
 			if wide {
-				state = enter(rebuilder, function, id)
+				state = seed(rebuilder, function, id)
 			}
 			for _, index := range indexes {
 				held := rebuilder.builder.Value(localTypes[index])
@@ -168,10 +168,10 @@ func promote(function *ssa.Function, localTypes map[int]ssa.Type) (*ssa.Function
 	return rebuilder.builder.Build(), true
 }
 
-// enter emits the unit's entry state in block id: function's Entry frame
+// seed emits the unit's entry state in block id: function's Entry frame
 // with block 0's params as its stack, refs owned, and no locals, since
 // every promoted slot still holds its entry value there.
-func enter(rebuilder *rebuilder, function *ssa.Function, id int) ssa.Value {
+func seed(rebuilder *rebuilder, function *ssa.Function, id int) ssa.Value {
 	block := function.Block(0)
 	var stack []ssa.Operand
 	if len(block.Params) > 0 {

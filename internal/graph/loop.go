@@ -4,7 +4,7 @@ package graph
 // targets: b->s is a back-edge, and s a loop header, exactly when s
 // dominates b — the standard definition of a natural loop.
 func Headers(g Graph, d *Dominance) []int {
-	seen := make(map[int]bool)
+	seen := make([]bool, g.Len())
 	var out []int
 	for b := 0; b < g.Len(); b++ {
 		for _, s := range g.Succ(b) {
@@ -20,7 +20,7 @@ func Headers(g Graph, d *Dominance) []int {
 // Body returns the nodes of the natural loop rooted at header.
 func Body(g Graph, d *Dominance, header int) map[int]bool {
 	body := map[int]bool{header: true}
-	stack := make([]int, 0)
+	var stack []int
 	for _, predecessor := range g.Pred(header) {
 		if d.Dominates(header, predecessor) && !body[predecessor] {
 			body[predecessor] = true
@@ -48,16 +48,16 @@ func Preheader(g Graph, body map[int]bool, header int) (int, bool) {
 			continue
 		}
 		if found >= 0 {
-			return 0, false
+			return -1, false
 		}
 		found = predecessor
 	}
 	if found < 0 {
-		return 0, false
+		return -1, false
 	}
 	successors := g.Succ(found)
 	if len(successors) != 1 || successors[0] != header {
-		return 0, false
+		return -1, false
 	}
 	return found, true
 }

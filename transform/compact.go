@@ -12,6 +12,13 @@ import (
 // CompactPass removes unused and duplicate constants and types.
 type CompactPass struct{}
 
+// An opcode indexes at most one pool: none, constants, or types.
+const (
+	poolNone = iota
+	poolConst
+	poolType
+)
+
 var _ pass.Pass[*program.Program] = (*CompactPass)(nil)
 
 // NewCompactPass returns the pass.
@@ -38,15 +45,11 @@ func (p *CompactPass) Run(_ *pass.Manager, prog *program.Program) (bool, error) 
 		ip := 0
 		for ip < len(code) {
 			inst := instr.Instruction(code[ip:])
-			switch inst.Opcode() {
-			case instr.CONST_GET:
+			switch poolOf(inst.Opcode()) {
+			case poolConst:
 				constUsed[inst.Operand(0)] = true
-			case instr.REF_TEST, instr.REF_CAST,
-				instr.ARRAY_NEW, instr.ARRAY_NEW_DEFAULT,
-				instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT,
-				instr.MAP_NEW, instr.MAP_NEW_DEFAULT:
+			case poolType:
 				typeUsed[inst.Operand(0)] = true
-			default:
 			}
 			ip += inst.Width()
 		}
@@ -79,17 +82,13 @@ func (p *CompactPass) Run(_ *pass.Manager, prog *program.Program) (bool, error) 
 		ip := 0
 		for ip < len(code) {
 			inst := instr.Instruction(code[ip:])
-			switch inst.Opcode() {
-			case instr.CONST_GET:
+			switch poolOf(inst.Opcode()) {
+			case poolConst:
 				idx := inst.Operand(0)
 				inst.SetOperand(0, uint64(constIndex[idx]))
-			case instr.REF_TEST, instr.REF_CAST,
-				instr.ARRAY_NEW, instr.ARRAY_NEW_DEFAULT,
-				instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT,
-				instr.MAP_NEW, instr.MAP_NEW_DEFAULT:
+			case poolType:
 				idx := inst.Operand(0)
 				inst.SetOperand(0, uint64(typeIndex[idx]))
-			default:
 			}
 			ip += inst.Width()
 		}
@@ -99,6 +98,20 @@ func (p *CompactPass) Run(_ *pass.Manager, prog *program.Program) (bool, error) 
 	prog.Types = typs
 
 	return constantLen == constSize && typeLen == typesSize, nil
+}
+
+func poolOf(op instr.Opcode) int {
+	switch op {
+	case instr.CONST_GET:
+		return poolConst
+	case instr.REF_TEST, instr.REF_CAST,
+		instr.ARRAY_NEW, instr.ARRAY_NEW_DEFAULT,
+		instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT,
+		instr.MAP_NEW, instr.MAP_NEW_DEFAULT:
+		return poolType
+	default:
+		return poolNone
+	}
 }
 
 func compactValues(items []types.Value, used []bool) ([]int, int) {

@@ -9,10 +9,10 @@ import (
 // internal/graph's dense integer node space.
 type cfg []*BasicBlock
 
-// Headers returns the bytecode offset of every loop header in fn: a block
+// Headers returns the bytecode offset of every loop header in function: a block
 // some back edge targets, in the sense internal/graph.Headers defines it.
-func Headers(fn *types.Function) ([]int, error) {
-	blocks, err := Blocks(fn)
+func Headers(function *types.Function) ([]int, error) {
+	blocks, err := Blocks(function)
 	if err != nil {
 		return nil, err
 	}

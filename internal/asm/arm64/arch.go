@@ -98,7 +98,9 @@ func (a arch) Spill(r asm.Reg, slot int) asm.Instruction {
 	return STR(r, SP, int16(8*slot))
 }
 
-// Reload loads r from spill slot n.
+// Reload loads r from spill slot n. A 32-bit spill still reloads through
+// the register's own width: a W load zero-extends the stored low word, so
+// the stale high half of the 8-byte slot is never read.
 func (a arch) Reload(r asm.Reg, slot int) asm.Instruction {
 	return LDR(r, SP, int16(8*slot))
 }

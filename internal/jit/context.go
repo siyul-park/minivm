@@ -108,15 +108,6 @@ const (
 // State, so State must lead.
 var _ [0]struct{} = [unsafe.Offsetof(Context{}.State)]struct{}{}
 
-// NewContext returns a context owning a native stack of size bytes.
-func NewContext(size int) (*Context, error) {
-	s, err := asm.NewState(size)
-	if err != nil {
-		return nil, err
-	}
-	return &Context{State: s}, nil
-}
-
 // Enter runs the native code at code until that activation returns or exits,
 // and reports how it left. Anything but TrapReturn leaves it suspended for
 // Resume.
@@ -133,6 +124,15 @@ func Resume(ctx *Context) Trap {
 		return TrapReturn
 	}
 	return ctx.Trap()
+}
+
+// NewContext returns a context owning a native stack of size bytes.
+func NewContext(size int) (*Context, error) {
+	s, err := asm.NewState(size)
+	if err != nil {
+		return nil, err
+	}
+	return &Context{State: s}, nil
 }
 
 // Exit reports the exit identifier native code last wrote before leaving;

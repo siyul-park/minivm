@@ -38,13 +38,9 @@ type lowering struct {
 	consts  map[ssa.Value]uint64
 	raw     map[ssa.Value]bool
 	homes   map[int]int
-	exits   []*jit.Exit
-	places  [][]place
-	saves   [][]save
-	// stalls holds each exit's remat constants, materialized at its stub.
-	stalls [][]stall
-	// memo is each ExitCall map's one register per remat constant.
-	memo map[int]map[ssa.Value]asm.VReg
+	// outlets hold one build state per exit, in exit id order; exit ids
+	// index it instead of parallel slices.
+	outlets []outlet
 	// deopts holds the deopt stubs placed since the last terminator that
 	// does not fall through, where deopt emits them.
 	deopts []stub
@@ -84,6 +80,17 @@ type lowering struct {
 type place struct {
 	to  *jit.Value
 	reg asm.VReg
+}
+
+// outlet is one exit under construction: its published map plus the rows
+// its stub still has to emit. memo is an ExitCall map's one register per
+// remat constant; stalls holds remat constants materialized at the stub.
+type outlet struct {
+	exit   *jit.Exit
+	places []place
+	saves  []save
+	stalls []stall
+	memo   map[ssa.Value]asm.VReg
 }
 
 type move struct {
@@ -157,8 +164,8 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 		f: f, m: m, a: asm.New(m.Arch()), fn: fn, address: address, osr: osr, count: count, objects: objects,
 		states: map[ssa.Value]ssa.Operation{}, consts: map[ssa.Value]uint64{}, raw: map[ssa.Value]bool{},
 		homes: homes, tmp: int32(f.Values()) + 4,
-		memo: map[int]map[ssa.Value]asm.VReg{}, remats: map[ssa.Value]bool{},
-		param: map[ssa.Value]bool{}, uses: map[ssa.Value]int{},
+		remats: map[ssa.Value]bool{},
+		param:  map[ssa.Value]bool{}, uses: map[ssa.Value]int{},
 	}
 	// A scalar or ref constant is rematerialized when f has a call and no
 	// loop block uses it: a loop keeps its constants in registers.
@@ -232,16 +239,16 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 	if !ok {
 		return nil, nil, 0, fmt.Errorf("%w: unresolved entry stub", ErrUnsupported)
 	}
-	exits := make([]jit.Exit, len(l.exits))
-	for id, e := range l.exits {
-		for _, p := range l.places[id] {
+	exits := make([]jit.Exit, len(l.outlets))
+	for id, o := range l.outlets {
+		for _, p := range o.places {
 			loc, ok := l.a.Loc(p.reg)
 			if !ok {
 				return nil, nil, 0, fmt.Errorf("%w: exit %d names v%d with no location", ErrUnsupported, id, p.reg.ID())
 			}
 			p.to.Loc = loc
 		}
-		exits[id] = *e
+		exits[id] = *o.exit
 	}
 	return code, exits, entry, nil
 }
@@ -292,18 +299,18 @@ func (l *lowering) Deopt() asm.Label {
 // Release places a release stub for ref.
 func (l *lowering) Release(ref asm.VReg) (exit, resume asm.Label) {
 	id := l.exit(jit.ExitRelease)
-	e := l.exits[id]
+	e := l.outlets[id].exit
 	e.Word.Kind = types.KindRef
-	l.places[id] = append(l.places[id], place{to: &e.Word, reg: ref})
+	l.outlets[id].places = append(l.outlets[id].places, place{to: &e.Word, reg: ref})
 	return l.stub(id)
 }
 
 // Box places a box stub for word, a wide i64.
 func (l *lowering) Box(word asm.VReg) (exit, resume asm.Label) {
 	id := l.exit(jit.ExitBox)
-	e := l.exits[id]
+	e := l.outlets[id].exit
 	e.Word.Kind = types.KindI64
-	l.places[id] = append(l.places[id], place{to: &e.Word, reg: word})
+	l.outlets[id].places = append(l.outlets[id].places, place{to: &e.Word, reg: word})
 	return l.stub(id)
 }
 
@@ -397,7 +404,7 @@ func (l *lowering) function() error {
 	for _, s := range l.stubs {
 		l.a.Bind(s.label)
 		l.emit(s.id)
-		if l.exits[s.id].Kind.Resumes() {
+		if l.outlets[s.id].exit.Kind.Resumes() {
 			l.jump(s.resume)
 		}
 	}
@@ -656,7 +663,7 @@ func (l *lowering) materialize(v ssa.Value, word uint64) asm.VReg {
 // which its caller binds.
 func (l *lowering) stub(id int) (exit, resume asm.Label) {
 	s := stub{label: l.a.Label(), id: id}
-	if l.exits[id].Kind.Resumes() {
+	if l.outlets[id].exit.Kind.Resumes() {
 		s.resume = l.a.Label()
 	}
 	l.stubs = append(l.stubs, s)
@@ -700,15 +707,16 @@ func (l *lowering) call(op ssa.Operation) error {
 	// translation retained it.
 	owned := frame.Stack[len(frame.Stack)-1].Owned
 	id := l.exit(jit.ExitCall)
-	l.exits[id].Callee = ref
-	l.exits[id].Owned = owned
+	out := &l.outlets[id]
+	out.exit.Callee = ref
+	out.exit.Owned = owned
 	if closure {
-		l.exits[id].Closure = &jit.Value{}
-		l.place(id, l.exits[id].Closure, callee)
+		out.exit.Closure = &jit.Value{}
+		l.place(id, out.exit.Closure, callee)
 	}
 	for j, b := range transform.Borrows(target) {
 		if b && !frame.Stack[below+j].Owned {
-			l.exits[id].Lent = append(l.exits[id].Lent, j)
+			out.exit.Lent = append(out.exit.Lent, j)
 		}
 	}
 	bridge, _ := l.stub(id)
@@ -756,14 +764,15 @@ func (l *lowering) leave(t ssa.Terminator) error {
 // emit resolves deferred remat constants, saves deferred deopt values, and
 // leaves native code through exit id.
 func (l *lowering) emit(id int) {
-	for _, s := range l.stalls[id] {
+	out := &l.outlets[id]
+	for _, s := range out.stalls {
 		reg := l.materialize(s.v, l.consts[s.v])
-		l.places[id] = append(l.places[id], place{to: s.to, reg: reg})
+		out.places = append(out.places, place{to: s.to, reg: reg})
 	}
-	for _, save := range l.saves[id] {
+	for _, save := range out.saves {
 		l.m.Spill(l.a, save.reg, save.slot)
 	}
-	l.m.Exit(l.a, id, l.exits[id].Kind, l.live(id))
+	l.m.Exit(l.a, id, out.exit.Kind, l.live(id))
 }
 
 // exit records the map of an exit of kind k at the current operation's state.
@@ -771,12 +780,9 @@ func (l *lowering) exit(k jit.Kind) int {
 	if l.gate && !l.loops[l.block] && (k == jit.ExitBridge || k == jit.ExitBox) {
 		l.fail(fmt.Errorf("%w: prefix %s exit outside every loop", ErrUnsupported, k))
 	}
-	id := len(l.exits)
+	id := len(l.outlets)
 	e := &jit.Exit{Kind: k}
-	l.exits = append(l.exits, e)
-	l.places = append(l.places, nil)
-	l.saves = append(l.saves, nil)
-	l.stalls = append(l.stalls, nil)
+	l.outlets = append(l.outlets, outlet{exit: e})
 
 	if k == jit.ExitRelease {
 		return id
@@ -823,7 +829,7 @@ func (l *lowering) exit(k jit.Kind) int {
 			continue
 		}
 		to.Value = jit.Value{Kind: l.f.Type(local.Value).Kind(), Loc: asm.Loc{Slot: slot, Spilled: true}}
-		l.saves[id] = append(l.saves[id], save{reg: l.Reg(local.Value), slot: slot})
+		l.outlets[id].saves = append(l.outlets[id].saves, save{reg: l.Reg(local.Value), slot: slot})
 	}
 	if k == jit.ExitBridge {
 		e.Code = l.op.Code
@@ -840,34 +846,33 @@ func (l *lowering) place(id int, to *jit.Value, v ssa.Value) {
 		l.fail(fmt.Errorf("%w: exit %d names unguarded i64 slot word v%d", ErrUnsupported, id, v))
 	}
 	to.Kind = l.f.Type(v).Kind()
+	out := &l.outlets[id]
 	if _, ok := l.remat(v); ok {
 		// An ExitCall map is also an outer activation's map, read from its
 		// spill slot by a deeper trap: the register must live across the
 		// call, one per value.
-		if l.exits[id].Kind == jit.ExitCall {
-			m := l.memo[id]
-			if m == nil {
-				m = map[ssa.Value]asm.VReg{}
-				l.memo[id] = m
+		if out.exit.Kind == jit.ExitCall {
+			if out.memo == nil {
+				out.memo = map[ssa.Value]asm.VReg{}
 			}
-			reg, ok := m[v]
+			reg, ok := out.memo[v]
 			if !ok {
 				reg = l.Reg(v)
-				m[v] = reg
+				out.memo[v] = reg
 			}
-			l.places[id] = append(l.places[id], place{to: to, reg: reg})
+			out.places = append(out.places, place{to: to, reg: reg})
 			return
 		}
 		// Any other map is read only at its own stub.
-		l.stalls[id] = append(l.stalls[id], stall{to: to, v: v})
+		out.stalls = append(out.stalls, stall{to: to, v: v})
 		return
 	}
-	l.places[id] = append(l.places[id], place{to: to, reg: l.Reg(v)})
+	out.places = append(out.places, place{to: to, reg: l.Reg(v)})
 }
 
 func (l *lowering) live(id int) []asm.VReg {
 	var regs []asm.VReg
-	for _, p := range l.places[id] {
+	for _, p := range l.outlets[id].places {
 		if !slices.Contains(regs, p.reg) {
 			regs = append(regs, p.reg)
 		}

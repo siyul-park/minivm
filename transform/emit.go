@@ -436,9 +436,9 @@ func (e *emitter) resolve(v ssa.Value) ssa.Value {
 	}
 }
 
-func (e *emitter) values(values []ssa.Value) []ssa.Value {
-	out := make([]ssa.Value, len(values))
-	for i, v := range values {
+func (e *emitter) values(vals []ssa.Value) []ssa.Value {
+	out := make([]ssa.Value, len(vals))
+	for i, v := range vals {
 		out[i] = e.resolve(v)
 	}
 	return out

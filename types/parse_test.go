@@ -11,10 +11,12 @@ import (
 
 func TestParseFunction(t *testing.T) {
 	tests := []struct {
+		name  string
 		lines []string
 	}{
 		{
 			// no locals
+			name: "no locals",
 			lines: strings.Split(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
 				Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN)).
 				MustBuild().String(), "\n",
@@ -22,6 +24,7 @@ func TestParseFunction(t *testing.T) {
 		},
 		{
 			// with locals
+			name: "with locals",
 			lines: strings.Split(types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}).
 				Locals(types.TypeI32, types.TypeI64).
 				Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
@@ -30,6 +33,7 @@ func TestParseFunction(t *testing.T) {
 		},
 		{
 			// with captures and locals
+			name: "with captures and locals",
 			lines: strings.Split(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
 				Captures(types.TypeI32, types.TypeAny).
 				Locals(types.TypeI64).
@@ -39,8 +43,8 @@ func TestParseFunction(t *testing.T) {
 		},
 	}
 
-	t.Run("round-trips formatted functions", func(t *testing.T) {
-		for _, tt := range tests {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			lines := tt.lines
 			for len(lines) > 0 && lines[len(lines)-1] == "" {
 				lines = lines[:len(lines)-1]
@@ -53,8 +57,8 @@ func TestParseFunction(t *testing.T) {
 				got = got[:len(got)-1]
 			}
 			require.Equal(t, lines, got, lines[0])
-		}
-	})
+		})
+	}
 	t.Run("no offset prefix", func(t *testing.T) {
 		// Instructions written without offset prefix must parse successfully.
 		lines := []string{
@@ -137,17 +141,17 @@ func TestParse(t *testing.T) {
 		{"bad", nil, true},
 	}
 
-	t.Run("type strings", func(t *testing.T) {
-		for _, tt := range tests {
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
 			got, err := types.Parse(tt.input)
 			if tt.wantErr {
-				require.Error(t, err, tt.input)
-				continue
+				require.Error(t, err)
+				return
 			}
-			require.NoError(t, err, tt.input)
-			require.True(t, tt.want.Equals(got), tt.input)
-		}
-	})
+			require.NoError(t, err)
+			require.True(t, tt.want.Equals(got))
+		})
+	}
 	t.Run("nested struct fields", func(t *testing.T) {
 		// A nested struct carries its own ";" separators, so the field split has
 		// to track brace depth rather than cutting on every semicolon.

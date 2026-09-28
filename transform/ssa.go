@@ -16,7 +16,7 @@ type SSAPass struct {
 }
 
 type pool struct {
-	program *program.Program
+	prog    *program.Program
 	boxed   []types.Boxed
 	objects Objects
 	at      map[types.Boxed]int
@@ -30,19 +30,21 @@ func NewSSAPass(pipeline *pass.Pipeline[*ssa.Function]) *SSAPass {
 }
 
 // Run applies the SSA round trip.
-func (p *SSAPass) Run(_ *pass.Manager, program *program.Program) (bool, error) {
-	constants := newPool(program)
+func (p *SSAPass) Run(_ *pass.Manager, prog *program.Program) (bool, error) {
+	constants := newPool(prog)
+	// The inner manager caches per-function analyses; the outer manager's
+	// unit is the whole program, a different cache key space.
 	manager := pass.NewManager()
 
-	root := &types.Function{Typ: &types.FunctionType{}, Locals: program.Locals, Code: program.Code, Handlers: program.Handlers}
+	root := &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
 	changed, err := p.roundtrip(manager, constants, 0, root)
 	if err != nil {
 		return false, err
 	}
 	if changed {
-		program.Code, program.Locals = root.Code, root.Locals
+		prog.Code, prog.Locals = root.Code, root.Locals
 	}
-	for i, v := range program.Constants {
+	for i, v := range prog.Constants {
 		function, ok := v.(*types.Function)
 		if !ok {
 			continue
@@ -82,14 +84,14 @@ func (p *SSAPass) roundtrip(manager *pass.Manager, constants *pool, address int,
 	return true, nil
 }
 
-func newPool(program *program.Program) *pool {
+func newPool(prog *program.Program) *pool {
 	p := &pool{
-		program: program,
-		boxed:   make([]types.Boxed, len(program.Constants)),
+		prog:    prog,
+		boxed:   make([]types.Boxed, len(prog.Constants)),
 		objects: Objects{},
 		at:      map[types.Boxed]int{},
 	}
-	for i, v := range program.Constants {
+	for i, v := range prog.Constants {
 		boxed, ok := box(v)
 		if !ok {
 			boxed = types.BoxRef(i + 1)
@@ -106,9 +108,9 @@ func newPool(program *program.Program) *pool {
 func (p *pool) module() Module {
 	return Module{
 		Constants: p.boxed,
-		Globals:   types.Kinds(p.program.Globals),
+		Globals:   types.Kinds(p.prog.Globals),
 		Objects:   p.objects,
-		Types:     p.program.Types,
+		Types:     p.prog.Types,
 	}
 }
 
@@ -119,8 +121,8 @@ func (p *pool) intern(c types.Boxed) (int, bool) {
 	if c.Kind() == types.KindRef {
 		return 0, false
 	}
-	at := len(p.program.Constants)
-	p.program.Constants = append(p.program.Constants, types.Unbox(c))
+	at := len(p.prog.Constants)
+	p.prog.Constants = append(p.prog.Constants, types.Unbox(c))
 	p.boxed = append(p.boxed, c)
 	p.at[c] = at
 	return at, true

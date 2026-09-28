@@ -159,6 +159,9 @@ func (p *Pool) share(i *Interpreter) {
 	}
 	own := i.native.shared
 	i.native.shared = p.shared.retain()
+	// own is unpublished and unreferenced from here: i runs on the pool
+	// runtime, so a release failure only leaks its mappings and no caller
+	// can recover it.
 	_ = own.release()
 }
 
@@ -175,6 +178,7 @@ func (p *Pool) wait(ctx context.Context) (*Interpreter, error) {
 }
 
 func (p *Pool) drop(i *Interpreter) {
+	// Put has no error channel and i is discarded either way.
 	_ = i.Close()
 	p.live.Add(-1)
 }
