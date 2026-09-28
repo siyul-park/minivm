@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/graph"
@@ -25,6 +26,11 @@ type lowering struct {
 	// its function's own entry.
 	osr   bool
 	count bool
+	// loops marks every block in a loop body; gate rejects a bridge or box
+	// exit outside them (see Lower); block is the block being lowered.
+	loops map[int]bool
+	gate  bool
+	block int
 	// upvals reports that f reads or writes its upvals.
 	upvals  bool
 	objects transform.Objects
@@ -158,8 +164,19 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 	// loop block uses it: a loop keeps its constants in registers.
 	loops := map[int]bool{}
 	dom := graph.NewDominance(f)
-	for _, h := range graph.Headers(f, dom) {
+	headers := graph.Headers(f, dom)
+	for _, h := range headers {
 		maps.Copy(loops, graph.Body(f, dom, h))
+	}
+	l.loops = loops
+	// A unit entered at ip 0 of code with loops gains only its prefix's
+	// dispatch, which a Go round trip outweighs: it bridges only in loops.
+	entry := f.Entry().IP
+	l.gate = osr && entry == 0 && len(headers) > 0
+	if l.gate {
+		if bytecode, err := analysis.Headers(fn); err == nil && slices.Contains(bytecode, entry) {
+			l.gate = false
+		}
 	}
 	caller := false
 	looped := map[ssa.Value]bool{}
@@ -338,6 +355,7 @@ func (l *lowering) function() error {
 		}
 	}
 	for i, block := range order {
+		l.block = block
 		b := l.f.Block(block)
 		l.a.Bind(labels[block])
 		l.fuse = ssa.NoValue
@@ -750,6 +768,9 @@ func (l *lowering) emit(id int) {
 
 // exit records the map of an exit of kind k at the current operation's state.
 func (l *lowering) exit(k jit.Kind) int {
+	if l.gate && !l.loops[l.block] && (k == jit.ExitBridge || k == jit.ExitBox) {
+		l.fail(fmt.Errorf("%w: prefix %s exit outside every loop", ErrUnsupported, k))
+	}
 	id := len(l.exits)
 	e := &jit.Exit{Kind: k}
 	l.exits = append(l.exits, e)

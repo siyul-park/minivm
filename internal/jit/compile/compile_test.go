@@ -951,6 +951,41 @@ func TestLower(t *testing.T) {
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
+	t.Run("rejects an ip-0 OSR unit whose loop-free prefix bridges", func(t *testing.T) {
+		b := ssa.New("f")
+		entry, header, exit := b.Block(), b.Block(), b.Block()
+		m1 := constant(b, entry, types.BoxRef(1))
+		mkey := constant(b, entry, types.BoxI32(2))
+		at := state(b, entry, 7, ssa.Operand{Value: m1, Owned: true}, ssa.Operand{Value: mkey})
+		got := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_GET, Args: []ssa.Value{m1, mkey}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+
+		value := constant(b, header, types.BoxI32(1))
+		hs := state(b, header, 9, ssa.Operand{Value: value})
+		b.Add(header, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{value}, State: hs})
+		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: header}, {Block: exit}}})
+		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
+
+		_, _, _, err := compile.Lower(b.Build(), new(machine), function(0, 1), nil, 0, true, false)
+		require.ErrorIs(t, err, compile.ErrUnsupported)
+	})
+
+	t.Run("accepts an ip-0 OSR unit whose loop-free prefix has no bridge", func(t *testing.T) {
+		b := ssa.New("f")
+		entry, header, exit := b.Block(), b.Block(), b.Block()
+		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+
+		value := constant(b, header, types.BoxI32(1))
+		hs := state(b, header, 9, ssa.Operand{Value: value})
+		b.Add(header, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{value}, State: hs})
+		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: header}, {Block: exit}}})
+		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
+
+		_, _, _, err := compile.Lower(b.Build(), new(machine), function(0, 1), nil, 0, true, false)
+		require.NoError(t, err)
+	})
+
 	t.Run("rejects a loop header without state", func(t *testing.T) {
 		b := ssa.New("f")
 		header := b.Block()

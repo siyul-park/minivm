@@ -1,6 +1,8 @@
 package interp
 
 import (
+	"slices"
+
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/internal/jit/compile"
@@ -26,9 +28,15 @@ type site struct {
 	// inner is s's own threaded handler, restored in place of the observer
 	// once s is known to never resolve.
 	inner func(*Interpreter)
-	// entry reports that s observes loop-free module code's ip 0, once per
-	// Run: it declines a cancelled Run, since that code reaches no safepoint.
+	// entry reports that s observes module code's ip 0, once per Run.
 	entry bool
+	// headers lists addr's own loop headers, set only on an entry site:
+	// empty for loop-free module code, which has no safepoint, so entry
+	// declines a cancelled Run instead; non-empty for module code with
+	// loops, which reaches one at each header, so entry need not. Submit
+	// also reads it, waiting for every one of addr's header sites to
+	// resolve before competing with them for addr's one queue slot.
+	headers []int
 	// threshold is s's submit count; cadence is how often past it s retries
 	// submission, looks up published code, and drains on a cached entry.
 	threshold, cadence int64
@@ -61,36 +69,62 @@ func (s *site) refute() bool {
 // observation, address 0 (module code) included. A header a fusion
 // absorbed (code[ip] == nil) is left alone: nothing runs there to observe.
 //
-// Loop-free module code is observed at ip 0 instead. Module code with a
-// loop is not: its ip-0 unit would take the queue's one address-0 slot
-// ahead of the headers' units and delay them (measured NBody +4%), for a
-// gain only in the code before the first loop.
+// Module code is also observed at ip 0, whether or not it has loops: its
+// entry site's submit waits for every header site of the same address to
+// resolve first (resolved), so it never takes the queue's one address-0
+// slot ahead of them.
 func (n *native) observe(i *Interpreter, addr int, fn *types.Function) {
 	headers, err := analysis.Headers(fn)
 	if err != nil {
 		return
 	}
-	ips, entry := headers, addr == 0 && len(headers) == 0
-	if entry {
-		ips = []int{0}
-	}
 	code := i.code[addr]
-	for _, ip := range ips {
+	// install adds an observer at ip, entry only for module code's own ip
+	// 0. translate.go completes address 0 through OpComplete regardless of
+	// fn.Typ, which i.module sets to an empty, non-nil FunctionType.
+	install := func(ip int, entry bool) {
 		if ip < 0 || ip >= len(code) || code[ip] == nil {
-			continue
+			return
 		}
-		// translate.go completes address 0 through OpComplete regardless of
-		// fn.Typ, which i.module sets to an empty, non-nil FunctionType.
 		threshold, cadence := int64(n.threshold), int64(interval)
+		var own []int
 		if entry {
-			// A module run once never compiles ahead of its callees; Runs are
-			// rare and loop-free code has no safepoint to drain at.
+			// A module run once never compiles ahead of its callees. Loop-free
+			// code has no safepoint to drain at, and Runs are rare: cadence 1.
+			// Code with loops polls its headers (resolved) at their cadence.
 			threshold, cadence = max(threshold, 2), 1
+			own = headers
+			if len(headers) > 0 {
+				cadence = interval
+			}
 		}
-		s := &site{address: addr, ip: ip, fn: fn, module: addr == 0, inner: code[ip], entry: entry, threshold: threshold, cadence: cadence}
+		s := &site{address: addr, ip: ip, fn: fn, module: addr == 0, inner: code[ip], entry: entry, headers: own, threshold: threshold, cadence: cadence}
 		n.sites[key{addr, ip}] = s
 		code[ip] = n.observer(s, code, s.inner)
 	}
+	for _, ip := range headers {
+		install(ip, false)
+	}
+	// A header already at ip 0 (the whole module is one loop) is observed
+	// above, as a header: entry semantics do not apply twice.
+	if addr == 0 && !slices.Contains(headers, 0) {
+		install(0, true)
+	}
+}
+
+// resolved reports whether every one of addr's header sites at ips has
+// published, permanently failed, or disabled: an entry site's submit waits
+// for this instead of competing with them for addr's one queue slot. A
+// header absent from sites has already failed or disabled (drain and enter
+// delete it on either); one still present is resolved once the store holds
+// its published code.
+func (n *native) resolved(addr int, ips []int) bool {
+	for _, ip := range ips {
+		if _, ok := n.sites[key{addr, ip}]; ok && n.store.CodeAt(addr, ip) == nil {
+			return false
+		}
+	}
+	return true
 }
 
 // observer wraps inner, the threaded handler at s's own header. Once
@@ -107,7 +141,7 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 		s.count++
 		switch {
 		case !s.submitted:
-			if s.count >= s.threshold && (s.count-s.threshold)%s.cadence == 0 {
+			if s.count >= s.threshold && (s.count-s.threshold)%s.cadence == 0 && n.resolved(s.address, s.headers) {
 				// The queue accepts one unit per address; an entry-0 CALL
 				// compile of the same address may hold it, undrained,
 				// since its own last call.
@@ -125,12 +159,14 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 
 // enter runs the current frame as s's cached OSR activation. It drains at
 // s's lookup cadence, counting entries: a callee called only from native
-// code would otherwise tier up only at a safepoint. Loop-free code reaches
-// no safepoint, so an entry site declines a cancelled Run, leaving threaded
-// code to report it. Native code reads a word per capture without a bounds
-// check, so a frame without its captures declines too.
+// code would otherwise tier up only at a safepoint. Loop-free module code
+// reaches no safepoint, so an entry site with no headers declines a
+// cancelled Run, leaving threaded code to report it; an entry site whose
+// module has loops reaches one at each header, so settle already reports
+// cancellation there. Native code reads a word per capture without a
+// bounds check, so a frame without its captures declines too.
 func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner func(*Interpreter)) bool {
-	if s.entry && cancelled(i) || len(i.fr.upvals) < len(s.fn.Captures) {
+	if s.entry && len(s.headers) == 0 && cancelled(i) || len(i.fr.upvals) < len(s.fn.Captures) {
 		return false
 	}
 	if s.count++; s.count%s.cadence == 0 {

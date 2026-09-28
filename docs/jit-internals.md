@@ -17,7 +17,8 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 |---|---|---|---|---|
 | `CALL` | interpreted calls to a `*types.Function`, and `ExitCall` replays of a closure call | `n` (Baseline); `graduate` (1024) native entries (Optimized) | every call | ip 0 |
 | OSR | back edges at a loop header, module code included | `n` | `interval` (256) back edges | the header |
-| Module entry | Runs of loop-free module code | `max(n, 2)` | every Run | ip 0 |
+| Module entry, loop-free | Runs of module code | `max(n, 2)` | every Run | ip 0 |
+| Module entry, with loops | Runs of module code | `max(n, 2)` | `interval` (256) Runs | ip 0 |
 
 `compile.Unit.OSR` / `jit.Code.OSR` mark OSR units, module entry included; a header can sit at ip 0.
 
@@ -140,11 +141,13 @@ A bridge receives only its lowered `SSA Args` through `Exit.Pops`; it uses a scr
 
 ## OSR
 
-Every loop header, including module code, has an observer; loop-free module code has one at ip 0 instead. Each site fixes its threshold and cadence at construction (Entries table). Past the threshold it retries submission and looks up `Store.CodeAt` at its cadence; a resolved site also drains at that cadence on entry, so a callee reached only from its native code still tiers up. Compile failure or refutation restores the threaded handler and disables the site.
+Every loop header, including module code, has an observer; module code also has one at ip 0, whether or not it has loops. Each site fixes its threshold and cadence at construction (Entries table). Past the threshold it retries submission and looks up `Store.CodeAt` at its cadence; a resolved site also drains at that cadence on entry, so a callee reached only from its native code still tiers up. Compile failure or refutation restores the threaded handler and disables the site.
 
-Loop-free code reaches no safepoint, so the ip-0 site drains on every entry and declines an already-cancelled Run, leaving threaded code to report it. Its threshold floor of 2 keeps a module run once from compiling ahead of its callees.
+Loop-free code reaches no safepoint, so its ip-0 site drains on every entry and declines an already-cancelled Run, leaving threaded code to report it. Its threshold floor of 2 keeps a module run once from compiling ahead of its callees.
 
-Module code with a loop has no ip-0 site: its unit would take the address's one queue slot ahead of the header units.
+Module code with loops reaches a safepoint at each header, so its ip-0 site does not decline a cancelled Run. Its submit waits until every header site of the address has published, failed, or been disabled (`resolved`), so it never takes the address's one queue slot ahead of them; it polls at the headers' cadence. A header at ip 0 is observed once, as a header.
+
+`compile.Lower` rejects an OSR unit rooted at ip 0 of code with loops when a bridge or box exit lies outside every loop: its only gain is the prefix's dispatch, which a Go round trip outweighs. The rejected unit's site is disabled; its header sites keep entering.
 
 Entry reuses the current frame (`FB = bp`, `Depth = 0`); exits rewrite it in place. Materialized frames finish threaded execution without observers.
 

@@ -3441,12 +3441,15 @@ func TestWithThreshold(t *testing.T) {
 		defer vm.Close()
 		ctx := context.Background()
 
-		// One run bridges at most once: a materialized frame finishes threaded.
-		// Retirement is reached once two consecutive runs report the same
-		// exits count.
+		// The header's own back edges cross its cadence within the first
+		// Run and it retires (refute deopts) within a handful of Runs. The
+		// ip-0 site's submit waits for the header to resolve (resolved),
+		// then needs its own cadence (interval) of Runs for a submit
+		// window and again for its first lookup to drain and publish the
+		// compile: at n=600 back edges per Run that lands around Run 512.
 		var got types.Value
 		var runErr, popErr error
-		var exits, prior float64
+		var compiles float64
 		require.Eventually(t, func() bool {
 			runErr = vm.Run(ctx)
 			if runErr != nil {
@@ -3458,19 +3461,32 @@ func TestWithThreshold(t *testing.T) {
 			}
 			vm.Reset()
 			vm.Flush()
-			prior = exits
-			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
-			return exits > 0 && exits == prior
+			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+			return compiles >= 2
 		}, 5*time.Second, time.Millisecond)
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
-		compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
-		// One submit, one compile; every native entry bridges immediately.
-		require.Equal(t, float64(1), compiles)
+		// Two submits, two compiles: the header's own OSR unit, and module
+		// code's own ip-0 unit (reachable prefix and loop both, including
+		// the same always-bridging op); every native entry bridges immediately.
+		require.Equal(t, float64(2), compiles)
 
-		// The retired site never polls or re-enters again: a further run
-		// takes the same back edges threaded, and both metrics hold.
+		// The ip-0 unit's own bridge-and-deopt count starts fresh once
+		// published (materializing hides the rest of a Run from its
+		// observer, so it takes one Run per deopt, like the header's own
+		// retirement): run comfortably past refute (8) deopts so it
+		// retires too, then confirm two further runs report the same
+		// steady-state exits count.
+		for range 12 {
+			require.NoError(t, vm.Run(ctx))
+			_, err := vm.Pop()
+			require.NoError(t, err)
+			vm.Reset()
+		}
+		vm.Flush()
+		exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+
 		require.NoError(t, vm.Run(ctx))
 		got2, err2 := vm.Pop()
 		require.NoError(t, err2)
@@ -3479,7 +3495,7 @@ func TestWithThreshold(t *testing.T) {
 		vm.Flush()
 		compilesAgain, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
 		exitsAgain, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
-		require.Equal(t, float64(1), compilesAgain)
+		require.Equal(t, float64(2), compilesAgain)
 		require.Equal(t, exits, exitsAgain)
 	})
 
@@ -3564,6 +3580,146 @@ func TestWithThreshold(t *testing.T) {
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			return entries > 0
 		}, 2*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("module code with a loop enters at ip 0 after its header unit publishes", func(t *testing.T) {
+		native(t)
+		// Straight-line prefix (i, a, b init) before the header, like the
+		// loop-free case, but here the loop makes it a module-with-loop ip-0
+		// site: no per-ip metric exists, so readiness uses both units'
+		// optimized compiles (header's own OSR unit plus ip 0's), the same
+		// proxy the callee-tiers-up case below uses.
+		prog := iterativeFibProgram(t, 200_000)
+		want := runProgram(t, prog)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+
+		var got types.Value
+		var compiles float64
+		var runErr, popErr error
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Reset()
+			vm.Flush()
+			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+			return compiles >= 2
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("the ip-0 unit of module code with loops never compiles before its header units resolve", func(t *testing.T) {
+		native(t)
+		// i starts past the loop's own exit check, so the header is a loop
+		// (analysis.Headers reads the back edge statically) but its Br(loop)
+		// is never taken: the header is hit once per Run — a fall-through,
+		// not a back edge — matching the entry site's own once-per-Run
+		// count exactly. With WithThreshold(3) both reach threshold on the
+		// same Run, the entry site's ip-0 handler dispatching first in
+		// program order: an ungated entry site would win the address's one
+		// queue slot and block the header until its next retry, cadence
+		// (256) Runs later. A gated entry site waits, so both resolve fast.
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_SET, 0)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32))
+		want := runProgram(t, prog)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(3), interp.WithProfiler(profiler))
+		defer vm.Close()
+
+		var results []types.Value
+		var errs []error
+		var compiles float64
+		require.Eventually(t, func() bool {
+			runErr := vm.Run(context.Background())
+			if runErr != nil {
+				errs = append(errs, runErr)
+				return true
+			}
+			result, popErr := vm.Pop()
+			if popErr != nil {
+				errs = append(errs, popErr)
+				return true
+			}
+			results = append(results, result)
+			vm.Reset()
+			vm.Flush()
+			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+			return compiles >= 2
+		}, 5*time.Second, time.Millisecond)
+		require.Empty(t, errs)
+		for _, result := range results {
+			require.Equal(t, want, result)
+		}
+	})
+
+	t.Run("module code whose prefix bridges keeps entering through its headers", func(t *testing.T) {
+		native(t)
+		// STRING_EQ sits in the straight-line prefix, outside every loop:
+		// the ip-0 unit's own compile fails the prefix gate
+		// (internal/jit/compile Lower's l.gate, ErrUnsupported), so drain
+		// restores its threaded handler and deletes its site
+		// (interp/native.go drain, OSR branch) instead of ever entering or
+		// retrying. The header's own unit, translated from the loop alone,
+		// carries no prefix and is unaffected.
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		b.Emit(instr.CONST_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.STRING_EQ).Emit(instr.DROP)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 5_000).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(types.String("x")))
+		want := runProgram(t, prog)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+
+		var got types.Value
+		var runErr, popErr error
+		var entries, unsupported float64
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			got, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Reset()
+			vm.Flush()
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+			unsupported, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "unsupported"})
+			return entries > 0 && unsupported > 0
+		}, 5*time.Second, time.Millisecond)
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
