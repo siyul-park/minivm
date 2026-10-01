@@ -79,9 +79,9 @@ const nativeStack = 1 << 20
 // budget is the back-edge count between safepoints.
 const budget = 1 << 16
 
-// refute is the count of refuted speculations under unchanged feedback that
+// tolerance is the count of refuted speculations under unchanged feedback that
 // retires native code.
-const refute = 8
+const tolerance = 8
 
 // graduate is the Baseline entry count that tiers an address to Optimized.
 const graduate = 1024
@@ -103,9 +103,9 @@ type shared struct {
 	// may nominate or sweep it, not only the one that published the job.
 	mu         sync.Mutex
 	candidates []int
-	// count is len(candidates), readable without mu so an empty sweep —
+	// nominated is len(candidates), readable without mu so an empty sweep —
 	// every call's common case — takes no lock.
-	count atomic.Int64
+	nominated atomic.Int64
 
 	// calls is the pool-wide CALL count per address, added to by every
 	// native sharing r while the address has no published code: a pooled
@@ -113,10 +113,10 @@ type shared struct {
 	// not threshold calls to any one interpreter.
 	calls []atomic.Int64
 
-	// sites is the pool-wide entry count per OSR/entry site, added to by
+	// totals is the pool-wide entry count per OSR/entry site, added to by
 	// every native sharing r while the site is unsubmitted; built lazily
 	// under mu.
-	sites map[key]*atomic.Int64
+	totals map[key]*atomic.Int64
 
 	refs atomic.Int64
 }
@@ -126,13 +126,13 @@ type shared struct {
 func (r *shared) total(k key) *atomic.Int64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.sites == nil {
-		r.sites = map[key]*atomic.Int64{}
+	if r.totals == nil {
+		r.totals = map[key]*atomic.Int64{}
 	}
-	t := r.sites[k]
+	t := r.totals[k]
 	if t == nil {
 		t = new(atomic.Int64)
-		r.sites[k] = t
+		r.totals[k] = t
 	}
 	return t
 }
@@ -143,14 +143,14 @@ func (r *shared) nominate(addr int) {
 	defer r.mu.Unlock()
 	if !slices.Contains(r.candidates, addr) {
 		r.candidates = append(r.candidates, addr)
-		r.count.Add(1)
+		r.nominated.Add(1)
 	}
 }
 
 // sweep calls visit on every candidate and keeps only the ones it reports
 // live, under one lock for the whole pass.
 func (r *shared) sweep(visit func(addr int) (live bool)) {
-	if r.count.Load() == 0 {
+	if r.nominated.Load() == 0 {
 		return
 	}
 	r.mu.Lock()
@@ -162,7 +162,7 @@ func (r *shared) sweep(visit func(addr int) (live bool)) {
 		}
 	}
 	r.candidates = live
-	r.count.Store(int64(len(live)))
+	r.nominated.Store(int64(len(live)))
 }
 
 // mixed marks a dynamic CALL site (native.callees) that has seen more than
@@ -449,10 +449,10 @@ func (n *native) record(i *Interpreter, exit jit.Exit) {
 
 // refute counts one refuted speculation against addr's code at tier and
 // reports whether it retires: at once when feedback moved since the code was
-// built, which a recompile can use, else at the refute count.
+// built, which a recompile can use, else at the tolerance count.
 func (n *native) refute(addr int, tier jit.Tier) bool {
 	n.deopts[addr]++
-	return n.moved(addr, tier) || n.deopts[addr] >= refute
+	return n.moved(addr, tier) || n.deopts[addr] >= tolerance
 }
 
 // retire unpublishes addr's code at tier and restarts its counters. The tier
@@ -500,7 +500,7 @@ func (n *native) drain(i *Interpreter) {
 			if errors.Is(job.Err, compile.ErrUnsupported) {
 				outcome = "unsupported"
 			}
-			n.metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: outcome})
+			metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: outcome})
 			continue
 		}
 		n.store.Publish(job.Code)
@@ -512,7 +512,7 @@ func (n *native) drain(i *Interpreter) {
 		if job.Code.Tier == jit.Baseline {
 			n.nominate(job.Unit.Address)
 		}
-		n.metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: "ok"})
+		metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: "ok"})
 	}
 	// Candidates are pool-wide: a native that never drains a Baseline job
 	// still promotes it once its own entries reach graduate.
@@ -555,7 +555,7 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 		}
 		exit := entered.Exits[ctx.Exit()]
 		if i.profiler != nil {
-			n.metric(i, metricExits, prof.Label{Key: "kind", Value: exit.Kind.String()})
+			metric(i, metricExits, prof.Label{Key: "kind", Value: exit.Kind.String()})
 		}
 		switch exit.Kind {
 		case jit.ExitSafepoint:
@@ -565,8 +565,7 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 				deopt(exit)
 				return false, false, nil
 			}
-			ctx.Heap = heapBase(i.heap)
-			ctx.RC = rcBase(i.rc)
+			n.sync(i)
 			ctx.Budget = budget
 			mark = ctx.Budget
 			n.drain(i)
@@ -578,8 +577,7 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 			if ref := types.Boxed(ctx.Read(int(ctx.Depth)-1, exit.Word)).Ref(); ref != 0 {
 				i.release(ref)
 			}
-			ctx.Heap = heapBase(i.heap)
-			ctx.RC = rcBase(i.rc)
+			n.sync(i)
 			trap = jit.Resume(ctx)
 		case jit.ExitBridge, jit.ExitBox:
 			// Charged before serving: a deopt after a bridge would run the op
@@ -596,8 +594,7 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 			}
 			switch class {
 			case jit.ClassBridge:
-				ctx.Heap = heapBase(i.heap)
-				ctx.RC = rcBase(i.rc)
+				n.sync(i)
 				trap = jit.Resume(ctx)
 				continue
 			case jit.ClassTrap:
@@ -608,7 +605,7 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 			return false, n.judge(entered, code, refute), nil
 		case jit.ExitCall:
 			ref := n.callee(int(ctx.Depth)-1, exit)
-			addr, ok := n.target(i, exit, ref)
+			addr, ok := target(i, exit, ref)
 			if !ok || !n.nests(i, exit, addr) {
 				deopt(exit)
 				n.replay(i, exit, ref)
@@ -622,8 +619,7 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 			if fault, ok := n.nest(i, exit, ref, start, deopt); !ok {
 				return false, false, fault
 			}
-			ctx.Heap = heapBase(i.heap)
-			ctx.RC = rcBase(i.rc)
+			n.sync(i)
 			mark = ctx.Budget
 			trap = jit.Resume(ctx)
 		default:
@@ -663,19 +659,10 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	returns := len(fn.Typ.Returns)
 
 	ctx := n.ctx
-	ctx.Heap = heapBase(i.heap)
-	ctx.Globals = base(i.globals)
-	ctx.RC = rcBase(i.rc)
-	ctx.Natives = n.store.Natives()
-	ctx.Entries = entry(n.entries)
-	ctx.Top = end(i.stack)
-	ctx.FB = base(i.stack[bp:])
-	ctx.Limit = uint64(min(len(ctx.Records), int(n.depth)+len(i.frames)-i.fp))
-	ctx.Budget = budget
-	ctx.Depth = n.depth
+	n.load(i, bp, 0)
 
 	if i.profiler != nil {
-		n.metric(i, metricEntries, prof.Label{Key: "tier", Value: code.Tier.String()})
+		metric(i, metricEntries, prof.Label{Key: "tier", Value: code.Tier.String()})
 	}
 
 	// Threaded code pushed every argument owned, but a return above depth 1
@@ -794,14 +781,14 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) jit.Class {
 	ctx := n.ctx
 	k := int(ctx.Depth) - 1
 	m := exit.Frame
-	bp := int((ctx.Records[k].FB - base(i.stack)) / unsafe.Sizeof(types.Boxed(0)))
+	bp := n.frameBase(i, k)
 	sp := bp + slots(i.function(m.Address))
 
 	tail := m.Stack[len(m.Stack)-exit.Pops:]
 	var buf [8]hold
 	holds := buf[:0]
 	for j, o := range tail {
-		v := n.box(i, o.Value.Kind, ctx.Read(k, o.Value))
+		v := fromWord(i, o.Value.Kind, ctx.Read(k, o.Value))
 		i.stack[sp+j] = v
 		if v.Kind() != types.KindRef {
 			continue
@@ -810,7 +797,7 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) jit.Class {
 		count := 0
 		if o.Value.Kind == types.KindRef {
 			if hosted(i.heap[v.Ref()]) {
-				restore(i, holds)
+				rollback(i, holds)
 				return jit.ClassGuard
 			}
 			count = i.rc[v.Ref()]
@@ -832,7 +819,7 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) jit.Class {
 	ok := exec(i, f)
 	if ok {
 		for j, kind := range exit.Results {
-			ctx.Results[j] = n.unbox(i, kind, i.stack[i.sp-len(exit.Results)+j])
+			ctx.Results[j] = toWord(i, kind, i.stack[i.sp-len(exit.Results)+j])
 		}
 		// Native code handed an adopted operand's own reference to the op;
 		// the handler consumed the retain above instead.
@@ -842,7 +829,7 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) jit.Class {
 			}
 		}
 	} else {
-		restore(i, holds)
+		rollback(i, holds)
 	}
 	i.fr, i.sp = savedFr, savedSP
 	if !ok {
@@ -851,8 +838,8 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) jit.Class {
 	return jit.ClassBridge
 }
 
-// restore releases each held operand back down to its saved count.
-func restore(i *Interpreter, holds []hold) {
+// rollback releases each held operand back down to its saved count.
+func rollback(i *Interpreter, holds []hold) {
 	for _, h := range holds {
 		for i.rc[h.ref] > h.count {
 			i.release(h.ref)
@@ -957,7 +944,7 @@ func (n *native) replay(i *Interpreter, exit jit.Exit, ref int) {
 // function or closure that takes the call's arguments and returns the kinds
 // it reads back; any other callee ok reports false and the caller deoptimizes
 // to run its own CALL.
-func (n *native) target(i *Interpreter, exit jit.Exit, ref int) (addr int, ok bool) {
+func target(i *Interpreter, exit jit.Exit, ref int) (addr int, ok bool) {
 	if exit.Callee != 0 {
 		return exit.Callee, true
 	}
@@ -992,7 +979,7 @@ func (n *native) nests(i *Interpreter, exit jit.Exit, addr int) bool {
 		return false
 	}
 	k := int(n.ctx.Depth) - 1
-	bp := int((n.ctx.Records[k].FB - base(i.stack)) / unsafe.Sizeof(types.Boxed(0)))
+	bp := n.frameBase(i, k)
 	return bp+slots(i.function(exit.Frame.Address))+len(exit.Frame.Stack)+exit.Args < len(i.stack)
 }
 
@@ -1011,7 +998,7 @@ func (n *native) nest(i *Interpreter, exit jit.Exit, ref, start int, deopt func(
 	k := int(ctx.Depth) - 1
 	m := exit.Frame
 	at := start + k - int(n.depth)
-	bp := int((ctx.Records[k].FB - base(i.stack)) / unsafe.Sizeof(types.Boxed(0)))
+	bp := n.frameBase(i, k)
 
 	state, limit, spent, depth, floor := ctx.State, ctx.Limit, ctx.Budget, n.depth, i.floor
 	fr, fp, sp, saved := i.fr, i.fp, i.sp, i.frames[at]
@@ -1026,12 +1013,12 @@ func (n *native) nest(i *Interpreter, exit jit.Exit, ref, start int, deopt func(
 		i.retainBox(i.stack[args+p])
 	}
 	n.depth, i.floor = uint64(k+1), at+1
-	fault, err := n.dispatch(i)
+	fault, err := dispatch(i)
 	n.depth, i.floor = depth, floor
 
 	if err == nil && fault == nil {
 		for j, kind := range exit.Results {
-			ctx.Results[j] = n.unbox(i, kind, i.stack[i.sp-len(exit.Results)+j])
+			ctx.Results[j] = toWord(i, kind, i.stack[i.sp-len(exit.Results)+j])
 		}
 		i.fr, i.fp, i.sp, i.frames[at] = fr, fp, sp, saved
 		ctx.State, ctx.Limit, ctx.Budget, ctx.Depth = state, limit, spent, uint64(k+1)
@@ -1063,7 +1050,7 @@ func (n *native) nest(i *Interpreter, exit jit.Exit, ref, start int, deopt func(
 // dispatch runs the threaded loop for nest until its stand-in frame's CALL
 // completes, reporting a cancellation as err and any panic no handler above
 // the floor caught as fault.
-func (n *native) dispatch(i *Interpreter) (fault any, err error) {
+func dispatch(i *Interpreter) (fault any, err error) {
 	defer func() {
 		fault = recover()
 	}()
@@ -1093,7 +1080,7 @@ func (n *native) frame(i *Interpreter, at, k int, m jit.Frame, ref int, release 
 	f.code = n.exactCode(i, m.Address)
 	f.ref = ref
 	f.release = release
-	f.bp = int((ctx.Records[k].FB - base(i.stack)) / unsafe.Sizeof(types.Boxed(0)))
+	f.bp = n.frameBase(i, k)
 	f.returns = m.Returns
 	f.ip = m.IP
 	f.upvals = i.upvals(ref, m.Address)
@@ -1101,7 +1088,7 @@ func (n *native) frame(i *Interpreter, at, k int, m jit.Frame, ref int, release 
 
 	sp := f.bp + slots(i.function(m.Address))
 	for j, o := range m.Stack {
-		boxed := n.box(i, o.Value.Kind, ctx.Read(k, o.Value))
+		boxed := fromWord(i, o.Value.Kind, ctx.Read(k, o.Value))
 		// A boxed wide i64 is fresh and already owned; only a ref borrows.
 		if !o.Owned && o.Value.Kind == types.KindRef {
 			i.retainBox(boxed)
@@ -1111,7 +1098,7 @@ func (n *native) frame(i *Interpreter, at, k int, m jit.Frame, ref int, release 
 	sp += len(m.Stack)
 
 	for _, l := range m.Locals {
-		boxed := n.box(i, l.Value.Kind, ctx.Read(k, l.Value))
+		boxed := fromWord(i, l.Value.Kind, ctx.Read(k, l.Value))
 		addr := f.bp + l.Index
 		i.releaseBox(i.stack[addr])
 		i.stack[addr] = boxed
@@ -1136,9 +1123,9 @@ func (n *native) exactCode(i *Interpreter, addr int) []func(*Interpreter) {
 	return code
 }
 
-// box converts a native word to the interpreter's Boxed representation.
+// fromWord converts a native word to the interpreter's Boxed representation.
 // Wide i64 values use the normal heap-promotion path.
-func (n *native) box(i *Interpreter, kind types.Kind, word uint64) types.Boxed {
+func fromWord(i *Interpreter, kind types.Kind, word uint64) types.Boxed {
 	switch kind {
 	case types.KindI1:
 		return types.BoxI1(uint32(word) != 0)
@@ -1159,9 +1146,9 @@ func (n *native) box(i *Interpreter, kind types.Kind, word uint64) types.Boxed {
 	}
 }
 
-// unbox converts v, a value a handler pushed, to the native word of kind,
-// consuming a heap-boxed i64's reference; box is its inverse.
-func (n *native) unbox(i *Interpreter, kind types.Kind, v types.Boxed) uint64 {
+// toWord converts v, a value a handler pushed, to the native word of kind,
+// consuming a heap-boxed i64's reference; fromWord is its inverse.
+func toWord(i *Interpreter, kind types.Kind, v types.Boxed) uint64 {
 	switch kind {
 	case types.KindI1, types.KindI8, types.KindI32:
 		return uint64(uint32(v.I32()))
@@ -1176,7 +1163,7 @@ func (n *native) unbox(i *Interpreter, kind types.Kind, v types.Boxed) uint64 {
 	}
 }
 
-func (n *native) metric(i *Interpreter, name string, labels ...prof.Label) {
+func metric(i *Interpreter, name string, labels ...prof.Label) {
 	if i.profiler == nil {
 		return
 	}
@@ -1197,27 +1184,44 @@ func cancelled(i *Interpreter) bool {
 	}
 }
 
-func base(s []types.Boxed) uintptr {
+// base is the address of s's backing array. The heap's is jit.SizeofValue
+// bytes (an interface word pair) per address, read-only to native code except
+// for the non-pointer element and field words a guarded exec op writes in place.
+func base[T any](s []T) uintptr {
 	return uintptr(unsafe.Pointer(unsafe.SliceData(s)))
 }
 
+// end is the address one past the last word of the operand stack s.
 func end(s []types.Boxed) uintptr {
 	return base(s) + uintptr(len(s))*unsafe.Sizeof(types.Boxed(0))
 }
 
-func rcBase(rc []int) uintptr {
-	return uintptr(unsafe.Pointer(unsafe.SliceData(rc)))
+// frameBase is the stack index where native activation k's frame starts.
+func (n *native) frameBase(i *Interpreter, k int) int {
+	return int((n.ctx.Records[k].FB - base(i.stack)) / unsafe.Sizeof(types.Boxed(0)))
 }
 
-func entry(entries []int64) uintptr {
-	return uintptr(unsafe.Pointer(unsafe.SliceData(entries)))
+// load points the native context at i for an entry whose frame starts at stack
+// index bp. spare is how many more nested activations the entry may start: an
+// OSR entry replaces the running frame instead of pushing one.
+func (n *native) load(i *Interpreter, bp, spare int) {
+	ctx := n.ctx
+	n.sync(i)
+	ctx.Globals = base(i.globals)
+	ctx.Natives = n.store.Natives()
+	ctx.Entries = base(n.entries)
+	ctx.Top = end(i.stack)
+	ctx.FB = base(i.stack[bp:])
+	ctx.Limit = uint64(min(len(ctx.Records), int(n.depth)+len(i.frames)-i.fp+spare))
+	ctx.Budget = budget
+	ctx.Depth = n.depth
 }
 
-// heapBase is the address of heap's backing array: jit.SizeofValue bytes
-// (an interface word pair) per address, read-only to native code except for
-// the non-pointer element/field words a guarded exec op writes in place.
-func heapBase(heap []types.Value) uintptr {
-	return uintptr(unsafe.Pointer(unsafe.SliceData(heap)))
+// sync points the native context at i's heap and counts, which a bridge or a
+// call may have moved.
+func (n *native) sync(i *Interpreter) {
+	n.ctx.Heap = base(i.heap)
+	n.ctx.RC = base(i.rc)
 }
 
 // slots is fn's parameter and local count, without Declared's allocation.

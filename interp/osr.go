@@ -192,20 +192,11 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	}
 
 	ctx := n.ctx
-	ctx.Heap = heapBase(i.heap)
-	ctx.Globals = base(i.globals)
-	ctx.RC = rcBase(i.rc)
-	ctx.Natives = n.store.Natives()
-	ctx.Entries = entry(n.entries)
-	ctx.Top = end(i.stack)
-	ctx.FB = base(i.stack[i.fr.bp:])
+	n.load(i, i.fr.bp, 1)
 	ctx.Upvals = base(i.fr.upvals)
-	ctx.Limit = uint64(min(len(ctx.Records), int(n.depth)+len(i.frames)-i.fp+1))
-	ctx.Budget = budget
-	ctx.Depth = n.depth
 
 	if i.profiler != nil {
-		n.metric(i, metricEntries, prof.Label{Key: "tier", Value: c.Tier.String()})
+		metric(i, metricEntries, prof.Label{Key: "tier", Value: c.Tier.String()})
 	}
 
 	ok, retire := true, false
@@ -223,7 +214,7 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 					return true
 				}
 				s.deopts++
-				return s.deopts >= refute
+				return s.deopts >= tolerance
 			},
 		)
 	} else {
@@ -235,9 +226,9 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	if retire {
 		n.store.RetireAt(s.address, s.ip)
 		s.code = nil
-		if s.deopts < refute && !same(s.built, n.feedback(s.address)) {
+		if s.deopts < tolerance && !same(s.built, n.feedback(s.address)) {
 			// Feedback moved since s's code was built: submit s again. Each
-			// re-arm counts toward refute, so recompiles stay bounded.
+			// re-arm counts toward tolerance, so recompiles stay bounded.
 			s.deopts++
 			s.submitted = false
 			s.ledger = jit.Ledger{}

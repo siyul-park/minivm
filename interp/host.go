@@ -59,6 +59,7 @@ var (
 	_ types.Value = (*HostMap)(nil)
 )
 
+// NewHostFunction exposes fn to the VM as a function of type typ.
 func NewHostFunction(typ *types.FunctionType, fn func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error)) *HostFunction {
 	return &HostFunction{Typ: typ, Fn: fn}
 }
@@ -268,6 +269,7 @@ func (h *HostMap) Delete(i *Interpreter, key types.Boxed) error {
 	return nil
 }
 
+// Clear removes every entry of the Go map.
 func (h *HostMap) Clear() { h.value().Clear() }
 
 // Map rebuilds the view as the VM map a copy of the Go value would have

@@ -86,7 +86,7 @@ func (e *Encoder) enter(ptr unsafe.Pointer) bool {
 
 func (e *Encoder) leave(ptr unsafe.Pointer) { delete(e.seen, ptr) }
 
-// box narrows a standalone value into a slot of typ, publishing a heap ref when
+// boxAs narrows a standalone value into a slot of typ, publishing a heap ref when
 // the slot holds one.
 func (e *Encoder) boxAs(val types.Value, typ types.Type) (types.Boxed, error) {
 	switch typ.Kind() {

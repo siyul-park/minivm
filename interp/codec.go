@@ -64,6 +64,7 @@ type field struct {
 	conversion *conversion
 }
 
+// Errors the built-in codec reports.
 var (
 	ErrMarshalCycle           = errors.New("marshal cycle")
 	ErrUnsupportedMarshalType = errors.New("unsupported marshal type")
@@ -258,6 +259,7 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 	return &Registry{entries: r.entries}
 }
 
+// Marshal converts v to a VM value; a nil v marshals to null.
 func (r *Registry) Marshal(i *Interpreter, v any) (types.Value, error) {
 	rv := reflect.ValueOf(v)
 	if !rv.IsValid() {
@@ -395,7 +397,7 @@ func (p *conversion) converting() bool {
 	return true
 }
 
-// runtime resolves a Go type that already holds a VM value.
+// native resolves a Go type that already holds a VM value.
 func (p *conversion) native() bool {
 	vm, ok := runtimeTypes[p.typ]
 	if !ok {

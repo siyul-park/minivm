@@ -15,6 +15,8 @@ type RuntimeError struct {
 	Frames []FrameInfo
 }
 
+// FrameInfo locates one frame of a RuntimeError by function address and
+// instruction pointer.
 type FrameInfo struct {
 	Func int
 	IP   int
@@ -27,6 +29,8 @@ type escape struct {
 	err error
 }
 
+// TrapCode values are the types.ErrorCode a guest handler sees for the
+// matching Err sentinel; TrapCodeHostError covers every other Go error.
 const (
 	TrapCodeUnknownOpcode       types.ErrorCode = -1
 	TrapCodeUnreachableExecuted types.ErrorCode = -2
@@ -45,6 +49,8 @@ const (
 	TrapCodeHostError           types.ErrorCode = -15
 )
 
+// Err sentinels are the semantic failures execution reports. ErrYield is not a
+// failure: Run returns it when a root frame yields.
 var (
 	ErrUnknownOpcode       = errors.New("unknown opcode")
 	ErrUnreachableExecuted = errors.New("unreachable executed")
@@ -89,6 +95,8 @@ var errorCodes = []struct {
 // the next Run call resumes exactly after the YIELD.
 var errYield = errors.New("yield")
 
+// ErrorCode maps err to the types.ErrorCode a guest handler observes: the code
+// of a thrown Error, a TrapCode for an execution sentinel, or TrapCodeHostError.
 func ErrorCode(err error) types.ErrorCode {
 	if err == nil {
 		return types.ErrorCodeNone

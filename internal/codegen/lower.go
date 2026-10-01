@@ -9,6 +9,12 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// typesPkg and instrPkg are the import paths generated code qualifies with.
+const (
+	typesPkg = "github.com/siyul-park/minivm/types"
+	instrPkg = "github.com/siyul-park/minivm/instr"
+)
+
 type value struct {
 	op       instr.Opcode
 	head     instr.Opcode
@@ -52,37 +58,37 @@ type target struct {
 type lowerer func(*state, step) (value, error)
 
 var lowerers = [256]lowerer{
-	instr.ARRAY_APPEND:        standaloneLowerer(arrayAppend),
-	instr.ARRAY_COPY:          standaloneLowerer(arrayCopy),
-	instr.ARRAY_DELETE:        standaloneLowerer(arrayDelete),
-	instr.ARRAY_FILL:          standaloneLowerer(arrayFill),
+	instr.ARRAY_APPEND:        emit(arrayAppend()),
+	instr.ARRAY_COPY:          emit(arrayCopy()),
+	instr.ARRAY_DELETE:        emit(arrayDelete()),
+	instr.ARRAY_FILL:          emit(arrayFill()),
 	instr.ARRAY_GET:           containerGet,
-	instr.ARRAY_LEN:           standaloneLowerer(arrayLen),
-	instr.ARRAY_NEW:           standaloneLowerer(arrayNew),
-	instr.ARRAY_NEW_DEFAULT:   standaloneLowerer(arrayNewDefault),
+	instr.ARRAY_LEN:           emit(arrayLen()),
+	instr.ARRAY_NEW:           emit(arrayNew()),
+	instr.ARRAY_NEW_DEFAULT:   emit(arrayNewDefault()),
 	instr.ARRAY_SET:           arrayStore,
-	instr.ARRAY_SLICE:         standaloneLowerer(arraySlice),
-	instr.BR:                  standaloneLowerer(br),
+	instr.ARRAY_SLICE:         emit(arraySlice()),
+	instr.BR:                  emit(br()),
 	instr.BR_IF:               branch,
-	instr.BR_TABLE:            standaloneLowerer(brTable),
+	instr.BR_TABLE:            emit(brTable()),
 	instr.CALL:                call,
 	instr.CLOSURE_NEW:         call,
 	instr.CONST_GET:           slotRead,
-	instr.CORO_DONE:           standaloneLowerer(coroDone),
-	instr.CORO_VALUE:          standaloneLowerer(coroValue),
+	instr.CORO_DONE:           emit(coroDone()),
+	instr.CORO_VALUE:          emit(coroValue()),
 	instr.DROP:                refOp,
 	instr.DUP:                 refOp,
-	instr.ERROR_CODE:          standaloneLowerer(errorCode),
-	instr.ERROR_GET:           standaloneLowerer(errorGet),
-	instr.ERROR_NEW:           standaloneLowerer(errorNew),
-	instr.F32_ABS:             standaloneLowerer(f32Abs),
+	instr.ERROR_CODE:          emit(errorCode()),
+	instr.ERROR_GET:           emit(errorGet()),
+	instr.ERROR_NEW:           emit(errorNew()),
+	instr.F32_ABS:             emit(float32Math("Abs")),
 	instr.F32_ADD:             arithmetic,
-	instr.F32_CEIL:            standaloneLowerer(f32Ceil),
+	instr.F32_CEIL:            emit(float32Math("Ceil")),
 	instr.F32_CONST:           slotRead,
 	instr.F32_COPYSIGN:        arithmetic,
 	instr.F32_DIV:             arithmetic,
 	instr.F32_EQ:              arithmetic,
-	instr.F32_FLOOR:           standaloneLowerer(f32Floor),
+	instr.F32_FLOOR:           emit(float32Math("Floor")),
 	instr.F32_GE:              arithmetic,
 	instr.F32_GT:              arithmetic,
 	instr.F32_LE:              arithmetic,
@@ -92,26 +98,26 @@ var lowerers = [256]lowerer{
 	instr.F32_MOD:             arithmetic,
 	instr.F32_MUL:             arithmetic,
 	instr.F32_NE:              arithmetic,
-	instr.F32_NEAREST:         standaloneLowerer(f32Nearest),
-	instr.F32_NEG:             standaloneLowerer(f32Neg),
-	instr.F32_REINTERPRET_I32: standaloneLowerer(f32ReinterpretI32),
+	instr.F32_NEAREST:         emit(float32Math("RoundToEven")),
+	instr.F32_NEG:             emit(convert(narrow("F32"), "F32", neg)),
+	instr.F32_REINTERPRET_I32: emit(convert(narrow("I32"), "F32", as("uint32"), via("math", "Float32frombits"))),
 	instr.F32_REM:             arithmetic,
-	instr.F32_SQRT:            standaloneLowerer(f32Sqrt),
+	instr.F32_SQRT:            emit(float32Math("Sqrt")),
 	instr.F32_SUB:             arithmetic,
-	instr.F32_TO_F64:          standaloneLowerer(f32ToF64),
-	instr.F32_TO_I32_S:        standaloneLowerer(f32ToI32S),
-	instr.F32_TO_I32_U:        standaloneLowerer(f32ToI32U),
-	instr.F32_TO_I64_S:        standaloneLowerer(f32ToI64S),
-	instr.F32_TO_I64_U:        standaloneLowerer(f32ToI64U),
-	instr.F32_TRUNC:           standaloneLowerer(f32Trunc),
-	instr.F64_ABS:             standaloneLowerer(f64Abs),
+	instr.F32_TO_F64:          emit(convert(narrow("F32"), "F64", as("float64"))),
+	instr.F32_TO_I32_S:        emit(saturate("F32", "int32")),
+	instr.F32_TO_I32_U:        emit(saturate("F32", "uint32")),
+	instr.F32_TO_I64_S:        emit(saturate("F32", "int64")),
+	instr.F32_TO_I64_U:        emit(saturate("F32", "uint64")),
+	instr.F32_TRUNC:           emit(float32Math("Trunc")),
+	instr.F64_ABS:             emit(float64Math("Abs")),
 	instr.F64_ADD:             arithmetic,
-	instr.F64_CEIL:            standaloneLowerer(f64Ceil),
+	instr.F64_CEIL:            emit(float64Math("Ceil")),
 	instr.F64_CONST:           slotRead,
 	instr.F64_COPYSIGN:        arithmetic,
 	instr.F64_DIV:             arithmetic,
 	instr.F64_EQ:              arithmetic,
-	instr.F64_FLOOR:           standaloneLowerer(f64Floor),
+	instr.F64_FLOOR:           emit(float64Math("Floor")),
 	instr.F64_GE:              arithmetic,
 	instr.F64_GT:              arithmetic,
 	instr.F64_LE:              arithmetic,
@@ -121,32 +127,32 @@ var lowerers = [256]lowerer{
 	instr.F64_MOD:             arithmetic,
 	instr.F64_MUL:             arithmetic,
 	instr.F64_NE:              arithmetic,
-	instr.F64_NEAREST:         standaloneLowerer(f64Nearest),
-	instr.F64_NEG:             standaloneLowerer(f64Neg),
-	instr.F64_REINTERPRET_I64: standaloneLowerer(f64ReinterpretI64),
+	instr.F64_NEAREST:         emit(float64Math("RoundToEven")),
+	instr.F64_NEG:             emit(convert(narrow("F64"), "F64", neg)),
+	instr.F64_REINTERPRET_I64: emit(convert(wide(), "F64", as("uint64"), via("math", "Float64frombits"))),
 	instr.F64_REM:             arithmetic,
-	instr.F64_SQRT:            standaloneLowerer(f64Sqrt),
+	instr.F64_SQRT:            emit(float64Math("Sqrt")),
 	instr.F64_SUB:             arithmetic,
-	instr.F64_TO_F32:          standaloneLowerer(f64ToF32),
-	instr.F64_TO_I32_S:        standaloneLowerer(f64ToI32S),
-	instr.F64_TO_I32_U:        standaloneLowerer(f64ToI32U),
-	instr.F64_TO_I64_S:        standaloneLowerer(f64ToI64S),
-	instr.F64_TO_I64_U:        standaloneLowerer(f64ToI64U),
-	instr.F64_TRUNC:           standaloneLowerer(f64Trunc),
+	instr.F64_TO_F32:          emit(convert(narrow("F64"), "F32", as("float32"))),
+	instr.F64_TO_I32_S:        emit(saturate("F64", "int32")),
+	instr.F64_TO_I32_U:        emit(saturate("F64", "uint32")),
+	instr.F64_TO_I64_S:        emit(saturate("F64", "int64")),
+	instr.F64_TO_I64_U:        emit(saturate("F64", "uint64")),
+	instr.F64_TRUNC:           emit(float64Math("Trunc")),
 	instr.GLOBAL_GET:          slotRead,
-	instr.GLOBAL_SET:          standaloneLowerer(globalSet),
-	instr.GLOBAL_TEE:          standaloneLowerer(globalTee),
+	instr.GLOBAL_SET:          emit(store(globalSlot, false)),
+	instr.GLOBAL_TEE:          emit(store(globalSlot, true)),
 	instr.I32_ADD:             arithmetic,
 	instr.I32_AND:             arithmetic,
-	instr.I32_CLZ:             standaloneLowerer(i32Clz),
+	instr.I32_CLZ:             emit(convert(narrow("I32"), "I32", as("uint32"), via("math/bits", "LeadingZeros32"), as("int32"))),
 	instr.I32_CONST:           slotRead,
-	instr.I32_CTZ:             standaloneLowerer(i32Ctz),
+	instr.I32_CTZ:             emit(convert(narrow("I32"), "I32", as("uint32"), via("math/bits", "TrailingZeros32"), as("int32"))),
 	instr.I32_DIV_S:           arithmetic,
 	instr.I32_DIV_U:           arithmetic,
 	instr.I32_EQ:              arithmetic,
 	instr.I32_EQZ:             arithmetic,
-	instr.I32_EXTEND16_S:      standaloneLowerer(i32Extend16S),
-	instr.I32_EXTEND8_S:       standaloneLowerer(i32Extend8S),
+	instr.I32_EXTEND16_S:      emit(convert(narrow("I32"), "I32", as("int16"), as("int32"))),
+	instr.I32_EXTEND8_S:       emit(convert(narrow("I32"), "I32", as("int8"), as("int32"))),
 	instr.I32_GE_S:            arithmetic,
 	instr.I32_GE_U:            arithmetic,
 	instr.I32_GT_S:            arithmetic,
@@ -158,8 +164,8 @@ var lowerers = [256]lowerer{
 	instr.I32_MUL:             arithmetic,
 	instr.I32_NE:              arithmetic,
 	instr.I32_OR:              arithmetic,
-	instr.I32_POPCNT:          standaloneLowerer(i32Popcnt),
-	instr.I32_REINTERPRET_F32: standaloneLowerer(i32ReinterpretF32),
+	instr.I32_POPCNT:          emit(convert(narrow("I32"), "I32", as("uint32"), via("math/bits", "OnesCount32"), as("int32"))),
+	instr.I32_REINTERPRET_F32: emit(convert(narrow("F32"), "I32", via("math", "Float32bits"), as("int32"))),
 	instr.I32_REM_S:           arithmetic,
 	instr.I32_REM_U:           arithmetic,
 	instr.I32_ROTL:            arithmetic,
@@ -168,25 +174,25 @@ var lowerers = [256]lowerer{
 	instr.I32_SHR_S:           arithmetic,
 	instr.I32_SHR_U:           arithmetic,
 	instr.I32_SUB:             arithmetic,
-	instr.I32_TO_F32_S:        standaloneLowerer(i32ToF32S),
-	instr.I32_TO_F32_U:        standaloneLowerer(i32ToF32U),
-	instr.I32_TO_F64_S:        standaloneLowerer(i32ToF64S),
-	instr.I32_TO_F64_U:        standaloneLowerer(i32ToF64U),
-	instr.I32_TO_I64_S:        standaloneLowerer(i32ToI64S),
-	instr.I32_TO_I64_U:        standaloneLowerer(i32ToI64U),
+	instr.I32_TO_F32_S:        emit(convert(narrow("I32"), "F32", as("float32"))),
+	instr.I32_TO_F32_U:        emit(convert(narrow("I32"), "F32", as("uint32"), as("float32"))),
+	instr.I32_TO_F64_S:        emit(convert(narrow("I32"), "F64", as("float64"))),
+	instr.I32_TO_F64_U:        emit(convert(narrow("I32"), "F64", as("uint32"), as("float64"))),
+	instr.I32_TO_I64_S:        emit(convert(narrow("I32"), "I64", as("int64"))),
+	instr.I32_TO_I64_U:        emit(convert(narrow("I32"), "I64", as("uint32"), as("int64"))),
 	instr.I32_XOR:             arithmetic,
 	instr.I64_ADD:             arithmetic,
 	instr.I64_AND:             arithmetic,
-	instr.I64_CLZ:             standaloneLowerer(i64Clz),
+	instr.I64_CLZ:             emit(convert(wide(), "I64", as("uint64"), via("math/bits", "LeadingZeros64"), as("int64"))),
 	instr.I64_CONST:           slotRead,
-	instr.I64_CTZ:             standaloneLowerer(i64Ctz),
+	instr.I64_CTZ:             emit(convert(wide(), "I64", as("uint64"), via("math/bits", "TrailingZeros64"), as("int64"))),
 	instr.I64_DIV_S:           arithmetic,
 	instr.I64_DIV_U:           arithmetic,
 	instr.I64_EQ:              arithmetic,
 	instr.I64_EQZ:             arithmetic,
-	instr.I64_EXTEND16_S:      standaloneLowerer(i64Extend16S),
-	instr.I64_EXTEND32_S:      standaloneLowerer(i64Extend32S),
-	instr.I64_EXTEND8_S:       standaloneLowerer(i64Extend8S),
+	instr.I64_EXTEND16_S:      emit(convert(wide(), "I64", as("int16"), as("int64"))),
+	instr.I64_EXTEND32_S:      emit(convert(wide(), "I64", as("int32"), as("int64"))),
+	instr.I64_EXTEND8_S:       emit(convert(wide(), "I64", as("int8"), as("int64"))),
 	instr.I64_GE_S:            arithmetic,
 	instr.I64_GE_U:            arithmetic,
 	instr.I64_GT_S:            arithmetic,
@@ -198,8 +204,8 @@ var lowerers = [256]lowerer{
 	instr.I64_MUL:             arithmetic,
 	instr.I64_NE:              arithmetic,
 	instr.I64_OR:              arithmetic,
-	instr.I64_POPCNT:          standaloneLowerer(i64Popcnt),
-	instr.I64_REINTERPRET_F64: standaloneLowerer(i64ReinterpretF64),
+	instr.I64_POPCNT:          emit(convert(wide(), "I64", as("uint64"), via("math/bits", "OnesCount64"), as("int64"))),
+	instr.I64_REINTERPRET_F64: emit(convert(narrow("F64"), "I64", via("math", "Float64bits"), as("int64"))),
 	instr.I64_REM_S:           arithmetic,
 	instr.I64_REM_U:           arithmetic,
 	instr.I64_ROTL:            arithmetic,
@@ -208,65 +214,66 @@ var lowerers = [256]lowerer{
 	instr.I64_SHR_S:           arithmetic,
 	instr.I64_SHR_U:           arithmetic,
 	instr.I64_SUB:             arithmetic,
-	instr.I64_TO_F32_S:        standaloneLowerer(i64ToF32S),
-	instr.I64_TO_F32_U:        standaloneLowerer(i64ToF32U),
-	instr.I64_TO_F64_S:        standaloneLowerer(i64ToF64S),
-	instr.I64_TO_F64_U:        standaloneLowerer(i64ToF64U),
-	instr.I64_TO_I32:          standaloneLowerer(i64ToI32),
+	instr.I64_TO_F32_S:        emit(convert(wide(), "F32", as("float32"))),
+	instr.I64_TO_F32_U:        emit(convert(wide(), "F32", as("uint64"), as("float32"))),
+	instr.I64_TO_F64_S:        emit(convert(wide(), "F64", as("float64"))),
+	instr.I64_TO_F64_U:        emit(convert(wide(), "F64", as("uint64"), as("float64"))),
+	instr.I64_TO_I32:          emit(convert(wide(), "I32", as("int32"))),
 	instr.I64_XOR:             arithmetic,
 	instr.LOCAL_GET:           slotRead,
 	instr.LOCAL_SET:           localStore,
-	instr.LOCAL_TEE:           standaloneLowerer(localTee),
-	instr.MAP_CLEAR:           standaloneLowerer(mapClear),
-	instr.MAP_DELETE:          standaloneLowerer(mapDelete),
-	instr.MAP_GET:             standaloneLowerer(mapGet),
-	instr.MAP_ITER:            standaloneLowerer(mapIter),
-	instr.MAP_KEYS:            standaloneLowerer(mapKeys),
-	instr.MAP_LEN:             standaloneLowerer(mapLen),
-	instr.MAP_LOOKUP:          standaloneLowerer(mapLookup),
-	instr.MAP_NEW:             standaloneLowerer(mapNew),
-	instr.MAP_NEW_DEFAULT:     standaloneLowerer(mapNewDefault),
-	instr.MAP_SET:             standaloneLowerer(mapSet),
-	instr.NOP:                 standaloneLowerer(nop),
-	instr.REF_CAST:            standaloneLowerer(refCast),
-	instr.REF_EQ:              standaloneLowerer(refEq),
-	instr.REF_GET:             standaloneLowerer(refGet),
+	instr.LOCAL_TEE:           emit(store(localSlot, true)),
+	instr.MAP_CLEAR:           emit(mapClear()),
+	instr.MAP_DELETE:          emit(mapDelete()),
+	instr.MAP_GET:             emit(mapGet()),
+	instr.MAP_ITER:            emit(mapIter()),
+	instr.MAP_KEYS:            emit(mapKeys()),
+	instr.MAP_LEN:             emit(mapLen()),
+	instr.MAP_LOOKUP:          emit(mapLookup()),
+	instr.MAP_NEW:             emit(mapNew()),
+	instr.MAP_NEW_DEFAULT:     emit(mapNewDefault()),
+	instr.MAP_SET:             emit(mapSet()),
+	instr.NOP:                 emit(nop()),
+	instr.REF_CAST:            emit(refCast()),
+	instr.REF_EQ:              emit(refCompare("==")),
+	instr.REF_GET:             emit(refGet()),
 	instr.REF_IS_NULL:         refOp,
-	instr.REF_NE:              standaloneLowerer(refNe),
-	instr.REF_NEW:             standaloneLowerer(refNew),
+	instr.REF_NE:              emit(refCompare("!=")),
+	instr.REF_NEW:             emit(refNew()),
 	instr.REF_NULL:            refOp,
-	instr.REF_SET:             standaloneLowerer(refSet),
-	instr.REF_TEST:            standaloneLowerer(refTest),
-	instr.RESUME:              standaloneLowerer(resume),
-	instr.RETURN:              standaloneLowerer(returnOp),
+	instr.REF_SET:             emit(refSet()),
+	instr.REF_TEST:            emit(refTest()),
+	instr.RESUME:              emit(resume()),
+	instr.RETURN:              emit(returnOp()),
 	instr.RETURN_CALL:         call,
-	instr.SELECT:              standaloneLowerer(selectOp),
-	instr.STRING_CONCAT:       standaloneLowerer(stringConcat),
-	instr.STRING_ENCODE_UTF32: standaloneLowerer(stringEncodeUtf32),
-	instr.STRING_EQ:           standaloneLowerer(stringEq),
-	instr.STRING_GE:           standaloneLowerer(stringGe),
-	instr.STRING_GT:           standaloneLowerer(stringGt),
-	instr.STRING_ITER:         standaloneLowerer(stringIter),
-	instr.STRING_LE:           standaloneLowerer(stringLe),
-	instr.STRING_LEN:          standaloneLowerer(stringLen),
-	instr.STRING_LT:           standaloneLowerer(stringLt),
-	instr.STRING_NE:           standaloneLowerer(stringNe),
-	instr.STRING_NEW_UTF32:    standaloneLowerer(stringNewUtf32),
+	instr.SELECT:              emit(selectOp()),
+	instr.STRING_CONCAT:       emit(stringConcat()),
+	instr.STRING_ENCODE_UTF32: emit(stringEncodeUtf32()),
+	instr.STRING_EQ:           emit(stringCompare("==")),
+	instr.STRING_GE:           emit(stringCompare(">=")),
+	instr.STRING_GT:           emit(stringCompare(">")),
+	instr.STRING_ITER:         emit(stringIter()),
+	instr.STRING_LE:           emit(stringCompare("<=")),
+	instr.STRING_LEN:          emit(stringLen()),
+	instr.STRING_LT:           emit(stringCompare("<")),
+	instr.STRING_NE:           emit(stringCompare("!=")),
+	instr.STRING_NEW_UTF32:    emit(stringNewUtf32()),
 	instr.STRUCT_GET:          containerGet,
-	instr.STRUCT_NEW:          standaloneLowerer(structNew),
-	instr.STRUCT_NEW_DEFAULT:  standaloneLowerer(structNewDefault),
-	instr.STRUCT_SET:          standaloneLowerer(structSet),
-	instr.SWAP:                standaloneLowerer(swap),
-	instr.THROW:               standaloneLowerer(throw),
-	instr.UNREACHABLE:         standaloneLowerer(unreachable),
+	instr.STRUCT_NEW:          emit(structNew()),
+	instr.STRUCT_NEW_DEFAULT:  emit(structNewDefault()),
+	instr.STRUCT_SET:          emit(structSet()),
+	instr.SWAP:                emit(swap()),
+	instr.THROW:               emit(throw()),
+	instr.UNREACHABLE:         emit(unreachable()),
 	instr.UPVAL_GET:           slotRead,
-	instr.UPVAL_SET:           standaloneLowerer(upvalSet),
-	instr.YIELD:               standaloneLowerer(yield),
+	instr.UPVAL_SET:           emit(store(upvalSlot, false)),
+	instr.YIELD:               emit(yield()),
 }
 
-func standaloneLowerer(emit func() jen.Code) lowerer {
+// emit lowers an opcode that has one handler and no fusion form.
+func emit(code jen.Code) lowerer {
 	return func(_ *state, current step) (value, error) {
-		return value{op: current.op, head: current.op, handler: emit()}, nil
+		return value{op: current.op, head: current.op, handler: code}, nil
 	}
 }
 
@@ -289,9 +296,111 @@ func standalone(op instr.Opcode, compile, body []jen.Code) jen.Code {
 	code := append([]jen.Code(nil), compile...)
 	code = append(code,
 		jen.Id("c").Dot("ip").Op("+=").Lit(width(op)),
-		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
+		jen.Return(closure(body...)),
 	)
 	return threaderFunc(code...)
+}
+
+// handler wraps body as the one-byte opcode shape: the compile step skips the
+// opcode and body runs per execution.
+func handler(body ...jen.Code) jen.Code {
+	return threaderFunc(
+		jen.Id("c").Dot("ip").Op("++"),
+		jen.Return(closure(body...)),
+	)
+}
+
+// u8 and u16 bind name to the one- and two-byte operand that follows the
+// opcode at code position pos.
+func u8(name string, pos jen.Code) jen.Code {
+	return jen.Id(name).Op(":=").Id("int").Call(jen.Id("c").Dot("code").Index(jen.Add(pos).Op("+").Lit(1)))
+}
+
+func u16(name string, pos jen.Code) jen.Code {
+	return jen.Id(name).Op(":=").Id("int").Call(jen.Op("*").Parens(jen.Op("*").Id("uint16")).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Id("c").Dot("code").Index(jen.Add(pos).Op("+").Lit(1)))))
+}
+
+// typeAt wraps body as the handler of a three-byte opcode whose operand
+// indexes c.types. An index out of range traps at run time.
+func typeAt(body ...jen.Code) jen.Code {
+	return threaderFunc(append([]jen.Code{
+		u16("idx", jen.Id("c").Dot("ip")),
+		jen.Id("c").Dot("ip").Op("+=").Lit(3),
+		jen.If(jen.Id("idx").Op(">=").Id("len").Call(jen.Id("c").Dot("types"))).Block(jen.Return(closure(jen.Panic(jen.Id("ErrSegmentationFault"))))),
+	}, body...)...)
+}
+
+// typed is typeAt for an operand that must name a *types.<typ>, bound as typ
+// for body; any other type traps at run time.
+func typed(typ string, body ...jen.Code) jen.Code {
+	return typeAt(append([]jen.Code{
+		jen.List(jen.Id("typ"), jen.Id("ok")).Op(":=").Id("c").Dot("types").Index(jen.Id("idx")).Assert(jen.Op("*").Qual(typesPkg, typ)),
+		jen.If(jen.Op("!").Id("ok")).Block(jen.Return(closure(jen.Panic(jen.Id("ErrTypeMismatch"))))),
+	}, body...)...)
+}
+
+// next moves the running frame past the current instruction.
+func next() jen.Code {
+	return jen.Id("i").Dot("fr").Dot("ip").Op("++")
+}
+
+// top is the operand-stack slot k from the top; top(1) is the top.
+func top(k int) *jen.Statement {
+	return jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(k))
+}
+
+// underflow traps when fewer than n operands are on the stack.
+func underflow(n int) jen.Code {
+	cond := jen.Id("i").Dot("sp").Op("<").Lit(n)
+	if n == 1 {
+		cond = jen.Id("i").Dot("sp").Op("==").Lit(0)
+	}
+	return jen.If(cond).Block(jen.Panic(jen.Id("ErrStackUnderflow")))
+}
+
+// closure is the runtime handler a compile step returns.
+func closure(body ...jen.Code) jen.Code {
+	return jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)
+}
+
+// reference traps unless slot holds a heap reference.
+func reference(slot jen.Code) jen.Code {
+	return jen.If(jen.Add(slot).Dot("Kind").Call().Op("!=").Qual(typesPkg, "KindRef")).Block(jen.Panic(jen.Id("ErrTypeMismatch")))
+}
+
+// container binds the reference at stack slot k to ref and its heap address to
+// addr, trapping when the slot holds no reference.
+func container(k int) jen.Code {
+	return jen.Id("ref").Op(":=").Add(top(k)).Line().
+		Add(reference(jen.Id("ref"))).Line().
+		Id("addr").Op(":=").Id("ref").Dot("Ref").Call()
+}
+
+// failure traps with the error call returns.
+func failure(call jen.Code) jen.Code {
+	return jen.If(jen.Id("err").Op(":=").Add(call), jen.Id("err").Op("!=").Nil()).Block(jen.Panic(jen.Id("err")))
+}
+
+// view replaces the host view in source with the VM value method of the view
+// returns, a copy of the Go value it addresses.
+func view(host, method string) jen.Code {
+	return jen.If(jen.List(jen.Id("view"), jen.Id("ok")).Op(":=").Id("source").Assert(jen.Op("*").Id(host)), jen.Id("ok")).Block(
+		jen.List(jen.Id("value"), jen.Id("err")).Op(":=").Id("view").Dot(method).Call(jen.Id("i")),
+		jen.If(jen.Id("err").Op("!=").Nil()).Block(jen.Panic(jen.Id("err"))),
+		jen.Id("source").Op("=").Id("value"),
+	)
+}
+
+// typeSwitch dispatches on the dynamic type behind subject: one case per
+// element of table, then rest, then a trap for any other type.
+func typeSwitch[T any](subject jen.Code, table []T, instance func(T) jen.Code, body func(T) []jen.Code, rest ...jen.Code) jen.Code {
+	cases := make([]jen.Code, 0, len(table)+len(rest)+1)
+	for _, entry := range table {
+		cases = append(cases, jen.Case(instance(entry)).Block(body(entry)...))
+	}
+	cases = append(cases, rest...)
+	cases = append(cases, jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))))
+	return jen.Switch(subject).Block(cases...)
 }
 
 // threaderFunc wraps body as the `func(c *threader) func(*Interpreter)`

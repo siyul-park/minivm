@@ -28,6 +28,7 @@ type Pool struct {
 	closed bool
 }
 
+// ErrPoolClosed is returned by Get once the pool is closed.
 var ErrPoolClosed = errors.New("pool closed")
 
 // NewPool builds a pool that lends up to size Interpreters constructed from
@@ -69,7 +70,15 @@ func (p *Pool) Get(ctx context.Context) (*Interpreter, error) {
 	}
 	p.mu.RUnlock()
 
-	return p.wait(ctx)
+	select {
+	case i, ok := <-p.idle:
+		if !ok {
+			return nil, ErrPoolClosed
+		}
+		return i, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // Put returns i to the pool after resetting its runtime state. If the pool is
@@ -163,18 +172,6 @@ func (p *Pool) share(i *Interpreter) {
 	// runtime, so a release failure only leaks its mappings and no caller
 	// can recover it.
 	_ = own.release()
-}
-
-func (p *Pool) wait(ctx context.Context) (*Interpreter, error) {
-	select {
-	case i, ok := <-p.idle:
-		if !ok {
-			return nil, ErrPoolClosed
-		}
-		return i, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
 }
 
 func (p *Pool) drop(i *Interpreter) {

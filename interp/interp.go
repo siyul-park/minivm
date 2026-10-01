@@ -50,8 +50,8 @@ type Interpreter struct {
 	trial   []int
 	work    []int
 	refbuf  []types.Ref
-	arrays  pool[*types.Array]
-	structs pool[*types.Struct]
+	arrays  recycler[*types.Array]
+	structs recycler[*types.Struct]
 
 	// enc and dec are the scratch a host value converts through. A conversion
 	// takes a pointer, so building one per field access would allocate on every
@@ -74,7 +74,6 @@ type Interpreter struct {
 	// search crosses it, and a panic it does not catch above it unwinds to
 	// their owner.
 	floor int
-	gen   int
 	gas   int64
 
 	tick  int
@@ -266,18 +265,8 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 					i.retain(addr)
 				}
 			}
-		case types.I1:
-			val = types.BoxI1(bool(v))
-		case types.I8:
-			val = types.BoxI8(int8(v))
-		case types.I32:
-			val = types.BoxI32(int32(v))
-		case types.I64:
-			val = i.boxI64(int64(v))
-		case types.F32:
-			val = types.BoxF32(float32(v))
-		case types.F64:
-			val = types.BoxF64(float64(v))
+		case types.I1, types.I8, types.I32, types.I64, types.F32, types.F64:
+			val = i.box(v)
 		case types.Ref:
 			val = types.BoxRef(int(v))
 			if addr := int(v); i.alive(addr) {
@@ -946,7 +935,10 @@ func (i *Interpreter) safepoint() error {
 	}
 	f := i.fr
 	if i.hook != nil {
-		i.restore(f, f.addr)
+		if f.addr >= 0 && f.addr < len(i.code) {
+			f.code = i.code[f.addr]
+			f.upvals = i.upvals(f.ref, f.addr)
+		}
 		if err := i.hook(i); err != nil {
 			return err
 		}
@@ -963,21 +955,6 @@ func (i *Interpreter) flush() {
 	}
 }
 
-func (i *Interpreter) restore(f *frame, addr int) {
-	if f == nil {
-		return
-	}
-	if addr <= 0 {
-		addr = f.addr
-	}
-	if addr < 0 || addr >= len(i.code) {
-		return
-	}
-	f.code = i.code[addr]
-	f.addr = addr
-	f.upvals = i.upvals(f.ref, addr)
-}
-
 // upvals returns the upvals a frame running addr through ref reads: the
 // closure's own when ref is a closure over addr, none otherwise.
 func (i *Interpreter) upvals(ref, addr int) []types.Boxed {
@@ -990,10 +967,12 @@ func (i *Interpreter) upvals(ref, addr int) []types.Boxed {
 }
 
 func (i *Interpreter) fault(r any) error {
-	return &RuntimeError{
-		Err:    i.cause(r),
-		Frames: i.stacktrace(),
+	frames := make([]FrameInfo, 0, i.fp)
+	for idx := i.fp - 1; idx >= 0; idx-- {
+		f := &i.frames[idx]
+		frames = append(frames, FrameInfo{Func: f.addr, IP: f.ip})
 	}
+	return &RuntimeError{Err: i.cause(r), Frames: frames}
 }
 
 func (i *Interpreter) guard(err *error) {
@@ -1143,19 +1122,12 @@ func (i *Interpreter) retireCoroutine(f *frame) {
 	co.done = true
 	co.image = co.image[:0]
 	co.upvals = nil
-	if f.release {
-		i.release(f.ref)
-	}
 	co.ref = 0
 	co.release = false
-	bp := f.bp
-	f.code = nil
+	i.stack[f.bp] = types.BoxRef(coAddr)
 	f.upvals = nil
 	f.coro = 0
-	i.fp--
-	i.fr = &i.frames[i.fp-1]
-	i.stack[bp] = types.BoxRef(coAddr)
-	i.sp = bp + 1
+	i.leave(f, f.bp+1)
 }
 
 // discard releases an unwound frame's activation: its function reference and any
@@ -1202,18 +1174,6 @@ func (i *Interpreter) message(v types.Boxed) string {
 		return i.heap[v.Ref()].String()
 	}
 	return types.Unbox(v).String()
-}
-
-func (i *Interpreter) stacktrace() []FrameInfo {
-	if i.fp <= 0 {
-		return nil
-	}
-	frames := make([]FrameInfo, 0, i.fp)
-	for idx := i.fp - 1; idx >= 0; idx-- {
-		f := i.frames[idx]
-		frames = append(frames, FrameInfo{Func: f.addr, IP: f.ip})
-	}
-	return frames
 }
 
 // mapKey defines the canonical map key: i1/i8 normalize to i32, strings key
@@ -1296,11 +1256,8 @@ func (i *Interpreter) box(val types.Value) types.Boxed {
 		return types.BoxF64(float64(v))
 	case types.Ref:
 		return types.BoxRef(int(v))
-	case types.String:
-		return types.BoxRef(i.alloc(v))
 	default:
-		addr := i.alloc(v)
-		return types.BoxRef(addr)
+		return types.BoxRef(i.alloc(v))
 	}
 }
 
@@ -1308,8 +1265,7 @@ func (i *Interpreter) boxI64(val int64) types.Boxed {
 	if types.IsBoxable(val) {
 		return types.BoxI64(val)
 	}
-	addr := i.alloc(types.I64(val))
-	return types.BoxRef(addr)
+	return types.BoxRef(i.alloc(types.I64(val)))
 }
 
 // encoder and decoder hand out the interpreter's own scratch, reset for one

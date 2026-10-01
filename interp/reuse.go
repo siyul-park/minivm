@@ -2,22 +2,24 @@ package interp
 
 import "slices"
 
-type pool[T any] struct {
+// recycler keeps the values Reset cleared so the next run reuses them. live
+// and peak track how many are in use, which sizes what survives a Reset.
+type recycler[T any] struct {
 	values []T
 	live   int
 	peak   int
 }
 
-func (p *pool[T]) add() {
+func (p *recycler[T]) add() {
 	p.live++
 	p.peak = max(p.peak, p.live)
 }
 
-func (p *pool[T]) remove() {
+func (p *recycler[T]) remove() {
 	p.live--
 }
 
-func (p *pool[T]) get() (T, bool) {
+func (p *recycler[T]) get() (T, bool) {
 	if len(p.values) == 0 {
 		var zero T
 		return zero, false
@@ -30,11 +32,11 @@ func (p *pool[T]) get() (T, bool) {
 	return value, true
 }
 
-func (p *pool[T]) put(value T) {
+func (p *recycler[T]) put(value T) {
 	p.values = append(p.values, value)
 }
 
-func (p *pool[T]) trim(dynamic int) int {
+func (p *recycler[T]) trim(dynamic int) int {
 	keep := max(p.peak, min(dynamic, len(p.values)))
 	if keep < len(p.values) {
 		clear(p.values[keep:])
@@ -44,12 +46,12 @@ func (p *pool[T]) trim(dynamic int) int {
 	return keep
 }
 
-func (p *pool[T]) reset() {
+func (p *recycler[T]) reset() {
 	p.live = 0
 	p.peak = 0
 }
 
-func (p *pool[T]) clear() {
+func (p *recycler[T]) clear() {
 	clear(p.values)
 	p.values = nil
 	p.reset()

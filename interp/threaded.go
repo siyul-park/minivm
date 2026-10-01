@@ -1471,10 +1471,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].I32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxI32(int32(bits.LeadingZeros32(uint32(v))))
-				}
+				i.stack[i.sp-1] = types.BoxI32(int32(bits.LeadingZeros32(uint32(v))))
 				i.fr.ip++
 			}
 		},
@@ -1485,10 +1482,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].I32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxI32(int32(bits.TrailingZeros32(uint32(v))))
-				}
+				i.stack[i.sp-1] = types.BoxI32(int32(bits.TrailingZeros32(uint32(v))))
 				i.fr.ip++
 			}
 		},
@@ -1499,10 +1493,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].I32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxI32(int32(bits.OnesCount32(uint32(v))))
-				}
+				i.stack[i.sp-1] = types.BoxI32(int32(bits.OnesCount32(uint32(v))))
 				i.fr.ip++
 			}
 		},
@@ -1537,10 +1528,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].I32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxI32(int32(int8(v)))
-				}
+				i.stack[i.sp-1] = types.BoxI32(int32(int8(v)))
 				i.fr.ip++
 			}
 		},
@@ -1551,10 +1539,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].I32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxI32(int32(int16(v)))
-				}
+				i.stack[i.sp-1] = types.BoxI32(int32(int16(v)))
 				i.fr.ip++
 			}
 		},
@@ -1696,10 +1681,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].I32()
-				{
-					v := v
-					i.stack[i.sp-1] = i.boxI64(int64(v))
-				}
+				i.stack[i.sp-1] = i.boxI64(int64(v))
 				i.fr.ip++
 			}
 		},
@@ -1710,10 +1692,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].I32()
-				{
-					v := v
-					i.stack[i.sp-1] = i.boxI64(int64(uint32(v)))
-				}
+				i.stack[i.sp-1] = i.boxI64(int64(uint32(v)))
 				i.fr.ip++
 			}
 		},
@@ -1724,10 +1703,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].I32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF32(float32(uint32(v)))
-				}
+				i.stack[i.sp-1] = types.BoxF32(float32(uint32(v)))
 				i.fr.ip++
 			}
 		},
@@ -1738,10 +1714,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].I32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF32(float32(v))
-				}
+				i.stack[i.sp-1] = types.BoxF32(float32(v))
 				i.fr.ip++
 			}
 		},
@@ -1752,10 +1725,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].I32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF64(float64(uint32(v)))
-				}
+				i.stack[i.sp-1] = types.BoxF64(float64(uint32(v)))
 				i.fr.ip++
 			}
 		},
@@ -1766,10 +1736,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].I32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF64(float64(v))
-				}
+				i.stack[i.sp-1] = types.BoxF64(float64(v))
 				i.fr.ip++
 			}
 		},
@@ -1780,10 +1747,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxI32(int32(math.Float32bits(v)))
-				}
+				i.stack[i.sp-1] = types.BoxI32(int32(math.Float32bits(v)))
 				i.fr.ip++
 			}
 		},
@@ -1982,10 +1946,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.unboxI64(i.stack[i.sp-1])
-				{
-					v := v
-					i.stack[i.sp-1] = i.boxI64(int64(bits.LeadingZeros64(uint64(v))))
-				}
+				i.stack[i.sp-1] = i.boxI64(int64(bits.LeadingZeros64(uint64(v))))
 				i.fr.ip++
 			}
 		},
@@ -1996,10 +1957,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.unboxI64(i.stack[i.sp-1])
-				{
-					v := v
-					i.stack[i.sp-1] = i.boxI64(int64(bits.TrailingZeros64(uint64(v))))
-				}
+				i.stack[i.sp-1] = i.boxI64(int64(bits.TrailingZeros64(uint64(v))))
 				i.fr.ip++
 			}
 		},
@@ -2010,10 +1968,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.unboxI64(i.stack[i.sp-1])
-				{
-					v := v
-					i.stack[i.sp-1] = i.boxI64(int64(bits.OnesCount64(uint64(v))))
-				}
+				i.stack[i.sp-1] = i.boxI64(int64(bits.OnesCount64(uint64(v))))
 				i.fr.ip++
 			}
 		},
@@ -2048,10 +2003,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.unboxI64(i.stack[i.sp-1])
-				{
-					v := v
-					i.stack[i.sp-1] = i.boxI64(int64(int8(v)))
-				}
+				i.stack[i.sp-1] = i.boxI64(int64(int8(v)))
 				i.fr.ip++
 			}
 		},
@@ -2062,10 +2014,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.unboxI64(i.stack[i.sp-1])
-				{
-					v := v
-					i.stack[i.sp-1] = i.boxI64(int64(int16(v)))
-				}
+				i.stack[i.sp-1] = i.boxI64(int64(int16(v)))
 				i.fr.ip++
 			}
 		},
@@ -2076,10 +2025,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.unboxI64(i.stack[i.sp-1])
-				{
-					v := v
-					i.stack[i.sp-1] = i.boxI64(int64(int32(v)))
-				}
+				i.stack[i.sp-1] = i.boxI64(int64(int32(v)))
 				i.fr.ip++
 			}
 		},
@@ -2221,10 +2167,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.unboxI64(i.stack[i.sp-1])
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxI32(int32(v))
-				}
+				i.stack[i.sp-1] = types.BoxI32(int32(v))
 				i.fr.ip++
 			}
 		},
@@ -2235,10 +2178,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.unboxI64(i.stack[i.sp-1])
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF32(float32(v))
-				}
+				i.stack[i.sp-1] = types.BoxF32(float32(v))
 				i.fr.ip++
 			}
 		},
@@ -2249,10 +2189,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.unboxI64(i.stack[i.sp-1])
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF32(float32(uint64(v)))
-				}
+				i.stack[i.sp-1] = types.BoxF32(float32(uint64(v)))
 				i.fr.ip++
 			}
 		},
@@ -2263,10 +2200,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.unboxI64(i.stack[i.sp-1])
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF64(float64(v))
-				}
+				i.stack[i.sp-1] = types.BoxF64(float64(v))
 				i.fr.ip++
 			}
 		},
@@ -2277,10 +2211,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.unboxI64(i.stack[i.sp-1])
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF64(float64(uint64(v)))
-				}
+				i.stack[i.sp-1] = types.BoxF64(float64(uint64(v)))
 				i.fr.ip++
 			}
 		},
@@ -2291,10 +2222,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F64()
-				{
-					v := v
-					i.stack[i.sp-1] = i.boxI64(int64(math.Float64bits(v)))
-				}
+				i.stack[i.sp-1] = i.boxI64(int64(math.Float64bits(v)))
 				i.fr.ip++
 			}
 		},
@@ -2410,10 +2338,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF32(float32(math.Abs(float64(v))))
-				}
+				i.stack[i.sp-1] = types.BoxF32(float32(math.Abs(float64(v))))
 				i.fr.ip++
 			}
 		},
@@ -2424,10 +2349,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF32(-v)
-				}
+				i.stack[i.sp-1] = types.BoxF32(-v)
 				i.fr.ip++
 			}
 		},
@@ -2438,10 +2360,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF32(float32(math.Sqrt(float64(v))))
-				}
+				i.stack[i.sp-1] = types.BoxF32(float32(math.Sqrt(float64(v))))
 				i.fr.ip++
 			}
 		},
@@ -2452,10 +2371,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF32(float32(math.Ceil(float64(v))))
-				}
+				i.stack[i.sp-1] = types.BoxF32(float32(math.Ceil(float64(v))))
 				i.fr.ip++
 			}
 		},
@@ -2466,10 +2382,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF32(float32(math.Floor(float64(v))))
-				}
+				i.stack[i.sp-1] = types.BoxF32(float32(math.Floor(float64(v))))
 				i.fr.ip++
 			}
 		},
@@ -2480,10 +2393,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF32(float32(math.Trunc(float64(v))))
-				}
+				i.stack[i.sp-1] = types.BoxF32(float32(math.Trunc(float64(v))))
 				i.fr.ip++
 			}
 		},
@@ -2494,10 +2404,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF32(float32(math.RoundToEven(float64(v))))
-				}
+				i.stack[i.sp-1] = types.BoxF32(float32(math.RoundToEven(float64(v))))
 				i.fr.ip++
 			}
 		},
@@ -2616,21 +2523,18 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F32()
-				{
-					v := v
-					var result int32
-					switch {
-					case math.IsNaN(float64(v)):
-						result = 0
-					case float64(v) >= 2.147483648e+09:
-						result = math.MaxInt32
-					case float64(v) < -2.147483648e+09:
-						result = math.MinInt32
-					default:
-						result = int32(float64(v))
-					}
-					i.stack[i.sp-1] = types.BoxI32(result)
+				var result int32
+				switch {
+				case math.IsNaN(float64(v)):
+					result = 0
+				case float64(v) >= 2.147483648e+09:
+					result = math.MaxInt32
+				case float64(v) < -2.147483648e+09:
+					result = math.MinInt32
+				default:
+					result = int32(float64(v))
 				}
+				i.stack[i.sp-1] = types.BoxI32(result)
 				i.fr.ip++
 			}
 		},
@@ -2641,19 +2545,16 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F32()
-				{
-					v := v
-					var result uint32
-					switch {
-					case math.IsNaN(float64(v)) || float64(v) < 0:
-						result = 0
-					case float64(v) >= 4.294967296e+09:
-						result = math.MaxUint32
-					default:
-						result = uint32(float64(v))
-					}
-					i.stack[i.sp-1] = types.BoxI32(int32(result))
+				var result uint32
+				switch {
+				case math.IsNaN(float64(v)) || float64(v) < 0:
+					result = 0
+				case float64(v) >= 4.294967296e+09:
+					result = math.MaxUint32
+				default:
+					result = uint32(float64(v))
 				}
+				i.stack[i.sp-1] = types.BoxI32(int32(result))
 				i.fr.ip++
 			}
 		},
@@ -2673,7 +2574,7 @@ var (
 				case float64(v) < -9.223372036854776e+18:
 					result = math.MinInt64
 				default:
-					result = int64(v)
+					result = int64(float64(v))
 				}
 				i.stack[i.sp-1] = i.boxI64(result)
 				i.fr.ip++
@@ -2693,7 +2594,7 @@ var (
 				case float64(v) >= 1.8446744073709552e+19:
 					result = math.MaxUint64
 				default:
-					result = uint64(v)
+					result = uint64(float64(v))
 				}
 				i.stack[i.sp-1] = i.boxI64(int64(result))
 				i.fr.ip++
@@ -2706,10 +2607,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF64(float64(v))
-				}
+				i.stack[i.sp-1] = types.BoxF64(float64(v))
 				i.fr.ip++
 			}
 		},
@@ -2720,10 +2618,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].I32()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF32(math.Float32frombits(uint32(v)))
-				}
+				i.stack[i.sp-1] = types.BoxF32(math.Float32frombits(uint32(v)))
 				i.fr.ip++
 			}
 		},
@@ -2839,10 +2734,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F64()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF64(math.Abs(v))
-				}
+				i.stack[i.sp-1] = types.BoxF64(math.Abs(v))
 				i.fr.ip++
 			}
 		},
@@ -2853,10 +2745,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F64()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF64(-v)
-				}
+				i.stack[i.sp-1] = types.BoxF64(-v)
 				i.fr.ip++
 			}
 		},
@@ -2867,10 +2756,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F64()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF64(math.Sqrt(v))
-				}
+				i.stack[i.sp-1] = types.BoxF64(math.Sqrt(v))
 				i.fr.ip++
 			}
 		},
@@ -2881,10 +2767,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F64()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF64(math.Ceil(v))
-				}
+				i.stack[i.sp-1] = types.BoxF64(math.Ceil(v))
 				i.fr.ip++
 			}
 		},
@@ -2895,10 +2778,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F64()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF64(math.Floor(v))
-				}
+				i.stack[i.sp-1] = types.BoxF64(math.Floor(v))
 				i.fr.ip++
 			}
 		},
@@ -2909,10 +2789,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F64()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF64(math.Trunc(v))
-				}
+				i.stack[i.sp-1] = types.BoxF64(math.Trunc(v))
 				i.fr.ip++
 			}
 		},
@@ -2923,10 +2800,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F64()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF64(math.RoundToEven(v))
-				}
+				i.stack[i.sp-1] = types.BoxF64(math.RoundToEven(v))
 				i.fr.ip++
 			}
 		},
@@ -3045,21 +2919,18 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F64()
-				{
-					v := v
-					var result int32
-					switch {
-					case math.IsNaN(v):
-						result = 0
-					case v >= 2.147483648e+09:
-						result = math.MaxInt32
-					case v < -2.147483648e+09:
-						result = math.MinInt32
-					default:
-						result = int32(v)
-					}
-					i.stack[i.sp-1] = types.BoxI32(result)
+				var result int32
+				switch {
+				case math.IsNaN(v):
+					result = 0
+				case v >= 2.147483648e+09:
+					result = math.MaxInt32
+				case v < -2.147483648e+09:
+					result = math.MinInt32
+				default:
+					result = int32(v)
 				}
+				i.stack[i.sp-1] = types.BoxI32(result)
 				i.fr.ip++
 			}
 		},
@@ -3070,19 +2941,16 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F64()
-				{
-					v := v
-					var result uint32
-					switch {
-					case math.IsNaN(v) || v < 0:
-						result = 0
-					case v >= 4.294967296e+09:
-						result = math.MaxUint32
-					default:
-						result = uint32(v)
-					}
-					i.stack[i.sp-1] = types.BoxI32(int32(result))
+				var result uint32
+				switch {
+				case math.IsNaN(v) || v < 0:
+					result = 0
+				case v >= 4.294967296e+09:
+					result = math.MaxUint32
+				default:
+					result = uint32(v)
 				}
+				i.stack[i.sp-1] = types.BoxI32(int32(result))
 				i.fr.ip++
 			}
 		},
@@ -3135,10 +3003,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.stack[i.sp-1].F64()
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF32(float32(v))
-				}
+				i.stack[i.sp-1] = types.BoxF32(float32(v))
 				i.fr.ip++
 			}
 		},
@@ -3149,10 +3014,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v := i.unboxI64(i.stack[i.sp-1])
-				{
-					v := v
-					i.stack[i.sp-1] = types.BoxF64(math.Float64frombits(uint64(v)))
-				}
+				i.stack[i.sp-1] = types.BoxF64(math.Float64frombits(uint64(v)))
 				i.fr.ip++
 			}
 		},
@@ -3315,7 +3177,7 @@ var (
 			switch typ.ElemKind {
 			case types.KindI1:
 				return func(i *Interpreter) {
-					if i.sp < 1 {
+					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
 					size := int(i.stack[i.sp-1].I32())
@@ -3332,7 +3194,7 @@ var (
 				}
 			case types.KindI8:
 				return func(i *Interpreter) {
-					if i.sp < 1 {
+					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
 					size := int(i.stack[i.sp-1].I32())
@@ -3349,7 +3211,7 @@ var (
 				}
 			case types.KindI32:
 				return func(i *Interpreter) {
-					if i.sp < 1 {
+					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
 					size := int(i.stack[i.sp-1].I32())
@@ -3366,7 +3228,7 @@ var (
 				}
 			case types.KindI64:
 				return func(i *Interpreter) {
-					if i.sp < 1 {
+					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
 					size := int(i.stack[i.sp-1].I32())
@@ -3383,7 +3245,7 @@ var (
 				}
 			case types.KindF32:
 				return func(i *Interpreter) {
-					if i.sp < 1 {
+					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
 					size := int(i.stack[i.sp-1].I32())
@@ -3400,7 +3262,7 @@ var (
 				}
 			case types.KindF64:
 				return func(i *Interpreter) {
-					if i.sp < 1 {
+					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
 					size := int(i.stack[i.sp-1].I32())
@@ -3417,7 +3279,7 @@ var (
 				}
 			default:
 				return func(i *Interpreter) {
-					if i.sp < 1 {
+					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
 					size := int(i.stack[i.sp-1].I32())
@@ -3449,7 +3311,7 @@ var (
 			switch typ.ElemKind {
 			case types.KindI1:
 				return func(i *Interpreter) {
-					if i.sp < 1 {
+					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
 					size := i.stack[i.sp-1].I32()
@@ -3462,7 +3324,7 @@ var (
 				}
 			case types.KindI8:
 				return func(i *Interpreter) {
-					if i.sp < 1 {
+					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
 					size := i.stack[i.sp-1].I32()
@@ -3475,7 +3337,7 @@ var (
 				}
 			case types.KindI32:
 				return func(i *Interpreter) {
-					if i.sp < 1 {
+					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
 					size := i.stack[i.sp-1].I32()
@@ -3488,7 +3350,7 @@ var (
 				}
 			case types.KindI64:
 				return func(i *Interpreter) {
-					if i.sp < 1 {
+					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
 					size := i.stack[i.sp-1].I32()
@@ -3501,7 +3363,7 @@ var (
 				}
 			case types.KindF32:
 				return func(i *Interpreter) {
-					if i.sp < 1 {
+					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
 					size := i.stack[i.sp-1].I32()
@@ -3514,7 +3376,7 @@ var (
 				}
 			case types.KindF64:
 				return func(i *Interpreter) {
-					if i.sp < 1 {
+					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
 					size := i.stack[i.sp-1].I32()
@@ -3527,7 +3389,7 @@ var (
 				}
 			default:
 				return func(i *Interpreter) {
-					if i.sp < 1 {
+					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
 					size := i.stack[i.sp-1].I32()
@@ -3940,7 +3802,7 @@ var (
 		instr.ARRAY_APPEND: func(c *threader) func(i *Interpreter) {
 			c.ip++
 			return func(i *Interpreter) {
-				if i.sp < 1 {
+				if i.sp == 0 {
 					panic(ErrStackUnderflow)
 				}
 				n := int(i.stack[i.sp-1].I32())
@@ -4046,7 +3908,7 @@ var (
 							panic(ErrIndexOutOfRange)
 						}
 					}
-					val = types.BoxI32(int32(arr[idx]))
+					val = types.BoxI32(arr[idx])
 					copy(arr[idx:], arr[idx+1:])
 					i.heap[addr] = arr[:len(arr)-1]
 				case types.TypedArray[int64]:
@@ -4058,7 +3920,7 @@ var (
 							panic(ErrIndexOutOfRange)
 						}
 					}
-					val = i.boxI64(int64(arr[idx]))
+					val = i.boxI64(arr[idx])
 					copy(arr[idx:], arr[idx+1:])
 					i.heap[addr] = arr[:len(arr)-1]
 				case types.TypedArray[float32]:
@@ -4070,7 +3932,7 @@ var (
 							panic(ErrIndexOutOfRange)
 						}
 					}
-					val = types.BoxF32(float32(arr[idx]))
+					val = types.BoxF32(arr[idx])
 					copy(arr[idx:], arr[idx+1:])
 					i.heap[addr] = arr[:len(arr)-1]
 				case types.TypedArray[float64]:
@@ -4082,7 +3944,7 @@ var (
 							panic(ErrIndexOutOfRange)
 						}
 					}
-					val = types.BoxF64(float64(arr[idx]))
+					val = types.BoxF64(arr[idx])
 					copy(arr[idx:], arr[idx+1:])
 					i.heap[addr] = arr[:len(arr)-1]
 				case *types.Array:
@@ -4355,7 +4217,7 @@ var (
 				}
 			}
 			return func(i *Interpreter) {
-				if i.sp < 1 {
+				if i.sp == 0 {
 					panic(ErrStackUnderflow)
 				}
 				size := int(i.stack[i.sp-1].I32())
@@ -4421,12 +4283,7 @@ var (
 						panic(ErrTypeMismatch)
 					}
 				}
-				var addr int
-				if typ.TraceKeys || typ.TraceValues {
-					addr = i.alloc(m)
-				} else {
-					addr = i.alloc(m)
-				}
+				addr := i.alloc(m)
 				i.sp = base + 1
 				i.stack[base] = types.BoxRef(addr)
 				i.fr.ip += 3
@@ -4447,7 +4304,7 @@ var (
 				}
 			}
 			return func(i *Interpreter) {
-				if i.sp < 1 {
+				if i.sp == 0 {
 					panic(ErrStackUnderflow)
 				}
 				capacity := int(i.stack[i.sp-1].I32())
@@ -4461,7 +4318,7 @@ var (
 		instr.MAP_LEN: func(c *threader) func(i *Interpreter) {
 			c.ip++
 			return func(i *Interpreter) {
-				if i.sp < 1 {
+				if i.sp == 0 {
 					panic(ErrStackUnderflow)
 				}
 				ref := i.stack[i.sp-1]
@@ -4812,7 +4669,7 @@ var (
 		instr.MAP_CLEAR: func(c *threader) func(i *Interpreter) {
 			c.ip++
 			return func(i *Interpreter) {
-				if i.sp < 1 {
+				if i.sp == 0 {
 					panic(ErrStackUnderflow)
 				}
 				ref := i.stack[i.sp-1]
@@ -4867,7 +4724,7 @@ var (
 		instr.MAP_KEYS: func(c *threader) func(i *Interpreter) {
 			c.ip++
 			return func(i *Interpreter) {
-				if i.sp < 1 {
+				if i.sp == 0 {
 					panic(ErrStackUnderflow)
 				}
 				ref := i.stack[i.sp-1]
@@ -4972,7 +4829,7 @@ var (
 		instr.MAP_ITER: func(c *threader) func(i *Interpreter) {
 			c.ip++
 			return func(i *Interpreter) {
-				if i.sp < 1 {
+				if i.sp == 0 {
 					panic(ErrStackUnderflow)
 				}
 				ref := i.stack[i.sp-1]
