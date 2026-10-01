@@ -764,6 +764,8 @@ func (w *walker) leave(ip int) ssa.Terminator {
 	return ssa.Terminator{Op: ssa.OpReturn, Args: args, State: w.deopt()}
 }
 
+// tail ends a RETURN_CALL: a self tail call loops back to the function's
+// first span, any other leaves native execution.
 func (w *walker) tail(ip int) (ssa.Terminator, bool) {
 	if len(w.stack) == 0 {
 		return ssa.Terminator{}, false
@@ -772,7 +774,55 @@ func (w *walker) tail(ip int) (ssa.Terminator, bool) {
 	if target == nil || len(w.stack) < 1+len(target.Typ.Params) {
 		return ssa.Terminator{}, false
 	}
-	return w.exit(ip), true
+	if !w.reuses(target) {
+		return w.exit(ip), true
+	}
+	return w.loop(ip), true
+}
+
+// reuses reports whether the RETURN_CALL at the stack's top re-enters this
+// unit's own function with the frame it already has: a plain function, not a
+// closure, with every argument on the stack and no slot a store could box
+// wide, since a deopt part-way through the stores could not resume threaded.
+func (w *walker) reuses(target *types.Function) bool {
+	callee := w.stack[len(w.stack)-1]
+	if w.activation.address == 0 || callee.closure != 0 || !callee.referenceKnown || callee.reference != w.activation.address ||
+		target != w.activation.function || len(target.Captures) > 0 || len(w.stack) != 1+len(target.Typ.Params) {
+		return false
+	}
+	for _, slot := range w.activation.slots {
+		if slot.Kind() == types.KindI64 {
+			return false
+		}
+		if _, ok := typ(slot.Kind()); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// loop lowers a self tail call as threaded frame reuse does: the arguments
+// replace the parameters, every other local is zeroed, each store releasing
+// the reference it overwrites, and control returns to the function's first
+// span. The stores share the call's resume state, which no store can use.
+func (w *walker) loop(ip int) ssa.Terminator {
+	w.begin(ip)
+	top := len(w.stack) - 1
+	w.release(w.stack[top])
+	w.stack = w.stack[:top]
+	for p := len(w.activation.function.Typ.Params) - 1; p >= 0; p-- {
+		w.store(ssa.SpaceLocal, p)
+	}
+	for slot := len(w.activation.function.Typ.Params); slot < len(w.activation.slots); slot++ {
+		kind := w.activation.slots[slot].Kind()
+		word := uint64(0)
+		if kind == types.KindRef {
+			word = uint64(types.BoxedNull)
+		}
+		w.constant(word, fact{kind: kind})
+		w.store(ssa.SpaceLocal, slot)
+	}
+	return ssa.Terminator{Op: ssa.OpJump}
 }
 
 func (w *walker) exit(ip int) ssa.Terminator {

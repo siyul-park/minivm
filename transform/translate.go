@@ -102,21 +102,23 @@ func Translate(module Module, address int, function *types.Function, entry int) 
 }
 
 // Borrows reports, per parameter, whether function borrows it: a reference
-// parameter function never writes. Its native caller keeps ownership for the
+// parameter function never writes, in a function with no RETURN_CALL, which
+// may replace every parameter. Its native caller keeps ownership for the
 // call; function neither retains nor releases it.
 func Borrows(function *types.Function) []bool {
 	if function == nil || function.Typ == nil {
 		return nil
 	}
-	written := map[int]bool{}
+	written, tail := map[int]bool{}, false
 	for _, inst := range instr.Unmarshal(function.Code) {
 		if inst.Opcode().Writes(instr.Local) {
 			written[int(inst.Operand(0))] = true
 		}
+		tail = tail || inst.Opcode() == instr.RETURN_CALL
 	}
 	borrows := make([]bool, len(function.Typ.Params))
 	for i, param := range function.Typ.Params {
-		borrows[i] = param.Kind() == types.KindRef && !written[i]
+		borrows[i] = param.Kind() == types.KindRef && !written[i] && !tail
 	}
 	return borrows
 }

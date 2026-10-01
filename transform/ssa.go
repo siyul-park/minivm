@@ -126,7 +126,8 @@ func (p *pool) intern(c types.Boxed) (int, bool) {
 }
 
 // expressible reports whether emit can rewrite function: its handler table
-// holds byte offsets that a rewrite would invalidate.
+// holds byte offsets that a rewrite would invalidate, and a RETURN_CALL ends
+// in a frame reuse that only native execution lowers.
 func expressible(function *types.Function) bool {
 	if len(function.Handlers) > 0 {
 		return false
@@ -134,7 +135,7 @@ func expressible(function *types.Function) bool {
 	for ip := 0; ip < len(function.Code); {
 		inst := instr.Instruction(function.Code[ip:])
 		switch inst.Opcode() {
-		case instr.UNREACHABLE, instr.YIELD, instr.RESUME:
+		case instr.UNREACHABLE, instr.YIELD, instr.RESUME, instr.RETURN_CALL:
 			return false
 		}
 		ip += inst.Width()

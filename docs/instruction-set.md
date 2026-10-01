@@ -28,7 +28,7 @@ The following rules `MUST` hold for every opcode:
 
 ## Native Status
 
-Threaded execution defines semantics. `internal/jit/arm64` lowers a subset when `WithThreshold` compiles a function. Every other operation becomes an `ExitBridge`: Go runs its threaded handler and native code resumes, except for the operations whose note says they deoptimize (the rest of the call runs threaded). A bridged operation whose handler traps deoptimizes, and threaded code runs it again to report the trap; one with a host-view operand deoptimizes before Go runs it; `jit-internals.md` owns the bridge rules. `RETURN_CALL` deoptimizes directly. `YIELD` and `RESUME` make the translator decline the whole unit at compile time, so it never reaches native code.
+Threaded execution defines semantics. `internal/jit/arm64` lowers a subset when `WithThreshold` compiles a function. Every other operation becomes an `ExitBridge`: Go runs its threaded handler and native code resumes, except for the operations whose note says they deoptimize (the rest of the call runs threaded). A bridged operation whose handler traps deoptimizes, and threaded code runs it again to report the trap; one with a host-view operand deoptimizes before Go runs it; `jit-internals.md` owns the bridge rules. `RETURN_CALL` deoptimizes directly, except a self tail call, which loops. `YIELD` and `RESUME` make the translator decline the whole unit at compile time, so it never reaches native code.
 
 | Status | Meaning |
 |---|---|
@@ -93,7 +93,7 @@ One opcode per row, in opcode-value order.
 | Stack | `SELECT` | `select` | ✅ | 🔲 | lowered on ARM64 |
 | Control | `CALL` | `call` | ◐ | 🔲 | ARM64 lowers a call to a constant target, to a closure the unit itself built with `CLOSURE_NEW` over a constant function, or to the one function or closure recorded at a dynamic site's feedback, with up to two register-convention arguments/results of any kind (i64 included); a dynamic call at a site that never ran deoptimizes at the call, and one at a site that saw callees of one function type always takes `ExitCall` and resumes native code; a dynamic call at a site that saw callees of differing types, a direct call of a function with captures, a callee frame beyond the reachable offset range, or an i64 result from a callee with no register convention makes translation or lowering reject the whole unit |
 | Control | `RETURN` | `return` | ✅ | 🔲 | lowered on ARM64 |
-| Control | `RETURN_CALL` | `return_call` | ⬜ | 🔲 | deoptimizes directly on ARM64 |
+| Control | `RETURN_CALL` | `return_call` | ◐ | 🔲 | a tail call of the unit's own plain function, with every argument on the stack and no `i64` slot, becomes a loop: the arguments replace the parameters, every other local is zeroed, each store releases what it overwrites, and the back edge spends budget; every other tail call deoptimizes directly on ARM64 |
 | Coroutines | `YIELD` | `yield` | ⬜ | 🔲 | makes the translator decline the whole unit; never reaches native code |
 | Coroutines | `RESUME` | `resume` | ⬜ | 🔲 | makes the translator decline the whole unit; never reaches native code |
 | Coroutines | `CORO_DONE` | `coro.done` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |

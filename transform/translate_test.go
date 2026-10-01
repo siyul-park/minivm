@@ -549,6 +549,73 @@ blk0: ()
 `, ssa.Format(out))
 	})
 
+	t.Run("loops a self tail call", func(t *testing.T) {
+		fn := &types.Function{
+			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+			Locals: []types.Type{types.TypeAny},
+			Code: assemble(t, func(b *instr.Builder) {
+				base := b.Label()
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_EQ).BrIf(base)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB)
+				b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_ADD)
+				b.Emit(instr.CONST_GET, 0).Emit(instr.RETURN_CALL)
+				b.Bind(base).Emit(instr.LOCAL_GET, 1).Emit(instr.RETURN)
+			})}
+		m := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(1)},
+			Objects:   transform.Objects{1: {Function: fn}}}
+
+		out, err := transform.Translate(m, 1, fn, 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, `func 1:0
+blk0: ()
+	jump blk1()
+blk1: () <-- (blk0, blk3)
+	v1:i32 = load local[0]
+	v2:i32 = const 0
+	v3:state = state {addr=1 base=0 ip=7 returns=1 stack=[v1, v2]}
+	v4:i1 = i32.eq v1, v2 state v3
+	br v4, blk2(), blk3()
+blk2: () <-- (blk1)
+	v16:i32 = load local[1]
+	v17:state = state {addr=1 base=0 ip=30 returns=1 stack=[v16]}
+	return v16 state v17
+blk3: () <-- (blk1)
+	v5:i32 = load local[0]
+	v6:i32 = const 1
+	v7:state = state {addr=1 base=0 ip=18 returns=1 stack=[v5, v6]}
+	v8:i32 = i32.sub v5, v6 state v7
+	v9:i32 = load local[1]
+	v10:i32 = load local[0]
+	v11:state = state {addr=1 base=0 ip=23 returns=1 stack=[v8, v9, v10]}
+	v12:i32 = i32.add v9, v10 state v11
+	v13:ref = const 1
+	v14:state = state {addr=1 base=0 ip=27 returns=1 stack=[v8, v12, v13]}
+	store local[1], v12 state v14
+	store local[0], v8 state v14
+	v15:ref = const 0
+	store local[2], v15 state v14
+	jump blk1()
+`, ssa.Format(out))
+	})
+
+	t.Run("exits a tail call whose frame it cannot reuse", func(t *testing.T) {
+		wide := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI64}}}
+		wide.Code = assemble(t, func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.RETURN_CALL)
+		})
+		m := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(1)},
+			Objects:   transform.Objects{1: {Function: wide}}}
+
+		out, err := transform.Translate(m, 1, wide, 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		require.Contains(t, ssa.Format(out), "exit state")
+	})
+
 	t.Run("speculates a dynamic callee its feedback observed", func(t *testing.T) {
 		fn, ips := indirectRecursiveFib(t)
 		m := transform.Module{
@@ -958,6 +1025,15 @@ func TestBorrows(t *testing.T) {
 				&types.FunctionType{Params: []types.Type{types.TypeAny}},
 				nil,
 				[]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_TEE, 0), instr.New(instr.RETURN)},
+			),
+			want: []bool{false},
+		},
+		{
+			name: "a ref parameter in a function that tail calls",
+			fn: types.NewFunction(
+				&types.FunctionType{Params: []types.Type{types.TypeAny}},
+				nil,
+				[]instr.Instruction{instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 0), instr.New(instr.RETURN_CALL)},
 			),
 			want: []bool{false},
 		},

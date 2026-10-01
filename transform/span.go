@@ -53,9 +53,11 @@ func split(code []byte, blocks []*analysis.BasicBlock) ([]span, map[int]int) {
 			spans[last[i]].flow = append(spans[last[i]].flow, first[succ])
 		}
 		spans[last[i]].succs = successors(code, block, at)
+		inst, ip := final(code, block)
+		tail := ip >= 0 && inst.Opcode() == instr.RETURN_CALL
 		for _, succ := range spans[last[i]].succs {
-			if succ == exit {
-				spans[last[i]].flow = append(spans[last[i]].flow, exit)
+			if succ == exit || tail {
+				spans[last[i]].flow = append(spans[last[i]].flow, succ)
 			}
 		}
 	}
@@ -74,18 +76,27 @@ func past(code []byte) bool {
 	return false
 }
 
-func successors(code []byte, block *analysis.BasicBlock, at map[int]int) []int {
+// final is block's last instruction and its offset, -1 for an empty block.
+func final(code []byte, block *analysis.BasicBlock) (instr.Instruction, int) {
+	var inst instr.Instruction
 	last := -1
 	for ip := block.Start; ip < block.End; {
-		inst := instr.Instruction(code[ip:])
-		last = ip
+		inst, last = instr.Instruction(code[ip:]), ip
 		ip += inst.Width()
 	}
-	if last >= 0 {
-		inst := instr.Instruction(code[last:])
+	return inst, last
+}
+
+// successors lists the spans block's last instruction can continue into. A
+// RETURN_CALL continues into the function's first span: the self tail call
+// the walker lowers as a loop re-enters it.
+func successors(code []byte, block *analysis.BasicBlock, at map[int]int) []int {
+	if inst, last := final(code, block); last >= 0 {
 		switch inst.Opcode() {
-		case instr.RETURN, instr.RETURN_CALL:
+		case instr.RETURN:
 			return nil
+		case instr.RETURN_CALL:
+			return targets([]int{0}, at)
 		case instr.BR, instr.BR_TABLE:
 			return targets(instr.Targets(code, last), at)
 		case instr.BR_IF:

@@ -573,6 +573,55 @@ func mixedProgram(t *testing.T, warm int, other bool) *program.Program {
 		program.WithConstants(relayDynamicFunction(), bumpFunction(1), bumpFunction(3), types.String("s"), pair))
 }
 
+// tailRefFunction is sum(n, acc, held) = n == 0 ? acc : sum(n-1, acc+n, held),
+// a self tail call through constant 0 that carries a ref parameter and parks
+// it in a ref local first, so the call must release the old ref slots.
+func tailRefFunction(t *testing.T) *types.Function {
+	t.Helper()
+	b := instr.NewBuilder()
+	base := b.Label()
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_EQ).BrIf(base)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_SET, 3)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_ADD)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.CONST_GET, 0).Emit(instr.RETURN_CALL)
+	b.Bind(base).Emit(instr.LOCAL_GET, 1).Emit(instr.RETURN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return &types.Function{
+		Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}},
+		Locals: []types.Type{types.TypeAny},
+		Code:   instr.Marshal(code),
+	}
+}
+
+// tailRefProgram calls tailRefFunction(n, 0, "held") through a wrapper that
+// lends it its own ref parameter, and leaves the result; constant 1 is the
+// string the call carries.
+func tailRefProgram(t *testing.T, n int) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	b.Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.RETURN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	wrapper := &types.Function{
+		Typ:  &types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}},
+		Code: instr.Marshal(code),
+	}
+	b = instr.NewBuilder()
+	b.Emit(instr.CONST_GET, 1).Emit(instr.CONST_GET, 2).Emit(instr.CALL)
+	code, err = b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithConstants(tailRefFunction(t), types.String("held"), wrapper))
+}
+
+// nativeEntries is the number of native entries at either tier.
+func nativeEntries(profiler *prof.Profiler) float64 {
+	baseline, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+	optimized, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+	return baseline + optimized
+}
+
 func TestWithThreshold(t *testing.T) {
 	t.Run("enters a hot recursive function's native code", func(t *testing.T) {
 		native(t)
@@ -602,6 +651,105 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, result)
+	})
+
+	t.Run("runs a self tail call as a native loop", func(t *testing.T) {
+		native(t)
+		prog := tailRefProgram(t, 1000)
+		threaded := interp.New(prog)
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		held, err := threaded.Const(1)
+		require.NoError(t, err)
+		wantCount, err := threaded.RefCount(held.Ref())
+		require.NoError(t, err)
+		require.NoError(t, threaded.Close())
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		var runErr, popErr, countErr error
+		var result types.Value
+		var count int
+		var entries float64
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			result, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			count, countErr = vm.RefCount(held.Ref())
+			vm.Reset()
+			vm.Flush()
+			entries = nativeEntries(profiler)
+			return entries >= 8
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.NoError(t, countErr)
+		require.Equal(t, want, result)
+		require.Equal(t, wantCount, count)
+
+		before := entries
+		for range 16 {
+			require.NoError(t, vm.Run(context.Background()))
+			result, err = vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, want, result)
+			count, err = vm.RefCount(held.Ref())
+			require.NoError(t, err)
+			require.Equal(t, wantCount, count)
+			vm.Reset()
+		}
+		vm.Flush()
+		require.Greater(t, nativeEntries(profiler), before)
+		deopts, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+		require.Zero(t, deopts)
+	})
+
+	t.Run("completes a deep self tail call without growing frames", func(t *testing.T) {
+		native(t)
+		prog := tailRefProgram(t, 1_000_000)
+		want := runProgram(t, prog)
+
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(4))
+		defer vm.Close()
+		for range 8 {
+			require.NoError(t, vm.Run(context.Background()))
+			result, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, want, result)
+			vm.Reset()
+			vm.Flush()
+		}
+	})
+
+	t.Run("cancels a long self tail call", func(t *testing.T) {
+		native(t)
+		prog := tailRefProgram(t, math.MaxInt32)
+
+		var runErr error
+		var exits float64
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		require.Eventually(t, func() bool {
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			runErr = vm.Run(ctx)
+			if !errors.Is(runErr, context.DeadlineExceeded) {
+				return false
+			}
+			vm.Reset()
+			vm.Flush()
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "safepoint"})
+			return exits > 0
+		}, 20*time.Second, 10*time.Millisecond)
+		require.ErrorIs(t, runErr, context.DeadlineExceeded)
 	})
 
 	t.Run("keeps a bridged loop-free module native", func(t *testing.T) {

@@ -143,7 +143,7 @@ A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every ad
 | release | release | `jit.Ledger` price |
 | served `ExitCall` | call | `jit.Ledger` price; nothing while the callee has no code but may still compile (`pending`) |
 | `ExitDeopt` with `Exit.Trap`; a bridge or box whose handler panicked; a denied control-transfer bridge (`THROW`, `UNREACHABLE`); a cancelled safepoint; a trap, throw, or cancellation in a served call's callee | trap | none |
-| `ExitDeopt` without `Exit.Trap` (guards, `OpExit` at a cold dynamic `CALL` or `RETURN_CALL`); any other declined bridge; an `ExitCall` not served | guard | refutation |
+| `ExitDeopt` without `Exit.Trap` (guards, `OpExit` at a cold dynamic `CALL` or a `RETURN_CALL` that is not a self tail call); any other declined bridge; an `ExitCall` not served | guard | refutation |
 
 | Rule | Contract |
 |---|---|
@@ -199,7 +199,7 @@ Entry reuses the current frame (`FB = bp`, `Depth = 0`); exits rewrite it in pla
 - i64 results use X0/X1 only for one or two results; wider result sets stay boxed.
 - A wide (>49-bit) i64 takes `ExitBox` at the sites listed in Exits above.
 - Container lowering requires `guard.shape`; null or mismatched representation deopts.
-- Bridges resume except the denied ops in Exits (above); `RETURN_CALL`'s `ExitDeopt` does not, nor an `ExitCall` to a coroutine function. `YIELD` and `RESUME` never reach an exit at all: they make the translator decline the whole unit at compile time.
+- Bridges resume except the denied ops in Exits (above); a non-self `RETURN_CALL`'s `ExitDeopt` does not, nor an `ExitCall` to a coroutine function. `YIELD` and `RESUME` never reach an exit at all: they make the translator decline the whole unit at compile time.
 - A catch block never runs natively: the interpreter runs it after the deopt.
 - Host functions are not speculated at dynamic CALL sites; owned callees are not candidates.
 - A hoisted `guard.shape` deopts at its loop header's state, an offset no op guards: its refutation falls back to the `tolerance` count instead of a generic site.
