@@ -47,7 +47,7 @@ func (m *machine) Prologue(_ *asm.Assembler, _ int, count bool, l compile.Layout
 	m.count = count
 	m.arguments = l.Arguments
 	m.args = args
-	m.results = l.Results
+	m.results = l.Registers
 	m.upvals = l.Upvals
 }
 
@@ -56,7 +56,7 @@ func (m *machine) Epilogue(*asm.Assembler) { m.calls = append(m.calls, "epilogue
 func (m *machine) Enter(a *asm.Assembler, l compile.Layout) asm.Label {
 	m.calls = append(m.calls, "enter")
 	m.arguments = l.Arguments
-	m.results = l.Results
+	m.results = l.Registers
 	label := a.Label()
 	a.Bind(label)
 	return label

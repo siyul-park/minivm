@@ -26,12 +26,13 @@ const (
 	ClassTrap
 )
 
-// scale is the ledger's fixed-point resolution: a work unit is scale debt.
-const scale = 8
-
-// slack is how far the ledger's debt or credit may run, 64 work units:
-// warm-up and bursts of exits pass, a sustained loss does not.
-const slack = 64 * scale
+const (
+	// scale is the ledger's fixed-point resolution: a work unit is scale debt.
+	scale = 8
+	// slack is how far the ledger's debt or credit may run, 64 work units:
+	// warm-up and bursts of exits pass, a sustained loss does not.
+	slack = 64 * scale
+)
 
 // prices is each class's round trip in work units times scale: the time one
 // served exit adds over threaded code, divided by the time native code saves

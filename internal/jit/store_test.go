@@ -53,6 +53,8 @@ func TestStore_Code(t *testing.T) {
 	c := code(t, 0, jit.Baseline)
 	require.True(t, s.Publish(c))
 	require.Equal(t, c, s.Code(0))
+	require.Nil(t, s.Code(-1))
+	require.Nil(t, s.Code(2))
 }
 
 func TestStore_Publish(t *testing.T) {
@@ -171,6 +173,16 @@ func TestStore_Retire(t *testing.T) {
 		s.Retire(0)
 		require.Nil(t, s.Code(0))
 	})
+
+	t.Run("is a no-op out of range", func(t *testing.T) {
+		s := jit.NewStore(1)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+		require.NotPanics(t, func() {
+			s.Retire(-1)
+			s.Retire(1)
+		})
+	})
 }
 
 func TestStore_CodeAt(t *testing.T) {
@@ -219,6 +231,10 @@ func TestStore_Find(t *testing.T) {
 	require.Equal(t, c, s.Find(c.Entry()+3))
 	require.Nil(t, s.Find(c.Entry()+4))
 	require.Nil(t, s.Find(c.Entry()-1))
+
+	o := osrCode(t, 0, 12, jit.Optimized)
+	require.True(t, s.Publish(o))
+	require.Equal(t, o, s.Find(o.Entry()))
 }
 
 func TestStore_Reclaim(t *testing.T) {

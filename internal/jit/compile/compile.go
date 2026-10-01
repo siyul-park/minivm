@@ -26,11 +26,13 @@ type lowering struct {
 	// its function's own entry.
 	osr   bool
 	count bool
-	// loops marks every block in a loop body; gate rejects a bridge or box
-	// exit outside them (see Lower); block is the block being lowered.
-	loops map[int]bool
-	gate  bool
-	block int
+	// headers are f's loop headers and loops marks every block in a loop
+	// body; gate rejects a bridge or box exit outside them (see scan); block
+	// is the block being lowered.
+	headers []int
+	loops   map[int]bool
+	gate    bool
+	block   int
 	// upvals reports that f reads or writes its upvals.
 	upvals  bool
 	objects transform.Objects
@@ -129,107 +131,10 @@ type stall struct {
 // header (transform.Translate roots there); Lower loads them itself (see
 // preload) instead of rejecting them.
 func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects, address int, osr, count bool) ([]byte, []jit.Exit, int, error) {
-	if f.Len() == 0 {
-		return nil, nil, 0, fmt.Errorf("%w: function shape", ErrUnsupported)
+	l, err := newLowering(f, m, fn, objects, address, osr, count)
+	if err != nil {
+		return nil, nil, 0, err
 	}
-	if !osr && len(f.Block(0).Params) > 0 {
-		return nil, nil, 0, fmt.Errorf("%w: entry parameters", ErrUnsupported)
-	}
-	for _, p := range f.Block(0).Params {
-		// A not-yet-loaded i64 param would need every later block-0 param's
-		// deopt map to distinguish "raw slot word" from "guarded" by
-		// position, which this backend does not implement; refuse rather
-		// than risk misboxing one on a guard failure.
-		if f.Type(p) == ssa.TypeI64 {
-			return nil, nil, 0, fmt.Errorf("%w: OSR i64 operand", ErrUnsupported)
-		}
-	}
-	homes := map[int]int{}
-	for block := 0; block < f.Len(); block++ {
-		for _, op := range f.Block(block).Operations {
-			if op.Op != ssa.OpState {
-				continue
-			}
-			for _, frame := range op.Frames {
-				if frame.Base != 0 && len(frame.Locals) > 0 {
-					return nil, nil, 0, fmt.Errorf("%w: outer-frame deopt", ErrUnsupported)
-				}
-				for _, local := range frame.Locals {
-					if _, ok := homes[local.Index]; !ok {
-						homes[local.Index] = len(homes)
-					}
-				}
-			}
-		}
-	}
-	l := &lowering{
-		f: f, m: m, a: asm.New(m.Arch()), fn: fn, address: address, osr: osr, count: count, objects: objects,
-		states: map[ssa.Value]ssa.Operation{}, consts: map[ssa.Value]uint64{}, raw: map[ssa.Value]bool{},
-		homes: homes, tmp: int32(f.Values()) + 4,
-		remats: map[ssa.Value]bool{},
-		param:  map[ssa.Value]bool{}, uses: map[ssa.Value]int{},
-	}
-	// A scalar or ref constant is rematerialized when f has a call and no
-	// loop block uses it: a loop keeps its constants in registers.
-	loops := map[int]bool{}
-	dom := graph.NewDominance(f)
-	headers := graph.Headers(f, dom)
-	for _, h := range headers {
-		maps.Copy(loops, graph.Body(f, dom, h))
-	}
-	l.loops = loops
-	// A unit entered at ip 0 of code with loops gains only its prefix's
-	// dispatch, which a Go round trip outweighs: it bridges only in loops.
-	entry := f.Entry().IP
-	l.gate = osr && entry == 0 && len(headers) > 0
-	if l.gate {
-		if bytecode, err := analysis.Headers(fn); err == nil && slices.Contains(bytecode, entry) {
-			l.gate = false
-		}
-	}
-	caller := false
-	looped := map[ssa.Value]bool{}
-	for id := 0; id < f.Len(); id++ {
-		b := f.Block(id)
-		mark := func(args []ssa.Value) {
-			for _, v := range args {
-				l.uses[v]++
-				if loops[id] {
-					looped[v] = true
-				}
-			}
-		}
-		for _, op := range b.Operations {
-			caller = caller || op.Op == ssa.OpExec && op.Code == instr.CALL
-			l.upvals = l.upvals || (op.Op == ssa.OpLoad || op.Op == ssa.OpStore) && op.Slot.Space == ssa.SpaceUpval
-			mark(op.Args)
-			for _, frame := range op.Frames {
-				for _, o := range frame.Stack {
-					l.uses[o.Value]++
-				}
-				for _, local := range frame.Locals {
-					l.uses[local.Value]++
-				}
-			}
-		}
-		mark(b.Terminator.Args)
-		for _, e := range b.Terminator.Edges {
-			mark(e.Args)
-		}
-	}
-	for id := 0; id < f.Len() && caller; id++ {
-		for _, op := range f.Block(id).Operations {
-			if op.Op == ssa.OpConst && !looped[op.Results[0]] {
-				switch l.f.Type(op.Results[0]) {
-				case ssa.TypeF32, ssa.TypeF64:
-				default:
-					l.remats[op.Results[0]] = true
-				}
-			}
-		}
-	}
-	l.a.Reserve(m.Reserve()...)
-	l.a.ReserveSlots(len(homes))
 	if err := l.function(); err != nil {
 		return nil, nil, 0, err
 	}
@@ -255,13 +160,129 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 	return code, exits, entry, nil
 }
 
+// newLowering rejects shapes the backend does not lower and scans f for what
+// lowering consults: homes, loops, uses, and remat constants.
+func newLowering(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects, address int, osr, count bool) (*lowering, error) {
+	if f.Len() == 0 {
+		return nil, fmt.Errorf("%w: function shape", ErrUnsupported)
+	}
+	if !osr && len(f.Block(0).Params) > 0 {
+		return nil, fmt.Errorf("%w: entry parameters", ErrUnsupported)
+	}
+	for _, p := range f.Block(0).Params {
+		// A not-yet-loaded i64 param would need every later block-0 param's
+		// deopt map to distinguish "raw slot word" from "guarded" by
+		// position, which this backend does not implement; refuse rather
+		// than risk misboxing one on a guard failure.
+		if f.Type(p) == ssa.TypeI64 {
+			return nil, fmt.Errorf("%w: OSR i64 operand", ErrUnsupported)
+		}
+	}
+	homes := map[int]int{}
+	for block := 0; block < f.Len(); block++ {
+		for _, op := range f.Block(block).Operations {
+			if op.Op != ssa.OpState {
+				continue
+			}
+			for _, frame := range op.Frames {
+				if frame.Base != 0 && len(frame.Locals) > 0 {
+					return nil, fmt.Errorf("%w: outer-frame deopt", ErrUnsupported)
+				}
+				for _, local := range frame.Locals {
+					if _, ok := homes[local.Index]; !ok {
+						homes[local.Index] = len(homes)
+					}
+				}
+			}
+		}
+	}
+	l := &lowering{
+		f: f, m: m, a: asm.New(m.Arch()), fn: fn, address: address, osr: osr, count: count, objects: objects,
+		states: map[ssa.Value]ssa.Operation{}, consts: map[ssa.Value]uint64{}, raw: map[ssa.Value]bool{},
+		homes: homes, tmp: int32(f.Values()) + 4,
+		remats: map[ssa.Value]bool{},
+		param:  map[ssa.Value]bool{}, uses: map[ssa.Value]int{},
+	}
+	l.scan()
+	l.a.Reserve(m.Reserve()...)
+	l.a.ReserveSlots(len(homes))
+	return l, nil
+}
+
+// scan fills headers, loops, gate, upvals, uses, and remats. A scalar or ref
+// constant is rematerialized when f has a call and no loop block uses it: a
+// loop keeps its constants in registers.
+func (l *lowering) scan() {
+	f := l.f
+	dom := graph.NewDominance(f)
+	l.headers = graph.Headers(f, dom)
+	l.loops = map[int]bool{}
+	for _, h := range l.headers {
+		maps.Copy(l.loops, graph.Body(f, dom, h))
+	}
+	// A unit entered at ip 0 of code with loops gains only its prefix's
+	// dispatch, which a Go round trip outweighs: it bridges only in loops.
+	entry := f.Entry().IP
+	l.gate = l.osr && entry == 0 && len(l.headers) > 0
+	if l.gate {
+		if bytecode, err := analysis.Headers(l.fn); err == nil && slices.Contains(bytecode, entry) {
+			l.gate = false
+		}
+	}
+	caller := false
+	looped := map[ssa.Value]bool{}
+	for id := 0; id < f.Len(); id++ {
+		b := f.Block(id)
+		mark := func(args []ssa.Value) {
+			for _, v := range args {
+				l.uses[v]++
+				if l.loops[id] {
+					looped[v] = true
+				}
+			}
+		}
+		for _, op := range b.Operations {
+			caller = caller || op.Op == ssa.OpExec && op.Code == instr.CALL
+			l.upvals = l.upvals || (op.Op == ssa.OpLoad || op.Op == ssa.OpStore) && op.Slot.Space == ssa.SpaceUpval
+			mark(op.Args)
+			for _, frame := range op.Frames {
+				for _, o := range frame.Stack {
+					l.uses[o.Value]++
+				}
+				for _, local := range frame.Locals {
+					l.uses[local.Value]++
+				}
+			}
+		}
+		mark(b.Terminator.Args)
+		for _, e := range b.Terminator.Edges {
+			mark(e.Args)
+		}
+	}
+	if !caller {
+		return
+	}
+	for id := 0; id < f.Len(); id++ {
+		for _, op := range f.Block(id).Operations {
+			if op.Op != ssa.OpConst || looped[op.Results[0]] {
+				continue
+			}
+			switch f.Type(op.Results[0]) {
+			case ssa.TypeF32, ssa.TypeF64:
+			default:
+				l.remats[op.Results[0]] = true
+			}
+		}
+	}
+}
+
 // Reg is v's virtual register, typed by its static representation; for a
 // remat constant, a fresh register loaded here.
 func (l *lowering) Reg(v ssa.Value) asm.VReg {
 	if c, ok := l.remat(v); ok {
 		return l.materialize(v, c)
 	}
-	return class(int32(v), l.f.Type(v))
+	return vreg(int32(v), l.f.Type(v))
 }
 
 // Type is v's static type.
@@ -307,19 +328,20 @@ func (l *lowering) Trap() asm.Label {
 
 // Release places a release stub for ref.
 func (l *lowering) Release(ref asm.VReg) (exit, resume asm.Label) {
-	id := l.exit(jit.ExitRelease)
-	e := l.outlets[id].exit
-	e.Word.Kind = types.KindRef
-	l.outlets[id].places = append(l.outlets[id].places, place{to: &e.Word, reg: ref})
-	return l.stub(id)
+	return l.word(jit.ExitRelease, types.KindRef, ref)
 }
 
 // Box places a box stub for word, a wide i64.
 func (l *lowering) Box(word asm.VReg) (exit, resume asm.Label) {
-	id := l.exit(jit.ExitBox)
-	e := l.outlets[id].exit
-	e.Word.Kind = types.KindI64
-	l.outlets[id].places = append(l.outlets[id].places, place{to: &e.Word, reg: word})
+	return l.word(jit.ExitBox, types.KindI64, word)
+}
+
+// word places a stub of kind k whose Word is reg, of kind kind.
+func (l *lowering) word(k jit.Kind, kind types.Kind, reg asm.VReg) (exit, resume asm.Label) {
+	id := l.exit(k)
+	out := &l.outlets[id]
+	out.exit.Word.Kind = kind
+	out.places = append(out.places, place{to: &out.exit.Word, reg: reg})
 	return l.stub(id)
 }
 
@@ -346,7 +368,6 @@ func (l *lowering) function() error {
 	for _, block := range order {
 		labels[block] = l.a.Label()
 	}
-	headers := graph.Headers(l.f, graph.NewDominance(l.f))
 
 	// Every slot is a live local at an OSR header, not just the params the
 	// function was called with: the prologue must start none of them.
@@ -358,8 +379,7 @@ func (l *lowering) function() error {
 		args = arguments(l.fn)
 		borrows = transform.Borrows(l.fn)
 	}
-	results := registers(l.fn)
-	layout := Layout{Kinds: l.fn.Slots(), Zeros: zeros, Arguments: args, Results: results, Borrows: borrows, Upvals: l.upvals}
+	layout := Layout{Kinds: l.fn.Slots(), Zeros: zeros, Arguments: args, Registers: registers(l.fn), Borrows: borrows, Upvals: l.upvals}
 	l.args = make([]asm.VReg, len(args))
 	for i, k := range args {
 		l.args[i] = l.fresh(ssa.TypeOf(k))
@@ -380,7 +400,7 @@ func (l *lowering) function() error {
 				l.fuse = results[0]
 			}
 		}
-		counted := !slices.Contains(headers, block)
+		counted := !slices.Contains(l.headers, block)
 		for _, op := range b.Operations {
 			if !counted && op.State != ssa.NoValue {
 				l.op = op
@@ -432,11 +452,7 @@ func registers(fn *types.Function) []types.Kind {
 	if fn == nil || fn.Typ == nil {
 		return nil
 	}
-	returns := fn.Typ.Returns
-	if len(returns) == 0 || len(returns) > 2 {
-		return nil
-	}
-	return types.Kinds(returns)
+	return convention(fn.Typ.Returns)
 }
 
 // arguments reports fn's register-convention parameters: at most two, of any
@@ -448,11 +464,15 @@ func arguments(fn *types.Function) []types.Kind {
 	if fn == nil || fn.Typ == nil {
 		return nil
 	}
-	params := fn.Typ.Params
-	if len(params) == 0 || len(params) > 2 {
+	return convention(fn.Typ.Params)
+}
+
+// convention is the kinds of ts when one or two values travel in registers.
+func convention(ts []types.Type) []types.Kind {
+	if len(ts) == 0 || len(ts) > 2 {
 		return nil
 	}
-	return types.Kinds(params)
+	return types.Kinds(ts)
 }
 
 // preload loads block 0's parameters from the operand-stack slots the
@@ -635,12 +655,12 @@ func (l *lowering) jump(label asm.Label) {
 func (l *lowering) fresh(t ssa.Type) asm.VReg {
 	id := l.tmp
 	l.tmp++
-	return class(id, t)
+	return vreg(id, t)
 }
 
-// class is register id typed by t's static representation: its bank and
+// vreg is register id typed by t's static representation: its bank and
 // width.
-func class(id int32, t ssa.Type) asm.VReg {
+func vreg(id int32, t ssa.Type) asm.VReg {
 	switch t {
 	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32:
 		return asm.NewVReg(id, asm.RegTypeInt, asm.Width32)
@@ -695,7 +715,8 @@ func (l *lowering) call(op ssa.Operation) error {
 			return fmt.Errorf("%w: call of %d", ErrUnsupported, ref)
 		}
 	}
-	if registers(target) == nil {
+	regs := registers(target)
+	if regs == nil {
 		for _, v := range op.Results {
 			if l.f.Type(v) == ssa.TypeI64 {
 				return fmt.Errorf("%w: i64 call result v%d", ErrUnsupported, v)
@@ -737,7 +758,7 @@ func (l *lowering) call(op ssa.Operation) error {
 			out.exit.Lent = append(out.exit.Lent, j)
 		}
 	}
-	if registers(target) != nil {
+	if regs != nil {
 		for _, v := range op.Results {
 			out.exit.Results = append(out.exit.Results, l.f.Type(v).Kind())
 			out.results = append(out.results, l.Reg(v))
@@ -754,7 +775,7 @@ func (l *lowering) call(op ssa.Operation) error {
 		Bridge:    bridge,
 		Join:      join,
 		Owned:     owned,
-		Registers: registers(target),
+		Registers: regs,
 		Arguments: arguments(target),
 		Generic:   generic,
 	}

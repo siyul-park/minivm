@@ -279,7 +279,7 @@ func TestMachine_Enter(t *testing.T) {
 			m.Prologue(a, 0, true, compile.Layout{}, nil)
 			m.Epilogue(a)
 			start := len(a.Rows())
-			m.Enter(a, compile.Layout{Results: c.results})
+			m.Enter(a, compile.Layout{Registers: c.results})
 			require.Equal(t, slices.Concat(head, c.body, tail), a.Rows()[start:])
 		}
 	})
@@ -1576,7 +1576,7 @@ func TestMachine_Return(t *testing.T) {
 			}},
 		} {
 			m, a := arm64.New(), asm.New(target.New())
-			m.Prologue(a, 0, true, compile.Layout{Kinds: scalars, Results: c.results}, nil)
+			m.Prologue(a, 0, true, compile.Layout{Kinds: scalars, Registers: c.results}, nil)
 			start := len(a.Rows())
 			m.Return(a, ssa.Terminator{Op: ssa.OpReturn, Args: c.args}, c.regs)
 			require.Equal(t, c.rows, a.Rows()[start:])
@@ -1585,7 +1585,7 @@ func TestMachine_Return(t *testing.T) {
 
 	t.Run("keeps OpComplete boxing to slots even under the register convention", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{Kinds: scalars, Results: []types.Kind{types.KindI32}}, nil)
+		m.Prologue(a, 0, true, compile.Layout{Kinds: scalars, Registers: []types.Kind{types.KindI32}}, nil)
 		start := len(a.Rows())
 		m.Return(a, ssa.Terminator{Op: ssa.OpComplete, Args: []ssa.Value{1}}, r)
 		require.Equal(t, rows(16), a.Rows()[start:])

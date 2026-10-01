@@ -20,13 +20,13 @@ type Machine interface {
 	// sequence (a Queue worker reuses one), so Prologue resets all
 	// per-function state. Prologue moves each l.Arguments entry's incoming
 	// value into args, one register of its class per entry, and keeps
-	// l.Results for OpReturn to consult.
+	// l.Registers for OpReturn to consult.
 	Prologue(a *asm.Assembler, address int, count bool, l Layout, args []asm.VReg)
 	// Epilogue ends the native function.
 	Epilogue(a *asm.Assembler)
 	// Enter emits the Go entry stub after Epilogue and returns its label:
 	// what Lower resolves to the native code's entry offset. l.Arguments and
-	// l.Results are the function's register-convention parameters and
+	// l.Registers are the function's register-convention parameters and
 	// results, empty when none apply.
 	Enter(a *asm.Assembler, l Layout) asm.Label
 	// Lower emits op and reports false when the target cannot lower it.
@@ -67,9 +67,9 @@ type Layout struct {
 	// Arguments is the function's register-convention parameters (see
 	// arguments), empty when none apply.
 	Arguments []types.Kind
-	// Results is the function's register-convention results (see
+	// Registers is the function's register-convention results (see
 	// registers), empty when none apply.
-	Results []types.Kind
+	Registers []types.Kind
 	// Borrows is transform.Borrows for a non-OSR unit and nil for an OSR
 	// unit, whose threaded-entered frame owns every slot.
 	Borrows []bool

@@ -30,9 +30,9 @@ type Machine struct {
 	// carries no such query, and the fact is Machine-local across the whole
 	// function, like kinds and temp).
 	guards map[ssa.Value]ssa.Shape
-	// results is this function's register-convention results (see compile's
+	// registers is this function's register-convention results (see compile's
 	// registers), empty when OpReturn boxes to the VM frame instead.
-	results []types.Kind
+	registers []types.Kind
 	// borrows is per-parameter, from transform.Borrows: OpReturn releases a
 	// borrowed slot only at depth 1, the Go-entered activation, since
 	// threaded CALL pushed it owned; a native caller lent it instead. Empty
@@ -87,7 +87,7 @@ func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.
 	// upvals, flag, and cond restart zero, which is unreadable: the upval
 	// read guards on a nonzero VReg, and ssa.NoValue names no branch
 	// argument, so nothing observes them before this function writes them.
-	*m = Machine{kinds: l.Kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}, results: l.Results, borrows: l.Borrows}
+	*m = Machine{kinds: l.Kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}, registers: l.Registers, borrows: l.Borrows}
 	a.Bind(m.entry)
 	a.Emit(
 		target.SUBI(target.SP, target.SP, 16),
@@ -188,7 +188,7 @@ func (m *Machine) Enter(a *asm.Assembler, l compile.Layout) asm.Label {
 		target.BLLabel(m.entry),
 		target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 	)
-	for i, k := range l.Results {
+	for i, k := range l.Registers {
 		src := register(i)
 		switch k.Repr() {
 		case types.KindRef, types.KindF64, types.KindI64:
@@ -322,7 +322,7 @@ func (m *Machine) Return(a *asm.Assembler, t ssa.Terminator, s compile.Site) {
 			a.Emit(target.STR(target.XZR, target.X25, int16(i*8)))
 		}
 	}
-	if t.Op == ssa.OpReturn && len(m.results) > 0 {
+	if t.Op == ssa.OpReturn && len(m.registers) > 0 {
 		// USE(X0)/USE(X1) after every move extends their fixed intervals
 		// through the whole sequence, so the allocator never assigns a
 		// later Arg's own value to a register a prior move already wrote.

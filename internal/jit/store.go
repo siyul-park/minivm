@@ -35,7 +35,7 @@ func NewStore(size int) *Store {
 	if size < 1 {
 		panic("jit: store size must be positive")
 	}
-	return &Store{natives: make([]uintptr, size), codes: make([]atomic.Pointer[Code], size)}
+	return &Store{natives: make([]uintptr, size), codes: make([]atomic.Pointer[Code], size), osr: map[key]*Code{}}
 }
 
 // Natives returns the address of the natives table, stable for the Store's
@@ -84,49 +84,35 @@ func (s *Store) Find(pc uintptr) *Code {
 
 // Publish takes ownership of c. An OSR code (c.OSR) is never a call target:
 // it installs into the (address, IP) map, once, instead of natives[c.Address].
-// Otherwise it installs c — natives[c.Address] = c.Native() — when c.Address
-// is in range and c.Tier is above the published code's tier (none published
-// counts as zero), retiring the code it replaces. Either way it reports
-// whether c installed; a stale c is freed instead.
+// Otherwise it installs c — natives[c.Address] = c.Native() — when c.Tier is
+// above the published code's tier (none published counts as zero), retiring
+// the code it replaces. Either way it reports whether c installed; a stale c,
+// or one whose address is out of range, is freed instead.
 func (s *Store) Publish(c *Code) bool {
-	s.mu.Lock()
-	installed := c.Address >= 0 && c.Address < len(s.natives)
-	if installed && c.OSR {
-		k := key{c.Address, c.IP}
-		if _, ok := s.osr[k]; ok {
-			installed = false
-		} else {
-			if s.osr == nil {
-				s.osr = map[key]*Code{}
+	installed := false
+	if c.Address >= 0 && c.Address < len(s.natives) {
+		s.mu.Lock()
+		if c.OSR {
+			k := key{c.Address, c.IP}
+			if installed = s.osr[k] == nil; installed {
+				s.osr[k] = c
 			}
-			s.osr[k] = c
+		} else {
+			old := s.codes[c.Address].Load()
+			var published Tier
+			if old != nil {
+				published = old.Tier
+			}
+			if installed = c.Tier > published; installed {
+				atomic.StoreUintptr(&s.natives[c.Address], c.native)
+				s.codes[c.Address].Store(c)
+				if old != nil {
+					s.retire(old)
+				}
+			}
 		}
 		s.mu.Unlock()
-		if !installed {
-			_ = c.Free()
-		}
-		return installed
 	}
-	var old *Code
-	if installed {
-		old = s.codes[c.Address].Load()
-		var published Tier
-		if old != nil {
-			published = old.Tier
-		}
-		installed = c.Tier > published
-	}
-	if installed {
-		atomic.StoreUintptr(&s.natives[c.Address], c.Native())
-		s.codes[c.Address].Store(c)
-		if old != nil {
-			old.retired.Store(true)
-			s.retired = append(s.retired, old)
-			s.pending.Add(1)
-		}
-	}
-	s.mu.Unlock()
-
 	if !installed {
 		_ = c.Free()
 	}
@@ -148,9 +134,7 @@ func (s *Store) Retire(address int) {
 	}
 	atomic.StoreUintptr(&s.natives[address], 0)
 	s.codes[address].Store(nil)
-	c.retired.Store(true)
-	s.retired = append(s.retired, c)
-	s.pending.Add(1)
+	s.retire(c)
 }
 
 // RetireAt moves the published OSR code at (address, ip) to the retired
@@ -165,9 +149,7 @@ func (s *Store) RetireAt(address, ip int) {
 		return
 	}
 	delete(s.osr, k)
-	c.retired.Store(true)
-	s.retired = append(s.retired, c)
-	s.pending.Add(1)
+	s.retire(c)
 }
 
 // Enter brackets an interpreter's native execution, suspended exits
@@ -229,4 +211,11 @@ func (s *Store) Close() error {
 		err = errors.Join(err, c.Free())
 	}
 	return err
+}
+
+// retire queues c for Reclaim; the caller holds mu.
+func (s *Store) retire(c *Code) {
+	c.retired.Store(true)
+	s.retired = append(s.retired, c)
+	s.pending.Add(1)
 }
