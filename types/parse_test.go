@@ -13,99 +13,83 @@ func TestParseFunction(t *testing.T) {
 	tests := []struct {
 		name  string
 		lines []string
+		want  *types.Function
 	}{
 		{
-			// no locals
 			name: "no locals",
-			lines: strings.Split(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			want: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
 				Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN)).
-				MustBuild().String(), "\n",
-			),
+				MustBuild(),
 		},
 		{
-			// with locals
 			name: "with locals",
-			lines: strings.Split(types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}).
+			want: types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}).
 				Locals(types.TypeI32, types.TypeI64).
 				Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
-				MustBuild().String(), "\n",
-			),
+				MustBuild(),
 		},
 		{
-			// with captures and locals
 			name: "with captures and locals",
-			lines: strings.Split(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			want: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
 				Captures(types.TypeI32, types.TypeAny).
 				Locals(types.TypeI64).
 				Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
-				MustBuild().String(), "\n",
-			),
+				MustBuild(),
+		},
+		{
+			name:  "no offset prefix",
+			lines: []string{"func() i32", "i32.const 42", "return"},
+			want: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+				Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
+				MustBuild(),
+		},
+		{
+			name:  "no offset prefix with locals",
+			lines: []string{"func(i32) i32", "i32", "i64", "i32.const 42", "return"},
+			want: types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}).
+				Locals(types.TypeI32, types.TypeI64).
+				Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
+				MustBuild(),
+		},
+		{
+			name:  "captures before locals",
+			lines: []string{"func() i32", "capture i32", "capture any", "i64", "i32.const 42", "return"},
+			want: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+				Captures(types.TypeI32, types.TypeAny).
+				Locals(types.TypeI64).
+				Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
+				MustBuild(),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			lines := tt.lines
-			for len(lines) > 0 && lines[len(lines)-1] == "" {
-				lines = lines[:len(lines)-1]
+			if lines == nil {
+				lines = strings.Split(strings.TrimRight(tt.want.String(), "\n"), "\n")
 			}
 			fn, err := types.ParseFunction(lines)
 			require.NoError(t, err, lines[0])
 			require.NotNil(t, fn, lines[0])
-			got := strings.Split(fn.String(), "\n")
-			for len(got) > 0 && got[len(got)-1] == "" {
-				got = got[:len(got)-1]
-			}
-			require.Equal(t, lines, got, lines[0])
+			require.Equal(t, tt.want.String(), fn.String(), lines[0])
 		})
 	}
-	t.Run("no offset prefix", func(t *testing.T) {
-		// Instructions written without offset prefix must parse successfully.
-		lines := []string{
-			"func() i32",
-			"i32.const 42",
-			"return",
-		}
-		fn, err := types.ParseFunction(lines)
-		require.NoError(t, err)
-		require.NotNil(t, fn)
-		require.Equal(t, 0, len(fn.Locals))
-		require.Equal(t, 2, len(instr.Unmarshal(fn.Code)))
-	})
-
-	t.Run("no offset prefix with locals", func(t *testing.T) {
-		lines := []string{
-			"func(i32) i32",
-			"i32",
-			"i64",
-			"i32.const 42",
-			"return",
-		}
-		fn, err := types.ParseFunction(lines)
-		require.NoError(t, err)
-		require.NotNil(t, fn)
-		require.Equal(t, 2, len(fn.Locals))
-		require.Equal(t, 2, len(instr.Unmarshal(fn.Code)))
-	})
-
-	t.Run("captures before locals", func(t *testing.T) {
-		lines := []string{
-			"func() i32",
-			"capture i32",
-			"capture any",
-			"i64",
-			"i32.const 42",
-			"return",
-		}
-		fn, err := types.ParseFunction(lines)
-		require.NoError(t, err)
-		require.NotNil(t, fn)
-		require.Equal(t, []types.Type{types.TypeI32, types.TypeAny}, fn.Captures)
-		require.Equal(t, []types.Type{types.TypeI64}, fn.Locals)
-		require.Equal(t, 2, len(instr.Unmarshal(fn.Code)))
-	})
 }
+
 func TestParse(t *testing.T) {
+	nested := types.NewStructType(
+		types.NewStructField(types.NewStructType(
+			types.NewStructField(types.TypeI32, types.FieldWithName("x")),
+			types.NewStructField(types.TypeI32, types.FieldWithName("y")),
+		), types.FieldWithName("a")),
+		types.NewStructField(types.TypeI32, types.FieldWithName("b")),
+	)
+	named := types.NewStructType(
+		types.NewStructField(types.TypeI64, types.FieldWithName("value")),
+		types.NewStructField(types.TypeAny, types.FieldWithName("left")),
+		types.NewStructField(types.TypeAny),
+	)
+
 	tests := []struct {
 		input   string
 		want    types.Type
@@ -139,6 +123,12 @@ func TestParse(t *testing.T) {
 		{"iterator[]", nil, true},
 		{"iterator[i32", nil, true},
 		{"bad", nil, true},
+		// A nested struct carries its own ";" separators, so the field split must track brace depth.
+		{nested.String(), nested, false},
+		// StructType.Equals ignores field names; String equality below pins them.
+		{named.String(), named, false},
+		// "notaname" is not followed by ": ", so it must not be read as a field name.
+		{"struct {notaname i32}", nil, true},
 	}
 
 	for _, tt := range tests {
@@ -150,48 +140,7 @@ func TestParse(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.True(t, tt.want.Equals(got))
+			require.Equal(t, tt.want.String(), got.String())
 		})
 	}
-	t.Run("nested struct fields", func(t *testing.T) {
-		// A nested struct carries its own ";" separators, so the field split has
-		// to track brace depth rather than cutting on every semicolon.
-		inner := types.NewStructType(
-			types.NewStructField(types.TypeI32, types.FieldWithName("x")),
-			types.NewStructField(types.TypeI32, types.FieldWithName("y")),
-		)
-		outer := types.NewStructType(
-			types.NewStructField(inner, types.FieldWithName("a")),
-			types.NewStructField(types.TypeI32, types.FieldWithName("b")),
-		)
-
-		parsed, err := types.Parse(outer.String())
-		require.NoError(t, err)
-		require.Equal(t, outer.String(), parsed.String())
-	})
-
-	t.Run("restores named and unnamed fields from String output", func(t *testing.T) {
-		// StructType.Equals ignores field names, so the table above cannot catch
-		// a regression that drops them; assert the names directly.
-		want := types.NewStructType(
-			types.NewStructField(types.TypeI64, types.FieldWithName("value")),
-			types.NewStructField(types.TypeAny, types.FieldWithName("left")),
-			types.NewStructField(types.TypeAny),
-		)
-		got, err := types.Parse(want.String())
-		require.NoError(t, err)
-
-		st, ok := got.(*types.StructType)
-		require.True(t, ok)
-		require.Equal(t, want, st)
-		require.Equal(t, "value", st.Fields[0].Name)
-		require.Equal(t, "left", st.Fields[1].Name)
-		require.Equal(t, "", st.Fields[2].Name)
-	})
-
-	t.Run("field name lookalike prefix without colon-space stays part of the type", func(t *testing.T) {
-		// "notaname" here isn't followed by ": ", so parseStructType must not
-		// misread it as a name and swallow the following token into the type.
-		_, err := types.Parse("struct {notaname i32}")
-		require.Error(t, err)
-	})
 }

@@ -24,8 +24,10 @@ func TestREPL_Run(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
+		files    map[string]string // seeded into $DIR before the session
 		contains []string
 		excludes []string
+		wantFile map[string]string // $DIR-relative file -> substring it must contain after the session
 	}{
 		{
 			name:     "i32 add",
@@ -357,134 +359,74 @@ func TestREPL_Run(t *testing.T) {
 			// locals command shows (no locals) at top level
 			input:    "i32.const 42\n.debug\nlocals\nquit\n.quit\n",
 			contains: []string{"(no locals)"},
-			excludes: []string{"error:"}}}
+			excludes: []string{"error:"}},
+		{
+			name:  "eof exits cleanly",
+			input: "i32.const 1\n",
+		},
+		{
+			name:     "stack accumulates bottom to top",
+			input:    "i32.const 10\ni32.const 20\n.quit\n",
+			contains: []string{"> 10\n> 10 20\n"}},
+		{
+			name:     "profile ranks tied ips and limits them to ten",
+			input:    strings.Repeat("nop\n", 11) + ".profile\n.quit\n",
+			contains: []string{"hot ips for func 0 (top 10):", "0000\t1\t9.1%\n0001\t1\t9.1%\n", "0008\t1\t9.1%\n0009\t1\t9.1%\n", "hot opcodes (top 10):"},
+			excludes: []string{"0010\t1"}},
+		{
+			name:     "profile does not mutate history",
+			input:    ".type\n[]i32\n\n.const\nfunc() i32\ni32.const 3\nreturn\n\nconst.get 0\ncall\n.profile\nconst.get 0\ncall\n.show\n.quit\n",
+			contains: []string{"[]i32", "func() i32", "const.get 0", "3 3"},
+			excludes: []string{"error:"}},
+		{
+			name:     "save then load round-trips through file",
+			input:    "i32.const 1\ni32.const 2\ni32.add\n.save $DIR/prog.mvm\n.reset\n.load $DIR/prog.mvm\n.show\n.quit\n",
+			contains: []string{"saved $DIR/prog.mvm", "loaded $DIR/prog.mvm", "i32.add"},
+			wantFile: map[string]string{"prog.mvm": "i32.add"}},
+		{
+			name:     "load replaces current state",
+			input:    "i32.const 1\ni32.const 2\n.load $DIR/replacement.mvm\n.show\n.quit\n",
+			files:    map[string]string{"replacement.mvm": "0000:\ti32.const 0x00000063\n0005:\treturn\n"},
+			contains: []string{"loaded $DIR/replacement.mvm", "i32.const 0x00000063"},
+			excludes: []string{"i32.const 0x00000001"}},
+		{
+			name:     "load reports parse errors",
+			input:    ".load $DIR/broken.mvm\n.quit\n",
+			files:    map[string]string{"broken.mvm": "not-an-instruction xyz\n"},
+			contains: []string{"error:"}},
+		{
+			name:     "load reports missing file",
+			input:    ".load $DIR/missing.mvm\n.quit\n",
+			contains: []string{"error:"}},
+		{
+			name:     "save and load require a path",
+			input:    ".save\n.load\n.quit\n",
+			contains: []string{"usage: .save", "usage: .load"}},
+	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, data := range tt.files {
+				require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(data), 0o644))
+			}
+			replace := func(v string) string { return strings.ReplaceAll(v, "$DIR", filepath.ToSlash(dir)) }
+
 			var out bytes.Buffer
-			r := cli.NewREPL(strings.NewReader(tt.input), &out, nil)
+			r := cli.NewREPL(strings.NewReader(replace(tt.input)), &out, cli.OS())
 			require.NoError(t, r.Run(context.Background()))
 			output := out.String()
 			for _, s := range tt.contains {
-				require.Contains(t, output, s)
+				require.Contains(t, output, replace(s))
 			}
 			for _, s := range tt.excludes {
-				require.NotContains(t, output, s)
+				require.NotContains(t, output, replace(s))
+			}
+			for name, want := range tt.wantFile {
+				data, err := os.ReadFile(filepath.Join(dir, name))
+				require.NoError(t, err)
+				require.Contains(t, string(data), want)
 			}
 		})
 	}
-
-	t.Run("eof exits cleanly", func(t *testing.T) {
-		var out bytes.Buffer
-		r := cli.NewREPL(strings.NewReader("i32.const 1\n"), &out, nil)
-		require.NoError(t, r.Run(context.Background()))
-	})
-
-	t.Run("stack accumulates bottom to top", func(t *testing.T) {
-		var out bytes.Buffer
-		r := cli.NewREPL(strings.NewReader("i32.const 10\ni32.const 20\n.quit\n"), &out, nil)
-		require.NoError(t, r.Run(context.Background()))
-		output := out.String()
-		var valLines []string
-		for _, l := range strings.Split(output, "\n") {
-			l = strings.TrimPrefix(l, "> ")
-			if l == "10" || l == "10 20" {
-				valLines = append(valLines, l)
-			}
-		}
-		require.Equal(t, []string{"10", "10 20"}, valLines)
-	})
-
-	t.Run("profile ranks tied ips and limits them to ten", func(t *testing.T) {
-		var out bytes.Buffer
-		input := strings.Repeat("nop\n", 11) + ".profile\n.quit\n"
-		r := cli.NewREPL(strings.NewReader(input), &out, nil)
-		require.NoError(t, r.Run(context.Background()))
-
-		output := out.String()
-		start := strings.Index(output, "hot ips for func 0 (top 10):")
-		end := strings.Index(output, "hot opcodes (top 10):")
-		require.NotEqual(t, -1, start)
-		require.Greater(t, end, start)
-		section := output[start:end]
-		require.Contains(t, section, "0000\t1")
-		require.Contains(t, section, "0009\t1")
-		require.Less(t, strings.Index(section, "0000\t1"), strings.Index(section, "0009\t1"))
-		require.NotContains(t, section, "0010\t1")
-	})
-
-	t.Run("profile does not mutate history", func(t *testing.T) {
-		var out bytes.Buffer
-		r := cli.NewREPL(strings.NewReader(".type\n[]i32\n\n.const\nfunc() i32\ni32.const 3\nreturn\n\nconst.get 0\ncall\n.profile\nconst.get 0\ncall\n.show\n.quit\n"), &out, nil)
-		require.NoError(t, r.Run(context.Background()))
-		output := out.String()
-		require.Contains(t, output, "[]i32")
-		require.Contains(t, output, "func() i32")
-		require.Contains(t, output, "const.get 0")
-		require.Contains(t, output, "3 3")
-		require.NotContains(t, output, "error:")
-	})
-
-	t.Run("save then load round-trips through file", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "prog.mvm")
-
-		var out1 bytes.Buffer
-		r1 := cli.NewREPL(
-			strings.NewReader("i32.const 1\ni32.const 2\ni32.add\n.save "+path+"\n.quit\n"),
-			&out1, cli.OS())
-		require.NoError(t, r1.Run(context.Background()))
-		require.Contains(t, out1.String(), "saved "+path)
-		data, err := os.ReadFile(path)
-		require.NoError(t, err)
-		require.Contains(t, string(data), "i32.add")
-
-		var out2 bytes.Buffer
-		r2 := cli.NewREPL(
-			strings.NewReader(".load "+path+"\n.show\n.quit\n"),
-			&out2, cli.OS())
-		require.NoError(t, r2.Run(context.Background()))
-		require.Contains(t, out2.String(), "loaded "+path)
-		require.Contains(t, out2.String(), "i32.add")
-	})
-
-	t.Run("load replaces current state", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "replacement.mvm")
-		require.NoError(t, os.WriteFile(path, []byte("0000:\ti32.const 0x00000063\n0005:\treturn\n"), 0o644))
-
-		var out bytes.Buffer
-		r := cli.NewREPL(
-			strings.NewReader("i32.const 1\ni32.const 2\n.load "+path+"\n.show\n.quit\n"),
-			&out, cli.OS())
-		require.NoError(t, r.Run(context.Background()))
-		output := out.String()
-		require.Contains(t, output, "loaded "+path)
-		require.Contains(t, output, "i32.const 0x00000063")
-		require.NotContains(t, output, "i32.const 0x00000001")
-	})
-
-	t.Run("load reports parse errors", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "broken.mvm")
-		require.NoError(t, os.WriteFile(path, []byte("not-an-instruction xyz\n"), 0o644))
-
-		var out bytes.Buffer
-		r := cli.NewREPL(strings.NewReader(".load "+path+"\n.quit\n"), &out, cli.OS())
-		require.NoError(t, r.Run(context.Background()))
-		require.Contains(t, out.String(), "error:")
-	})
-
-	t.Run("load reports missing file", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "missing.mvm")
-		var out bytes.Buffer
-		r := cli.NewREPL(strings.NewReader(".load "+path+"\n.quit\n"), &out, cli.OS())
-		require.NoError(t, r.Run(context.Background()))
-		require.Contains(t, out.String(), "error:")
-	})
-
-	t.Run("save and load require a path", func(t *testing.T) {
-		var out bytes.Buffer
-		r := cli.NewREPL(strings.NewReader(".save\n.load\n.quit\n"), &out, cli.OS())
-		require.NoError(t, r.Run(context.Background()))
-		require.Contains(t, out.String(), "usage: .save")
-		require.Contains(t, out.String(), "usage: .load")
-	})
 }
