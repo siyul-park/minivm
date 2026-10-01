@@ -147,6 +147,42 @@ func TestStore_Publish(t *testing.T) {
 		require.Equal(t, c, s.CodeAt(0, 0))
 		require.Nil(t, s.Code(0))
 	})
+
+	t.Run("publishes, retires, and reclaims safely from concurrent goroutines", func(t *testing.T) {
+		s := jit.NewStore(4)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+		var wg sync.WaitGroup
+		for addr := range 4 {
+			for _, tier := range []jit.Tier{jit.Baseline, jit.Optimized} {
+				c := code(t, addr, tier)
+				wg.Add(1)
+				go func(c *jit.Code) {
+					defer wg.Done()
+					s.Publish(c)
+				}(c)
+			}
+			osr := osrCode(t, addr, 12, jit.Optimized)
+			wg.Add(1)
+			go func(c *jit.Code) {
+				defer wg.Done()
+				s.Publish(c)
+				_ = s.CodeAt(addr, 12)
+				s.RetireAt(addr, 12)
+			}(osr)
+		}
+		for range 4 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				s.Enter()
+				s.Find(0)
+				s.Leave()
+				_ = s.Reclaim()
+			}()
+		}
+		wg.Wait()
+	})
 }
 
 func TestStore_Retire(t *testing.T) {
@@ -278,40 +314,4 @@ func TestStore_Close(t *testing.T) {
 	require.True(t, s.Publish(osr))
 
 	require.NoError(t, s.Close())
-}
-
-func TestStore_Race(t *testing.T) {
-	s := jit.NewStore(4)
-	t.Cleanup(func() { require.NoError(t, s.Close()) })
-
-	var wg sync.WaitGroup
-	for addr := range 4 {
-		for _, tier := range []jit.Tier{jit.Baseline, jit.Optimized} {
-			c := code(t, addr, tier)
-			wg.Add(1)
-			go func(c *jit.Code) {
-				defer wg.Done()
-				s.Publish(c)
-			}(c)
-		}
-		osr := osrCode(t, addr, 12, jit.Optimized)
-		wg.Add(1)
-		go func(c *jit.Code) {
-			defer wg.Done()
-			s.Publish(c)
-			_ = s.CodeAt(addr, 12)
-			s.RetireAt(addr, 12)
-		}(osr)
-	}
-	for range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			s.Enter()
-			s.Find(0)
-			s.Leave()
-			_ = s.Reclaim()
-		}()
-	}
-	wg.Wait()
 }
