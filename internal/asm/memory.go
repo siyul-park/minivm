@@ -3,20 +3,10 @@
 package asm
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"syscall"
 	"unsafe"
-)
-
-type memory []byte
-
-var (
-	ErrInvalidSize    = errors.New("invalid size")
-	ErrMmapFailed     = errors.New("mmap failed")
-	ErrMprotectFailed = errors.New("mprotect failed")
-	ErrMunmapFailed   = errors.New("munmap failed")
 )
 
 func executable(m memory) error {

@@ -22,7 +22,66 @@ type Buffer struct {
 	mu sync.Mutex
 }
 
-var ErrBufferFull = errors.New("buffer full")
+// memory is a page-aligned mapping owned by a Buffer.
+type memory []byte
+
+// Stable buffer errors.
+var (
+	ErrBufferFull     = errors.New("buffer full")
+	ErrInvalidSize    = errors.New("invalid size")
+	ErrMmapFailed     = errors.New("mmap failed")
+	ErrMprotectFailed = errors.New("mprotect failed")
+	ErrMunmapFailed   = errors.New("munmap failed")
+)
+
+// Link publishes code into b in an immutable executable mapping and returns
+// its entry address.
+func Link(b *Buffer, code []byte) (uintptr, error) {
+	if b == nil {
+		return 0, fmt.Errorf("%w: nil buffer", ErrInvalidArgs)
+	}
+	if len(code) == 0 {
+		return 0, fmt.Errorf("%w: empty code", ErrInvalidArgs)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.size == 0 {
+		return 0, fmt.Errorf("%w: freed buffer", ErrInvalidArgs)
+	}
+	mem := b.mem
+	replace := b.sealed || len(code) > len(mem)
+	if replace {
+		size := max(b.size, len(code))
+		var err error
+		mem, err = allocMemory(size)
+		if err != nil {
+			return 0, fmt.Errorf("%w: allocate %d bytes: %w", ErrBufferFull, size, err)
+		}
+	}
+
+	copy(mem, code)
+	if err := executable(mem); err != nil {
+		if replace {
+			if freeErr := freeMemory(mem); freeErr != nil {
+				b.maps = append(b.maps, mem)
+				err = errors.Join(err, freeErr)
+			}
+		}
+		return 0, err
+	}
+	if replace {
+		if b.sealed {
+			b.maps = append(b.maps, b.mem)
+		} else if err := freeMemory(b.mem); err != nil {
+			b.maps = append(b.maps, b.mem)
+		}
+		b.mem = mem
+	}
+	b.sealed = true
+	return uintptr(unsafe.Pointer(&mem[0])), nil
+}
 
 // NewBuffer allocates an executable buffer with the given initial mapping
 // capacity, rounded up to a page boundary.
@@ -42,7 +101,6 @@ func (b *Buffer) Free() error {
 
 	b.size = 0
 	var err error
-	maps := b.maps
 	kept := b.maps[:0]
 	for _, m := range b.maps {
 		if freeErr := freeMemory(m); freeErr != nil {
@@ -50,7 +108,7 @@ func (b *Buffer) Free() error {
 			kept = append(kept, m)
 		}
 	}
-	clear(maps[len(kept):])
+	clear(b.maps[len(kept):])
 	b.maps = kept
 	if freeErr := freeMemory(b.mem); freeErr != nil {
 		err = errors.Join(err, freeErr)
@@ -59,46 +117,4 @@ func (b *Buffer) Free() error {
 		b.sealed = false
 	}
 	return err
-}
-
-// install publishes code in an immutable executable mapping and returns its
-// entry address.
-func (b *Buffer) install(code []byte) (unsafe.Pointer, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	if b.size == 0 {
-		return nil, fmt.Errorf("%w: freed buffer", ErrInvalidArgs)
-	}
-	mem := b.mem
-	replace := b.sealed || len(code) > len(mem)
-	if replace {
-		size := max(b.size, len(code))
-		var err error
-		mem, err = allocMemory(size)
-		if err != nil {
-			return nil, fmt.Errorf("%w: allocate %d bytes: %w", ErrBufferFull, size, err)
-		}
-	}
-
-	copy(mem, code)
-	if err := executable(mem); err != nil {
-		if replace {
-			if freeErr := freeMemory(mem); freeErr != nil {
-				b.maps = append(b.maps, mem)
-				err = errors.Join(err, freeErr)
-			}
-		}
-		return nil, err
-	}
-	if replace {
-		if b.sealed {
-			b.maps = append(b.maps, b.mem)
-		} else if err := freeMemory(b.mem); err != nil {
-			b.maps = append(b.maps, b.mem)
-		}
-		b.mem = mem
-	}
-	b.sealed = true
-	return unsafe.Pointer(&mem[0]), nil
 }

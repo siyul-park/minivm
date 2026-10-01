@@ -30,7 +30,11 @@ type Assembler struct {
 	offsets  map[Label]int
 }
 
+// Stable assembler errors.
 var (
+	ErrInvalidOperand       = errors.New("invalid operand")
+	ErrInvalidArgs          = errors.New("invalid arguments")
+	ErrBranchOutOfRange     = errors.New("branch offset out of range")
 	ErrUnallocated          = errors.New("unallocated register")
 	ErrUnresolvedLabel      = errors.New("unresolved label")
 	ErrNoRegistersAvailable = errors.New("no registers available")
@@ -88,7 +92,7 @@ func (a *Assembler) Build() ([]byte, error) {
 		return nil, fmt.Errorf("%w: nil architecture", ErrInvalidArgs)
 	}
 	insts, labels, slots := slices.Clone(a.insts), maps.Clone(a.labels), a.slots
-	if frame, ok := a.arch.(Frame); ok && virtual(insts) {
+	if frame, ok := a.arch.(Frame); ok {
 		alloc := newAllocator(frame, insts, labels, a.reserved, a.slots)
 		var err error
 		if insts, labels, err = alloc.allocate(); err != nil {
@@ -97,9 +101,8 @@ func (a *Assembler) Build() ([]byte, error) {
 		a.locs, slots = alloc.locs, alloc.slots
 	}
 	size := int64((slots*8 + 15) &^ 15)
-	for i, inst := range insts {
-		ops := [4]*Operand{&inst.Dst, &inst.Src1, &inst.Src2, &inst.Src3}
-		for _, op := range ops {
+	for i := range insts {
+		for _, op := range insts[i].operands() {
 			if _, ok := (*op).(SlotsOperand); ok {
 				*op = Imm(size)
 			}
@@ -107,7 +110,6 @@ func (a *Assembler) Build() ([]byte, error) {
 				return nil, err
 			}
 		}
-		insts[i] = inst
 	}
 	return a.encode(insts, labels)
 }
@@ -123,18 +125,6 @@ func (a *Assembler) Loc(v VReg) (Loc, bool) {
 func (a *Assembler) Offset(id Label) (int, bool) {
 	off, ok := a.offsets[id]
 	return off, ok
-}
-
-// virtual reports whether any row names a virtual register.
-func virtual(insts []Instruction) bool {
-	for _, inst := range insts {
-		for _, op := range [4]Operand{inst.Dst, inst.Src1, inst.Src2, inst.Src3} {
-			if _, ok := register(op).(VReg); ok {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func validate(op Operand) error {
@@ -161,7 +151,7 @@ func (a *Assembler) encode(insts []Instruction, labels map[Label]int) ([]byte, e
 			return nil, err
 		}
 		if relaxes {
-			if at, repl := a.collect(relaxer, insts, labels, offsets); len(at) > 0 {
+			if at, repl := collect(relaxer, insts, labels, offsets); len(at) > 0 {
 				insts, labels = splice(insts, labels, at, repl)
 				continue
 			}
@@ -199,7 +189,7 @@ func (a *Assembler) draft(insts []Instruction) ([][]byte, []int, error) {
 // collect drafts a Relaxer replacement for every label branch whose
 // displacement is out of range, in instruction order. at and repl are
 // parallel: at[k] is the index of the branch replaced by repl[k].
-func (a *Assembler) collect(
+func collect(
 	relaxer Relaxer, insts []Instruction, labels map[Label]int, offsets []int,
 ) (at []int, repl [][]Instruction) {
 	for i, inst := range insts {

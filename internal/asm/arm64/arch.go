@@ -6,9 +6,7 @@ import (
 	"github.com/siyul-park/minivm/internal/asm"
 )
 
-type arch struct {
-	encoder *Encoder
-}
+type arch struct{}
 
 // skipDisp skips the single 4-byte B after the inverted conditional branch.
 const skipDisp = 8
@@ -44,12 +42,12 @@ var _ asm.Relaxer = arch{}
 
 // New returns the ARM64 assembler architecture.
 func New() arch {
-	return arch{encoder: NewEncoder()}
+	return arch{}
 }
 
 // Encoder returns the target instruction encoder.
 func (a arch) Encoder() asm.Encoder {
-	return a.encoder
+	return Encoder{}
 }
 
 // Flow reports how control leaves an instruction.

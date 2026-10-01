@@ -16,8 +16,8 @@ type PReg struct {
 	width RegWidth
 }
 
-// VReg is a virtual register. Build rejects it because allocation is outside
-// the assembler.
+// VReg is a virtual register. Build assigns it a PReg or a spill slot when the
+// target is a Frame, and rejects it otherwise.
 type VReg struct {
 	id    int32
 	typ   RegType
@@ -36,9 +36,8 @@ const (
 )
 
 const (
-	WidthUndefined RegWidth = 0
-	Width32        RegWidth = 32
-	Width64        RegWidth = 64
+	Width32 RegWidth = 32
+	Width64 RegWidth = 64
 )
 
 // NewPReg constructs a physical register descriptor.

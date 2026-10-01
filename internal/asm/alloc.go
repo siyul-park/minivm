@@ -65,8 +65,8 @@ func newAllocator(frame Frame, insts []Instruction, labels map[Label]int, reserv
 		}
 	}
 	for _, inst := range insts {
-		for _, op := range [4]Operand{inst.Dst, inst.Src1, inst.Src2, inst.Src3} {
-			if v, ok := register(op).(VReg); ok {
+		for _, op := range inst.operands() {
+			if v, ok := register(*op).(VReg); ok {
 				a.next = max(a.next, v.ID()+1)
 			}
 		}
@@ -75,7 +75,7 @@ func newAllocator(frame Frame, insts []Instruction, labels map[Label]int, reserv
 }
 
 // allocate runs scans and rewrites until one scan assigns every virtual
-// register, then substitutes the spill-area size wherever a row asks for it.
+// register, then rewrites the rows to physical registers.
 func (a *allocator) allocate() ([]Instruction, map[Label]int, error) {
 	for {
 		assigned, spilled, err := a.scan(a.intervals())
@@ -100,7 +100,7 @@ func (a *allocator) intervals() []interval {
 	for b, blk := range blocks {
 		after := out[b]
 		for row := blk[1] - 1; row >= blk[0]; row-- {
-			reads, writes := a.operands(row)
+			reads, writes := a.access(row)
 			live := map[value]bool{}
 			for v := range after {
 				live[v] = true
@@ -155,7 +155,7 @@ func (a *allocator) liveness() ([][2]int, []map[value]bool) {
 	for b, blk := range blocks {
 		gen[b], kill[b] = map[value]bool{}, map[value]bool{}
 		for row := blk[0]; row < blk[1]; row++ {
-			reads, writes := a.operands(row)
+			reads, writes := a.access(row)
 			for _, v := range reads {
 				if !kill[b][v] {
 					gen[b][v] = true
@@ -246,16 +246,16 @@ func (a *allocator) blocks() ([][2]int, [][]int) {
 	return blocks, succs
 }
 
-// operands lists the values row reads and the values it writes.
-func (a *allocator) operands(row int) (reads, writes []value) {
+// access lists the values row reads and the values it writes.
+func (a *allocator) access(row int) (reads, writes []value) {
 	inst := a.insts[row]
 	written := a.frame.Writes(inst)
-	for i, op := range [4]Operand{inst.Dst, inst.Src1, inst.Src2, inst.Src3} {
-		v, ok := a.value(register(op))
+	for i, op := range inst.operands() {
+		v, ok := a.value(register(*op))
 		if !ok {
 			continue
 		}
-		if _, mem := op.(MemOperand); !mem && written[i] {
+		if _, mem := (*op).(MemOperand); !mem && written[i] {
 			writes = append(writes, v)
 		} else {
 			reads = append(reads, v)
@@ -269,7 +269,7 @@ func (a *allocator) operands(row int) (reads, writes []value) {
 func (a *allocator) value(r Reg) (value, bool) {
 	switch r := r.(type) {
 	case VReg:
-		return value{virtual: true, id: r.ID(), typ: r.Type(), width: r.Width()}, true
+		return virtual(r), true
 	case PReg:
 		v := physical(r)
 		return v, a.usable[v]
@@ -403,10 +403,9 @@ func (a *allocator) rewrite(spilled []value) {
 	for row, inst := range a.insts {
 		var before, after []Instruction
 		written := a.frame.Writes(inst)
-		ops := [4]*Operand{&inst.Dst, &inst.Src1, &inst.Src2, &inst.Src3}
 		fresh := map[value]VReg{}
 		reloaded, parked := map[value]bool{}, map[value]bool{}
-		for i, op := range ops {
+		for i, op := range inst.operands() {
 			v, ok := a.value(register(*op))
 			if !ok || !v.virtual {
 				continue
@@ -457,13 +456,12 @@ func (a *allocator) assign(assigned map[value]PReg) {
 		}
 	}
 	for row, inst := range a.insts {
-		ops := [4]*Operand{&inst.Dst, &inst.Src1, &inst.Src2, &inst.Src3}
-		for _, op := range ops {
+		for _, op := range inst.operands() {
 			v, ok := register(*op).(VReg)
 			if !ok {
 				continue
 			}
-			r := assigned[value{virtual: true, id: v.ID(), typ: v.Type(), width: v.Width()}]
+			r := assigned[virtual(v)]
 			*op = replace(*op, NewPReg(r.ID(), v.Type(), v.Width()))
 		}
 		a.insts[row] = inst
@@ -522,6 +520,11 @@ func physical(r PReg) value {
 	return value{id: int32(r.ID()), typ: r.Type()}
 }
 
+func virtual(r VReg) value {
+	return value{virtual: true, id: r.ID(), typ: r.Type(), width: r.Width()}
+}
+
+// vreg is the inverse of virtual.
 func vreg(v value) VReg {
 	return VReg{id: v.id, typ: v.typ, width: v.width}
 }

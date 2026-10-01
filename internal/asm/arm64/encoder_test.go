@@ -9,12 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewEncoder(t *testing.T) {
-	require.NotNil(t, arm64.NewEncoder())
-}
-
 func TestEncoder_Encode(t *testing.T) {
-	encoder := arm64.NewEncoder()
+	encoder := arm64.Encoder{}
 
 	// A non-constant expression so int16(...) truncates at runtime instead
 	// of failing to compile, matching what a caller could pass at runtime.
