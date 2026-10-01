@@ -9,10 +9,8 @@ func Order(g Graph) []int {
 
 	visited := make([]bool, n)
 	post := make([]int, 0, n)
-	stack := []struct {
-		node int
-		next int
-	}{{0, 0}}
+	type frame struct{ node, next int }
+	stack := []frame{{0, 0}}
 	visited[0] = true
 	for len(stack) > 0 {
 		top := &stack[len(stack)-1]
@@ -22,10 +20,7 @@ func Order(g Graph) []int {
 			top.next++
 			if !visited[next] {
 				visited[next] = true
-				stack = append(stack, struct {
-					node int
-					next int
-				}{next, 0})
+				stack = append(stack, frame{next, 0})
 			}
 			continue
 		}

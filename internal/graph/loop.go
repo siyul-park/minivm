@@ -6,7 +6,7 @@ package graph
 func Headers(g Graph, d *Dominance) []int {
 	seen := make([]bool, g.Len())
 	var out []int
-	for b := 0; b < g.Len(); b++ {
+	for b := range g.Len() {
 		for _, s := range g.Succ(b) {
 			if !seen[s] && d.Dominates(s, b) {
 				seen[s] = true

@@ -27,7 +27,7 @@ func Format(function *Function) string {
 		for _, o := range block.Operations {
 			fmt.Fprintf(&sb, "\t%s\n", op(function, o))
 		}
-		fmt.Fprintf(&sb, "\t%s\n", term(function, block.Terminator))
+		fmt.Fprintf(&sb, "\t%s\n", term(block.Terminator))
 	}
 	return sb.String()
 }
@@ -66,7 +66,7 @@ func op(function *Function, o Operation) string {
 	return sb.String()
 }
 
-func term(function *Function, t Terminator) string {
+func term(t Terminator) string {
 	var sb strings.Builder
 	sb.WriteString(t.Op.String())
 	args := references(t.Args)
@@ -155,9 +155,9 @@ func stack(operands []Operand) []string {
 	return names
 }
 
-func locals(locals []Local) []string {
-	names := make([]string, len(locals))
-	for i, l := range locals {
+func locals(values []Local) []string {
+	names := make([]string, len(values))
+	for i, l := range values {
 		names[i] = fmt.Sprintf("%d=v%d", l.Index, l.Value)
 	}
 	return names

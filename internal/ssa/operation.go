@@ -123,7 +123,8 @@ type Terminator struct {
 type Edge struct {
 	// Block is the successor id.
 	Block int
-	Args  []Value
+	// Args are the values bound to the successor's params.
+	Args []Value
 }
 
 const (
