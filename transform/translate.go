@@ -68,14 +68,6 @@ func Translate(module Module, address int, function *types.Function, entry int) 
 	if function == nil || len(function.Code) == 0 {
 		return nil, nil
 	}
-	f := facts{
-		constants: module.Constants,
-		globals:   module.Globals,
-		objects:   module.Objects,
-		types:     module.Types,
-		callees:   module.Callees,
-		refuted:   module.Refuted,
-	}
 	blocks, err := analysis.Blocks(function)
 	if err != nil {
 		return nil, err
@@ -88,8 +80,8 @@ func Translate(module Module, address int, function *types.Function, entry int) 
 	if spans[0].start != 0 {
 		return nil, nil
 	}
-	activation := activation{function: function, address: address, slots: function.Declared()}
-	states, seen, ok := f.analyze(activation, spans, 0, frame{closures: make([]int, len(activation.slots))})
+	act := activation{function: function, address: address, slots: function.Declared()}
+	states, seen, ok := module.analyze(act, spans, 0, frame{closures: make([]int, len(act.slots))})
 	if !ok {
 		return nil, nil
 	}
@@ -97,12 +89,12 @@ func Translate(module Module, address int, function *types.Function, entry int) 
 		if !seen[root] {
 			return nil, nil
 		}
-		states, seen, ok = f.analyze(activation, spans, root, owned(states[root]))
+		states, seen, ok = module.analyze(act, spans, root, states[root].owning())
 		if !ok {
 			return nil, nil
 		}
 	}
-	built := f.build(activation, spans, states, seen, root)
+	built := module.build(act, spans, states, seen, root)
 	if built != nil && len(built.Pred(0)) > 0 {
 		built = rotate(built)
 	}
@@ -129,31 +121,43 @@ func Borrows(function *types.Function) []bool {
 	return borrows
 }
 
+// Adopts returns the number of code's topmost popped operands whose
+// ownership it takes: every one when it enters a frame, the stored value
+// when it overwrites heap contents and yields nothing. The other operands
+// stay their owner's to release after code.
+func Adopts(code instr.Opcode, pops, results int) int {
+	switch {
+	case code.Writes(instr.Frame):
+		return pops
+	case code.Reads(instr.Heap) && code.Writes(instr.Heap) && results == 0:
+		return 1
+	default:
+		return 0
+	}
+}
+
 // rotate prepends an empty block ahead of f's own block 0 when it has a
 // predecessor — root is a loop header, reached from both outside f and its
 // own back edge — so block 0 has none: every later pass and Lower assume
 // this. The new block carries block 0's own params, forwarded unchanged.
 func rotate(f *ssa.Function) *ssa.Function {
-	rebuilder := newRebuilder(f)
-	first := rebuilder.builder.Block()
+	r := newRebuilder(f)
+	first := r.builder.Block()
 	origin := f.Block(0).Params
 	args := make([]ssa.Value, len(origin))
 	for i, p := range origin {
-		args[i] = rebuilder.builder.Param(first, f.Type(p))
+		args[i] = r.builder.Param(first, f.Type(p))
 	}
 	for _, block := range graph.Order(f) {
-		id := rebuilder.block(block)
+		id := r.open(block)
 		b := f.Block(block)
-		for _, param := range b.Params {
-			rebuilder.alias(param, rebuilder.builder.Param(id, f.Type(param)))
-		}
 		for _, operation := range b.Operations {
-			rebuilder.builder.Add(id, rebuilder.define(f, rebuilder.operation(operation)))
+			r.builder.Add(id, r.define(r.operation(operation)))
 		}
-		rebuilder.builder.Term(id, rebuilder.terminator(b.Terminator))
+		r.builder.Term(id, r.terminator(b.Terminator))
 	}
-	rebuilder.builder.Term(first, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: rebuilder.block(0), Args: args}}})
-	return rebuilder.builder.Build()
+	r.builder.Term(first, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: r.block(0), Args: args}}})
+	return r.builder.Build()
 }
 
 func (o Objects) function(reference int) *types.Function {

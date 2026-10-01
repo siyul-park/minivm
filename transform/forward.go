@@ -29,26 +29,23 @@ func NewForwardPass() *ForwardPass {
 func (p *ForwardPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	children := graph.NewDominance(function).Children()
 
-	rebuilder := newRebuilder(function)
+	r := newRebuilder(function)
 	changed := false
 
 	var walk func(block int, held map[ssa.Slot]ssa.Value)
 	walk = func(block int, held map[ssa.Slot]ssa.Value) {
-		id := rebuilder.block(block)
-		currentBlock := function.Block(block)
-		for _, param := range currentBlock.Params {
-			rebuilder.alias(param, rebuilder.builder.Param(id, function.Type(param)))
-		}
+		id := r.open(block)
+		b := function.Block(block)
 		if len(function.Pred(block)) != 1 {
 			clear(held)
 		}
 
-		for _, operation := range currentBlock.Operations {
-			operation = rebuilder.operation(operation)
+		for _, operation := range b.Operations {
+			operation = r.operation(operation)
 			switch operation.Op {
 			case ssa.OpLoad:
 				if at, ok := held[operation.Slot]; ok {
-					rebuilder.alias(operation.Results[0], at)
+					r.alias(operation.Results[0], at)
 					changed = true
 					continue
 				}
@@ -63,13 +60,13 @@ func (p *ForwardPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error)
 					}
 				}
 			}
-			operation = rebuilder.define(function, operation)
+			operation = r.define(operation)
 			if operation.Op == ssa.OpLoad {
 				held[operation.Slot] = operation.Results[0]
 			}
-			rebuilder.builder.Add(id, operation)
+			r.builder.Add(id, operation)
 		}
-		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Terminator))
+		r.builder.Term(id, r.terminator(b.Terminator))
 
 		for _, child := range children[block] {
 			walk(child, maps.Clone(held))
@@ -80,6 +77,6 @@ func (p *ForwardPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error)
 	if !changed {
 		return true, nil
 	}
-	*function = *rebuilder.builder.Build()
+	*function = *r.builder.Build()
 	return false, nil
 }

@@ -4,9 +4,8 @@ import (
 	"math"
 	"math/bits"
 
-	"github.com/siyul-park/minivm/internal/graph"
-
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/internal/graph"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/pass"
 )
@@ -25,19 +24,16 @@ func NewFoldPass() *FoldPass {
 func (p *FoldPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	constants := map[ssa.Value]uint64{}
 	computed := map[ssa.Value]bool{}
-	rebuilder := newRebuilder(function)
+	r := newRebuilder(function)
 	changed := false
 
 	for _, block := range graph.Order(function) {
-		id := rebuilder.block(block)
-		currentBlock := function.Block(block)
-		for _, param := range currentBlock.Params {
-			rebuilder.alias(param, rebuilder.builder.Param(id, function.Type(param)))
-		}
-		for _, operation := range currentBlock.Operations {
-			operation = rebuilder.operation(operation)
+		id := r.open(block)
+		b := function.Block(block)
+		for _, operation := range b.Operations {
+			operation = r.operation(operation)
 			if operation.Op == ssa.OpExec && operation.Code.IsPure() {
-				if next, ok := fold(rebuilder, id, function, constants, computed, operation); ok {
+				if next, ok := fold(r, id, constants, computed, operation); ok {
 					changed = true
 					if len(next.Results) == 0 {
 						continue
@@ -45,8 +41,8 @@ func (p *FoldPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 					operation = next
 				}
 			}
-			operation = rebuilder.define(function, operation)
-			rebuilder.builder.Add(id, operation)
+			operation = r.define(operation)
+			r.builder.Add(id, operation)
 			switch operation.Op {
 			case ssa.OpConst:
 				constants[operation.Results[0]] = operation.Const
@@ -57,17 +53,17 @@ func (p *FoldPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 				}
 			}
 		}
-		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Terminator))
+		r.builder.Term(id, r.terminator(b.Terminator))
 	}
 
 	if !changed {
 		return true, nil
 	}
-	*function = *rebuilder.builder.Build()
+	*function = *r.builder.Build()
 	return false, nil
 }
 
-func fold(rebuilder *rebuilder, id int, function *ssa.Function, constants map[ssa.Value]uint64, computed map[ssa.Value]bool, operation ssa.Operation) (ssa.Operation, bool) {
+func fold(r *rebuilder, id int, constants map[ssa.Value]uint64, computed map[ssa.Value]bool, operation ssa.Operation) (ssa.Operation, bool) {
 	args := make([]uint64, 0, len(operation.Args))
 	for _, a := range operation.Args {
 		w, ok := constants[a]
@@ -89,18 +85,18 @@ func fold(rebuilder *rebuilder, id int, function *ssa.Function, constants map[ss
 	if !ok {
 		return operation, false
 	}
-	if identity(operation.Code, right) && computed[operation.Args[0]] && rebuilder.builder.Type(operation.Args[0]) == function.Type(operation.Results[0]) {
-		rebuilder.alias(operation.Results[0], operation.Args[0])
+	if identity(operation.Code, right) && computed[operation.Args[0]] && r.builder.Type(operation.Args[0]) == r.from.Type(operation.Results[0]) {
+		r.alias(operation.Results[0], operation.Args[0])
 		return ssa.Operation{Op: operation.Op, Code: operation.Code, Args: operation.Args}, true
 	}
 	code, amount, ok := shift(operation.Code, right)
 	if !ok {
 		return operation, false
 	}
-	shift := rebuilder.builder.Value(rebuilder.builder.Type(operation.Args[1]))
-	rebuilder.builder.Add(id, ssa.Operation{Op: ssa.OpConst, Const: amount, Results: []ssa.Value{shift}})
-	constants[shift] = amount
-	return ssa.Operation{Op: operation.Op, Code: code, Args: []ssa.Value{operation.Args[0], shift}, State: operation.State, Results: operation.Results}, true
+	count := r.builder.Value(r.builder.Type(operation.Args[1]))
+	r.builder.Add(id, ssa.Operation{Op: ssa.OpConst, Const: amount, Results: []ssa.Value{count}})
+	constants[count] = amount
+	return ssa.Operation{Op: operation.Op, Code: code, Args: []ssa.Value{operation.Args[0], count}, State: operation.State, Results: operation.Results}, true
 }
 
 // identity reports whether w is code's identity operand, decoded by the

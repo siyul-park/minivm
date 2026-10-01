@@ -2,12 +2,8 @@ package transform
 
 import "github.com/siyul-park/minivm/internal/ssa"
 
-type site struct {
-	block int
-	index int
-}
-
 type rebuilder struct {
+	from    *ssa.Function
 	builder *ssa.Builder
 	blocks  map[int]int
 	values  map[ssa.Value]ssa.Value
@@ -17,6 +13,7 @@ func newRebuilder(function *ssa.Function) *rebuilder {
 	builder := ssa.New(function.Name())
 	builder.Entry(function.Entry())
 	return &rebuilder{
+		from:    function,
 		builder: builder,
 		blocks:  map[int]int{},
 		values:  map[ssa.Value]ssa.Value{},
@@ -29,6 +26,15 @@ func (r *rebuilder) block(block int) int {
 	}
 	id := r.builder.Block()
 	r.blocks[block] = id
+	return id
+}
+
+// open returns block's id in the rebuilt function, declaring its params.
+func (r *rebuilder) open(block int) int {
+	id := r.block(block)
+	for _, param := range r.from.Block(block).Params {
+		r.alias(param, r.builder.Param(id, r.from.Type(param)))
+	}
 	return id
 }
 
@@ -105,13 +111,13 @@ func (r *rebuilder) terminator(t ssa.Terminator) ssa.Terminator {
 	return t
 }
 
-func (r *rebuilder) define(function *ssa.Function, operation ssa.Operation) ssa.Operation {
+func (r *rebuilder) define(operation ssa.Operation) ssa.Operation {
 	if len(operation.Results) == 0 {
 		return operation
 	}
 	results := make([]ssa.Value, len(operation.Results))
 	for i, old := range operation.Results {
-		nv := r.builder.Value(function.Type(old))
+		nv := r.builder.Value(r.from.Type(old))
 		r.alias(old, nv)
 		results[i] = nv
 	}

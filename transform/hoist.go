@@ -153,32 +153,27 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 		return true, nil
 	}
 
-	rebuilder := newRebuilder(function)
+	r := newRebuilder(function)
 	states := map[int]ssa.Value{}
 	for _, b := range blocks {
-		id := rebuilder.block(b)
-		currentBlock := function.Block(b)
-		for _, v := range currentBlock.Params {
-			rebuilder.alias(v, rebuilder.builder.Param(id, function.Type(v)))
-		}
-		for i, operation := range currentBlock.Operations {
-			target := rebuilder.block(current(site{b, i}))
-			operation = rebuilder.operation(operation)
+		id := r.open(b)
+		for i, operation := range function.Block(b).Operations {
+			target := r.block(current(site{b, i}))
+			operation = r.operation(operation)
 			if h, ok := entries[site{b, i}]; ok {
 				state, ok := states[h]
 				if !ok {
-					state = rebuilder.builder.Value(ssa.TypeState)
-					rebuilder.builder.Add(target, rebuilder.operation(ssa.Operation{Op: ssa.OpState, Frames: frames[h], Results: []ssa.Value{state}}))
+					state = r.builder.Value(ssa.TypeState)
+					r.builder.Add(target, r.operation(ssa.Operation{Op: ssa.OpState, Frames: frames[h], Results: []ssa.Value{state}}))
 					states[h] = state
 				}
 				operation.State = state
 			}
-			rebuilder.builder.Add(target, rebuilder.define(function, operation))
+			r.builder.Add(target, r.define(operation))
 		}
-		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Terminator))
+		r.builder.Term(id, r.terminator(function.Block(b).Terminator))
 	}
-	next := rebuilder.builder.Build()
-	*function = *next
+	*function = *r.builder.Build()
 	return false, nil
 }
 

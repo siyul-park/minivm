@@ -9,6 +9,11 @@ import (
 // DCEPass removes unreachable blocks and dead pure operations.
 type DCEPass struct{}
 
+type site struct {
+	block int
+	index int
+}
+
 var _ pass.Pass[*ssa.Function] = (*DCEPass)(nil)
 
 // NewDCEPass returns the pass.
@@ -21,29 +26,25 @@ func (p *DCEPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	blocks := graph.Order(function)
 	live := liveness(function, blocks)
 
-	rebuilder := newRebuilder(function)
+	r := newRebuilder(function)
 	changed := len(blocks) != function.Len()
 	for _, block := range blocks {
-		id := rebuilder.block(block)
-		currentBlock := function.Block(block)
-		for _, param := range currentBlock.Params {
-			rebuilder.alias(param, rebuilder.builder.Param(id, function.Type(param)))
-		}
-		for i, operation := range currentBlock.Operations {
+		id := r.open(block)
+		b := function.Block(block)
+		for i, operation := range b.Operations {
 			if !live[site{block, i}] {
 				changed = true
 				continue
 			}
-			rebuilder.builder.Add(id, rebuilder.define(function, rebuilder.operation(operation)))
+			r.builder.Add(id, r.define(r.operation(operation)))
 		}
-		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Terminator))
+		r.builder.Term(id, r.terminator(b.Terminator))
 	}
 
 	if !changed {
 		return true, nil
 	}
-	next := rebuilder.builder.Build()
-	*function = *next
+	*function = *r.builder.Build()
 	return false, nil
 }
 

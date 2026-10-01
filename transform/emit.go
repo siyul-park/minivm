@@ -25,7 +25,7 @@ type emitter struct {
 
 	locals []types.Type
 	code   []instr.Instruction
-	begin  int
+	floor  int
 	starts []int
 	fixes  []fix
 	stack  []ssa.Value
@@ -97,7 +97,11 @@ func (e *emitter) collect() bool {
 		for _, operation := range e.ops[id] {
 			e.count(id, operation.Args)
 		}
-		e.count(id, operands(e.terms[id]))
+		term := e.terms[id]
+		e.count(id, term.Args)
+		for _, edge := range term.Edges {
+			e.count(id, edge.Args)
+		}
 	}
 	for v, n := range e.uses {
 		if n > 1 {
@@ -170,7 +174,7 @@ func (e *emitter) assign() bool {
 	}
 	slices.Sort(values)
 	for _, v := range values {
-		t, ok := declared(e.function.Type(v))
+		t, ok := local(e.function.Type(v))
 		if !ok {
 			return false
 		}
@@ -188,7 +192,7 @@ func (e *emitter) walk() bool {
 	e.code, e.fixes, e.needed = nil, nil, ssa.NoValue
 	e.starts = make([]int, e.function.Len())
 	for id := range e.function.Len() {
-		e.starts[id], e.begin = len(e.code), len(e.code)
+		e.starts[id], e.floor = len(e.code), len(e.code)
 		if !e.open(id) {
 			return false
 		}
@@ -266,7 +270,7 @@ func (e *emitter) close(id int) bool {
 		}
 		e.leave(id, term.Edges[0].Block)
 	case ssa.OpBranch, ssa.OpTable:
-		if !e.uniform(term.Edges) || !e.carry(append(slices.Clone(term.Edges[0].Args), term.Args[0])) {
+		if !uniform(term.Edges) || !e.carry(append(slices.Clone(term.Edges[0].Args), term.Args[0])) {
 			return false
 		}
 		e.stack = e.stack[:len(e.stack)-1]
@@ -336,7 +340,7 @@ func (e *emitter) results(results []ssa.Value) bool {
 	return true
 }
 
-func (e *emitter) uniform(edges []ssa.Edge) bool {
+func uniform(edges []ssa.Edge) bool {
 	for _, edge := range edges[1:] {
 		if !slices.Equal(edge.Args, edges[0].Args) {
 			return false
@@ -353,7 +357,7 @@ func (e *emitter) leave(id, next int) {
 
 func (e *emitter) branch(operation instr.Opcode, block int) {
 	e.write(instr.New(operation, 0))
-	e.fixes = append(e.fixes, fix{at: len(e.code) - 1, operand: 0, block: block})
+	e.fixes = append(e.fixes, fix{at: len(e.code) - 1, block: block})
 }
 
 func (e *emitter) table(edges []ssa.Edge) {
@@ -417,7 +421,7 @@ func (e *emitter) link() ([]byte, bool) {
 }
 
 func (e *emitter) write(inst instr.Instruction) {
-	if inst.Opcode() == instr.LOCAL_GET && len(e.code) > e.begin {
+	if inst.Opcode() == instr.LOCAL_GET && len(e.code) > e.floor {
 		if last := e.code[len(e.code)-1]; last.Opcode() == instr.LOCAL_SET && last.Operand(0) == inst.Operand(0) {
 			e.code[len(e.code)-1] = instr.New(instr.LOCAL_TEE, inst.Operand(0))
 			return
@@ -444,15 +448,7 @@ func (e *emitter) values(vals []ssa.Value) []ssa.Value {
 	return out
 }
 
-func operands(t ssa.Terminator) []ssa.Value {
-	out := slices.Clone(t.Args)
-	for _, edge := range t.Edges {
-		out = append(out, edge.Args...)
-	}
-	return out
-}
-
-func declared(t ssa.Type) (types.Type, bool) {
+func local(t ssa.Type) (types.Type, bool) {
 	switch t {
 	case ssa.TypeI1:
 		return types.TypeI1, true

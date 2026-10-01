@@ -56,10 +56,7 @@ func (p *SSAPass) Run(_ *pass.Manager, prog *program.Program) (bool, error) {
 		changed = changed || done
 	}
 
-	if !changed {
-		return true, nil
-	}
-	return false, nil
+	return !changed, nil
 }
 
 func (p *SSAPass) roundtrip(manager *pass.Manager, constants *pool, address int, function *types.Function) (bool, error) {

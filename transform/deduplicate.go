@@ -6,41 +6,36 @@ import (
 )
 
 func deduplicate(function *ssa.Function, key func(*ssa.Function, ssa.Operation) (string, bool)) (*ssa.Function, bool) {
-	dominance := graph.NewDominance(function)
-	children := dominance.Children()
+	children := graph.NewDominance(function).Children()
 
-	rebuilder := newRebuilder(function)
+	r := newRebuilder(function)
 	table := map[string][]ssa.Value{}
 	changed := false
 
 	var walk func(block int)
 	walk = func(block int) {
-		id := rebuilder.block(block)
-		currentBlock := function.Block(block)
-		for _, p := range currentBlock.Params {
-			rebuilder.alias(p, rebuilder.builder.Param(id, function.Type(p)))
-		}
+		id := r.open(block)
+		b := function.Block(block)
 
 		var pushed []string
-		for _, operation := range currentBlock.Operations {
-			operation = rebuilder.operation(operation)
-			if k, ok := key(function, operation); ok {
-				if rep, seen := table[k]; seen {
-					for i, old := range operation.Results {
-						rebuilder.alias(old, rep[i])
-					}
-					changed = true
-					continue
+		for _, operation := range b.Operations {
+			operation = r.operation(operation)
+			k, keyed := key(function, operation)
+			if rep, seen := table[k]; keyed && seen {
+				for i, old := range operation.Results {
+					r.alias(old, rep[i])
 				}
-				operation = rebuilder.define(function, operation)
-				rebuilder.builder.Add(id, operation)
-				table[k] = operation.Results
-				pushed = append(pushed, k)
+				changed = true
 				continue
 			}
-			rebuilder.builder.Add(id, rebuilder.define(function, operation))
+			operation = r.define(operation)
+			r.builder.Add(id, operation)
+			if keyed {
+				table[k] = operation.Results
+				pushed = append(pushed, k)
+			}
 		}
-		rebuilder.builder.Term(id, rebuilder.terminator(currentBlock.Terminator))
+		r.builder.Term(id, r.terminator(b.Terminator))
 
 		for _, c := range children[block] {
 			walk(c)
@@ -51,5 +46,5 @@ func deduplicate(function *ssa.Function, key func(*ssa.Function, ssa.Operation) 
 	}
 	walk(0)
 
-	return rebuilder.builder.Build(), changed
+	return r.builder.Build(), changed
 }

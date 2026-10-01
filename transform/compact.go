@@ -35,29 +35,20 @@ func (p *CompactPass) Run(_ *pass.Manager, prog *program.Program) (bool, error) 
 		}
 	}
 
-	constants := prog.Constants
-	typs := prog.Types
-	constantLen, typeLen := len(constants), len(typs)
-
+	constants, typs := prog.Constants, prog.Types
 	constUsed := make([]bool, len(constants))
 	typeUsed := make([]bool, len(typs))
-	for _, code := range codes {
-		ip := 0
-		for ip < len(code) {
-			inst := instr.Instruction(code[ip:])
-			switch poolOf(inst.Opcode()) {
-			case poolConst:
-				constUsed[inst.Operand(0)] = true
-			case poolType:
-				typeUsed[inst.Operand(0)] = true
-			}
-			ip += inst.Width()
+	scan(codes, func(pool int, inst instr.Instruction) {
+		switch pool {
+		case poolConst:
+			constUsed[inst.Operand(0)] = true
+		case poolType:
+			typeUsed[inst.Operand(0)] = true
 		}
-	}
+	})
 
 	constIndex, constSize := compactValues(constants, constUsed)
-	typeIndex, typesSize := compactTypes(typs, typeUsed)
-
+	typeIndex, typeSize := compactTypes(typs, typeUsed)
 	for i, v := range constIndex {
 		if v >= 0 {
 			constants[v] = constants[i]
@@ -69,35 +60,36 @@ func (p *CompactPass) Run(_ *pass.Manager, prog *program.Program) (bool, error) 
 		}
 	}
 
-	constants = constants[:constSize]
-	typs = typs[:typesSize]
-	if len(constants) == 0 {
-		constants = nil
-	}
-	if len(typs) == 0 {
-		typs = nil
-	}
+	scan(codes, func(pool int, inst instr.Instruction) {
+		switch pool {
+		case poolConst:
+			inst.SetOperand(0, uint64(constIndex[inst.Operand(0)]))
+		case poolType:
+			inst.SetOperand(0, uint64(typeIndex[inst.Operand(0)]))
+		}
+	})
 
+	unchanged := len(constants) == constSize && len(typs) == typeSize
+	prog.Constants, prog.Types = constants[:constSize], typs[:typeSize]
+	if constSize == 0 {
+		prog.Constants = nil
+	}
+	if typeSize == 0 {
+		prog.Types = nil
+	}
+	return unchanged, nil
+}
+
+// scan calls visit for every instruction of codes with the pool its operand
+// indexes.
+func scan(codes [][]byte, visit func(pool int, inst instr.Instruction)) {
 	for _, code := range codes {
-		ip := 0
-		for ip < len(code) {
+		for ip := 0; ip < len(code); {
 			inst := instr.Instruction(code[ip:])
-			switch poolOf(inst.Opcode()) {
-			case poolConst:
-				idx := inst.Operand(0)
-				inst.SetOperand(0, uint64(constIndex[idx]))
-			case poolType:
-				idx := inst.Operand(0)
-				inst.SetOperand(0, uint64(typeIndex[idx]))
-			}
+			visit(poolOf(inst.Opcode()), inst)
 			ip += inst.Width()
 		}
 	}
-
-	prog.Constants = constants
-	prog.Types = typs
-
-	return constantLen == constSize && typeLen == typesSize, nil
 }
 
 func poolOf(op instr.Opcode) int {

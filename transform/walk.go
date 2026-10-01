@@ -1,6 +1,7 @@
 package transform
 
 import (
+	"slices"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
@@ -9,7 +10,7 @@ import (
 )
 
 type walker struct {
-	facts
+	Module
 	builder    *ssa.Builder
 	block      int
 	activation activation
@@ -21,6 +22,20 @@ type walker struct {
 	ip     int
 	before []operand
 	state  ssa.Value
+}
+
+// newWalker returns a walker at the start of block, its stack the params of
+// in's facts; it fails when a fact has no SSA representation.
+func newWalker(m Module, b *ssa.Builder, block int, act activation, in frame) (*walker, bool) {
+	stack := make([]operand, len(in.stack))
+	for i, e := range in.stack {
+		t, ok := typ(e.kind)
+		if !ok {
+			return nil, false
+		}
+		stack[i] = operand{value: b.Param(block, t), fact: e}
+	}
+	return &walker{Module: m, builder: b, block: block, activation: act, stack: stack, closures: slices.Clone(in.closures)}, true
 }
 
 func (w *walker) adopt() {
@@ -82,10 +97,14 @@ func (w *walker) deopt() ssa.Value {
 	if w.state != ssa.NoValue {
 		return w.state
 	}
+	stack := make([]ssa.Operand, len(w.before))
+	for i, o := range w.before {
+		stack[i] = ssa.Operand{Value: o.value, Owned: o.kind == types.KindRef && o.backing == backingStack}
+	}
 	w.state = w.builder.Value(ssa.TypeState)
 	w.builder.Add(w.block, ssa.Operation{
 		Op:      ssa.OpState,
-		Frames:  []ssa.Frame{{Address: w.activation.address, IP: w.ip, Returns: w.activation.returns(), Stack: deopt(w.before)}},
+		Frames:  []ssa.Frame{{Address: w.activation.address, IP: w.ip, Returns: w.activation.returns(), Stack: stack}},
 		Results: []ssa.Value{w.state},
 	})
 	return w.state
@@ -168,11 +187,7 @@ func (w *walker) edges(s span, states []frame, ids []int) ([]ssa.Edge, bool) {
 	}
 	edges := make([]ssa.Edge, len(s.succs))
 	for i, succ := range s.succs {
-		args := make([]ssa.Value, len(w.stack))
-		for j, o := range w.stack {
-			args[j] = o.value
-		}
-		edges[i] = ssa.Edge{Block: ids[succ], Args: args}
+		edges[i] = ssa.Edge{Block: ids[succ], Args: values(w.stack)}
 	}
 	return edges, true
 }
@@ -205,7 +220,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		return w.store(ssa.SpaceUpval, int(inst.Operand(0)))
 
 	case instr.CONST_GET:
-		return w.pool(int(inst.Operand(0)))
+		return w.fetch(int(inst.Operand(0)))
 	case instr.I32_CONST:
 		val := int32(inst.Operand(0))
 		return w.constant(uint64(uint32(val)), fact{kind: types.KindI32, value: val, valueKnown: true})
@@ -306,12 +321,8 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		if len(w.stack) == 0 {
 			return false
 		}
-		cast := fact{kind: w.stack[len(w.stack)-1].kind}
-		if idx := int(inst.Operand(0)); idx < len(w.types) {
-			cast.structType, _ = w.types[idx].(*types.StructType)
-			cast.arrayType, _ = w.types[idx].(*types.ArrayType)
-			cast.mapType, _ = w.types[idx].(*types.MapType)
-		}
+		cast := holds(w.named(inst))
+		cast.kind = w.stack[len(w.stack)-1].kind
 		return w.emit(operation, 1, []fact{cast})
 	case instr.MAP_GET, instr.MAP_LOOKUP:
 		if len(w.stack) < 2 {
@@ -330,7 +341,8 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		if len(w.stack) == 0 {
 			return false
 		}
-		return w.emit(operation, 1, []fact{{kind: types.KindRef, mapType: w.declared(inst)}})
+		mapType, _ := w.named(inst).(*types.MapType)
+		return w.emit(operation, 1, []fact{{kind: types.KindRef, mapType: mapType}})
 
 	case instr.CALL:
 		if len(w.stack) == 0 {
@@ -344,7 +356,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		var typ *types.FunctionType
 		if target != nil {
 			typ = target.Typ
-		} else if callee := w.callees[w.ip]; callee.Function == 0 {
+		} else if callee := w.Callees[w.ip]; callee.Function == 0 {
 			typ = callee.Type
 		}
 		if typ == nil {
@@ -363,17 +375,13 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		if !capture.referenceKnown || capture.reference <= 0 {
 			return false
 		}
-		target := w.objects.function(capture.reference)
+		target := w.Objects.function(capture.reference)
 		if target == nil {
 			return false
 		}
 		return w.emit(operation, 1+len(target.Captures), []fact{{kind: types.KindRef, closure: capture.reference}})
 	case instr.STRUCT_NEW:
-		idx := int(inst.Operand(0))
-		if idx >= len(w.types) {
-			return false
-		}
-		record, ok := w.types[idx].(*types.StructType)
+		record, ok := w.named(inst).(*types.StructType)
 		if !ok {
 			return false
 		}
@@ -382,11 +390,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		if len(w.stack) == 0 {
 			return false
 		}
-		idx := int(inst.Operand(0))
-		if idx >= len(w.types) {
-			return false
-		}
-		array, ok := w.types[idx].(*types.ArrayType)
+		array, ok := w.named(inst).(*types.ArrayType)
 		if !ok {
 			return false
 		}
@@ -402,7 +406,8 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		count := int(top.value)
 		switch operation {
 		case instr.MAP_NEW:
-			return w.emit(operation, 1+count*2, []fact{{kind: types.KindRef, mapType: w.declared(inst)}})
+			mapType, _ := w.named(inst).(*types.MapType)
+			return w.emit(operation, 1+count*2, []fact{{kind: types.KindRef, mapType: mapType}})
 		case instr.ARRAY_APPEND:
 			return w.emit(operation, 2+count, []fact{{kind: types.KindRef}})
 		default:
@@ -424,14 +429,13 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 	return w.emit(operation, len(effect.Pop), results)
 }
 
-// declared is the map type inst's type operand names, nil when it names none.
-func (w *walker) declared(inst instr.Instruction) *types.MapType {
+// named is the type inst's type operand names, nil when it names none.
+func (w *walker) named(inst instr.Instruction) types.Type {
 	idx := int(inst.Operand(0))
-	if idx >= len(w.types) {
+	if idx >= len(w.Types) {
 		return nil
 	}
-	t, _ := w.types[idx].(*types.MapType)
-	return t
+	return w.Types[idx]
 }
 
 // element resolves array's declared element kind, when known: the array's
@@ -440,7 +444,7 @@ func (w *walker) declared(inst instr.Instruction) *types.MapType {
 func (w *walker) element(array fact) (types.Kind, bool) {
 	t := array.arrayType
 	if t == nil && array.referenceKnown && array.reference > 0 {
-		t = w.objects[array.reference].Array
+		t = w.Objects[array.reference].Array
 	}
 	if t == nil {
 		return 0, false
@@ -449,21 +453,14 @@ func (w *walker) element(array fact) (types.Kind, bool) {
 }
 
 func (w *walker) field(container, index fact) (types.Kind, ssa.Shape, bool) {
-	record := w.record(container)
+	record := container.structType
+	if record == nil && container.referenceKnown && container.reference > 0 {
+		record = w.Objects[container.reference].Struct
+	}
 	if record == nil || !index.valueKnown || index.value < 0 || int(index.value) >= len(record.Fields) {
 		return 0, ssa.Shape{}, false
 	}
 	return record.Fields[index.value].Kind, ssa.Shape{Struct: true, Type: uintptr(unsafe.Pointer(record))}, true
-}
-
-func (w *walker) record(container fact) *types.StructType {
-	if container.structType != nil {
-		return container.structType
-	}
-	if container.referenceKnown && container.reference > 0 {
-		return w.objects[container.reference].Struct
-	}
-	return nil
 }
 
 // callee resolves the function a CALL at operand at calls: a constant
@@ -477,7 +474,7 @@ func (w *walker) callee(at int) *types.Function {
 	if ref <= 0 {
 		return nil
 	}
-	target := w.objects.function(ref)
+	target := w.Objects.function(ref)
 	if target == nil || target.Typ == nil {
 		return nil
 	}
@@ -490,7 +487,7 @@ func (w *walker) unseen() bool {
 	if len(w.stack) == 0 || w.callee(len(w.stack)-1) != nil {
 		return false
 	}
-	_, seen := w.callees[w.ip]
+	_, seen := w.Callees[w.ip]
 	return !seen
 }
 
@@ -502,12 +499,12 @@ func (w *walker) unseen() bool {
 // it, so the CALL proceeds exactly as a resolved one; a closure callee keeps
 // its operand, guarded to be a closure over the admitted function.
 func (w *walker) speculate(at int) *types.Function {
-	callee, ok := w.callees[w.ip]
+	callee, ok := w.Callees[w.ip]
 	if !ok {
 		return nil
 	}
 	ref := callee.Function
-	target := w.objects.function(ref)
+	target := w.Objects.function(ref)
 	if target == nil || target.Typ == nil {
 		return nil
 	}
@@ -588,40 +585,39 @@ func (w *walker) store(space ssa.Space, index int) bool {
 }
 
 func (w *walker) slot(space ssa.Space, index int) (ssa.Slot, fact, bool) {
-	frame := w.activation
 	slot := ssa.Slot{Space: space, Index: index}
 	var out fact
 	switch space {
 	case ssa.SpaceLocal:
-		if index >= len(frame.slots) {
+		if index >= len(w.activation.slots) {
 			return slot, out, false
 		}
-		out = holds(frame.slots[index])
+		out = holds(w.activation.slots[index])
 		out.backing, out.offset = backingLocal, index
 	case ssa.SpaceUpval:
-		if index >= len(frame.function.Captures) {
+		if index >= len(w.activation.function.Captures) {
 			return slot, out, false
 		}
-		out = holds(frame.function.Captures[index])
+		out = holds(w.activation.function.Captures[index])
 		out.backing, out.offset = backingUpval, index
 	default:
-		if index >= len(w.globals) {
+		if index >= len(w.Globals) {
 			return slot, out, false
 		}
-		out = fact{kind: w.globals[index], backing: backingGlobal, offset: index}
+		out = fact{kind: w.Globals[index], backing: backingGlobal, offset: index}
 	}
 	return slot, out, true
 }
 
-func (w *walker) pool(index int) bool {
-	if index >= len(w.constants) {
+func (w *walker) fetch(index int) bool {
+	if index >= len(w.Constants) {
 		return false
 	}
-	boxed := w.constants[index]
+	boxed := w.Constants[index]
 	out, word := fact{kind: boxed.Kind()}, ssa.Word(boxed)
 	if out.kind == types.KindRef {
 		out.backing, out.reference, out.referenceKnown = backingConst, boxed.Ref(), true
-		if obj, ok := w.objects[boxed.Ref()]; ok && obj.I64 != nil {
+		if obj, ok := w.Objects[boxed.Ref()]; ok && obj.I64 != nil {
 			out, word = fact{kind: types.KindI64}, uint64(*obj.I64)
 		}
 	}
@@ -637,21 +633,6 @@ func (w *walker) constant(word uint64, out fact) bool {
 	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpConst, Const: word, Results: []ssa.Value{value}})
 	w.push(value, out)
 	return true
-}
-
-// Adopts returns the number of code's topmost popped operands whose
-// ownership it takes: every one when it enters a frame, the stored value
-// when it overwrites heap contents and yields nothing. The other operands
-// stay their owner's to release after code.
-func Adopts(code instr.Opcode, pops, results int) int {
-	switch {
-	case code.Writes(instr.Frame):
-		return pops
-	case code.Reads(instr.Heap) && code.Writes(instr.Heap) && results == 0:
-		return 1
-	default:
-		return 0
-	}
 }
 
 func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
@@ -690,10 +671,7 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 	case adopted > 0:
 		w.own(len(w.stack) - 1)
 	}
-	args := make([]ssa.Value, named)
-	for i := range args {
-		args[i] = w.stack[len(w.stack)-named+i].value
-	}
+	args := values(w.stack[len(w.stack)-named:])
 	consumed := append([]operand(nil), w.stack[len(w.stack)-pops:]...)
 	w.stack = w.stack[:len(w.stack)-pops]
 
@@ -735,7 +713,7 @@ func (w *walker) call() ([]bool, ssa.Shape) {
 	target := w.callee(top)
 	if target == nil {
 		w.adopt()
-		return nil, ssa.Shape{Type: uintptr(unsafe.Pointer(w.callees[w.ip].Type))}
+		return nil, ssa.Shape{Type: uintptr(unsafe.Pointer(w.Callees[w.ip].Type))}
 	}
 	var shape ssa.Shape
 	if ref := w.stack[top].closure; ref != 0 {
@@ -772,11 +750,7 @@ func (w *walker) lent(i int) bool {
 func (w *walker) complete(ip int) ssa.Terminator {
 	w.begin(ip)
 	w.adopt()
-	args := make([]ssa.Value, len(w.stack))
-	for i, o := range w.stack {
-		args[i] = o.value
-	}
-	return ssa.Terminator{Op: ssa.OpComplete, Args: args, State: w.deopt()}
+	return ssa.Terminator{Op: ssa.OpComplete, Args: values(w.stack), State: w.deopt()}
 }
 
 func (w *walker) leave(ip int) ssa.Terminator {
@@ -808,7 +782,7 @@ func (w *walker) exit(ip int) ssa.Terminator {
 }
 
 func (w *walker) guard(at int, shape ssa.Shape) {
-	if w.stack[at].kind != types.KindRef || shape.Function == 0 && w.refuted[w.ip] {
+	if w.stack[at].kind != types.KindRef || shape.Function == 0 && w.Refuted[w.ip] {
 		return
 	}
 	value := w.builder.Value(ssa.TypeRef)
@@ -820,4 +794,12 @@ func (w *walker) guard(at int, shape ssa.Shape) {
 		Results: []ssa.Value{value},
 	})
 	w.stack[at].value = value
+}
+
+func values(stack []operand) []ssa.Value {
+	out := make([]ssa.Value, len(stack))
+	for i, o := range stack {
+		out[i] = o.value
+	}
+	return out
 }
