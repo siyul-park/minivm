@@ -122,12 +122,16 @@ type Call struct {
 	Live []asm.VReg
 	// Bridge is the ExitCall the call takes when the callee is not native,
 	// the activation is too deep, or the frame does not fit. The interpreter
-	// replays the call itself; Bridge never returns to native code.
+	// runs the call itself, and native code resumes at Join.
 	Bridge asm.Label
 	// Safepoint is taken when the call spends the last budget unit.
 	Safepoint asm.Label
 	// Resume is the call site after the safepoint check.
 	Resume asm.Label
+	// Join is where Bridge resumes: past the callee's release, where slot
+	// results are read, or past the moves of register results, which Bridge
+	// loads itself.
+	Join asm.Label
 	// Owned reports whether the call's state owns Callee's reference, so
 	// the call releases it once the callee returns.
 	Owned bool

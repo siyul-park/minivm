@@ -402,8 +402,9 @@ func (m *Machine) Results(a *asm.Assembler, regs []asm.VReg) {
 // Call writes boxed arguments at the callee frame base, passes a closure
 // callee's upvals base through Context.Upvals when Upvals, and dispatches
 // through Context.Natives, or, when Self, branches directly to the unit's
-// own entry. Missing code, depth, or space takes ExitCall; an owned Callee
-// is released once the callee returns, a borrowed one left alone.
+// own entry. Missing code, depth, or space takes ExitCall, which resumes at
+// Join; an owned Callee is released once a native callee returns, a
+// borrowed one left alone.
 func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	if 8*(c.Base+c.Size) > 4095 {
 		return false
@@ -478,8 +479,10 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 		for j, v := range c.Results {
 			convention(a, s.Reg(v), j, true)
 		}
+		a.Bind(c.Join)
 		return true
 	}
+	a.Bind(c.Join)
 	for j, v := range c.Results {
 		a.Emit(target.LDR(s.Reg(v), target.X25, int16((c.Base+j)*8)))
 	}

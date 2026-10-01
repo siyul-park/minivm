@@ -2098,10 +2098,10 @@ func TestMachine_Exit(t *testing.T) {
 		require.Equal(t, append(rows(4, jit.TrapDeopt), target.BRK(0)), a.Rows())
 	})
 
-	t.Run("never returns from a call", func(t *testing.T) {
+	t.Run("suspends a call for the interpreter to run", func(t *testing.T) {
 		a := asm.New(target.New())
 		arm64.New().Exit(a, 5, jit.ExitCall, uses)
-		require.Equal(t, append(rows(5, jit.TrapBridge), target.BRK(0)), a.Rows())
+		require.Equal(t, append(rows(5, jit.TrapBridge), target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget))), a.Rows())
 	})
 }
 

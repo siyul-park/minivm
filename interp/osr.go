@@ -175,7 +175,7 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 // cancellation there. Native code reads a word per capture without a
 // bounds check, so a frame without its captures declines too.
 func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner func(*Interpreter)) bool {
-	if s.entry && len(s.headers) == 0 && cancelled(i) || len(i.fr.upvals) < len(s.fn.Captures) {
+	if s.entry && len(s.headers) == 0 && cancelled(i) || len(i.fr.upvals) < len(s.fn.Captures) || n.depth >= uint64(len(n.ctx.Records)) {
 		return false
 	}
 	if s.count++; s.count%s.cadence == 0 {
@@ -201,21 +201,24 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	ctx.Top = end(i.stack)
 	ctx.FB = base(i.stack[i.fr.bp:])
 	ctx.Upvals = base(i.fr.upvals)
-	ctx.Limit = uint64(min(len(ctx.Records), len(i.frames)-i.fp+1))
+	ctx.Limit = uint64(min(len(ctx.Records), int(n.depth)+len(i.frames)-i.fp+1))
 	ctx.Budget = budget
-	ctx.Depth = 0
+	ctx.Depth = n.depth
 
 	if i.profiler != nil {
 		n.metric(i, metricEntries, prof.Label{Key: "tier", Value: c.Tier.String()})
 	}
 
 	ok, retire := true, false
+	var fault any
 	if trap := jit.Enter(c.Entry(), ctx); trap != jit.TrapReturn {
-		ok, retire = n.settle(i, c, trap, &s.bridge,
-			// An OSR activation is entered without a call, so there is no
-			// caller frame above it in Records to preserve: rebuild rewrites
-			// the current frame in place instead of pushing a new one.
-			func(exit jit.Exit) { n.rebuild(i, exit, i.fp-1, i.fr.ref, i.fr.release) },
+		// An OSR activation is entered without a call, so there is no caller
+		// frame above it in Records to preserve: rebuild rewrites the current
+		// frame in place instead of pushing a new one.
+		start := i.fp - 1
+		f := i.fr
+		ok, retire, fault = n.settle(i, c, trap, &s.bridge, start,
+			func(exit jit.Exit) { n.rebuild(i, exit, start, f.ref, f.release) },
 			s.refute,
 		)
 	}
@@ -229,6 +232,9 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 		delete(n.sites, key{s.address, s.ip})
 	}
 	n.store.Leave()
+	if fault != nil {
+		panic(fault)
+	}
 	_ = n.store.Reclaim()
 	return true
 }

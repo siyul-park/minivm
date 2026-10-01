@@ -322,9 +322,7 @@ func TestNew(t *testing.T) {
 		require.Less(t, ctx.Records[1].PC, code+uintptr(len(bytes)))
 	})
 
-	t.Run("bridges a call to a function without native code", func(t *testing.T) {
-		// An ExitCall never resumes (interp deoptimizes it), so this stops
-		// at the bridge: the exit map and the slot-boxed argument.
+	t.Run("resumes a call to a function without native code with the result the interpreter places", func(t *testing.T) {
 		fib, module := fibonacci(t)
 		f, err := transform.Translate(module, 2, fib, 0)
 		require.NoError(t, err)
@@ -338,15 +336,26 @@ func TestNew(t *testing.T) {
 		ctx.Natives = address(t, natives)
 		ctx.RC = address(t, rc)
 
-		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
-		exit := exits[ctx.Exit()]
-		require.Equal(t, jit.ExitCall, exit.Kind)
-		require.Equal(t, 2, exit.Callee)
-		require.Equal(t, instr.CALL, instr.Opcode(fib.Code[exit.Frame.IP-1]))
-		require.Empty(t, exit.Frame.Stack)
-		require.Equal(t, types.BoxI32(9), stack[1])
-		// The borrowed callee's retain is never emitted, so bridging costs
-		// no RC movement.
+		var args []int32
+		trap := jit.Enter(code, ctx)
+		for trap == jit.TrapBridge {
+			exit := exits[ctx.Exit()]
+			require.Equal(t, jit.ExitCall, exit.Kind)
+			require.Equal(t, 2, exit.Callee)
+			require.Equal(t, []types.Kind{types.KindI32}, exit.Results)
+			require.Equal(t, instr.CALL, instr.Opcode(fib.Code[exit.Frame.IP-1]))
+			// The boxed argument sits at the callee frame base: past the
+			// caller's one slot and the operands below the call.
+			n := stack[1+len(exit.Frame.Stack)].I32()
+			args = append(args, n)
+			ctx.Results[0] = uint64(uint32(fibonacciOf(n)))
+			trap = jit.Resume(ctx)
+		}
+		require.Equal(t, jit.TrapReturn, trap)
+		require.Equal(t, []int32{9, 8}, args)
+		require.Equal(t, types.BoxI32(55), stack[0])
+		// The borrowed callee's retain is never emitted, so a served call
+		// costs no RC movement.
 		require.Equal(t, []int{0, 0, 1}, rc)
 	})
 
@@ -918,6 +927,14 @@ func fibonacci(t *testing.T) (*types.Function, transform.Module) {
 		b.Bind(small).Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
 	})
 	return fib, transform.Module{Constants: []types.Boxed{types.BoxRef(2)}, Objects: transform.Objects{2: {Function: fib}}}
+}
+
+// fibonacciOf is fibonacci's own result for n, computed in Go.
+func fibonacciOf(n int32) int32 {
+	if n < 2 {
+		return n
+	}
+	return fibonacciOf(n-1) + fibonacciOf(n-2)
 }
 
 // kindType is a representative types.Type for k, for a Returns declaration

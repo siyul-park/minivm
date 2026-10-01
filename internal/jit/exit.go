@@ -17,24 +17,29 @@ type Exit struct {
 	// Adopts is how many of those arguments, topmost, Code takes ownership
 	// of (transform.Adopts): native code hands each its own reference.
 	Adopts int
-	// Callee is the function address an ExitCall replays.
+	// Callee is the function address an ExitCall calls.
 	Callee int
 	// Closure is where an ExitCall's closure over Callee lives, nil when the
-	// call names Callee directly: the replay pushes it, and a callee
-	// materialized from this call runs through it.
+	// call names Callee directly: the interpreter calls through it, and a
+	// callee materialized from this call runs through it.
 	Closure *Value
-	// Owned reports whether the call site retained its callee's reference: an
-	// ExitCall replay must retain a borrowed callee's reference itself before
-	// pushing it, so the interpreter's own CALL has one of its own to release.
+	// Owned reports whether the call site retained its callee's reference: the
+	// interpreter must retain a borrowed callee's reference itself before
+	// pushing it, so its own CALL has one of its own to release.
 	Owned bool
 	// Lent are the callee frame slots this call passes without a reference
-	// of its own: materializing the callee, or replaying the call, retains
-	// each.
+	// of its own: materializing the callee, or the interpreter running the
+	// call, retains each.
 	Lent []int
+	// Kept are the callee frame slots this call passes owned to a borrowed
+	// parameter: native code releases each once the call returns to it, so
+	// the interpreter running the call retains each for its callee frame.
+	Kept []int
 	// Frame is the interpreter frame at the exit. An ExitRelease has a zero
 	// Frame: it neither reads nor rebuilds it.
 	Frame Frame
-	// Results are the kinds of the values an ExitBridge reads back from
+	// Results are the kinds of the values an ExitBridge, or an ExitCall to a
+	// callee with register-convention results, reads back from
 	// Context.Results, in order.
 	Results []types.Kind
 	// Word is the value an ExitRelease or ExitBox hands to the interpreter:
@@ -87,20 +92,20 @@ const (
 	// ExitRelease suspends native code for the interpreter to release the
 	// last reference named by Word.
 	ExitRelease
-	// ExitCall abandons native code for the interpreter to replay the call to
-	// Callee; it never resumes native code. Frames are the caller's state
-	// after the call, which is also its state while a native callee runs.
+	// ExitCall suspends native code for the interpreter to run the call to
+	// Callee, then resumes it with the call's results. Frames are the
+	// caller's state after the call, which is also its state while a native
+	// callee runs.
 	ExitCall
 	// ExitBox suspends native code for the interpreter to heap-box Word, a
 	// wide i64 outside the inline range, into Context.Results[0].
 	ExitBox
 )
 
-// Resumes reports whether native code continues after k: ExitDeopt abandons
-// the activation and ExitCall hands it to the interpreter's own replay, so
-// neither returns to native code.
+// Resumes reports whether native code continues after k: only ExitDeopt
+// abandons the activation.
 func (k Kind) Resumes() bool {
-	return k != ExitDeopt && k != ExitCall
+	return k != ExitDeopt
 }
 
 // String returns the exit kind name.

@@ -15,7 +15,7 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 
 | Entry | Counts | Threshold | Cadence | Root |
 |---|---|---|---|---|
-| `CALL` | interpreted calls to a `*types.Function`, and `ExitCall` replays of a closure call | `n` (Baseline); `graduate` (1024) native entries (Optimized) | every call | ip 0 |
+| `CALL` | interpreted calls to a `*types.Function`, served `ExitCall`s included, and `ExitCall`s of a closure call | `n` (Baseline); `graduate` (1024) native entries (Optimized) | every call | ip 0 |
 | OSR | back edges at a loop header, module code included | `n` | `interval` (256) back edges | the header |
 | Module entry, loop-free | Runs of module code | `max(n, 2)` | every Run | ip 0 |
 | Module entry, with loops | Runs of module code | `max(n, 2)` | `interval` (256) Runs | ip 0 |
@@ -67,7 +67,7 @@ A `CALL` whose callee is a closure carries the closure's `ssa.Shape` (function, 
 | a `CLOSURE_NEW` over a constant function in the same unit, on the stack or in a local no path re-stores before the call | static: no guard; an OSR unit knows no closure built before its header |
 | a closure recorded at the site's feedback | `guard.shape` on the operand: a `*types.Closure` over the function, of its type, holding at least its captures |
 
-A local- or constant-backed callee is lent: the call neither retains nor releases it. Closure feedback is recorded only where Go already runs: an `ExitCall` replay of a closure call records its callee and counts its entry, since the threaded closure `CALL` has no native hook.
+A local- or constant-backed callee is lent: the call neither retains nor releases it. Closure feedback is recorded only where Go already runs: an `ExitCall` of a closure call records its callee and counts its entry, since the threaded closure `CALL` has no native hook.
 
 A function with captures runs natively only through its closure:
 
@@ -86,7 +86,7 @@ A reference parameter its function never writes (`transform.Borrows`) is borrowe
 | Prologue | Push `Records[Depth]`, save `Record.PC`, count `Entries[address]` when enabled, start non-parameter locals at their zeros (`value-representation.md`), loading each distinct zero once; OSR starts none. A function that reads or writes its upvals loads their base from `Context.Upvals`. |
 | Store | Reference-capable `OpStore` releases the old slot value before overwrite, matching threaded `LOCAL_SET` and `UPVAL_SET`. |
 | Return | `OpReturn` releases reference slots; borrowed parameters only at depth 1 (the Go-entered activation), returns up to two register results in X0/X1, or stores boxed results; `OpComplete` writes past locals. |
-| Call | Constant calls box arguments into the callee frame, then use `Context.Natives[addr]`; self-calls use the unit entry. A closure call to a function with captures writes the closure's upvals base to `Context.Upvals` after its budget check. Missing code, depth, or frame space takes `ExitCall`. |
+| Call | Constant calls box arguments into the callee frame, then use `Context.Natives[addr]`; self-calls use the unit entry. A closure call to a function with captures writes the closure's upvals base to `Context.Upvals` after its budget check. Missing code, depth, or frame space takes `ExitCall`, which resumes past the callee release: slot results are read there, register results are loaded from `Context.Results` by the exit stub. |
 
 ### Call convention
 
@@ -108,12 +108,12 @@ A reference parameter its function never writes (`transform.Borrows`) is borrowe
 | `ExitBridge` | unlowered `OpExec` | yes, unless denied or its handler traps |
 | `ExitSafepoint` | loop header or native call when `Budget` is spent | yes |
 | `ExitRelease` | dropping a last reference | yes |
-| `ExitCall` | `CALL` that cannot run natively | no |
+| `ExitCall` | `CALL` that cannot run natively | yes, unless the callee is a coroutine function, does not fit the stack, or leaves by a trap, throw, or cancellation |
 | `ExitBox` | a wide (> 49-bit) i64 at a store, slot return, call argument, or `OpComplete` | yes |
 
 A deopt stub sits out of line after the next terminator that does not fall through, so the values its map names stay live only that far. Safepoint, release, box, and call stubs follow the body; a bridge and `OpExit` exit inline.
 
-`jit.Kind.Resumes` owns the "Resumes native" column above; `compile.stub`/`function` and `arm64.Machine.Exit` all read it instead of comparing kinds themselves. A non-resuming exit's stub ends in `BRK` and skips the `X24` (`Budget`) reload, since native code never runs past it; it materializes native activations outermost-first, then continues threaded, and `jit.Enter` never nests.
+`jit.Kind.Resumes` owns the "Resumes native" column above; `compile.stub`/`function` and `arm64.Machine.Exit` all read it instead of comparing kinds themselves. A non-resuming exit's stub ends in `BRK` and skips the `X24` (`Budget`) reload, since native code never runs past it; it materializes the run's native activations outermost-first, then continues threaded.
 
 | Exit | Resume rule |
 |---|---|
@@ -124,7 +124,20 @@ A deopt stub sits out of line after the next terminator that does not fall throu
 
 A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every admitted op are exactly the operands its handler pops; it uses a scratch stack and leaves native registers untouched. The bridge retains every ref operand for the handler, so none reaches zero during an attempt; a boxed wide i64 is a fresh heap value the handler owns. After a completed handler, the bridge releases its retain of each operand the op adopts (`transform.Adopts`: the stored value of a heap write with no result), since native code handed the op that operand's own reference; native code releases the other operands it owns. Result words are unboxed per kind; a heap-boxed i64 result is consumed into a raw word. The materializer retains borrowed refs. Bridge/box resumption shares `resume`/`amortize`.
 
-`Exit.Lent` slots are retained when a callee is materialized or an ExitCall replayed. `Exit.Closure` locates a closure call's callee: the replay pushes it, and the materialized callee frame runs through it with its upvals.
+`Exit.Lent` slots are retained when a callee is materialized or the interpreter runs an ExitCall; `Exit.Kept` slots (owned arguments to borrowed parameters, which native code releases after the call) are retained for a served call and released again if its caller never resumes. `Exit.Closure` locates a closure call's callee: the interpreter pushes it, and the materialized callee frame runs through it with its upvals.
+
+### Served calls
+
+`native.nest` serves an `ExitCall` while its native caller stays suspended:
+
+| Concern | Rule |
+|---|---|
+| Frames | The caller's activations keep frame slots from the run's start; a stand-in frame for the innermost runs only its exact-code `CALL` (code cut past it), so `Interpreter.dispatch` stops when the callee returns to it. |
+| Handlers | `Interpreter.floor` hides the suspended slots from every handler search; a panic not caught above it re-panics from `dispatch` to `nest`. |
+| Native entries | Start at `Context.Depth` = the suspended depth (`native.depth`), on the same native stack below the suspended frames; `Records` bounds the total depth, and no entry starts once they are full. `Limit` counts the suspended activations. A Go entry above depth 0 releases its borrowed parameters itself after it returns, since `OpReturn` releases them only at depth 1. |
+| State | `asm.State`, `Limit`, `Budget`, and `Depth` are saved before and restored after; the nested run spends its own budget. |
+| Results | Register results are unboxed into `Context.Results`; slot results stay at the callee frame base. |
+| Leaving | A cancellation materializes the caller under the callee's live frames and continues threaded; a `THROW` whose search stopped at the floor is pushed back and runs again over them; any other panic materializes them and re-panics after the entering call leaves the store. None refutes the caller. A coroutine callee, whose `CALL` returns a handle, deopts and replays the call. |
 
 ## Store and tiers
 
@@ -134,7 +147,7 @@ A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every ad
 | Retire | `Retire`/`RetireAt` unpublish; retired code remains discoverable until safe to reclaim. |
 | Reclaim | `Reclaim` frees code only after no interpreter remains native. |
 | Promotion | Baseline entries count calls; a live Baseline reaching the interpreter's graduate threshold queues Optimized. Optimized/OSR entries do not count. |
-| Failure | Repeated deopts retire that tier once they reach the interpreter's refute threshold. An `ExitCall` to a callee whose Baseline is still pending (no code, not failed) neither refutes nor counts against the bridge limit. A compile failure is permanent only when feedback is unchanged from its snapshot. |
+| Failure | Repeated deopts retire that tier once they reach the interpreter's refute threshold. A compile failure is permanent only when feedback is unchanged from its snapshot. |
 | Bridges | Each code address/site keeps its unamortized bridge count and native work across entries. A bridge is amortized when work since the previous served bridge reaches `amortize` (4); TrapReturn finalizes the last work segment. That clears the site's count and the bridged function's own count. Calls, returns, back edges, and native callees all contribute to the work. |
 | Async | `compile.Queue` compiles one unit per address; publication is drained at the next call, OSR observation or entry, or safepoint. |
 | Pool | `Pool` shares `Store`, `Queue`, module data, the Baseline promotion candidate list, each address's CALL count, and each OSR/entry site's count until it submits, so a pooled workload compiles after about `threshold` entries in total. Each interpreter keeps its own `jit.Context`, feedback, graduate entries, deopts, bridges, failure marks, and a submitted site's cadence. A pooled interpreter whose entries reach the graduate threshold requests Optimized even if a different interpreter drained its Baseline job. A pooled interpreter whose deopts refute shared code retires it for the pool and blocks only its own tier. |
@@ -157,7 +170,7 @@ Entry reuses the current frame (`FB = bp`, `Depth = 0`); exits rewrite it in pla
 - i64 results use X0/X1 only for one or two results; wider result sets stay boxed.
 - A wide (>49-bit) i64 takes `ExitBox` at the sites listed in Exits above.
 - Container lowering requires `guard.shape`; null or mismatched representation deopts.
-- Bridges resume except the denied ops in Exits (above); `ExitCall` and `RETURN_CALL`'s `ExitDeopt` do not. `YIELD` and `RESUME` never reach an exit at all: they make the translator decline the whole unit at compile time.
+- Bridges resume except the denied ops in Exits (above); `RETURN_CALL`'s `ExitDeopt` does not, nor an `ExitCall` to a coroutine function. `YIELD` and `RESUME` never reach an exit at all: they make the translator decline the whole unit at compile time.
 - Host functions are not speculated at dynamic CALL sites; owned callees are not candidates.
 
 ## Metrics

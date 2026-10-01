@@ -48,6 +48,15 @@ type native struct {
 	// exact caches unfused threaded code for materialized frames, by address.
 	exact [][]func(*Interpreter)
 
+	// depth is how many native activations are suspended under a call the
+	// interpreter runs for them (nest): the next entry starts its records
+	// above them.
+	depth uint64
+	// borrows caches transform.Borrows by address for entries above depth
+	// 0, whose activation's return keeps its borrowed parameters (it
+	// releases them only at depth 1).
+	borrows [][]bool
+
 	// compile is captured once so deoptimization does not add a static
 	// dependency from generated threaded handlers back to their compiler.
 	// Calling i.compile here directly creates the threaded/fusions
@@ -266,6 +275,7 @@ func newNative(i *Interpreter, threshold int) *native {
 		bridges:   make([]bridge, len(i.code)),
 		failed:    make([][2]bool, len(i.code)),
 		exact:     make([][]func(*Interpreter), len(i.code)),
+		borrows:   make([][]bool, len(i.code)),
 		sites:     map[key]*site{},
 		callees:   make([][]transform.Callee, len(i.code)),
 		compile:   i.compile,
@@ -309,7 +319,7 @@ func (n *native) attempt(i *Interpreter, addr int, fn *types.Function, release b
 	if release {
 		n.see(i, transform.Callee{Function: addr})
 	}
-	if len(fn.Captures) > 0 {
+	if len(fn.Captures) > 0 || n.depth >= uint64(len(n.ctx.Records)) {
 		return false
 	}
 	n.drain(i)
@@ -339,8 +349,11 @@ func (n *native) attempt(i *Interpreter, addr int, fn *types.Function, release b
 			return false
 		}
 	}
-	retire := n.run(i, addr, fn, code, bp, release, advance)
+	retire, fault := n.run(i, addr, fn, code, bp, release, advance)
 	n.store.Leave()
+	if fault != nil {
+		panic(fault)
+	}
 	if retire {
 		n.store.Retire(addr)
 		// The unchanged input has no new feedback for a recompile at this tier.
@@ -412,12 +425,6 @@ func (n *native) refute(addr int) bool {
 	return n.deopts[addr] >= refute
 }
 
-// pending reports whether addr has no published code yet but may still get
-// Baseline code.
-func (n *native) pending(addr int) bool {
-	return addr < len(n.failed) && !n.hasFailed(addr, jit.Baseline) && n.store.Code(addr) == nil
-}
-
 // hasFailed reports whether addr's compile at tier permanently failed.
 func (n *native) hasFailed(addr int, tier jit.Tier) bool {
 	return n.failed[addr][tier-1]
@@ -474,10 +481,12 @@ func (n *native) drain(i *Interpreter) {
 	})
 }
 
-// settle serves exits from trap through safepoints, releases, and bridges.
-// ok reports that the activation reached TrapReturn; retire reports whether
-// the code retires.
-func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, account *bridge, deopt func(jit.Exit), refute func() bool) (ok, retire bool) {
+// settle serves exits from trap through safepoints, releases, bridges, and
+// calls; the entered activation materializes as frame start. ok reports that
+// the activation reached TrapReturn; retire reports whether the code retires;
+// fault is a panic a call raised past its native caller, which the caller
+// re-raises once it leaves the store.
+func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, account *bridge, start int, deopt func(jit.Exit), refute func() bool) (ok, retire bool, fault any) {
 	ctx := n.ctx
 	account.mark = budget
 	for {
@@ -487,12 +496,13 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, account *
 				account.count = 0
 				account.work = 0
 			}
-			return true, false
+			return true, false, nil
 		}
 
-		// At Depth 1 no native call has run since entry: skip Find's locked scan.
+		// At the entered depth no native call has run since entry: skip
+		// Find's locked scan.
 		entered := code
-		if ctx.Depth != 1 {
+		if ctx.Depth != n.depth+1 {
 			entered = n.store.Find(ctx.PC())
 		}
 		exit := entered.Exits[ctx.Exit()]
@@ -506,7 +516,7 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, account *
 				// Threaded code reports the cancellation at its next safepoint,
 				// as an error no guest handler can catch.
 				deopt(exit)
-				return false, refute()
+				return false, refute(), nil
 			}
 			ctx.Heap = heapBase(i.heap)
 			ctx.RC = rcBase(i.rc)
@@ -548,28 +558,34 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, account *
 			}
 			deopt(exit)
 			if account.count >= resume {
-				return false, true
+				return false, true, nil
 			}
-			return false, refute()
+			return false, refute(), nil
 		case jit.ExitCall:
-			deopt(exit)
-			// A callee whose Baseline is still pending is no refuted
-			// speculation and no unpaid bridge.
-			if n.pending(exit.Callee) {
-				account.count = 0
-				return false, false
+			account.spend(ctx)
+			ref := n.callee(int(ctx.Depth)-1, exit)
+			if !n.nests(i, exit) {
+				deopt(exit)
+				n.replay(i, exit, ref)
+				return false, refute(), nil
 			}
-			return false, refute()
+			if fault, ok := n.nest(i, exit, ref, start, deopt); !ok {
+				return false, false, fault
+			}
+			ctx.Heap = heapBase(i.heap)
+			ctx.RC = rcBase(i.rc)
+			account.mark = ctx.Budget
+			trap = jit.Resume(ctx)
 		default:
 			deopt(exit)
-			return false, refute()
+			return false, refute(), nil
 		}
 	}
 }
 
 // run executes one native call whose frame starts at bp and reports whether
-// it should retire.
-func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Code, bp int, release bool, advance int) bool {
+// it should retire and the fault settle reports.
+func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Code, bp int, release bool, advance int) (bool, any) {
 	returns := len(fn.Typ.Returns)
 
 	ctx := n.ctx
@@ -580,24 +596,43 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	ctx.Entries = entry(n.entries)
 	ctx.Top = end(i.stack)
 	ctx.FB = base(i.stack[bp:])
-	ctx.Limit = uint64(min(len(ctx.Records), len(i.frames)-i.fp))
+	ctx.Limit = uint64(min(len(ctx.Records), int(n.depth)+len(i.frames)-i.fp))
 	ctx.Budget = budget
-	ctx.Depth = 0
+	ctx.Depth = n.depth
 
 	if i.profiler != nil {
 		n.metric(i, metricEntries, prof.Label{Key: "tier", Value: code.Tier.String()})
 	}
 
+	// Threaded code pushed every argument owned, but a return above depth 1
+	// releases no borrowed parameter: Go releases each once it returns.
+	var buf [4]types.Boxed
+	owned := buf[:0]
+	if n.depth > 0 {
+		if n.borrows[addr] == nil {
+			n.borrows[addr] = transform.Borrows(fn)
+		}
+		for p, b := range n.borrows[addr] {
+			if b {
+				owned = append(owned, i.stack[bp+p])
+			}
+		}
+	}
+
 	if trap := jit.Enter(code.Entry(), ctx); trap != jit.TrapReturn {
-		ok, retire := n.settle(i, code, trap, &n.bridges[addr],
+		start := i.fp
+		ok, retire, fault := n.settle(i, code, trap, &n.bridges[addr], start,
 			// ip advances the entering (pre-rebuild) frame, which rebuild
 			// never writes, so it applies before rebuild retargets i.fr.
-			func(exit jit.Exit) { i.fr.ip += advance; n.rebuild(i, exit, i.fp, addr, release) },
+			func(exit jit.Exit) { i.fr.ip += advance; n.rebuild(i, exit, start, addr, release) },
 			func() bool { return n.refute(addr) },
 		)
 		if !ok {
-			return retire
+			return retire, fault
 		}
+	}
+	for _, v := range owned {
+		i.releaseBox(v)
 	}
 	boxRegisters(i, code, bp)
 	if release {
@@ -605,7 +640,7 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	}
 	i.sp = bp + returns
 	i.fr.ip += advance
-	return false
+	return false, nil
 }
 
 // widen heap-boxes exit.Word, a wide i64, into Context.Results[0] as
@@ -759,72 +794,161 @@ func hosted(v types.Value) bool {
 	}
 }
 
-// rebuild materializes every native activation as a frame from start,
-// replays an ExitCall's callee, and positions the interpreter at the
-// innermost one. Activation 0 was entered through ref, and release reports
-// whether it owns that reference. A replayed closure callee is counted and
-// recorded here, since the threaded closure CALL has no native hook.
+// rebuild materializes every native activation of the current run, from
+// depth upward, as frames from start and positions the interpreter at the
+// innermost one. The run's first activation was entered through ref, and
+// release reports whether it owns that reference.
 func (n *native) rebuild(i *Interpreter, exit jit.Exit, start, ref int, release bool) {
 	ctx := n.ctx
-	depth := int(ctx.Depth)
+	floor, depth := int(n.depth), int(ctx.Depth)
 
-	maps := make([]jit.Frame, depth)
-	refs := make([]int, depth)
-	owns := make([]bool, depth)
-	// lent[k] are the parameter slots activation k was entered with but does
-	// not own; the outermost activation is never lent one, since threaded
-	// code pushed its arguments owned.
-	lent := make([][]int, depth)
-	maps[depth-1] = exit.Frame
+	maps := make([]jit.Frame, depth-floor)
+	refs := make([]int, depth-floor)
+	owns := make([]bool, depth-floor)
+	// lent[j] are the parameter slots activation floor+j was entered with
+	// but does not own; the first is never lent one, since threaded code
+	// pushed its arguments owned.
+	lent := make([][]int, depth-floor)
+	maps[depth-floor-1] = exit.Frame
 	refs[0], owns[0] = ref, release
-	for k := depth - 2; k >= 0; k-- {
+	for k := depth - 2; k >= floor; k-- {
 		code := n.store.Find(ctx.Records[k+1].PC)
 		e := code.Exits[ctx.Records[k].Exit]
-		maps[k] = e.Frame
-		refs[k+1] = n.callee(k, e)
-		owns[k+1] = e.Owned
-		lent[k+1] = e.Lent
+		maps[k-floor] = e.Frame
+		refs[k-floor+1] = n.callee(k, e)
+		owns[k-floor+1] = e.Owned
+		lent[k-floor+1] = e.Lent
 	}
 
-	for k := 0; k < depth; k++ {
-		n.frame(i, start, k, maps[k], refs[k], owns[k])
+	for j := range maps {
+		n.frame(i, start+j, floor+j, maps[j], refs[j], owns[j])
 	}
-	for k := 1; k < depth; k++ {
-		bp := i.frames[start+k].bp
-		for _, p := range lent[k] {
+	for j := 1; j < len(maps); j++ {
+		bp := i.frames[start+j].bp
+		for _, p := range lent[j] {
 			i.retainBox(i.stack[bp+p])
 		}
 	}
-	inner := &i.frames[start+depth-1]
-	i.fp = start + depth
-	i.fr = inner
+	i.fp = start + len(maps)
+	i.fr = &i.frames[i.fp-1]
+	ctx.Abandon()
+}
 
-	if exit.Kind == jit.ExitCall {
-		for _, p := range exit.Lent {
-			i.retainBox(i.stack[i.sp+p])
-		}
-		callee := i.heap[exit.Callee].(*types.Function)
-		i.sp += len(callee.Typ.Params)
-		ref := types.BoxRef(n.callee(depth-1, exit))
-		if !exit.Owned {
-			// A borrowed callee carries no reference of its own; the
-			// replayed CALL releases whatever it adopts, so it needs one.
-			i.retainBox(ref)
-		}
-		i.stack[i.sp] = ref
-		i.sp++
-		// CALL is one byte (interp.go's handler walk relies on the same
-		// fact), so its own ip is the map's IP, recorded past it, minus one.
-		inner.ip--
-		if exit.Closure != nil {
-			n.see(i, transform.Callee{Function: exit.Callee, Closure: true})
-			if n.store.Code(exit.Callee) == nil {
-				n.count(i, exit.Callee, callee)
-			}
+// replay pushes exit's callee over its arguments at i.fr's CALL, which the
+// interpreter then runs: it retains each lent argument and a borrowed ref,
+// since the CALL adopts both. A closure callee is counted and recorded here,
+// since the threaded closure CALL has no native hook.
+func (n *native) replay(i *Interpreter, exit jit.Exit, ref int) {
+	for _, p := range exit.Lent {
+		i.retainBox(i.stack[i.sp+p])
+	}
+	callee := i.heap[exit.Callee].(*types.Function)
+	i.sp += len(callee.Typ.Params)
+	boxed := types.BoxRef(ref)
+	if !exit.Owned {
+		i.retainBox(boxed)
+	}
+	i.stack[i.sp] = boxed
+	i.sp++
+	// CALL is one byte (interp.go's handler walk relies on the same fact),
+	// so its own ip is the map's IP, recorded past it, minus one.
+	i.fr.ip--
+	if exit.Closure != nil {
+		n.see(i, transform.Callee{Function: exit.Callee, Closure: true})
+		if n.store.Code(exit.Callee) == nil {
+			n.count(i, exit.Callee, callee)
 		}
 	}
-	ctx.Depth = 0
-	ctx.Abandon()
+}
+
+// nests reports whether exit's call can run while its caller stays
+// suspended: not a coroutine, whose CALL returns a handle instead of the
+// results native code expects, and with room to push the callee.
+func (n *native) nests(i *Interpreter, exit jit.Exit) bool {
+	callee := i.heap[exit.Callee].(*types.Function)
+	if exit.Callee < len(i.coros) && i.coros[exit.Callee] {
+		return false
+	}
+	k := int(n.ctx.Depth) - 1
+	bp := int((n.ctx.Records[k].FB - base(i.stack)) / unsafe.Sizeof(types.Boxed(0)))
+	return bp+slots(i.function(exit.Frame.Address))+len(exit.Frame.Stack)+len(callee.Typ.Params) < len(i.stack)
+}
+
+// nest runs exit's call in the interpreter while its native caller stays
+// suspended, and reports whether native code resumes. A frame standing in
+// for the caller runs only its CALL; the native activations below it keep
+// their frame slots from start, which no handler search or unwinding crosses
+// (Interpreter.floor), and native entries meanwhile start their records
+// above them (depth). On return the results go where the call's exit map
+// reads them and the suspended state comes back. Anything else leaving the
+// callee materializes the caller under the callee's live frames: a
+// cancellation continues threaded, a THROW whose search the floor stopped
+// runs again over the materialized frames, and any other panic is fault.
+func (n *native) nest(i *Interpreter, exit jit.Exit, ref, start int, deopt func(jit.Exit)) (fault any, ok bool) {
+	ctx := n.ctx
+	k := int(ctx.Depth) - 1
+	m := exit.Frame
+	at := start + k - int(n.depth)
+	bp := int((ctx.Records[k].FB - base(i.stack)) / unsafe.Sizeof(types.Boxed(0)))
+
+	state, limit, spent, depth, floor := ctx.State, ctx.Limit, ctx.Budget, n.depth, i.floor
+	fr, fp, sp, saved := i.fr, i.fp, i.sp, i.frames[at]
+
+	code := n.exactCode(i, m.Address)
+	i.frames[at] = frame{addr: m.Address, code: code[:m.IP], bp: bp, ip: m.IP, returns: m.Returns}
+	i.fr, i.fp = &i.frames[at], at+1
+	args := bp + slots(i.function(m.Address)) + len(m.Stack)
+	i.sp = args
+	n.replay(i, exit, ref)
+	for _, p := range exit.Kept {
+		i.retainBox(i.stack[args+p])
+	}
+	n.depth, i.floor = uint64(k+1), at+1
+	fault, err := n.dispatch(i)
+	n.depth, i.floor = depth, floor
+
+	if err == nil && fault == nil {
+		for j, kind := range exit.Results {
+			ctx.Results[j] = n.unbox(i, kind, i.stack[i.sp-len(exit.Results)+j])
+		}
+		i.fr, i.fp, i.sp, i.frames[at] = fr, fp, sp, saved
+		ctx.State, ctx.Limit, ctx.Budget, ctx.Depth = state, limit, spent, uint64(k+1)
+		return nil, true
+	}
+
+	// The caller never resumes to release what it kept.
+	for _, p := range exit.Kept {
+		i.releaseBox(i.stack[args+p])
+	}
+	// deopt materializes the caller from the state it was suspended in;
+	// the callee's frames above it stay as they are.
+	ip, live := i.frames[at].ip, [...]int{i.fp, i.sp}
+	inner := i.fr
+	ctx.State, ctx.Depth = state, uint64(k+1)
+	i.fr, i.fp, i.sp, i.frames[at] = fr, fp, sp, saved
+	deopt(exit)
+	i.frames[at].ip = ip
+	i.fr, i.fp, i.sp = inner, live[0], live[1]
+	if _, ok := fault.(escape); ok {
+		// THROW popped its exception and stopped at the floor before any
+		// other effect: pushing it back runs THROW again over every frame.
+		i.sp++
+		fault = nil
+	}
+	return fault, false
+}
+
+// dispatch runs the threaded loop for nest until its stand-in frame's CALL
+// completes, reporting a cancellation as err and any panic no handler above
+// the floor caught as fault.
+func (n *native) dispatch(i *Interpreter) (fault any, err error) {
+	defer func() {
+		fault = recover()
+	}()
+	for caught := true; caught; {
+		caught, err = i.dispatch()
+	}
+	return nil, err
 }
 
 // callee is the reference activation k's ExitCall e calls through: the
@@ -836,13 +960,13 @@ func (n *native) callee(k int, e jit.Exit) int {
 	return types.Boxed(n.ctx.Read(k, *e.Closure)).Ref()
 }
 
-// frame materializes activation k from m, entered through ref. release
-// reports whether k owns ref: the outermost activation follows the entering
-// call site, and every other one follows the call site's own Owned decision
-// in the caller's compiled code.
-func (n *native) frame(i *Interpreter, start, k int, m jit.Frame, ref int, release bool) {
+// frame materializes activation k from m as frame at, entered through ref.
+// release reports whether k owns ref: the run's first activation follows the
+// entering call site, and every other one follows the call site's own Owned
+// decision in the caller's compiled code.
+func (n *native) frame(i *Interpreter, at, k int, m jit.Frame, ref int, release bool) {
 	ctx := n.ctx
-	f := &i.frames[start+k]
+	f := &i.frames[at]
 	f.addr = m.Address
 	f.code = n.exactCode(i, m.Address)
 	f.ref = ref

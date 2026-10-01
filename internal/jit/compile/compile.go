@@ -84,13 +84,15 @@ type place struct {
 
 // outlet is one exit under construction: its published map plus the rows
 // its stub still has to emit. memo is an ExitCall map's one register per
-// remat constant; stalls holds remat constants materialized at the stub.
+// remat constant; stalls holds remat constants materialized at the stub;
+// results are the registers a resumed exit loads from Context.Results.
 type outlet struct {
-	exit   *jit.Exit
-	places []place
-	saves  []save
-	stalls []stall
-	memo   map[ssa.Value]asm.VReg
+	exit    *jit.Exit
+	places  []place
+	saves   []save
+	stalls  []stall
+	memo    map[ssa.Value]asm.VReg
+	results []asm.VReg
 }
 
 type move struct {
@@ -509,13 +511,7 @@ func (l *lowering) operation(op ssa.Operation) error {
 		if l.m.Lower(l.a, op, l) {
 			return l.err
 		}
-		results := make([]asm.VReg, len(op.Results))
-		for i, v := range op.Results {
-			results[i] = l.Reg(v)
-		}
-		id := l.exit(jit.ExitBridge)
-		l.emit(id)
-		l.m.Results(l.a, results)
+		l.emit(l.exit(jit.ExitBridge))
 		return l.err
 	case ssa.OpStore:
 		if i, ok := l.argument(op.Slot); ok {
@@ -715,11 +711,21 @@ func (l *lowering) call(op ssa.Operation) error {
 		l.place(id, out.exit.Closure, callee)
 	}
 	for j, b := range transform.Borrows(target) {
-		if b && !frame.Stack[below+j].Owned {
+		switch {
+		case !b:
+		case frame.Stack[below+j].Owned:
+			out.exit.Kept = append(out.exit.Kept, j)
+		default:
 			out.exit.Lent = append(out.exit.Lent, j)
 		}
 	}
-	bridge, _ := l.stub(id)
+	if registers(target) != nil {
+		for _, v := range op.Results {
+			out.exit.Results = append(out.exit.Results, l.f.Type(v).Kind())
+			out.results = append(out.results, l.Reg(v))
+		}
+	}
+	bridge, join := l.stub(id)
 	sid := l.exit(jit.ExitSafepoint)
 	safepoint, resume := l.stub(sid)
 	site := Call{
@@ -734,6 +740,7 @@ func (l *lowering) call(op ssa.Operation) error {
 		Bridge:    bridge,
 		Safepoint: safepoint,
 		Resume:    resume,
+		Join:      join,
 		Owned:     owned,
 		Self:      !l.osr && ref == l.address,
 		Registers: registers(target),
@@ -761,8 +768,8 @@ func (l *lowering) leave(t ssa.Terminator) error {
 	return nil
 }
 
-// emit resolves deferred remat constants, saves deferred deopt values, and
-// leaves native code through exit id.
+// emit resolves deferred remat constants, saves deferred deopt values,
+// leaves native code through exit id, and loads its results on resume.
 func (l *lowering) emit(id int) {
 	out := &l.outlets[id]
 	for _, s := range out.stalls {
@@ -773,6 +780,9 @@ func (l *lowering) emit(id int) {
 		l.m.Spill(l.a, save.reg, save.slot)
 	}
 	l.m.Exit(l.a, id, out.exit.Kind, l.live(id))
+	if len(out.results) > 0 {
+		l.m.Results(l.a, out.results)
+	}
 }
 
 // exit records the map of an exit of kind k at the current operation's state.
@@ -837,6 +847,7 @@ func (l *lowering) exit(k jit.Kind) int {
 		e.Adopts = transform.Adopts(l.op.Code, len(l.op.Args), len(l.op.Results))
 		for _, v := range l.op.Results {
 			e.Results = append(e.Results, l.f.Type(v).Kind())
+			l.outlets[id].results = append(l.outlets[id].results, l.Reg(v))
 		}
 	}
 	return id

@@ -67,10 +67,15 @@ type Interpreter struct {
 	// keeps its own content whatever its reference count.
 	tail []byte
 
-	fp  int
-	sp  int
-	gen int
-	gas int64
+	fp int
+	sp int
+	// floor is the frame count below which frames stand for native
+	// activations suspended under a call they made (native.nest): no handler
+	// search crosses it, and a panic it does not catch above it unwinds to
+	// their owner.
+	floor int
+	gen   int
+	gas   int64
 
 	tick  int
 	fuel  int64
@@ -799,6 +804,9 @@ func (i *Interpreter) dispatch() (caught bool, err error) {
 				caught = true
 				return
 			}
+			if i.floor > 0 {
+				panic(r)
+			}
 			err = i.fault(r)
 		}
 	}()
@@ -1025,11 +1033,12 @@ func (i *Interpreter) handle(r any) bool {
 	return true
 }
 
-// handler walks frames from innermost outward for the first protected region
-// covering the active instruction: the throwing site in the top frame, the call
-// site (ip-1, CALL/RETURN_CALL are one byte) in each suspended caller.
+// handler walks frames from innermost outward, down to floor, for the first
+// protected region covering the active instruction: the throwing site in the
+// top frame, the call site (ip-1, CALL/RETURN_CALL are one byte) in each
+// suspended caller.
 func (i *Interpreter) handler() (int, instr.Handler, bool) {
-	for fp := i.fp; fp >= 1; fp-- {
+	for fp := i.fp; fp > i.floor; fp-- {
 		f := &i.frames[fp-1]
 		ip := f.ip
 		if fp != i.fp {
