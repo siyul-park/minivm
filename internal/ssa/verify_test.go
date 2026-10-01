@@ -86,40 +86,25 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
 	})
 
-	t.Run("rejects a tail call used where an operation belongs", func(t *testing.T) {
-		b := ssa.New("f")
-		entry := b.Block()
-		state := b.Value(ssa.TypeState)
-		callee := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxRef(2)), Results: []ssa.Value{callee}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.RETURN_CALL, Args: []ssa.Value{callee}, State: state})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
-		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
-	})
-
-	t.Run("rejects a return used where an operation belongs", func(t *testing.T) {
-		b := ssa.New("f")
-		entry := b.Block()
-		state := b.Value(ssa.TypeState)
-		callee := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxRef(2)), Results: []ssa.Value{callee}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.RETURN, Args: []ssa.Value{callee}, State: state})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
-		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
-	})
-
-	t.Run("rejects a branch used where an operation belongs", func(t *testing.T) {
-		b := ssa.New("f")
-		entry := b.Block()
-		state := b.Value(ssa.TypeState)
-		callee := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxRef(2)), Results: []ssa.Value{callee}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.BR_IF, Args: []ssa.Value{callee}, State: state})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
-		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
+	t.Run("rejects a control opcode used where an operation belongs", func(t *testing.T) {
+		for _, c := range []struct {
+			name string
+			code instr.Opcode
+		}{
+			{"tail call", instr.RETURN_CALL},
+			{"return", instr.RETURN},
+			{"branch", instr.BR_IF},
+		} {
+			b := ssa.New("f")
+			entry := b.Block()
+			state := b.Value(ssa.TypeState)
+			callee := b.Value(ssa.TypeRef)
+			b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
+			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxRef(2)), Results: []ssa.Value{callee}})
+			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: []ssa.Value{callee}, State: state})
+			b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+			require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm, c.name)
+		}
 	})
 
 	t.Run("rejects a value defined twice", func(t *testing.T) {
@@ -444,21 +429,21 @@ func TestVerify(t *testing.T) {
 		require.NoError(t, ssa.Verify(b.Build()))
 	})
 
-	t.Run("rejects an i32 const with a nonzero upper half", func(t *testing.T) {
-		b := ssa.New("f")
-		entry := b.Block()
-		x := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1 << 32, Results: []ssa.Value{x}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{x}})
-		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
-	})
-
-	t.Run("rejects an i1 const of 2", func(t *testing.T) {
-		b := ssa.New("f")
-		entry := b.Block()
-		x := b.Value(ssa.TypeI1)
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 2, Results: []ssa.Value{x}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{x}})
-		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
+	t.Run("rejects a const wider than its type", func(t *testing.T) {
+		for _, c := range []struct {
+			name  string
+			typ   ssa.Type
+			value uint64
+		}{
+			{"i32 with a nonzero upper half", ssa.TypeI32, 1 << 32},
+			{"i1 of 2", ssa.TypeI1, 2},
+		} {
+			b := ssa.New("f")
+			entry := b.Block()
+			x := b.Value(c.typ)
+			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: c.value, Results: []ssa.Value{x}})
+			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{x}})
+			require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType, c.name)
+		}
 	})
 }

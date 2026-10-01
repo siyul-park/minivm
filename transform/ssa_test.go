@@ -24,7 +24,107 @@ func TestNewSSAPass(t *testing.T) {
 
 func TestSSAPass_Run(t *testing.T) {
 	t.Run("a round trip preserves what a program does", func(t *testing.T) {
-		for _, prog := range programCases(t) {
+		assemble := func(emit func(b *program.Builder)) *program.Program {
+			b := program.NewBuilder()
+			emit(b)
+			prog, err := b.Build()
+			require.NoError(t, err)
+			return prog
+		}
+		sum := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32, types.TypeI32},
+			Returns: []types.Type{types.TypeI32}}).Emit(
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN)).MustBuild()
+
+		fib := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32}})
+		base := fib.Label()
+		fib.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S))
+		fib.BrIf(base)
+		fib.Emit(
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			instr.New(instr.I32_ADD), instr.New(instr.RETURN))
+		fib.Bind(base).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
+
+		total := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.NewArrayType(types.TypeI32)},
+			Returns: []types.Type{types.TypeI32}}).Locals(types.TypeI32, types.TypeI32)
+		header, done := total.Label(), total.Label()
+		total.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1))
+		total.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 2))
+		total.Bind(header)
+		total.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.ARRAY_LEN), instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_LE_S))
+		total.BrIf(done)
+		total.Emit(
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 2), instr.New(instr.ARRAY_GET),
+			instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2))
+		total.Br(header)
+		total.Bind(done).Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.RETURN))
+		for name, prog := range map[string]*program.Program{
+			"constants": program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 22), instr.New(instr.I32_ADD)}),
+			"stack shuffles": program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 7), instr.New(instr.I32_CONST, 3),
+				instr.New(instr.SWAP), instr.New(instr.DUP), instr.New(instr.DROP), instr.New(instr.I32_SUB)}),
+			"select": program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_CONST, 0), instr.New(instr.SELECT)}),
+			"globals": program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 5), instr.New(instr.GLOBAL_SET, 0),
+				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_ADD)}, program.WithGlobals(types.TypeI32)),
+			"locals": program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 5), instr.New(instr.LOCAL_TEE, 0),
+				instr.New(instr.LOCAL_SET, 0), instr.New(instr.LOCAL_GET, 0)}, program.WithLocals(types.TypeI32)),
+			"constantFunction array": program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET)}, program.WithConstants(types.TypedArray[int32]{10, 20, 30})),
+			"constantFunction string": program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_LEN)}, program.WithConstants(types.String("hello"))),
+			"recursion": program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 12), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(fib.MustBuild())),
+			"array loop": program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 1), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(total.MustBuild(), types.TypedArray[int32]{1, 2, 3, 4})),
+			"call": program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 4),
+				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(sum)),
+			"branch": assemble(func(b *program.Builder) {
+				other, done := b.Label(), b.Label()
+				b.Emit(instr.I32_CONST, 1).BrIf(other)
+				b.Emit(instr.I32_CONST, 2).Br(done)
+				b.Bind(other).Emit(instr.I32_CONST, 3)
+				b.Bind(done)
+			}),
+			"branch table": assemble(func(b *program.Builder) {
+				one, two, done := b.Label(), b.Label(), b.Label()
+				b.Locals(types.TypeI32)
+				b.Emit(instr.I32_CONST, 1).BrTable(done, one, two)
+				b.Bind(one).Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_SET, 0).Br(done)
+				b.Bind(two).Emit(instr.I32_CONST, 2).Emit(instr.LOCAL_SET, 0)
+				b.Bind(done).Emit(instr.LOCAL_GET, 0)
+			}),
+			"loop": assemble(func(b *program.Builder) {
+				header, done := b.Label(), b.Label()
+				b.Locals(types.TypeI32)
+				b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+				b.Bind(header)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 10).Emit(instr.I32_GE_S).BrIf(done)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+				b.Br(header)
+				b.Bind(done).Emit(instr.LOCAL_GET, 0)
+			}),
+			"branch past the end": assemble(func(b *program.Builder) {
+				done := b.Label()
+				b.Locals(types.TypeI32)
+				b.Emit(instr.I32_CONST, 1).BrIf(done)
+				b.Emit(instr.I32_CONST, 2).Emit(instr.LOCAL_SET, 0)
+				b.Bind(done)
+			})} {
 			require.NoError(t, program.Verify(prog))
 			want, wantErr := executionResult(t, prog)
 
@@ -34,8 +134,8 @@ func TestSSAPass_Run(t *testing.T) {
 			require.NoError(t, program.Verify(got))
 
 			values, message := executionResult(t, got)
-			require.Equal(t, wantErr, message)
-			require.Equal(t, want, values)
+			require.Equal(t, wantErr, message, name)
+			require.Equal(t, want, values, name)
 		}
 	})
 
@@ -91,7 +191,61 @@ func TestSSAPass_Run(t *testing.T) {
 		pipeline.Add(transform.NewDCEPass())
 
 		folded := map[instr.Opcode]bool{}
-		for _, window := range constantFunction(t) {
+		push := func(kind instr.Kind, v float64) (instr.Instruction, bool) {
+			switch kind {
+			case instr.KindI1, instr.KindI8, instr.KindI32, instr.KindAny:
+				return instr.New(instr.I32_CONST, uint64(uint32(int32(v)))), true
+			case instr.KindI64:
+				return instr.New(instr.I64_CONST, uint64(int64(v))), true
+			case instr.KindF32:
+				return instr.New(instr.F32_CONST, uint64(math.Float32bits(float32(v)))), true
+			case instr.KindF64:
+				return instr.New(instr.F64_CONST, math.Float64bits(v)), true
+			case instr.KindRef:
+				return instr.New(instr.REF_NULL), true
+			default:
+				return nil, false
+			}
+		}
+		windowOf := func(op instr.Opcode, right float64) ([]instr.Instruction, bool) {
+			typ := instr.TypeOf(op)
+			if len(typ.Widths) > 0 || len(typ.Pop) == 0 {
+				return nil, false
+			}
+			code := make([]instr.Instruction, 0, len(typ.Pop)+1)
+			for i := len(typ.Pop) - 1; i >= 0; i-- {
+				value := 6.0
+				if i == 0 {
+					value = right
+				}
+				inst, ok := push(typ.Pop[i], value)
+				if !ok {
+					return nil, false
+				}
+				code = append(code, inst)
+			}
+			return append(code, instr.New(op)), true
+		}
+
+		var out []struct {
+			op   instr.Opcode
+			code []instr.Instruction
+		}
+		for op := instr.Opcode(0); op < math.MaxUint8; op++ {
+			if !instr.Valid(op) || !op.IsPure() {
+				continue
+			}
+			for _, right := range []float64{3, 0} {
+				if code, ok := windowOf(op, right); ok {
+					out = append(out, struct {
+						op   instr.Opcode
+						code []instr.Instruction
+					}{op: op, code: code})
+				}
+			}
+		}
+		require.NotEmpty(t, out)
+		for _, window := range out {
 			prog := program.New(window.code)
 			require.NoError(t, program.Verify(prog))
 			values, message := executionResult(t, prog)
@@ -283,8 +437,20 @@ func TestSSAPass_Run(t *testing.T) {
 		}{
 			{name: "within reach", pad: 32748, expects: false},
 			{name: "out of reach", pad: 32751, expects: true}} {
+			require.Zero(t, tc.pad%3)
+
+			fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Locals(types.TypeI32)
+			done := fn.Label()
+			fn.Emit(instr.New(instr.I32_CONST, 1))
+			fn.BrIf(done)
+			for range tc.pad / 3 {
+				fn.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.DROP))
+			}
+			fn.Emit(instr.New(instr.I32_CONST, 7), instr.New(instr.DUP), instr.New(instr.I32_ADD), instr.New(instr.DROP))
+			fn.Bind(done).Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN))
+			span := fn.MustBuild()
 			input := program.New([]instr.Instruction{
-				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(spanningFunction(t, tc.pad)))
+				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(span))
 			require.NoError(t, program.Verify(input))
 			want, wantErr := executionResult(t, input)
 			before := input.String()
@@ -329,14 +495,38 @@ func TestSSAPass_Run(t *testing.T) {
 	})
 
 	t.Run("leaves a function it cannot express unchanged", func(t *testing.T) {
-		for _, input := range declinedCases(t) {
+		body := func(is ...instr.Instruction) *types.Function {
+			return types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+				Emit(is...).MustBuild()
+		}
+		guarded := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}})
+		start, end, catch := guarded.Label(), guarded.Label(), guarded.Label()
+		guarded.Bind(start).Emit(instr.New(instr.I32_CONST, 1))
+		guarded.Bind(end).Emit(instr.New(instr.RETURN))
+		guarded.Bind(catch).Emit(instr.New(instr.DROP), instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN))
+		guarded.Try(start, end, catch, 0)
+		for name, input := range map[string]*program.Program{
+			"a trap the IR does not represent": program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(body(
+				instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN), instr.New(instr.UNREACHABLE)))),
+			"an opcode with an immediate operand": program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(body(
+				instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.ARRAY_LEN), instr.New(instr.RETURN))), program.WithTypes(types.NewArrayType(types.TypeI32))),
+			"a tail call": program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(body(
+				instr.New(instr.CONST_GET, 0), instr.New(instr.RETURN_CALL)))),
+			"an exception handler": program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(guarded.MustBuild())),
+			"a module value needing a local": program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 7), instr.New(instr.DUP), instr.New(instr.I32_ADD)})} {
 			require.NoError(t, program.Verify(input))
 			before := input.String()
 
 			preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), input)
 			require.NoError(t, err)
-			require.True(t, preserved)
-			require.Equal(t, before, input.String())
+			require.True(t, preserved, name)
+			require.Equal(t, before, input.String(), name)
 		}
 	})
 }
@@ -356,223 +546,6 @@ func pipeline() *pass.Pipeline[*ssa.Function] {
 	pipeline.Add(transform.NewHoistPass())
 	pipeline.Add(transform.NewDCEPass())
 	return pipeline
-}
-
-func programCases(t *testing.T) map[string]*program.Program {
-	t.Helper()
-
-	assemble := func(emit func(b *program.Builder)) *program.Program {
-		b := program.NewBuilder()
-		emit(b)
-		prog, err := b.Build()
-		require.NoError(t, err)
-		return prog
-	}
-	sum := types.NewFunctionBuilder(&types.FunctionType{
-		Params:  []types.Type{types.TypeI32, types.TypeI32},
-		Returns: []types.Type{types.TypeI32}}).Emit(
-		instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD),
-		instr.New(instr.RETURN)).MustBuild()
-
-	fib := types.NewFunctionBuilder(&types.FunctionType{
-		Params:  []types.Type{types.TypeI32},
-		Returns: []types.Type{types.TypeI32}})
-	base := fib.Label()
-	fib.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S))
-	fib.BrIf(base)
-	fib.Emit(
-		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
-		instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_SUB),
-		instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-		instr.New(instr.I32_ADD), instr.New(instr.RETURN))
-	fib.Bind(base).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
-
-	total := types.NewFunctionBuilder(&types.FunctionType{
-		Params:  []types.Type{types.NewArrayType(types.TypeI32)},
-		Returns: []types.Type{types.TypeI32}}).Locals(types.TypeI32, types.TypeI32)
-	header, done := total.Label(), total.Label()
-	total.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1))
-	total.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 2))
-	total.Bind(header)
-	total.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.ARRAY_LEN), instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_LE_S))
-	total.BrIf(done)
-	total.Emit(
-		instr.New(instr.LOCAL_GET, 1),
-		instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 2), instr.New(instr.ARRAY_GET),
-		instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
-		instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2))
-	total.Br(header)
-	total.Bind(done).Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.RETURN))
-
-	return map[string]*program.Program{
-		"constants": program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 22), instr.New(instr.I32_ADD)}),
-		"stack shuffles": program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7), instr.New(instr.I32_CONST, 3),
-			instr.New(instr.SWAP), instr.New(instr.DUP), instr.New(instr.DROP), instr.New(instr.I32_SUB)}),
-		"select": program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2),
-			instr.New(instr.I32_CONST, 0), instr.New(instr.SELECT)}),
-		"globals": program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5), instr.New(instr.GLOBAL_SET, 0),
-			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_ADD)}, program.WithGlobals(types.TypeI32)),
-		"locals": program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5), instr.New(instr.LOCAL_TEE, 0),
-			instr.New(instr.LOCAL_SET, 0), instr.New(instr.LOCAL_GET, 0)}, program.WithLocals(types.TypeI32)),
-		"constantFunction array": program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET)}, program.WithConstants(types.TypedArray[int32]{10, 20, 30})),
-		"constantFunction string": program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_LEN)}, program.WithConstants(types.String("hello"))),
-		"recursion": program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 12), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(fib.MustBuild())),
-		"array loop": program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 1), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(total.MustBuild(), types.TypedArray[int32]{1, 2, 3, 4})),
-		"call": program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 4),
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(sum)),
-		"branch": assemble(func(b *program.Builder) {
-			other, done := b.Label(), b.Label()
-			b.Emit(instr.I32_CONST, 1).BrIf(other)
-			b.Emit(instr.I32_CONST, 2).Br(done)
-			b.Bind(other).Emit(instr.I32_CONST, 3)
-			b.Bind(done)
-		}),
-		"branch table": assemble(func(b *program.Builder) {
-			one, two, done := b.Label(), b.Label(), b.Label()
-			b.Locals(types.TypeI32)
-			b.Emit(instr.I32_CONST, 1).BrTable(done, one, two)
-			b.Bind(one).Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_SET, 0).Br(done)
-			b.Bind(two).Emit(instr.I32_CONST, 2).Emit(instr.LOCAL_SET, 0)
-			b.Bind(done).Emit(instr.LOCAL_GET, 0)
-		}),
-		"loop": assemble(func(b *program.Builder) {
-			header, done := b.Label(), b.Label()
-			b.Locals(types.TypeI32)
-			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
-			b.Bind(header)
-			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 10).Emit(instr.I32_GE_S).BrIf(done)
-			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
-			b.Br(header)
-			b.Bind(done).Emit(instr.LOCAL_GET, 0)
-		}),
-		"branch past the end": assemble(func(b *program.Builder) {
-			done := b.Label()
-			b.Locals(types.TypeI32)
-			b.Emit(instr.I32_CONST, 1).BrIf(done)
-			b.Emit(instr.I32_CONST, 2).Emit(instr.LOCAL_SET, 0)
-			b.Bind(done)
-		})}
-}
-
-func declinedCases(t *testing.T) map[string]*program.Program {
-	t.Helper()
-
-	body := func(is ...instr.Instruction) *types.Function {
-		return types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-			Emit(is...).MustBuild()
-	}
-	guarded := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}})
-	start, end, catch := guarded.Label(), guarded.Label(), guarded.Label()
-	guarded.Bind(start).Emit(instr.New(instr.I32_CONST, 1))
-	guarded.Bind(end).Emit(instr.New(instr.RETURN))
-	guarded.Bind(catch).Emit(instr.New(instr.DROP), instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN))
-	guarded.Try(start, end, catch, 0)
-
-	return map[string]*program.Program{
-		"a trap the IR does not represent": program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(body(
-			instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN), instr.New(instr.UNREACHABLE)))),
-		"an opcode with an immediate operand": program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(body(
-			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.ARRAY_LEN), instr.New(instr.RETURN))), program.WithTypes(types.NewArrayType(types.TypeI32))),
-		"a tail call": program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(body(
-			instr.New(instr.CONST_GET, 0), instr.New(instr.RETURN_CALL)))),
-		"an exception handler": program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(guarded.MustBuild())),
-		"a module value needing a local": program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7), instr.New(instr.DUP), instr.New(instr.I32_ADD)})}
-}
-
-func constantFunction(t *testing.T) []struct {
-	op   instr.Opcode
-	code []instr.Instruction
-} {
-	t.Helper()
-
-	push := func(kind instr.Kind, v float64) (instr.Instruction, bool) {
-		switch kind {
-		case instr.KindI1, instr.KindI8, instr.KindI32, instr.KindAny:
-			return instr.New(instr.I32_CONST, uint64(uint32(int32(v)))), true
-		case instr.KindI64:
-			return instr.New(instr.I64_CONST, uint64(int64(v))), true
-		case instr.KindF32:
-			return instr.New(instr.F32_CONST, uint64(math.Float32bits(float32(v)))), true
-		case instr.KindF64:
-			return instr.New(instr.F64_CONST, math.Float64bits(v)), true
-		case instr.KindRef:
-			return instr.New(instr.REF_NULL), true
-		default:
-			return nil, false
-		}
-	}
-	window := func(op instr.Opcode, right float64) ([]instr.Instruction, bool) {
-		typ := instr.TypeOf(op)
-		if len(typ.Widths) > 0 || len(typ.Pop) == 0 {
-			return nil, false
-		}
-		code := make([]instr.Instruction, 0, len(typ.Pop)+1)
-		for i := len(typ.Pop) - 1; i >= 0; i-- {
-			value := 6.0
-			if i == 0 {
-				value = right
-			}
-			inst, ok := push(typ.Pop[i], value)
-			if !ok {
-				return nil, false
-			}
-			code = append(code, inst)
-		}
-		return append(code, instr.New(op)), true
-	}
-
-	var out []struct {
-		op   instr.Opcode
-		code []instr.Instruction
-	}
-	for op := instr.Opcode(0); op < math.MaxUint8; op++ {
-		if !instr.Valid(op) || !op.IsPure() {
-			continue
-		}
-		for _, right := range []float64{3, 0} {
-			if code, ok := window(op, right); ok {
-				out = append(out, struct {
-					op   instr.Opcode
-					code []instr.Instruction
-				}{op: op, code: code})
-			}
-		}
-	}
-	require.NotEmpty(t, out)
-	return out
-}
-
-func spanningFunction(t *testing.T, pad int) *types.Function {
-	t.Helper()
-	require.Zero(t, pad%3)
-
-	fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Locals(types.TypeI32)
-	done := fn.Label()
-	fn.Emit(instr.New(instr.I32_CONST, 1))
-	fn.BrIf(done)
-	for range pad / 3 {
-		fn.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.DROP))
-	}
-	fn.Emit(instr.New(instr.I32_CONST, 7), instr.New(instr.DUP), instr.New(instr.I32_ADD), instr.New(instr.DROP))
-	fn.Bind(done).Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN))
-	return fn.MustBuild()
 }
 
 func generatedProgram(t *testing.T, random *rand.Rand) *program.Program {

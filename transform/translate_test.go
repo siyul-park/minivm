@@ -561,7 +561,43 @@ blk0: ()
 		require.NoError(t, err)
 		require.NotNil(t, out)
 		require.NoError(t, ssa.Verify(out))
-		require.Equal(t, wantIndirectRecursiveFib(ips), ssa.Format(out))
+		require.Equal(t, fmt.Sprintf(`func 1:0
+blk0: ()
+	v1:i32 = load local[0]
+	v2:i32 = const 2
+	v4:state = state {addr=1 base=0 ip=7 returns=1 stack=[v1, v2]}
+	v3:i1 = i32.lt_s v1, v2 state v4
+	br v3, blk1(), blk2()
+blk1: () <-- (blk0)
+	v5:i32 = load local[0]
+	v6:state = state {addr=1 base=0 ip=41 returns=1 stack=[v5]}
+	return v5 state v6
+blk2: () <-- (blk0)
+	v7:i32 = load local[0]
+	v8:i32 = const 1
+	v10:state = state {addr=1 base=0 ip=18 returns=1 stack=[v7, v8]}
+	v9:i32 = i32.sub v7, v8 state v10
+	v11:ref = load local[1]
+	v12:ref = load local[1]
+	v13:ref = const 1
+	v15:state = state {addr=1 base=0 ip=%[1]d returns=1 stack=[v9, v11, v12]}
+	v14:ref = guard.value v12, v13 state v15
+	v16:i32 = call v9, v11, v13 state v15
+	v17:i32 = load local[0]
+	v18:i32 = const 2
+	v20:state = state {addr=1 base=0 ip=31 returns=1 stack=[v16, v17, v18]}
+	v19:i32 = i32.sub v17, v18 state v20
+	v21:ref = load local[1]
+	v22:ref = load local[1]
+	v23:ref = const 1
+	v25:state = state {addr=1 base=0 ip=%[2]d returns=1 stack=[v16, v19, v21, v22]}
+	v24:ref = guard.value v22, v23 state v25
+	v26:i32 = call v19, v21, v23 state v25
+	v28:state = state {addr=1 base=0 ip=37 returns=1 stack=[v16, v26]}
+	v27:i32 = i32.add v16, v26 state v28
+	v29:state = state {addr=1 base=0 ip=38 returns=1 stack=[v27]}
+	return v27 state v29
+`, ips[0], ips[1]), ssa.Format(out))
 	})
 
 	t.Run("resolves a closure built in the same unit as a static callee and lends it from its local", func(t *testing.T) {
@@ -704,7 +740,20 @@ blk0: ()
 		require.NoError(t, err)
 		require.NotNil(t, out)
 		require.NoError(t, ssa.Verify(out))
-		require.Equal(t, wantColdCall(ip), ssa.Format(out))
+		require.Equal(t, fmt.Sprintf(`func 1:0
+blk0: ()
+	v1:i32 = load local[0]
+	br v1, blk1(), blk2()
+blk1: () <-- (blk0)
+	v2:ref = load local[1]
+	retain v2
+	v3:state = state {addr=1 base=0 ip=%d returns=1 stack=[v2 owned]}
+	exit state v3
+blk2: () <-- (blk0)
+	v4:i32 = load local[0]
+	v5:state = state {addr=1 base=0 ip=7 returns=1 stack=[v4]}
+	return v4 state v5
+`, ip), ssa.Format(out))
 	})
 
 	t.Run("calls a dynamic callee of one shared signature through an owned, signature-carrying call", func(t *testing.T) {
@@ -715,7 +764,29 @@ blk0: ()
 		require.NoError(t, err)
 		require.NotNil(t, out)
 		require.NoError(t, ssa.Verify(out))
-		require.Equal(t, wantGenericCall(ip, sig), ssa.Format(out))
+		require.Equal(t, fmt.Sprintf(`func 1:0
+blk0: ()
+	v1:i32 = load local[0]
+	br v1, blk1(), blk2()
+blk1: () <-- (blk0)
+	v2:ref = load local[1]
+	retain v2
+	v4:state = state {addr=1 base=0 ip=%d returns=1 stack=[v2 owned]}
+	v3:i32 = call v2 callee type 0x%x state v4
+	br v3, blk3(), blk4()
+blk2: () <-- (blk0)
+	v5:i32 = load local[0]
+	v6:state = state {addr=1 base=0 ip=7 returns=1 stack=[v5]}
+	return v5 state v6
+blk3: () <-- (blk1)
+	v7:i32 = const 9
+	v8:state = state {addr=1 base=0 ip=25 returns=1 stack=[v7]}
+	return v7 state v8
+blk4: () <-- (blk1)
+	v9:i32 = const 7
+	v10:state = state {addr=1 base=0 ip=19 returns=1 stack=[v9]}
+	return v9 state v10
+`, ip, uintptr(unsafe.Pointer(sig))), ssa.Format(out))
 	})
 
 	t.Run("declines a dynamic callee whose feedback shares no signature", func(t *testing.T) {
@@ -740,7 +811,15 @@ blk0: ()
 	})
 
 	t.Run("declines to speculate an owned callee", func(t *testing.T) {
-		fn, ip := ownedCalleeFunction(t)
+		b := instr.NewBuilder()
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.REF_CAST, 0).Emit(instr.CALL).Emit(instr.RETURN)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		fn := &types.Function{
+			Typ:  &types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}},
+			Code: instr.Marshal(code),
+		}
+		ip := calls(fn.Code)[0]
 		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}}
 		m := transform.Module{
 			Constants: []types.Boxed{types.BoxRef(1)},
@@ -950,65 +1029,6 @@ func indirectRecursiveFib(t *testing.T) (*types.Function, []int) {
 	return fn, calls(fn.Code)
 }
 
-// wantIndirectRecursiveFib is indirectRecursiveFib's SSA text once both
-// dynamic CALLs speculate their recorded callee (address 1, a self call).
-// Neither call retains param 1 (self), a borrowed local-backed argument, or
-// its constant callee.
-func wantIndirectRecursiveFib(ips []int) string {
-	return fmt.Sprintf(`func 1:0
-blk0: ()
-	v1:i32 = load local[0]
-	v2:i32 = const 2
-	v4:state = state {addr=1 base=0 ip=7 returns=1 stack=[v1, v2]}
-	v3:i1 = i32.lt_s v1, v2 state v4
-	br v3, blk1(), blk2()
-blk1: () <-- (blk0)
-	v5:i32 = load local[0]
-	v6:state = state {addr=1 base=0 ip=41 returns=1 stack=[v5]}
-	return v5 state v6
-blk2: () <-- (blk0)
-	v7:i32 = load local[0]
-	v8:i32 = const 1
-	v10:state = state {addr=1 base=0 ip=18 returns=1 stack=[v7, v8]}
-	v9:i32 = i32.sub v7, v8 state v10
-	v11:ref = load local[1]
-	v12:ref = load local[1]
-	v13:ref = const 1
-	v15:state = state {addr=1 base=0 ip=%[1]d returns=1 stack=[v9, v11, v12]}
-	v14:ref = guard.value v12, v13 state v15
-	v16:i32 = call v9, v11, v13 state v15
-	v17:i32 = load local[0]
-	v18:i32 = const 2
-	v20:state = state {addr=1 base=0 ip=31 returns=1 stack=[v16, v17, v18]}
-	v19:i32 = i32.sub v17, v18 state v20
-	v21:ref = load local[1]
-	v22:ref = load local[1]
-	v23:ref = const 1
-	v25:state = state {addr=1 base=0 ip=%[2]d returns=1 stack=[v16, v19, v21, v22]}
-	v24:ref = guard.value v22, v23 state v25
-	v26:i32 = call v19, v21, v23 state v25
-	v28:state = state {addr=1 base=0 ip=37 returns=1 stack=[v16, v26]}
-	v27:i32 = i32.add v16, v26 state v28
-	v29:state = state {addr=1 base=0 ip=38 returns=1 stack=[v27]}
-	return v27 state v29
-`, ips[0], ips[1])
-}
-
-// ownedCalleeFunction builds a function whose dynamic CALL's callee operand
-// is owned (ref.cast adopts it), and reports the CALL's own ip.
-func ownedCalleeFunction(t *testing.T) (*types.Function, int) {
-	t.Helper()
-	b := instr.NewBuilder()
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.REF_CAST, 0).Emit(instr.CALL).Emit(instr.RETURN)
-	code, err := b.Assemble()
-	require.NoError(t, err)
-	fn := &types.Function{
-		Typ:  &types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}},
-		Code: instr.Marshal(code),
-	}
-	return fn, calls(fn.Code)[0]
-}
-
 // calls returns the offset of every CALL in code, in order.
 func calls(code []byte) []int {
 	var out []int
@@ -1051,54 +1071,6 @@ func coldCallFunction(t *testing.T) (*types.Function, int) {
 		Code: instr.Marshal(code),
 	}
 	return fn, calls(fn.Code)[0]
-}
-
-// wantColdCall is coldCallFunction's SSA text without feedback: the cold
-// block retains the callee it adopts and exits at the CALL, and the blocks
-// after the call are absent.
-func wantColdCall(ip int) string {
-	return fmt.Sprintf(`func 1:0
-blk0: ()
-	v1:i32 = load local[0]
-	br v1, blk1(), blk2()
-blk1: () <-- (blk0)
-	v2:ref = load local[1]
-	retain v2
-	v3:state = state {addr=1 base=0 ip=%d returns=1 stack=[v2 owned]}
-	exit state v3
-blk2: () <-- (blk0)
-	v4:i32 = load local[0]
-	v5:state = state {addr=1 base=0 ip=7 returns=1 stack=[v4]}
-	return v4 state v5
-`, ip)
-}
-
-// wantGenericCall is coldCallFunction's SSA text once its site saw callees of
-// type sig: the call owns its callee and carries sig.
-func wantGenericCall(ip int, sig *types.FunctionType) string {
-	return fmt.Sprintf(`func 1:0
-blk0: ()
-	v1:i32 = load local[0]
-	br v1, blk1(), blk2()
-blk1: () <-- (blk0)
-	v2:ref = load local[1]
-	retain v2
-	v4:state = state {addr=1 base=0 ip=%d returns=1 stack=[v2 owned]}
-	v3:i32 = call v2 callee type 0x%x state v4
-	br v3, blk3(), blk4()
-blk2: () <-- (blk0)
-	v5:i32 = load local[0]
-	v6:state = state {addr=1 base=0 ip=7 returns=1 stack=[v5]}
-	return v5 state v6
-blk3: () <-- (blk1)
-	v7:i32 = const 9
-	v8:state = state {addr=1 base=0 ip=25 returns=1 stack=[v7]}
-	return v7 state v8
-blk4: () <-- (blk1)
-	v9:i32 = const 7
-	v10:state = state {addr=1 base=0 ip=19 returns=1 stack=[v9]}
-	return v9 state v10
-`, ip, uintptr(unsafe.Pointer(sig)))
 }
 
 // protectedFunction divides its parameters inside a protected region whose
