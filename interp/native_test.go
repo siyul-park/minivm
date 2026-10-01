@@ -1004,34 +1004,157 @@ func wideStoreLoopProgram(t *testing.T, n int) *program.Program {
 	return program.New(code, program.WithLocals(types.TypeI32), program.WithGlobals(types.TypeI64))
 }
 
-// divFailProgram warms native division, then repeatedly takes the zero-divisor
-// deopt path inside one Try region. Reaching refute retires the address permanently.
-func divFailProgram(t *testing.T, warm, fails int) *program.Program {
-	t.Helper()
-	fn := divFunction(t)
-	b := instr.NewBuilder()
-	warmLoop, warmDone := b.Label(), b.Label()
-	b.Bind(warmLoop)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warm)).Emit(instr.I32_GE_S).BrIf(warmDone)
-	b.Emit(instr.I32_CONST, 1).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
-	b.Br(warmLoop)
-	b.Bind(warmDone)
+// rareTrapFunction is h(n) = div(1) + ... + div(1) + div(0) through constant
+// div, n calls in all: every call traps on its last iteration only.
+func rareTrapFunction(div int) *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}).Locals(types.TypeI32, types.TypeI32)
+	loop, done := b.Label(), b.Label()
+	b.Bind(loop).Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_GE_S)).BrIf(done)
+	b.Emit(
+		instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.I32_NE),
+		instr.New(instr.CONST_GET, uint64(div)), instr.New(instr.CALL),
+		instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2),
+		instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
+	).Br(loop)
+	b.Bind(done).Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN))
+	return b.MustBuild()
+}
 
-	failLoop, failDone, start, end, catch := b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
-	b.Bind(failLoop)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(fails)).Emit(instr.I32_GE_S).BrIf(failDone)
-	b.Bind(start).Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
-	b.Bind(end)
-	b.Bind(catch).Emit(instr.ERROR_CODE).Emit(instr.DROP)
+// rareTrapProgram calls rareTrapFunction(n) rounds times, each call inside a
+// Try region whose handler drops the error. Constants are [h, div]. Module
+// locals [0] the counter and [1] the number of caught errors, left on the
+// stack.
+func rareTrapProgram(t *testing.T, rounds, n int) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done, start, end, catch, next := b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(rounds)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Bind(start).Emit(instr.I32_CONST, uint64(n)).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	b.Bind(end).Br(next)
+	b.Bind(catch).Emit(instr.DROP)
 	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
-	b.Br(failLoop)
-	b.Bind(failDone).Emit(instr.LOCAL_GET, 1)
+	b.Bind(next)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 1)
 	b.Try(start, end, catch, 2)
 	code, err := b.Assemble()
 	require.NoError(t, err)
 	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32),
-		program.WithConstants(fn), program.WithHandlers(b.Handlers()...))
+		program.WithConstants(rareTrapFunction(1), divFunction(t)), program.WithHandlers(b.Handlers()...))
+}
+
+// rareNullProgram calls at(a, 0) rounds times, each call inside a Try region
+// whose handler drops the error, where a is a null []i32 every 16th round
+// and a three-element one otherwise; at counts to 8 before it reads a[0]. Constants are [at, array]. Module
+// locals [0] the counter, [1] the number of caught errors (left on the
+// stack), [2] the array, and [3] the null.
+func rareNullProgram(t *testing.T, rounds int) *program.Program {
+	t.Helper()
+	at := types.NewFunctionBuilder(&types.FunctionType{
+		Params: []types.Type{types.NewArrayType(types.TypeI32), types.TypeI32}, Returns: []types.Type{types.TypeI32},
+	}).Locals(types.TypeI32)
+	count, counted := at.Label(), at.Label()
+	at.Bind(count).Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 8), instr.New(instr.I32_GE_S)).BrIf(counted)
+	at.Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2)).Br(count)
+	at.Bind(counted).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.ARRAY_GET), instr.New(instr.RETURN))
+	arr := types.NewArray(types.NewArrayType(types.TypeI32), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
+
+	b := instr.NewBuilder()
+	loop, done, start, end, catch, next, null, picked := b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
+	b.Emit(instr.CONST_GET, 1).Emit(instr.LOCAL_SET, 2)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(rounds)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Bind(start)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 15).Emit(instr.I32_AND).Emit(instr.I32_CONST, 15).Emit(instr.I32_EQ).BrIf(null)
+	b.Emit(instr.LOCAL_GET, 2).Br(picked)
+	b.Bind(null).Emit(instr.LOCAL_GET, 3)
+	b.Bind(picked).Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	b.Bind(end).Br(next)
+	b.Bind(catch).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Bind(next)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 1)
+	b.Try(start, end, catch, 4)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	array := types.NewArrayType(types.TypeI32)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32, array, array),
+		program.WithConstants(at.MustBuild(), arr), program.WithHandlers(b.Handlers()...))
+}
+
+// heldFunction is held(x) = x; a Try region around a no-op keeps it from
+// ever compiling, so a native caller always reaches it through ExitCall.
+func heldFunction() *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
+	start, end, catch := b.Label(), b.Label(), b.Label()
+	b.Bind(start).Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.DROP))
+	b.Bind(end).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
+	b.Bind(catch).Emit(instr.New(instr.DROP), instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN))
+	b.Try(start, end, catch, 1)
+	return b.MustBuild()
+}
+
+// servedProgram calls served(x) = held(x) + ... + held(x), n calls through
+// constant 1 in loop-free code, once from module code that a Try region
+// around a no-op keeps threaded: served's only work is its calls, each one
+// served. Constants are [served, held].
+func servedProgram(t *testing.T, n int) *program.Program {
+	t.Helper()
+	served := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
+	served.Emit(instr.New(instr.I32_CONST, 0))
+	for range n {
+		served.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.CALL), instr.New(instr.I32_ADD))
+	}
+	served.Emit(instr.New(instr.RETURN))
+
+	b := instr.NewBuilder()
+	start, end, catch, done := b.Label(), b.Label(), b.Label(), b.Label()
+	b.Bind(start).Emit(instr.I32_CONST, 0).Emit(instr.DROP)
+	b.Bind(end).Emit(instr.I32_CONST, 1).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Br(done)
+	b.Bind(catch).Emit(instr.DROP).Emit(instr.I32_CONST, 0)
+	b.Bind(done)
+	b.Try(start, end, catch, 0)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithConstants(served.MustBuild(), heldFunction()), program.WithHandlers(b.Handlers()...))
+}
+
+// turnProgram calls relay(s, i, fn) n times from a module loop that first
+// counts an inner loop to 8, where fn is bump3 when global 0 and i's low bit
+// are both set and bump1 otherwise: the site stays monomorphic until global
+// 0 turns it polymorphic. Constants are [relay, bump1, bump3, s]. Module
+// locals [0] the counter, [1] the running sum (left on the stack), [2] s,
+// and [3] the inner counter.
+func turnProgram(t *testing.T, n int) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done, inner, counted, high, chosen := b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
+	b.Emit(instr.CONST_GET, 3).Emit(instr.LOCAL_SET, 2)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
+	b.Bind(inner)
+	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 8).Emit(instr.I32_GE_S).BrIf(counted)
+	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+	b.Br(inner)
+	b.Bind(counted)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0)
+	b.Emit(instr.GLOBAL_GET, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_AND).Emit(instr.I32_CONST, 1).Emit(instr.I32_AND).BrIf(high)
+	b.Emit(instr.CONST_GET, 1).Br(chosen)
+	b.Bind(high).Emit(instr.CONST_GET, 2)
+	b.Bind(chosen).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 1)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32, types.TypeString, types.TypeI32), program.WithGlobals(types.TypeI32),
+		program.WithConstants(relayDynamicFunction(), bumpFunction(1), bumpFunction(3), types.String("s")))
 }
 
 // nestedConcatOuterFunction calls its constant callee with (a, b), so a hot
@@ -1307,17 +1430,21 @@ func relayFunction(callee int, guarded bool) *types.Function {
 }
 
 // loopFunction is loop(s, n) = callee(s, 0) + ... + callee(s, n-1) through
-// constant callee; when global, it passes global 0 instead of s, which the
-// call owns rather than lends.
+// constant callee, counting an inner loop to 8 before each call, so its own
+// work pays for a served call; when global, it passes global 0 instead of
+// s, which the call owns rather than lends.
 func loopFunction(callee int, global bool) *types.Function {
 	arg := instr.New(instr.LOCAL_GET, 0)
 	if global {
 		arg = instr.New(instr.GLOBAL_GET, 0)
 	}
-	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString, types.TypeI32}, Returns: []types.Type{types.TypeI32}}).Locals(types.TypeI32, types.TypeI32)
-	loop, done := b.Label(), b.Label()
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString, types.TypeI32}, Returns: []types.Type{types.TypeI32}}).Locals(types.TypeI32, types.TypeI32, types.TypeI32)
+	loop, done, count, counted := b.Label(), b.Label(), b.Label(), b.Label()
 	b.Bind(loop).Emit(instr.New(instr.LOCAL_GET, 3), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_GE_S)).BrIf(done)
-	b.Emit(
+	b.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 4))
+	b.Bind(count).Emit(instr.New(instr.LOCAL_GET, 4), instr.New(instr.I32_CONST, 8), instr.New(instr.I32_GE_S)).BrIf(counted)
+	b.Emit(instr.New(instr.LOCAL_GET, 4), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 4)).Br(count)
+	b.Bind(counted).Emit(
 		arg, instr.New(instr.LOCAL_GET, 3), instr.New(instr.CONST_GET, uint64(callee)), instr.New(instr.CALL),
 		instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2),
 		instr.New(instr.LOCAL_GET, 3), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 3),
@@ -1556,7 +1683,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Zero(t, deopts)
 	})
 
-	t.Run("retires a loop that bridges every iteration with only a call between", func(t *testing.T) {
+	t.Run("retires a loop whose only work per iteration is a bridge and its release", func(t *testing.T) {
 		native(t)
 		record := node()
 		b := instr.NewBuilder()
@@ -1565,12 +1692,12 @@ func TestWithThreshold(t *testing.T) {
 		b.Bind(loop)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 100).Emit(instr.I32_GE_S).BrIf(done)
 		b.Emit(instr.STRUCT_NEW_DEFAULT, 0).Emit(instr.DROP)
-		b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
 		b.Br(loop)
 		b.Bind(done).Emit(instr.LOCAL_GET, 0)
 		code, err := b.Assemble()
 		require.NoError(t, err)
-		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithTypes(record), program.WithConstants(incFunction()))
+		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithTypes(record))
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
@@ -2007,10 +2134,11 @@ func TestWithThreshold(t *testing.T) {
 		b.Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_NEW_DEFAULT, 1).Emit(instr.LOCAL_SET, 3)
 		b.Bind(loop)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 300).Emit(instr.I32_GE_S).BrIf(done)
-		// Each group of bridges follows an inner loop's native work.
+		// Each group of bridges follows an inner loop's native work, enough
+		// to pay for the bridges (jit.Ledger).
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
 		b.Bind(first)
-		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(firstDone)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 16).Emit(instr.I32_GE_S).BrIf(firstDone)
 		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).Br(first)
 		b.Bind(firstDone)
 		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_SET)
@@ -2024,7 +2152,7 @@ func TestWithThreshold(t *testing.T) {
 		b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 4)
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
 		b.Bind(second)
-		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(secondDone)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 16).Emit(instr.I32_GE_S).BrIf(secondDone)
 		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).Br(second)
 		b.Bind(secondDone)
 		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_FILL)
@@ -2040,7 +2168,7 @@ func TestWithThreshold(t *testing.T) {
 		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_DELETE)
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
 		b.Bind(third)
-		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(thirdDone)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 16).Emit(instr.I32_GE_S).BrIf(thirdDone)
 		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).Br(third)
 		b.Bind(thirdDone)
 		// A wide i64 crosses the bridge boxed on the heap both ways.
@@ -2604,6 +2732,51 @@ func TestWithThreshold(t *testing.T) {
 		require.Zero(t, metric("vm_jit_exits_total", deopt))
 		// The caller of the dynamic call compiles instead of being refused.
 		require.Zero(t, metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "unsupported"}))
+	})
+
+	t.Run("a caller whose served calls cost more than its own work retires, matching threaded", func(t *testing.T) {
+		native(t)
+		const runs = 16
+		prog := servedProgram(t, 16)
+		want := runProgram(t, prog)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		calls := func() float64 {
+			vm.Flush()
+			v, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
+			return v
+		}
+		var runErr error
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			vm.Reset()
+			return runErr != nil || calls() > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		// Until the ledger retires served.
+		require.Eventually(t, func() bool {
+			before := calls()
+			for range runs {
+				if runErr = vm.Run(context.Background()); runErr != nil {
+					return true
+				}
+				vm.Reset()
+			}
+			return calls() == before
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+
+		before := calls()
+		for range runs {
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			vm.Reset()
+		}
+		require.Equal(t, before, calls())
 	})
 
 	t.Run("a dynamic call whose callee takes other parameters deopts and matches threaded including RefCount", func(t *testing.T) {
@@ -3426,36 +3599,60 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, want, got)
 	})
 
-	t.Run("a function that deoptimizes every call retires once and never re-enters native code", func(t *testing.T) {
+	t.Run("a callee's division by zero caught by a guest handler costs its native caller nothing: the caller keeps entering past refute traps, matching threaded including RefCount", func(t *testing.T) {
 		native(t)
-		// Warmup is long enough for Baseline and Optimized publication.
-		const fails = 200
-		prog := divFailProgram(t, 200_000, fails)
-		want := runProgram(t, prog)
+		const rounds, batches = 32, 64
+		prog := rareTrapProgram(t, rounds, 100)
 
-		var deopts float64
-		var runErr, popErr error
-		var result types.Value
-		require.Eventually(t, func() bool {
-			profiler := prof.New()
-			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
-			defer vm.Close()
-			runErr = vm.Run(context.Background())
-			if runErr != nil {
-				return true
+		threaded := interp.New(prog)
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(rounds), want)
+		counts := func(vm *interp.Interpreter) []int {
+			var out []int
+			for index := range 2 {
+				c, err := vm.Const(index)
+				require.NoError(t, err)
+				count, err := vm.RefCount(c.Ref())
+				require.NoError(t, err)
+				out = append(out, count)
 			}
-			result, popErr = vm.Pop()
-			if popErr != nil {
-				return true
-			}
+			return out
+		}
+		wantCounts := counts(threaded)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		metric := func(name string, labels ...prof.Label) float64 {
 			vm.Flush()
-			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
-			return deopts > 0
+			v, _ := profiler.Metric(name, labels...)
+			return v
+		}
+		entries := func() float64 {
+			return metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"}) +
+				metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+		}
+		var runErr error
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			vm.Reset()
+			return runErr != nil || metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"}) > 0
 		}, 5*time.Second, time.Millisecond)
 		require.NoError(t, runErr)
-		require.NoError(t, popErr)
-		require.Equal(t, want, result)
-		require.Less(t, deopts, float64(fails))
+
+		before := entries()
+		for range batches {
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			require.Equal(t, wantCounts, counts(vm))
+			vm.Reset()
+		}
+		require.GreaterOrEqual(t, entries()-before, float64(batches*rounds))
 	})
 
 	t.Run("a cancelled context during a native loop escapes guest handlers as the context error", func(t *testing.T) {
@@ -3746,6 +3943,49 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, result)
+	})
+
+	t.Run("a container guard refuted by a null array recompiles with its site bridged: later nulls trap without retiring it, matching threaded", func(t *testing.T) {
+		native(t)
+		const rounds, batches = 64, 8
+		prog := rareNullProgram(t, rounds)
+		want := runProgram(t, prog)
+		require.Equal(t, types.I32(rounds/16), want)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		metric := func(name string, labels ...prof.Label) float64 {
+			vm.Flush()
+			v, _ := profiler.Metric(name, labels...)
+			return v
+		}
+		entries := func() float64 {
+			return metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"}) +
+				metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+		}
+		var runErr error
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			vm.Reset()
+			return runErr != nil || metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"}) > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		for range batches {
+			require.NoError(t, vm.Run(context.Background()))
+			vm.Reset()
+			time.Sleep(time.Millisecond)
+		}
+
+		before := entries()
+		for range batches {
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			vm.Reset()
+		}
+		require.GreaterOrEqual(t, entries()-before, float64(batches*rounds))
 	})
 
 	t.Run("a quiet loop reading a null array only under a condition never true stays native across runs, matching threaded", func(t *testing.T) {
@@ -4774,6 +5014,68 @@ func TestWithThreshold(t *testing.T) {
 		require.Less(t, deopts, float64(3000))
 	})
 
+	t.Run("a speculated callee site turned polymorphic recompiles generic after its refutation and stays native through call exits, matching threaded", func(t *testing.T) {
+		native(t)
+		const n, runs = 200, 16
+		prog := turnProgram(t, n)
+
+		threaded := interp.New(prog)
+		defer threaded.Close()
+		require.NoError(t, threaded.SetGlobal(0, types.BoxI32(1)))
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		metric := func(name string, labels ...prof.Label) float64 {
+			vm.Flush()
+			v, _ := profiler.Metric(name, labels...)
+			return v
+		}
+		deopts := func() float64 { return metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"}) }
+		calls := func() float64 { return metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"}) }
+		// Reset clears globals: every polymorphic Run sets global 0 again.
+		run := func() {
+			require.NoError(t, vm.SetGlobal(0, types.BoxI32(1)))
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			vm.Reset()
+		}
+		// Monomorphic until relay compiles with its one observed callee.
+		compiled := prof.Label{Key: "tier", Value: "baseline"}
+		ok := prof.Label{Key: "outcome", Value: "ok"}
+		var runErr error
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			vm.Reset()
+			return runErr != nil || metric("vm_jit_compiles_total", compiled, ok) >= 2
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+		for range runs {
+			require.NoError(t, vm.Run(context.Background()))
+			vm.Reset()
+		}
+
+		turned := deopts()
+		for range runs {
+			run()
+			time.Sleep(time.Millisecond)
+		}
+		// Fewer than refute: the moved feedback retires the code at once.
+		require.Less(t, deopts()-turned, float64(8))
+
+		settled, served := deopts(), calls()
+		for range runs {
+			run()
+		}
+		require.Equal(t, settled, deopts())
+		require.Greater(t, calls(), served)
+	})
+
 	t.Run("a closure callee's site traps until native code records it, and the caller matches threaded", func(t *testing.T) {
 		native(t)
 		prog := closureCallsProgram(t, 50)
@@ -4982,13 +5284,14 @@ func TestWithThreshold(t *testing.T) {
 		}
 		baseline := prof.Label{Key: "tier", Value: "baseline"}
 		call := prof.Label{Key: "kind", Value: "call"}
+		bridge := prof.Label{Key: "kind", Value: "bridge"}
 
 		var got types.Value
 		var runErr, popErr error
-		var compiled, entries, called float64
+		var compiled, bridged, called float64
 		require.Eventually(t, func() bool {
 			vm.Flush()
-			entered, exited := metric("vm_jit_entries_total", baseline), metric("vm_jit_exits_total", call)
+			declined, exited := metric("vm_jit_exits_total", bridge), metric("vm_jit_exits_total", call)
 			if runErr = vm.Run(context.Background()); runErr != nil {
 				return true
 			}
@@ -4997,18 +5300,18 @@ func TestWithThreshold(t *testing.T) {
 			}
 			vm.Reset()
 			vm.Flush()
-			// With the caller entered natively and no call exit, every
-			// closure call ran natively, the last one into ARRAY_NEW, whose
-			// bridge never resumes.
+			// A closure runs natively only through a native caller: an
+			// ARRAY_NEW bridge exit, which never resumes, with no call exit
+			// means every closure call ran natively, the last one into it.
 			compiled = metric("vm_jit_compiles_total", baseline, prof.Label{Key: "outcome", Value: "ok"})
-			entries, called = metric("vm_jit_entries_total", baseline)-entered, metric("vm_jit_exits_total", call)-exited
-			return compiled >= 2 && entries > 0 && called == 0
+			bridged, called = metric("vm_jit_exits_total", bridge)-declined, metric("vm_jit_exits_total", call)-exited
+			return compiled >= 2 && bridged > 0 && called == 0
 		}, 5*time.Second, time.Millisecond)
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
 		require.GreaterOrEqual(t, compiled, float64(2))
-		require.Positive(t, entries)
+		require.Positive(t, bridged)
 		require.Zero(t, called)
 	})
 

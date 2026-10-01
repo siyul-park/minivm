@@ -91,8 +91,11 @@ type Site interface {
 	// flags instead of a register.
 	Fuse(v ssa.Value) bool
 	// Deopt returns the label of an exit that abandons native code at the
-	// interpreter state of the operation.
+	// interpreter state of the operation when a speculation fails.
 	Deopt() asm.Label
+	// Trap is Deopt for a check the operation itself raises in threaded
+	// code (a zero divisor, an index out of bounds).
+	Trap() asm.Label
 	// Release returns the label of an exit that hands the interpreter ref,
 	// whose last reference native code drops, and the label the machine
 	// binds where native code resumes.

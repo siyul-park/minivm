@@ -111,7 +111,7 @@ A reference parameter its function never writes (`transform.Borrows`) is borrowe
 
 | Kind | Taken at | Resumes native |
 |---|---|---|
-| `ExitDeopt` | failed check, `OpExit` | no |
+| `ExitDeopt` | failed check, `OpExit`; `Exit.Trap` marks a check the operation itself raises (`Site.Trap`: zero divisor, index bounds) | no |
 | `ExitBridge` | unlowered `OpExec` | yes, unless denied or its handler traps |
 | `ExitSafepoint` | loop header or native call when `Budget` is spent | yes |
 | `ExitRelease` | dropping a last reference | yes |
@@ -129,7 +129,27 @@ A deopt stub sits out of line after the next terminator that does not fall throu
 | Box | `Exit.Word` carries the wide i64; interpreter allocates a boxed value, then native resumes. |
 | Trap | A bridge whose handler panics restores each heap operand to the count it saved before the attempt, then deopts; threaded code runs the op again and reports its trap. The declined attempt leaves only heap and count storage growth, stack slots above the frame, and the scratch frame changed: no admitted handler writes heap contents, allocates, or retains anything but its operands before its last panic point. A box trap deopts the same way. |
 
-A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every admitted op are exactly the operands its handler pops; it uses a scratch stack and leaves native registers untouched. The bridge retains every ref operand for the handler, so none reaches zero during an attempt; a boxed wide i64 is a fresh heap value the handler owns. After a completed handler, the bridge releases its retain of each operand the op adopts (`transform.Adopts`: the stored value of a heap write with no result), since native code handed the op that operand's own reference; native code releases the other operands it owns. Result words are unboxed per kind; a heap-boxed i64 result is consumed into a raw word. The materializer retains borrowed refs. Bridge/box resumption shares `resume`/`amortize`.
+A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every admitted op are exactly the operands its handler pops; it uses a scratch stack and leaves native registers untouched. The bridge retains every ref operand for the handler, so none reaches zero during an attempt; a boxed wide i64 is a fresh heap value the handler owns. After a completed handler, the bridge releases its retain of each operand the op adopts (`transform.Adopts`: the stored value of a heap write with no result), since native code handed the op that operand's own reference; native code releases the other operands it owns. Result words are unboxed per kind; a heap-boxed i64 result is consumed into a raw word. The materializer retains borrowed refs.
+
+### Exit policy
+
+`interp.native.settle` gives every exit outcome one `jit.Class`; the class decides what the exit costs the code.
+
+| Outcome | Class | Cost |
+|---|---|---|
+| served bridge or box | bridge | `jit.Ledger` price |
+| release | release | `jit.Ledger` price |
+| served `ExitCall` | call | `jit.Ledger` price; nothing while the callee has no code but may still compile (`pending`) |
+| `ExitDeopt` with `Exit.Trap`; a bridge or box whose handler panicked; a denied control-transfer bridge (`THROW`, `UNREACHABLE`); a cancelled safepoint; a trap, throw, or cancellation in a served call's callee | trap | none |
+| `ExitDeopt` without `Exit.Trap` (guards, `OpExit` at a cold dynamic `CALL` or `RETURN_CALL`); any other declined bridge; an `ExitCall` not served | guard | refutation |
+
+| Rule | Contract |
+|---|---|
+| Ledger | Per Go-entered address (`native.ledgers`) and per OSR site, in work units (`Budget`'s back edges, calls, returns), credited on every exit and return. `Charge` adds the class price (bridge 2.4, release 0.75, call 3.5 units; guard and trap 0) and reports whether debt ≤ 64 units; credit is floored at −64 units. A bridge, box, or call is charged before it is served; a refusal deopts (replaying a call) and retires the run's code. A release cannot deopt: its charge takes effect at the next bridge or call. |
+| Prices | Time one served exit adds over threaded code (bridge ~53 ns, release ~17 ns, call ~76 ns on the reference arm64 machine) divided by native time saved per work unit (~22 ns in exiting kernels). |
+| Guard | Deopts. An `ExitDeopt` guard records its site (`native.refuted`, snapshot as `transform.Module.Refuted`). It is judged against the code that took it: the run's own code, or a native callee's still-published code, retired in place. That code retires at once when its feedback moved since it was built, else on the `refute` (8)th refutation. |
+| Generic site | The translator emits no container `guard.shape` at a refuted offset: the op bridges. Call sites become generic through `Callees` (replay records the new callee). |
+| Oscillation | Feedback per address is monotone and finite (call sites unset → callee → mixed; refuted sites only added); a retire either consumes a feedback step or fails the tier. An OSR site whose feedback moved re-arms (resubmits) instead of disabling, and each re-arm counts toward `refute`. |
 
 `Exit.Lent` slots are retained when a callee is materialized or the interpreter runs an ExitCall; `Exit.Kept` slots (owned arguments to borrowed parameters, which native code releases after the call) are retained for a served call and released again if its caller never resumes. `Exit.Target` locates the callee value of a closure call or a generic call: the interpreter pushes it, and the materialized callee frame runs through it with its upvals. `Exit.Args` is the argument count of every `ExitCall`; `Exit.Returns` are the kinds a generic call reads back from slots.
 
@@ -155,14 +175,13 @@ A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every ad
 | Retire | `Retire`/`RetireAt` unpublish; retired code remains discoverable until safe to reclaim. |
 | Reclaim | `Reclaim` frees code only after no interpreter remains native. |
 | Promotion | Baseline entries count calls; a live Baseline reaching the interpreter's graduate threshold queues Optimized. Optimized/OSR entries do not count. |
-| Failure | Repeated deopts retire that tier once they reach the interpreter's refute threshold. A compile failure, or a retire, is permanent only when feedback is unchanged from the snapshot the code was compiled from. |
-| Bridges | Each code address/site keeps its unamortized bridge count and native work across entries. A bridge is amortized when work since the previous served bridge reaches `amortize` (4); TrapReturn finalizes the last work segment. That clears the site's count and the bridged function's own count. Calls, returns, back edges, and native callees all contribute to the work. |
+| Failure | Code retires by its exit policy (Exits). A compile failure, or a retire, is permanent only when feedback (`Callees`, `Refuted`) is unchanged from the snapshot the code was compiled from. |
 | Async | `compile.Queue` compiles one unit per address; publication is drained at the next call, OSR observation or entry, or safepoint. |
-| Pool | `Pool` shares `Store`, `Queue`, module data, the Baseline promotion candidate list, each address's CALL count, and each OSR/entry site's count until it submits, so a pooled workload compiles after about `threshold` entries in total. Each interpreter keeps its own `jit.Context`, feedback, graduate entries, deopts, bridges, failure marks, and a submitted site's cadence. A pooled interpreter whose entries reach the graduate threshold requests Optimized even if a different interpreter drained its Baseline job. A pooled interpreter whose deopts refute shared code retires it for the pool and blocks only its own tier. |
+| Pool | `Pool` shares `Store`, `Queue`, module data, the Baseline promotion candidate list, each address's CALL count, and each OSR/entry site's count until it submits, so a pooled workload compiles after about `threshold` entries in total. Each interpreter keeps its own `jit.Context`, feedback, graduate entries, refutations, ledgers, failure marks, and a submitted site's cadence. A pooled interpreter whose entries reach the graduate threshold requests Optimized even if a different interpreter drained its Baseline job. A pooled interpreter whose deopts refute shared code retires it for the pool and blocks only its own tier. |
 
 ## OSR
 
-Every loop header, including module code, has an observer; module code also has one at ip 0, whether or not it has loops. Each site fixes its threshold and cadence at construction (Entries table). Past the threshold it retries submission and looks up `Store.CodeAt` at its cadence; a resolved site also drains at that cadence on entry, so a callee reached only from its native code still tiers up. Compile failure or refutation restores the threaded handler and disables the site.
+Every loop header, including module code, has an observer; module code also has one at ip 0, whether or not it has loops. Each site fixes its threshold and cadence at construction (Entries table). Past the threshold it retries submission and looks up `Store.CodeAt` at its cadence; a resolved site also drains at that cadence on entry, so a callee reached only from its native code still tiers up. Compile failure, or a retire whose feedback has not moved, restores the threaded handler and disables the site; a retire whose feedback moved re-arms it (Exit policy).
 
 Loop-free code reaches no safepoint, so its ip-0 site drains on every entry and declines an already-cancelled Run, leaving threaded code to report it. Its threshold floor of 2 keeps a module run once from compiling ahead of its callees.
 
@@ -180,6 +199,7 @@ Entry reuses the current frame (`FB = bp`, `Depth = 0`); exits rewrite it in pla
 - Container lowering requires `guard.shape`; null or mismatched representation deopts.
 - Bridges resume except the denied ops in Exits (above); `RETURN_CALL`'s `ExitDeopt` does not, nor an `ExitCall` to a coroutine function. `YIELD` and `RESUME` never reach an exit at all: they make the translator decline the whole unit at compile time.
 - Host functions are not speculated at dynamic CALL sites; owned callees are not candidates.
+- A hoisted `guard.shape` deopts at its loop header's state, an offset no op guards: its refutation falls back to the `refute` count instead of a generic site.
 
 ## Metrics
 

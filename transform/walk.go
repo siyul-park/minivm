@@ -808,7 +808,7 @@ func (w *walker) exit(ip int) ssa.Terminator {
 }
 
 func (w *walker) guard(at int, shape ssa.Shape) {
-	if w.stack[at].kind != types.KindRef {
+	if w.stack[at].kind != types.KindRef || shape.Function == 0 && w.refuted[w.ip] {
 		return
 	}
 	value := w.builder.Value(ssa.TypeRef)

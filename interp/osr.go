@@ -8,6 +8,7 @@ import (
 	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/internal/jit/compile"
 	"github.com/siyul-park/minivm/prof"
+	"github.com/siyul-park/minivm/transform"
 	"github.com/siyul-park/minivm/types"
 )
 
@@ -50,11 +51,15 @@ type site struct {
 	submitted bool
 	// code is the published code once a store lookup has found it; nil
 	// until then, and again once the site fails.
-	code   *jit.Code
+	code *jit.Code
+	// built is the feedback s's published code was compiled from.
+	built transform.Module
+	// deopts counts s's refuted speculations and re-arms: never reset, so
+	// they bound s's recompiles.
 	deopts int
-	// bridge carries this site's unamortized bridge work independently of
-	// native CALL entries at the same address.
-	bridge bridge
+	// ledger weighs s's native work against its exits' cost, independently
+	// of native CALL entries at the same address.
+	ledger jit.Ledger
 }
 
 // interval is how many back edges pass — once a header site has crossed
@@ -63,12 +68,6 @@ type site struct {
 // take never runs on the per-iteration path. An entry site observes Runs
 // and uses 1.
 const interval = 256
-
-// refute counts one deopt against s and reports when it should retire.
-func (s *site) refute() bool {
-	s.deopts++
-	return s.deopts >= refute
-}
 
 // observe wraps every loop header's threaded handler of fn at addr with OSR
 // observation, address 0 (module code) included. A header a fusion
@@ -217,19 +216,35 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 		// frame in place instead of pushing a new one.
 		start := i.fp - 1
 		f := i.fr
-		ok, retire, fault = n.settle(i, c, trap, &s.bridge, start,
+		ok, retire, fault = n.settle(i, c, trap, &s.ledger, start,
 			func(exit jit.Exit) { n.rebuild(i, exit, start, f.ref, f.release) },
-			s.refute,
+			func() bool {
+				if !same(s.built, n.feedback(s.address)) {
+					return true
+				}
+				s.deopts++
+				return s.deopts >= refute
+			},
 		)
+	} else {
+		s.ledger.Spend(budget - ctx.Budget)
 	}
 	if ok {
 		n.finish(i, s, c)
 	}
 	if retire {
 		n.store.RetireAt(s.address, s.ip)
-		code[s.ip] = inner
 		s.code = nil
-		delete(n.sites, key{s.address, s.ip})
+		if s.deopts < refute && !same(s.built, n.feedback(s.address)) {
+			// Feedback moved since s's code was built: submit s again. Each
+			// re-arm counts toward refute, so recompiles stay bounded.
+			s.deopts++
+			s.submitted = false
+			s.ledger = jit.Ledger{}
+		} else {
+			code[s.ip] = inner
+			delete(n.sites, key{s.address, s.ip})
+		}
 	}
 	n.store.Leave()
 	if fault != nil {

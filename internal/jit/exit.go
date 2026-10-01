@@ -9,6 +9,10 @@ import (
 // Exit maps one native exit to its interpreter state.
 type Exit struct {
 	Kind Kind
+	// Trap reports that an ExitDeopt is taken where its operation itself
+	// faults: threaded code runs it again and raises the program's own trap.
+	// Any other ExitDeopt refutes a speculation.
+	Trap bool
 	// Code is the opcode resumed by an ExitBridge.
 	Code instr.Opcode
 	// Pops is Code's own operand count: the number of Frame.Stack's own

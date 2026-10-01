@@ -29,16 +29,17 @@ type native struct {
 	// Baseline function prologue increments its own address there, including
 	// native-to-native entries.
 	entries []int64
-	deopts  []int
-	// bridges carries each address's unamortized bridge count and native work
-	// across entries.
-	bridges []bridge
+	// deopts counts each address's refuted speculations since its last retire.
+	deopts []int
+	// ledgers weighs each address's native work against its exits' cost
+	// across Go entries.
+	ledgers []jit.Ledger
 	// failed records permanent compile failure per address and tier.
 	failed [][2]bool
 	// built is the feedback each address's published code was compiled from,
 	// per tier: a retire blocks a recompile only when feedback has not moved
 	// since.
-	built [][2]map[int]transform.Callee
+	built [][2]transform.Module
 	// sites indexes every observed OSR site by (address, ip): drain looks a
 	// failed OSR unit's site up here to restore its threaded handler.
 	sites map[key]*site
@@ -49,6 +50,9 @@ type native struct {
 	// allocated lazily, sized to its own code. feedback reads this to
 	// snapshot a unit's own sites at submit time.
 	callees [][]transform.Callee
+	// refuted records, by address then ip, each guard native code has seen
+	// fail; allocated lazily like callees. feedback snapshots it.
+	refuted [][]bool
 
 	// exact caches unfused threaded code for materialized frames, by address.
 	exact [][]func(*Interpreter)
@@ -75,32 +79,12 @@ const nativeStack = 1 << 20
 // budget is the back-edge count between safepoints.
 const budget = 1 << 16
 
-// refute is the deopt threshold that retires native code.
+// refute is the count of refuted speculations under unchanged feedback that
+// retires native code.
 const refute = 8
-
-// resume is the consecutive unamortized-bridge limit before a site retires.
-// It uses the same retry count as refute: native work must pay for the Go round trip.
-const resume = refute
-
-// amortize is the native work (back edges, calls, returns) since the
-// previous bridge that makes the next one count as paid for rather than
-// against resume.
-const amortize = 4
 
 // graduate is the Baseline entry count that tiers an address to Optimized.
 const graduate = 1024
-
-// bridge carries unamortized work for one CALL address or OSR site across entries.
-type bridge struct {
-	count int
-	work  int64
-	mark  int64
-}
-
-func (b *bridge) spend(ctx *jit.Context) {
-	b.work += b.mark - ctx.Budget
-	b.mark = ctx.Budget
-}
 
 // hold is one heap operand of a bridge attempt and its count before it.
 type hold struct {
@@ -277,13 +261,14 @@ func newNative(i *Interpreter, threshold int) *native {
 		threshold: threshold,
 		entries:   make([]int64, len(i.code)),
 		deopts:    make([]int, len(i.code)),
-		bridges:   make([]bridge, len(i.code)),
+		ledgers:   make([]jit.Ledger, len(i.code)),
 		failed:    make([][2]bool, len(i.code)),
-		built:     make([][2]map[int]transform.Callee, len(i.code)),
+		built:     make([][2]transform.Module, len(i.code)),
 		exact:     make([][]func(*Interpreter), len(i.code)),
 		borrows:   make([][]bool, len(i.code)),
 		sites:     map[key]*site{},
 		callees:   make([][]transform.Callee, len(i.code)),
+		refuted:   make([][]bool, len(i.code)),
 		compile:   i.compile,
 	}
 	// OSR observes every loop header of every function i compiled at
@@ -361,14 +346,7 @@ func (n *native) attempt(i *Interpreter, addr int, fn *types.Function, release b
 		panic(fault)
 	}
 	if retire {
-		n.store.Retire(addr)
-		// Unchanged feedback gives a recompile at this tier no new input.
-		if maps.Equal(n.built[addr][code.Tier-1], n.feedback(addr).Callees) {
-			n.markFailed(addr, code.Tier)
-		}
-		// Counters restart; the failed tier stays blocked.
-		n.calls[addr].Store(0)
-		n.entries[addr], n.deopts[addr], n.bridges[addr] = 0, 0, bridge{}
+		n.retire(addr, code.Tier)
 	}
 	_ = n.store.Reclaim()
 	return true
@@ -412,33 +390,81 @@ func (n *native) see(i *Interpreter, callee transform.Callee) {
 }
 
 // feedback is addr's compile-time snapshot of n.module: its own dynamic CALL
-// sites (see), an unseen one absent, a mixed one without its function. The
-// snapshot is never mutated after Submit: a fresh map every call.
+// sites (see), an unseen one absent, a mixed one without its function, and
+// its refuted guard sites (record). The snapshot is never mutated after
+// Submit: fresh maps every call.
 func (n *native) feedback(addr int) transform.Module {
 	m := n.module
-	if addr >= len(n.callees) || n.callees[addr] == nil {
+	if addr >= len(n.callees) {
 		return m
 	}
-	callees := map[int]transform.Callee{}
 	for ip, callee := range n.callees[addr] {
 		switch {
 		case callee == transform.Callee{}:
+			continue
 		case callee.Function == mixed:
-			callees[ip] = transform.Callee{Type: callee.Type}
-		default:
-			callees[ip] = callee
+			callee = transform.Callee{Type: callee.Type}
 		}
+		if m.Callees == nil {
+			m.Callees = map[int]transform.Callee{}
+		}
+		m.Callees[ip] = callee
 	}
-	if len(callees) > 0 {
-		m.Callees = callees
+	for ip, ok := range n.refuted[addr] {
+		if !ok {
+			continue
+		}
+		if m.Refuted == nil {
+			m.Refuted = map[int]bool{}
+		}
+		m.Refuted[ip] = true
 	}
 	return m
 }
 
-// refute counts deopts; refute retires the code at its current tier.
-func (n *native) refute(addr int) bool {
+// same reports whether feedback snapshots a and b hold the same callees and
+// refuted sites.
+func same(a, b transform.Module) bool {
+	return maps.Equal(a.Callees, b.Callees) && maps.Equal(a.Refuted, b.Refuted)
+}
+
+// moved reports whether addr's feedback changed since its code at tier was
+// built: a recompile at that tier has new input.
+func (n *native) moved(addr int, tier jit.Tier) bool {
+	return !same(n.built[addr][tier-1], n.feedback(addr))
+}
+
+// record notes exit's site, a guard that failed, so the next compile of its
+// function translates the site generic (transform.Module.Refuted).
+func (n *native) record(i *Interpreter, exit jit.Exit) {
+	addr, ip := exit.Frame.Address, exit.Frame.IP
+	if addr >= len(n.refuted) {
+		return
+	}
+	if n.refuted[addr] == nil {
+		n.refuted[addr] = make([]bool, len(i.code[addr]))
+	}
+	n.refuted[addr][ip] = true
+}
+
+// refute counts one refuted speculation against addr's code at tier and
+// reports whether it retires: at once when feedback moved since the code was
+// built, which a recompile can use, else at the refute count.
+func (n *native) refute(addr int, tier jit.Tier) bool {
 	n.deopts[addr]++
-	return n.deopts[addr] >= refute
+	return n.moved(addr, tier) || n.deopts[addr] >= refute
+}
+
+// retire unpublishes addr's code at tier and restarts its counters. The tier
+// fails only when feedback has not moved since the code was built: a
+// recompile would get no new input.
+func (n *native) retire(addr int, tier jit.Tier) {
+	n.store.Retire(addr)
+	if !n.moved(addr, tier) {
+		n.markFailed(addr, tier)
+	}
+	n.calls[addr].Store(0)
+	n.entries[addr], n.deopts[addr], n.ledgers[addr] = 0, 0, jit.Ledger{}
 }
 
 // hasFailed reports whether addr's compile at tier permanently failed.
@@ -465,7 +491,7 @@ func (n *native) drain(i *Interpreter) {
 					i.code[s.address][s.ip] = s.inner
 					delete(n.sites, k)
 				}
-			} else if maps.Equal(job.Unit.Module.Callees, n.feedback(job.Unit.Address).Callees) {
+			} else if same(job.Unit.Module, n.feedback(job.Unit.Address)) {
 				// Feedback that moved since this unit's own snapshot gets
 				// another try instead of a permanent failure.
 				n.markFailed(job.Unit.Address, job.Unit.Tier)
@@ -479,7 +505,9 @@ func (n *native) drain(i *Interpreter) {
 		}
 		n.store.Publish(job.Code)
 		if !job.Unit.OSR {
-			n.built[job.Unit.Address][job.Code.Tier-1] = job.Unit.Module.Callees
+			n.built[job.Unit.Address][job.Code.Tier-1] = job.Unit.Module
+		} else if s, ok := n.sites[key{job.Unit.Address, job.Unit.Entry}]; ok {
+			s.built = job.Unit.Module
 		}
 		if job.Code.Tier == jit.Baseline {
 			n.nominate(job.Unit.Address)
@@ -505,16 +533,17 @@ func (n *native) drain(i *Interpreter) {
 // the activation reached TrapReturn; retire reports whether the code retires;
 // fault is a panic a call raised past its native caller, which the caller
 // re-raises once it leaves the store.
-func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, account *bridge, start int, deopt func(jit.Exit), refute func() bool) (ok, retire bool, fault any) {
+//
+// Each exit costs the code by its class (jit.Class): a trap nothing; a guard
+// its refutation (judge); a bridge or call its price, charged to ledger before it is
+// served, which retires the code once its work no longer pays.
+func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *jit.Ledger, start int, deopt func(jit.Exit), refute func() bool) (ok, retire bool, fault any) {
 	ctx := n.ctx
-	account.mark = budget
+	mark := int64(budget)
 	for {
+		ledger.Spend(mark - ctx.Budget)
+		mark = ctx.Budget
 		if trap == jit.TrapReturn {
-			account.spend(ctx)
-			if account.work >= amortize {
-				account.count = 0
-				account.work = 0
-			}
 			return true, false, nil
 		}
 
@@ -530,20 +559,22 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, account *
 		}
 		switch exit.Kind {
 		case jit.ExitSafepoint:
-			account.spend(ctx)
 			if cancelled(i) {
 				// Threaded code reports the cancellation at its next safepoint,
 				// as an error no guest handler can catch.
 				deopt(exit)
-				return false, refute(), nil
+				return false, false, nil
 			}
 			ctx.Heap = heapBase(i.heap)
 			ctx.RC = rcBase(i.rc)
 			ctx.Budget = budget
-			account.mark = ctx.Budget
+			mark = ctx.Budget
 			n.drain(i)
 			trap = jit.Resume(ctx)
 		case jit.ExitRelease:
+			// A release cannot deopt (it maps no frame): its charge takes
+			// effect at the next bridge or call.
+			ledger.Charge(jit.ClassRelease)
 			if ref := types.Boxed(ctx.Read(int(ctx.Depth)-1, exit.Word)).Ref(); ref != 0 {
 				i.release(ref)
 			}
@@ -551,55 +582,79 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, account *
 			ctx.RC = rcBase(i.rc)
 			trap = jit.Resume(ctx)
 		case jit.ExitBridge, jit.ExitBox:
-			account.spend(ctx)
-			// Checked before serving: a deopt after a bridge would run the op twice.
-			served := false
-			if account.count < resume {
-				if exit.Kind == jit.ExitBox {
-					served = n.widen(i, exit)
-				} else {
-					served = bridgeable[exit.Code] && n.bridge(i, exit)
-				}
+			// Charged before serving: a deopt after a bridge would run the op
+			// twice.
+			if !ledger.Charge(jit.ClassBridge) {
+				deopt(exit)
+				return false, true, nil
 			}
-			if served {
-				if account.work >= amortize {
-					account.count = 0
-					n.bridges[exit.Frame.Address] = bridge{}
-				} else {
-					account.count++
-				}
-				account.work = 0
-				account.mark = ctx.Budget
+			class := jit.ClassTrap
+			if exit.Kind == jit.ExitBridge {
+				class = n.bridge(i, exit)
+			} else if n.widen(i, exit) {
+				class = jit.ClassBridge
+			}
+			switch class {
+			case jit.ClassBridge:
 				ctx.Heap = heapBase(i.heap)
 				ctx.RC = rcBase(i.rc)
 				trap = jit.Resume(ctx)
 				continue
+			case jit.ClassTrap:
+				deopt(exit)
+				return false, false, nil
 			}
 			deopt(exit)
-			if account.count >= resume {
-				return false, true, nil
-			}
-			return false, refute(), nil
+			return false, n.judge(entered, code, refute), nil
 		case jit.ExitCall:
-			account.spend(ctx)
 			ref := n.callee(int(ctx.Depth)-1, exit)
-			if addr, ok := n.target(i, exit, ref); !ok || !n.nests(i, exit, addr) {
+			addr, ok := n.target(i, exit, ref)
+			if !ok || !n.nests(i, exit, addr) {
 				deopt(exit)
 				n.replay(i, exit, ref)
-				return false, refute(), nil
+				return false, n.judge(entered, code, refute), nil
+			}
+			if !n.pending(addr) && !ledger.Charge(jit.ClassCall) {
+				deopt(exit)
+				n.replay(i, exit, ref)
+				return false, true, nil
 			}
 			if fault, ok := n.nest(i, exit, ref, start, deopt); !ok {
 				return false, false, fault
 			}
 			ctx.Heap = heapBase(i.heap)
 			ctx.RC = rcBase(i.rc)
-			account.mark = ctx.Budget
+			mark = ctx.Budget
 			trap = jit.Resume(ctx)
 		default:
 			deopt(exit)
-			return false, refute(), nil
+			if exit.Trap {
+				return false, false, nil
+			}
+			n.record(i, exit)
+			return false, n.judge(entered, code, refute), nil
 		}
 	}
+}
+
+// judge weighs a refuted speculation in entered, the code that took the
+// exit, and reports whether the run's own code retires. refute judges the
+// run's own code; a native callee's code that is still published is judged
+// against its own feedback and count, and retired here.
+func (n *native) judge(entered, code *jit.Code, refute func() bool) bool {
+	if entered == code {
+		return refute()
+	}
+	if !entered.Retired() && n.refute(entered.Address, entered.Tier) {
+		n.retire(entered.Address, entered.Tier)
+	}
+	return false
+}
+
+// pending reports whether addr has no code yet but may still compile: a
+// served call to it is its callee's warm-up, which costs the caller nothing.
+func (n *native) pending(addr int) bool {
+	return addr < len(n.failed) && !n.hasFailed(addr, jit.Baseline) && n.store.Code(addr) == nil
 }
 
 // run executes one native call whose frame starts at bp and reports whether
@@ -640,15 +695,17 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 
 	if trap := jit.Enter(code.Entry(), ctx); trap != jit.TrapReturn {
 		start := i.fp
-		ok, retire, fault := n.settle(i, code, trap, &n.bridges[addr], start,
+		ok, retire, fault := n.settle(i, code, trap, &n.ledgers[addr], start,
 			// ip advances the entering (pre-rebuild) frame, which rebuild
 			// never writes, so it applies before rebuild retargets i.fr.
 			func(exit jit.Exit) { i.fr.ip += advance; n.rebuild(i, exit, start, addr, release) },
-			func() bool { return n.refute(addr) },
+			func() bool { return n.refute(addr, code.Tier) },
 		)
 		if !ok {
 			return retire, fault
 		}
+	} else {
+		n.ledgers[addr].Spend(budget - ctx.Budget)
 	}
 	for _, v := range owned {
 		i.releaseBox(v)
@@ -706,8 +763,10 @@ var bridgeable = func() (out [256]bool) {
 }()
 
 // bridge runs exit's threaded handler once against its boxed operands and
-// reports whether native code resumes. It leaves native registers untouched;
-// asm.Resume restores them.
+// reports the exit's class: jit.ClassBridge when native code resumes,
+// jit.ClassTrap when the op raised its trap or is a control transfer, and
+// jit.ClassGuard when it declined without running. It leaves native
+// registers untouched; asm.Resume restores them.
 //
 // A handler that panics declines: threaded code runs the op again after the
 // deopt and reports its trap. Before running it, bridge saves each heap
@@ -719,9 +778,17 @@ var bridgeable = func() (out [256]bool) {
 // retains anything but its operands before its last panic point. An operand
 // that is a host view declines before the handler runs, since its
 // conversions are host code.
-func (n *native) bridge(i *Interpreter, exit jit.Exit) bool {
+func (n *native) bridge(i *Interpreter, exit jit.Exit) jit.Class {
+	if !bridgeable[exit.Code] {
+		// A control transfer is the program leaving on its own; any other
+		// denied op deopts unrun.
+		if exit.Code.Writes(instr.Branch) {
+			return jit.ClassTrap
+		}
+		return jit.ClassGuard
+	}
 	if i.fp >= len(i.frames) {
-		return false
+		return jit.ClassGuard
 	}
 
 	ctx := n.ctx
@@ -744,7 +811,7 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) bool {
 		if o.Value.Kind == types.KindRef {
 			if hosted(i.heap[v.Ref()]) {
 				restore(i, holds)
-				return false
+				return jit.ClassGuard
 			}
 			count = i.rc[v.Ref()]
 		}
@@ -778,7 +845,10 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) bool {
 		restore(i, holds)
 	}
 	i.fr, i.sp = savedFr, savedSP
-	return ok
+	if !ok {
+		return jit.ClassTrap
+	}
+	return jit.ClassBridge
 }
 
 // restore releases each held operand back down to its saved count.

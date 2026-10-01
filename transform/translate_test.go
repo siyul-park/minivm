@@ -294,6 +294,23 @@ blk3: (v6:ref) <-- (blk1)
 		require.Contains(t, ssa.Format(out), "guard.shape")
 	})
 
+	t.Run("leaves an array load at a refuted guard site unguarded", func(t *testing.T) {
+		load := instr.New(instr.LOCAL_GET, 0)
+		index := instr.New(instr.I32_CONST, 0)
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}, Returns: []types.Type{types.TypeI32}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Append(load, index).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
+			})}
+		m := transform.Module{Refuted: map[int]bool{load.Width() + index.Width(): true}}
+
+		out, err := transform.Translate(m, 1, fn, 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		require.NotContains(t, ssa.Format(out), "guard.shape")
+		require.Contains(t, ssa.Format(out), "array.get")
+	})
+
 	t.Run("guards an array load through a declared element kind", func(t *testing.T) {
 		fn := &types.Function{
 			Typ:    &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}, Returns: []types.Type{types.TypeI32}},

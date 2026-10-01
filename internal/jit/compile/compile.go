@@ -298,6 +298,13 @@ func (l *lowering) Deopt() asm.Label {
 	return s.label
 }
 
+// Trap places a deopt stub as Deopt does, marked as the operation's own trap.
+func (l *lowering) Trap() asm.Label {
+	label := l.Deopt()
+	l.outlets[l.deopts[len(l.deopts)-1].id].exit.Trap = true
+	return label
+}
+
 // Release places a release stub for ref.
 func (l *lowering) Release(ref asm.VReg) (exit, resume asm.Label) {
 	id := l.exit(jit.ExitRelease)

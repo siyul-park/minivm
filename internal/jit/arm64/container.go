@@ -337,7 +337,7 @@ func (m *Machine) slice(a *asm.Assembler, ref asm.Reg, shape ssa.Shape) (ptr, ln
 func (m *Machine) index(a *asm.Assembler, s compile.Site, at, length asm.Reg) asm.VReg {
 	idx := m.vreg()
 	a.Emit(target.SXTW(idx, at))
-	a.Emit(target.CMP(idx, length), target.BCondLabel(target.OpBCS, s.Deopt()))
+	a.Emit(target.CMP(idx, length), target.BCondLabel(target.OpBCS, s.Trap()))
 	return idx
 }
 

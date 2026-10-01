@@ -72,7 +72,7 @@ func (m *machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 	}
 	switch {
 	case op.Op == ssa.OpExec && op.Code == instr.I32_DIV_S:
-		a.Emit(arm64.CBZLabel(s.Reg(op.Args[1]), s.Deopt()))
+		a.Emit(arm64.CBZLabel(s.Reg(op.Args[1]), s.Trap()))
 	case op.Op == ssa.OpRelease:
 		exit, resume := s.Release(s.Reg(op.Args[0]))
 		a.Emit(arm64.CBZLabel(s.Reg(op.Args[0]), exit))
@@ -400,7 +400,7 @@ func TestLower(t *testing.T) {
 		require.Equal(t, 1, exits[0].Adopts)
 	})
 
-	t.Run("deopts a failed check at its operation's state", func(t *testing.T) {
+	t.Run("deopts a failed check at its operation's state as the operation's own trap", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		x := constant(b, entry, types.BoxI32(6))
@@ -416,6 +416,7 @@ func TestLower(t *testing.T) {
 		require.Equal(t, []string{"prologue", "const", "const", "exec", "return", "exit 0 0", "epilogue", "enter"}, m.calls)
 		require.Len(t, exits, 1)
 		require.Equal(t, jit.ExitDeopt, exits[0].Kind)
+		require.True(t, exits[0].Trap)
 		require.Equal(t, 3, exits[0].Frame.IP)
 	})
 
@@ -772,7 +773,7 @@ func TestLower(t *testing.T) {
 		require.Equal(t, []string{"prologue", "const", "budget", "store", "br", "call"}, m.calls[:6])
 	})
 
-	t.Run("deopts at an exit terminator", func(t *testing.T) {
+	t.Run("deopts at an exit terminator as a refuted speculation, not a trap", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		at := state(b, entry, 4)
@@ -783,6 +784,7 @@ func TestLower(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []string{"prologue", "exit 0 0", "epilogue", "enter"}, m.calls)
 		require.Equal(t, jit.ExitDeopt, exits[0].Kind)
+		require.False(t, exits[0].Trap)
 	})
 
 	t.Run("rejects a guard.kind of an already-raw i64", func(t *testing.T) {

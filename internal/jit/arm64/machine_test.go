@@ -40,6 +40,8 @@ func (r regs) Fuse(ssa.Value) bool { return false }
 
 func (r regs) Deopt() asm.Label { return exit }
 
+func (r regs) Trap() asm.Label { return exit }
+
 func (r regs) Release(asm.VReg) (asm.Label, asm.Label) { return exit, resume }
 
 func (r regs) Box(asm.VReg) (asm.Label, asm.Label) { return exit, resume }

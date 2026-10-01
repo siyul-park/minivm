@@ -26,6 +26,10 @@ type Module struct {
 	// site never seen, the zero Callee for a site that saw callees of
 	// differing types.
 	Callees map[int]Callee
+	// Refuted holds the offsets whose guard native code has seen fail. A
+	// recorded snapshot: a container op there translates unguarded, so it
+	// bridges instead of speculating its shape again.
+	Refuted map[int]bool
 }
 
 // Callee is what a dynamic CALL site observed.
@@ -70,6 +74,7 @@ func Translate(module Module, address int, function *types.Function, entry int) 
 		objects:   module.Objects,
 		types:     module.Types,
 		callees:   module.Callees,
+		refuted:   module.Refuted,
 	}
 	blocks, err := analysis.Blocks(function)
 	if err != nil {

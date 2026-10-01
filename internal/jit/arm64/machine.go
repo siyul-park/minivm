@@ -1002,7 +1002,7 @@ func (m *Machine) divide(a *asm.Assembler, op ssa.Operation, s compile.Site, wid
 	if x.Type() != asm.RegTypeInt || y.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt || x.Width() != width || y.Width() != width || dst.Width() != width {
 		return false
 	}
-	a.Emit(target.CBZLabel(y, s.Deopt()))
+	a.Emit(target.CBZLabel(y, s.Trap()))
 	rem := op.Code == instr.I32_REM_S || op.Code == instr.I32_REM_U || op.Code == instr.I64_REM_S || op.Code == instr.I64_REM_U
 	if rem {
 		q := target.W16

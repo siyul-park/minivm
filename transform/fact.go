@@ -18,6 +18,8 @@ type facts struct {
 	// callees is a dynamic CALL's ip to its recorded single callee (see
 	// Module.Callees).
 	callees map[int]Callee
+	// refuted is Module.Refuted.
+	refuted map[int]bool
 }
 
 type activation struct {
