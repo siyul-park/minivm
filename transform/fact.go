@@ -79,9 +79,6 @@ func deopt(stack []operand) []ssa.Operand {
 // (e.g. an empty operand stack at a loop header): seen is what tells reached
 // apart from never visited.
 func (f facts) analyze(entry activation, spans []span, root int, in frame) ([]frame, []bool, bool) {
-	if len(entry.function.Handlers) > 0 {
-		return nil, nil, false
-	}
 	states := make([]frame, len(spans))
 	seen := make([]bool, len(spans))
 	seen[root] = true

@@ -63,7 +63,7 @@ func (p *SSAPass) Run(_ *pass.Manager, prog *program.Program) (bool, error) {
 }
 
 func (p *SSAPass) roundtrip(manager *pass.Manager, constants *pool, address int, function *types.Function) (bool, error) {
-	if !expressible(function.Code) {
+	if !expressible(function) {
 		return false, nil
 	}
 	f, err := Translate(constants.module(), address, function, 0)
@@ -128,9 +128,14 @@ func (p *pool) intern(c types.Boxed) (int, bool) {
 	return at, true
 }
 
-func expressible(code []byte) bool {
-	for ip := 0; ip < len(code); {
-		inst := instr.Instruction(code[ip:])
+// expressible reports whether emit can rewrite function: its handler table
+// holds byte offsets that a rewrite would invalidate.
+func expressible(function *types.Function) bool {
+	if len(function.Handlers) > 0 {
+		return false
+	}
+	for ip := 0; ip < len(function.Code); {
+		inst := instr.Instruction(function.Code[ip:])
 		switch inst.Opcode() {
 		case instr.UNREACHABLE, instr.YIELD, instr.RESUME:
 			return false

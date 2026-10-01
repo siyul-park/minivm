@@ -230,12 +230,29 @@ blk3: (v6:ref) <-- (blk1)
 		require.Nil(t, out)
 	})
 
-	t.Run("declines what bytecode alone cannot resolve/a protected region", func(t *testing.T) {
-		fn := &types.Function{
-			Typ:      &types.FunctionType{Returns: []types.Type{types.TypeI32}},
-			Handlers: []instr.Handler{{Start: 0, End: 5, Catch: 5}},
-			Code:     assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN) })}
+	t.Run("translates a protected region without its catch block", func(t *testing.T) {
+		fn, _ := protectedFunction(t)
+
 		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, `func 1:0
+blk0: ()
+	v1:i32 = load local[0]
+	v2:i32 = load local[1]
+	v4:state = state {addr=1 base=0 ip=4 returns=1 stack=[v1, v2]}
+	v3:i32 = i32.div_s v1, v2 state v4
+	jump blk1(v3)
+blk1: (v5:i32) <-- (blk0)
+	v6:state = state {addr=1 base=0 ip=5 returns=1 stack=[v5]}
+	return v5 state v6
+`, ssa.Format(out))
+	})
+
+	t.Run("declines an entry inside a catch block", func(t *testing.T) {
+		fn, catch := protectedFunction(t)
+
+		out, err := transform.Translate(transform.Module{}, 1, fn, catch)
 		require.NoError(t, err)
 		require.Nil(t, out)
 	})
@@ -1082,4 +1099,24 @@ blk4: () <-- (blk1)
 	v10:state = state {addr=1 base=0 ip=19 returns=1 stack=[v9]}
 	return v9 state v10
 `, ip, uintptr(unsafe.Pointer(sig)))
+}
+
+// protectedFunction divides its parameters inside a protected region whose
+// catch block returns 0, and reports the catch block's offset.
+func protectedFunction(t *testing.T) (*types.Function, int) {
+	t.Helper()
+	b := instr.NewBuilder()
+	start, end, catch := b.Label(), b.Label(), b.Label()
+	b.Bind(start).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_DIV_S)
+	b.Bind(end).Emit(instr.RETURN)
+	b.Bind(catch).Emit(instr.DROP).Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+	b.Try(start, end, catch, 2)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	at := instr.New(instr.LOCAL_GET, 0).Width()*2 + instr.New(instr.I32_DIV_S).Width() + instr.New(instr.RETURN).Width()
+	return &types.Function{
+		Typ:      &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+		Code:     instr.Marshal(code),
+		Handlers: b.Handlers(),
+	}, at
 }

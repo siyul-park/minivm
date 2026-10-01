@@ -58,6 +58,8 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 
 A loop header `MUST` have state before its budget check. An OSR unit loads block-0 parameters from the current operand stack and starts no locals.
 
+A function or module with `Handlers` translates. A catch block is reached only by handler dispatch, never by a CFG edge, so Translate never reaches it and native code holds none; an entry at a header inside a catch block declines. A fault raised inside a protected range (a trap, a bridged op's panic, `THROW`, a callee's fault crossing a native caller) deopts at the op's state, and threaded code finds the handler (`Interpreter.handler`) over the materialized frames: the top frame at its `ip`, each suspended caller at `ip-1`. These deopts are trap class. `SSAPass` declines a function with `Handlers`: re-emitting would invalidate the table's byte offsets.
+
 Translate never retains a constant callee: the pool keeps it alive, so its call state does not own it and the native call neither retains nor releases it. Lower takes `Call.Owned` from that state. A dynamic `CALL` resolves from its site's feedback:
 
 | Feedback | Translation |
@@ -198,6 +200,7 @@ Entry reuses the current frame (`FB = bp`, `Depth = 0`); exits rewrite it in pla
 - A wide (>49-bit) i64 takes `ExitBox` at the sites listed in Exits above.
 - Container lowering requires `guard.shape`; null or mismatched representation deopts.
 - Bridges resume except the denied ops in Exits (above); `RETURN_CALL`'s `ExitDeopt` does not, nor an `ExitCall` to a coroutine function. `YIELD` and `RESUME` never reach an exit at all: they make the translator decline the whole unit at compile time.
+- A catch block never runs natively: the interpreter runs it after the deopt.
 - Host functions are not speculated at dynamic CALL sites; owned callees are not candidates.
 - A hoisted `guard.shape` deopts at its loop header's state, an offset no op guards: its refutation falls back to the `refute` count instead of a generic site.
 

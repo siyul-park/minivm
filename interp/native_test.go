@@ -1062,11 +1062,14 @@ func rareNullProgram(t *testing.T, rounds int) *program.Program {
 	arr := types.NewArray(types.NewArrayType(types.TypeI32), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
 
 	b := instr.NewBuilder()
-	loop, done, start, end, catch, next, null, picked := b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
+	loop, done, live, start, end, catch, next, null, picked := b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
 	b.Emit(instr.CONST_GET, 1).Emit(instr.LOCAL_SET, 2)
 	b.Bind(loop)
 	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(rounds)).Emit(instr.I32_GE_S).BrIf(done)
-	b.Bind(start)
+	// A read no run reaches keeps the module loop threaded.
+	b.Emit(instr.I32_CONST, 1).BrIf(live)
+	b.Emit(instr.REF_NULL).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.DROP)
+	b.Bind(live).Bind(start)
 	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 15).Emit(instr.I32_AND).Emit(instr.I32_CONST, 15).Emit(instr.I32_EQ).BrIf(null)
 	b.Emit(instr.LOCAL_GET, 2).Br(picked)
 	b.Bind(null).Emit(instr.LOCAL_GET, 3)
@@ -1086,22 +1089,28 @@ func rareNullProgram(t *testing.T, rounds int) *program.Program {
 		program.WithConstants(at.MustBuild(), arr), program.WithHandlers(b.Handlers()...))
 }
 
-// heldFunction is held(x) = x; a Try region around a no-op keeps it from
-// ever compiling, so a native caller always reaches it through ExitCall.
+// refuse emits a prologue that reads an element of a null on a path no run
+// takes: the translator declines an array read of unknown element kind, so b's
+// function never compiles.
+func refuse(b *types.FunctionBuilder) {
+	body := b.Label()
+	b.Emit(instr.New(instr.I32_CONST, 1)).BrIf(body)
+	b.Emit(instr.New(instr.REF_NULL), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET), instr.New(instr.DROP))
+	b.Bind(body)
+}
+
+// heldFunction is held(x) = x; it never compiles, so a native caller always
+// reaches it through ExitCall.
 func heldFunction() *types.Function {
 	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
-	start, end, catch := b.Label(), b.Label(), b.Label()
-	b.Bind(start).Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.DROP))
-	b.Bind(end).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
-	b.Bind(catch).Emit(instr.New(instr.DROP), instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN))
-	b.Try(start, end, catch, 1)
+	refuse(b)
+	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
 	return b.MustBuild()
 }
 
 // servedProgram calls served(x) = held(x) + ... + held(x), n calls through
-// constant 1 in loop-free code, once from module code that a Try region
-// around a no-op keeps threaded: served's only work is its calls, each one
-// served. Constants are [served, held].
+// constant 1 in loop-free code, once from module code: served's only work is
+// its calls, each one served. Constants are [served, held].
 func servedProgram(t *testing.T, n int) *program.Program {
 	t.Helper()
 	served := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
@@ -1112,15 +1121,103 @@ func servedProgram(t *testing.T, n int) *program.Program {
 	served.Emit(instr.New(instr.RETURN))
 
 	b := instr.NewBuilder()
-	start, end, catch, done := b.Label(), b.Label(), b.Label(), b.Label()
-	b.Bind(start).Emit(instr.I32_CONST, 0).Emit(instr.DROP)
-	b.Bind(end).Emit(instr.I32_CONST, 1).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Br(done)
-	b.Bind(catch).Emit(instr.DROP).Emit(instr.I32_CONST, 0)
-	b.Bind(done)
-	b.Try(start, end, catch, 0)
+	b.Emit(instr.I32_CONST, 1).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
 	code, err := b.Assemble()
 	require.NoError(t, err)
-	return program.New(code, program.WithConstants(served.MustBuild(), heldFunction()), program.WithHandlers(b.Handlers()...))
+	return program.New(code, program.WithConstants(served.MustBuild(), heldFunction()))
+}
+
+// protectedFunction is f(n) = the sum of 6400 / ((i+1) & 63) for i in [0, n)
+// with 1000 added for each i whose divisor is zero: the division sits inside a
+// Try region that catches the trap. Local [3] holds a string for the whole
+// call, so a leak or a double release shows in the constant's RefCount.
+func protectedFunction() *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}).
+		Locals(types.TypeI32, types.TypeI32, types.TypeString)
+	loop, done, start, end, catch, next := b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
+	b.Emit(instr.New(instr.CONST_GET, 1), instr.New(instr.LOCAL_SET, 3))
+	b.Bind(loop).Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_GE_S)).BrIf(done)
+	b.Bind(start).Emit(
+		instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 6400),
+		instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.I32_CONST, 63), instr.New(instr.I32_AND),
+		instr.New(instr.I32_DIV_S), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2))
+	b.Bind(end).Br(next)
+	b.Bind(catch).Emit(instr.New(instr.DROP), instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 1000), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2))
+	b.Bind(next).Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1)).Br(loop)
+	b.Bind(done).Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN))
+	b.Try(start, end, catch, 4)
+	return b.MustBuild()
+}
+
+// protectedProgram calls protectedFunction(n) rounds times and leaves the last
+// result on the stack. Constants are [f, string]; module local [0] is the
+// counter.
+func protectedProgram(t *testing.T, rounds, n int) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(rounds)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.I32_CONST, uint64(n)).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.I32_CONST, uint64(n)).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(protectedFunction(), types.String("owned")))
+}
+
+// throwProgram sums guard(0) + ... + guard(calls-1) in loop-free module code.
+// guard(x) calls thrower(x) inside a Try region whose handler returns the
+// length of the caught string; thrower(x) throws a string constant when x's
+// low four bits are all set and returns x otherwise. Constants are
+// [guard, thrower, string].
+func throwProgram(t *testing.T, calls int) *program.Program {
+	t.Helper()
+	thrower := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
+	raise := thrower.Label()
+	thrower.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 15), instr.New(instr.I32_AND), instr.New(instr.I32_CONST, 15), instr.New(instr.I32_EQ)).BrIf(raise)
+	thrower.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
+	thrower.Bind(raise).Emit(instr.New(instr.CONST_GET, 2), instr.New(instr.THROW))
+
+	guard := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
+	start, end, catch := guard.Label(), guard.Label(), guard.Label()
+	guard.Bind(start).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.CALL))
+	guard.Bind(end).Emit(instr.New(instr.RETURN))
+	guard.Bind(catch).Emit(instr.New(instr.STRING_LEN), instr.New(instr.RETURN))
+	guard.Try(start, end, catch, 1)
+
+	b := instr.NewBuilder()
+	b.Emit(instr.I32_CONST, 0)
+	for x := range calls {
+		b.Emit(instr.I32_CONST, uint64(x)).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.I32_ADD)
+	}
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithConstants(guard.MustBuild(), thrower.MustBuild(), types.String("boom!")))
+}
+
+// moduleTryProgram runs protectedFunction's loop in the module itself, inside
+// a Try region, then divides 1 by sum-want outside the region: the trap
+// escapes Run exactly when the loop summed to want. Module locals are [0] the
+// counter and [1] the sum.
+func moduleTryProgram(t *testing.T, n, want int) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done, start, end, catch, next := b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
+	b.Bind(loop).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Bind(start)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 6400)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.I32_CONST, 63).Emit(instr.I32_AND)
+	b.Emit(instr.I32_DIV_S).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Bind(end).Br(next)
+	b.Bind(catch).Emit(instr.DROP).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1000).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Bind(next).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+	b.Bind(done).Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(want)).Emit(instr.I32_SUB).Emit(instr.I32_DIV_S)
+	b.Try(start, end, catch, 2)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32), program.WithHandlers(b.Handlers()...))
 }
 
 // turnProgram calls relay(s, i, fn) n times from a module loop that first
@@ -1391,14 +1488,12 @@ func hostArrayGlobalProgram(t *testing.T, warm int) *program.Program {
 }
 
 // guardFunction is guard(s, x) = x + 100 / (limit - x), or, when throw, s
-// thrown once x reaches limit. A Try region around a no-op keeps the
-// translator from ever compiling it, so a native caller always reaches it
-// through ExitCall.
+// thrown once x reaches limit. It never compiles, so a native caller always
+// reaches it through ExitCall.
 func guardFunction(limit int, throw bool) *types.Function {
 	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString, types.TypeI32}, Returns: []types.Type{types.TypeI32}})
-	start, end, catch, raise := b.Label(), b.Label(), b.Label(), b.Label()
-	b.Bind(start).Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.DROP))
-	b.Bind(end)
+	raise := b.Label()
+	refuse(b)
 	if throw {
 		b.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, uint64(limit)), instr.New(instr.I32_GE_S)).BrIf(raise)
 	}
@@ -1407,25 +1502,20 @@ func guardFunction(limit int, throw bool) *types.Function {
 		instr.New(instr.I32_SUB), instr.New(instr.I32_DIV_S), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
 	)
 	b.Bind(raise).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.THROW))
-	b.Bind(catch).Emit(instr.New(instr.DROP), instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN))
-	b.Try(start, end, catch, 2)
 	return b.MustBuild()
 }
 
 // relayFunction is relay(s, x) = callee(s, x) + 1 through constant callee;
-// when guarded, a Try region around a no-op keeps it from ever compiling.
+// when guarded, it never compiles.
 func relayFunction(callee int, guarded bool) *types.Function {
 	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString, types.TypeI32}, Returns: []types.Type{types.TypeI32}})
-	start, end, catch := b.Label(), b.Label(), b.Label()
-	b.Bind(start).Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.DROP))
-	b.Bind(end).Emit(
+	if guarded {
+		refuse(b)
+	}
+	b.Emit(
 		instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CONST_GET, uint64(callee)), instr.New(instr.CALL),
 		instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
 	)
-	b.Bind(catch).Emit(instr.New(instr.DROP), instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN))
-	if guarded {
-		b.Try(start, end, catch, 2)
-	}
 	return b.MustBuild()
 }
 
@@ -3655,6 +3745,145 @@ func TestWithThreshold(t *testing.T) {
 		require.GreaterOrEqual(t, entries()-before, float64(batches*rounds))
 	})
 
+	t.Run("a hot loop inside a protected region keeps its function native past caught traps, matching threaded including RefCount", func(t *testing.T) {
+		native(t)
+		const rounds, batches = 32, 64
+		prog := protectedProgram(t, rounds, 100)
+
+		threaded := interp.New(prog)
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		count := func(vm *interp.Interpreter) int {
+			c, err := vm.Const(1)
+			require.NoError(t, err)
+			n, err := vm.RefCount(c.Ref())
+			require.NoError(t, err)
+			return n
+		}
+		wantCount := count(threaded)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		metric := func(name string, labels ...prof.Label) float64 {
+			vm.Flush()
+			v, _ := profiler.Metric(name, labels...)
+			return v
+		}
+		entries := func() float64 {
+			return metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"}) +
+				metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+		}
+		var runErr error
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			vm.Reset()
+			return runErr != nil || metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"}) > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+
+		before := entries()
+		for range batches {
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			require.Equal(t, wantCount, count(vm))
+			vm.Reset()
+		}
+		require.GreaterOrEqual(t, entries()-before, float64(batches*rounds))
+	})
+
+	t.Run("a native callee's throw is caught by its native caller's handler, matching threaded including RefCount", func(t *testing.T) {
+		native(t)
+		const calls, batches = 32, 64
+		prog := throwProgram(t, calls)
+
+		threaded := interp.New(prog)
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		counts := func(vm *interp.Interpreter) []int {
+			var out []int
+			for index := range 3 {
+				c, err := vm.Const(index)
+				require.NoError(t, err)
+				count, err := vm.RefCount(c.Ref())
+				require.NoError(t, err)
+				out = append(out, count)
+			}
+			return out
+		}
+		wantCounts := counts(threaded)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		metric := func(name string, labels ...prof.Label) float64 {
+			vm.Flush()
+			v, _ := profiler.Metric(name, labels...)
+			return v
+		}
+		entries := func() float64 {
+			return metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"}) +
+				metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+		}
+		var runErr error
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			vm.Reset()
+			return runErr != nil || metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"}) > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+
+		before := entries()
+		for range batches {
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			require.Equal(t, wantCounts, counts(vm))
+			vm.Reset()
+		}
+		require.GreaterOrEqual(t, entries()-before, float64(batches*calls))
+		// Neither the caller nor its callee is refused.
+		require.Zero(t, metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "unsupported"}))
+	})
+
+	t.Run("a module loop inside a protected region enters natively and reports a trap outside the region as threaded does", func(t *testing.T) {
+		native(t)
+		const n = 200_000
+		want := 0
+		for i := range n {
+			if d := (i + 1) & 63; d == 0 {
+				want += 1000
+			} else {
+				want += 6400 / d
+			}
+		}
+		prog := moduleTryProgram(t, n, want)
+		wantErr := runProgramErr(t, prog)
+		require.ErrorIs(t, wantErr, interp.ErrDivideByZero)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		var runErr error
+		var entries float64
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			vm.Reset()
+			vm.Flush()
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+			return entries > 0
+		}, 5*time.Second, time.Millisecond)
+		require.Greater(t, entries, float64(0))
+		require.EqualError(t, runErr, wantErr.Error())
+	})
+
 	t.Run("a cancelled context during a native loop escapes guest handlers as the context error", func(t *testing.T) {
 		native(t)
 		// The final call repeats natively until the timer cancels it.
@@ -4273,11 +4502,9 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("a deopt inside an OSR'd loop called from module code is caught by a guest handler, matching threaded including RefCount", func(t *testing.T) {
 		native(t)
-		// A module with a handler of its own can never OSR-compile (a
-		// function's own Handlers alone gate compile.Compile, module
-		// included), so the OSR-eligible loop lives in a called function
-		// with no handlers of its own; the module's handler wraps the call
-		// and catches the real trap once it unwinds out of that frame.
+		// The OSR-eligible loop lives in a called function with no handlers
+		// of its own; the module's handler wraps the call and catches the
+		// real trap once it unwinds out of that frame.
 		prog := moduleDivCaughtProgram(t, 2_000_000, 1_500_000)
 		wantValue, wantCode := runModuleDivCaught(t, prog)
 
@@ -5738,10 +5965,8 @@ func sumHeaderProgram(t *testing.T, warmCalls, warmEach, n int) *program.Program
 
 // loopDivFunction sums 100/(i-k) for i in [0,n), k fixed well past OSR's own
 // submit threshold: i==k divides by zero mid-loop, after OSR has resolved
-// and entered. It has no handlers of its own, so its loop header stays
-// OSR-eligible even though the module that calls it does (a function's own
-// Handlers alone gate compile.Compile, matching translate.go's "declines...
-// a protected region" contract).
+// and entered. It has no handlers of its own, so the trap unwinds its frame
+// to the module's handler.
 func loopDivFunction(t *testing.T, n, k int) *types.Function {
 	t.Helper()
 	b := instr.NewBuilder()
