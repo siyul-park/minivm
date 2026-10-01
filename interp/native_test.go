@@ -1370,6 +1370,104 @@ func sumrecFunction(self int) *types.Function {
 	return b.MustBuild()
 }
 
+// bumpFunction is bump(s, x) = x + add.
+func bumpFunction(add int) *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString, types.TypeI32}, Returns: []types.Type{types.TypeI32}})
+	b.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, uint64(add)), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
+	return b.MustBuild()
+}
+
+// relayDynamicFunction is relay(s, x, fn) = fn(s, x) through param 2, a
+// dynamic CALL.
+func relayDynamicFunction() *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString, types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}})
+	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 2), instr.New(instr.CALL), instr.New(instr.RETURN))
+	return b.MustBuild()
+}
+
+// pairFunction is pair(x) = x + 100, taking one parameter where bump takes
+// two.
+func pairFunction() *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
+	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 100), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
+	return b.MustBuild()
+}
+
+// mixedProgram calls relay(s, i, bump) warm times, bump alternating between
+// two functions of one signature by i's low bit through the same dynamic
+// CALL site; when other, it then calls relay once more with a function of
+// another signature. Constants are [relay, bump1, bump3, s, pair]. Module
+// locals [0] the counter, [1] the running sum, and [2] s, left under the sum
+// on the stack.
+func mixedProgram(t *testing.T, warm int, other bool) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done, high, chosen := b.Label(), b.Label(), b.Label(), b.Label()
+	b.Emit(instr.CONST_GET, 3).Emit(instr.LOCAL_SET, 2)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warm)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_AND).BrIf(high)
+	b.Emit(instr.CONST_GET, 1).Br(chosen)
+	b.Bind(high).Emit(instr.CONST_GET, 2)
+	b.Bind(chosen).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done)
+	if other {
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 4).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	}
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32, types.TypeString),
+		program.WithConstants(relayDynamicFunction(), bumpFunction(1), bumpFunction(3), types.String("s"), pairFunction()))
+}
+
+// coldFunction is cold(s, n, k, fn) = the sum of i over [0, n), except that
+// at i == k it adds fn(s, i) instead: a dynamic CALL no run reaches while k
+// is out of range.
+func coldFunction() *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString, types.TypeI32, types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}}).Locals(types.TypeI32, types.TypeI32)
+	loop, done, hit, next := b.Label(), b.Label(), b.Label(), b.Label()
+	b.Bind(loop).Emit(instr.New(instr.LOCAL_GET, 5), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_GE_S)).BrIf(done)
+	b.Emit(instr.New(instr.LOCAL_GET, 5), instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_EQ)).BrIf(hit)
+	b.Emit(instr.New(instr.LOCAL_GET, 5)).Br(next)
+	b.Bind(hit).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 5), instr.New(instr.LOCAL_GET, 3), instr.New(instr.CALL))
+	b.Bind(next).Emit(
+		instr.New(instr.LOCAL_GET, 4), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 4),
+		instr.New(instr.LOCAL_GET, 5), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 5),
+	).Br(loop)
+	b.Bind(done).Emit(instr.New(instr.LOCAL_GET, 4), instr.New(instr.RETURN))
+	return b.MustBuild()
+}
+
+// coldProgram calls cold(s, 100, -1, bump) warm times, then cold(s, 100,
+// final, bump) once. Constants are [cold, bump, s]. Module locals [0] the
+// counter, [1] the running sum, and [2] s, left under the sum on the stack.
+func coldProgram(t *testing.T, warm, final int) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Emit(instr.CONST_GET, 2).Emit(instr.LOCAL_SET, 2)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warm)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 100).Emit(instr.I32_CONST, uint64(math.MaxUint32)).Emit(instr.CONST_GET, 1).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 100).Emit(instr.I32_CONST, uint64(final)).Emit(instr.CONST_GET, 1).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32, types.TypeString),
+		program.WithConstants(coldFunction(), bumpFunction(1), types.String("s")))
+}
+
 func TestWithThreshold(t *testing.T) {
 	t.Run("compiles a hot recursive function and enters its native code", func(t *testing.T) {
 		native(t)
@@ -2462,6 +2560,131 @@ func TestWithThreshold(t *testing.T) {
 		}
 	})
 
+	t.Run("a dynamic call whose callees share one signature resumes native code through call exits, matching threaded including RefCount", func(t *testing.T) {
+		native(t)
+		prog := mixedProgram(t, 64, false)
+		want := interp.New(prog)
+		require.NoError(t, want.Run(context.Background()))
+		wantSum, wantCount, err := popLoop(want)
+		require.NoError(t, err)
+		require.NoError(t, want.Close())
+
+		// Both callees are seen before the caller compiles.
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(8), interp.WithProfiler(profiler))
+		defer vm.Close()
+		metric := func(name string, labels ...prof.Label) float64 {
+			vm.Flush()
+			v, _ := profiler.Metric(name, labels...)
+			return v
+		}
+		entries := func() float64 {
+			return metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"}) + metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+		}
+		run := func() {
+			require.NoError(t, vm.Run(context.Background()))
+			sum, count, err := popLoop(vm)
+			require.NoError(t, err)
+			require.Equal(t, wantSum, sum)
+			require.Equal(t, wantCount, count)
+			vm.Reset()
+		}
+		call, deopt := prof.Label{Key: "kind", Value: "call"}, prof.Label{Key: "kind", Value: "deopt"}
+		require.Eventually(t, func() bool {
+			err := vm.Run(context.Background())
+			vm.Reset()
+			return err != nil || metric("vm_jit_exits_total", call) > 0
+		}, 5*time.Second, time.Millisecond)
+		beforeEntries, beforeCalls := entries(), metric("vm_jit_exits_total", call)
+		for range 16 {
+			run()
+		}
+		require.Greater(t, entries(), beforeEntries)
+		require.Greater(t, metric("vm_jit_exits_total", call), beforeCalls)
+		require.Zero(t, metric("vm_jit_exits_total", deopt))
+		// The caller of the dynamic call compiles instead of being refused.
+		require.Zero(t, metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "unsupported"}))
+	})
+
+	t.Run("a dynamic call whose callee takes other parameters deopts and matches threaded including RefCount", func(t *testing.T) {
+		native(t)
+		prog := mixedProgram(t, 64, true)
+		want := interp.New(prog)
+		require.NoError(t, want.Run(context.Background()))
+		wantSum, wantCount, err := popLoop(want)
+		require.NoError(t, err)
+		require.NoError(t, want.Close())
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(8), interp.WithProfiler(profiler))
+		defer vm.Close()
+		entries := func() float64 {
+			vm.Flush()
+			v, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			return v
+		}
+		for range 64 {
+			require.NoError(t, vm.Run(context.Background()))
+			sum, count, err := popLoop(vm)
+			require.NoError(t, err)
+			require.Equal(t, wantSum, sum)
+			require.Equal(t, wantCount, count)
+			vm.Reset()
+			time.Sleep(time.Millisecond)
+		}
+		require.Positive(t, entries())
+	})
+
+	t.Run("a dynamic call no run has reached costs native code no deopt until it runs, then matches threaded including RefCount", func(t *testing.T) {
+		native(t)
+		for _, c := range []struct {
+			name  string
+			final int
+		}{
+			{"it stays cold", -1},
+			{"it runs", 3},
+		} {
+			prog := coldProgram(t, 64, c.final)
+			want := interp.New(prog)
+			require.NoError(t, want.Run(context.Background()), c.name)
+			wantSum, wantCount, err := popLoop(want)
+			require.NoError(t, err, c.name)
+			require.NoError(t, want.Close())
+
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			metric := func(name string, labels ...prof.Label) float64 {
+				vm.Flush()
+				v, _ := profiler.Metric(name, labels...)
+				return v
+			}
+			run := func() {
+				require.NoError(t, vm.Run(context.Background()), c.name)
+				sum, count, err := popLoop(vm)
+				require.NoError(t, err, c.name)
+				require.Equal(t, wantSum, sum, c.name)
+				require.Equal(t, wantCount, count, c.name)
+				vm.Reset()
+			}
+			entered := prof.Label{Key: "tier", Value: "baseline"}
+			require.Eventually(t, func() bool {
+				err := vm.Run(context.Background())
+				vm.Reset()
+				return err != nil || metric("vm_jit_entries_total", entered) > 0
+			}, 5*time.Second, time.Millisecond, c.name)
+			for range 16 {
+				run()
+			}
+			deopts := metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			if c.final < 0 {
+				require.Zero(t, deopts, c.name)
+			} else {
+				require.Positive(t, deopts, c.name)
+			}
+			require.NoError(t, vm.Close())
+		}
+	})
+
 	t.Run("a native call to a coroutine function deoptimizes and matches threaded including RefCount", func(t *testing.T) {
 		native(t)
 		// Its CALL returns a coroutine handle, not the results the native
@@ -2484,28 +2707,26 @@ func TestWithThreshold(t *testing.T) {
 		wantSum, wantCount, err := popLoop(want)
 		require.NoError(t, err)
 
-		var gotSum types.Value
-		var gotCount int
-		var runErr, popErr error
-		var exits float64
-		require.Eventually(t, func() bool {
-			profiler := prof.New()
-			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
-			defer vm.Close()
-			if runErr = vm.Run(context.Background()); runErr != nil {
-				return true
-			}
-			if gotSum, gotCount, popErr = popLoop(vm); popErr != nil {
-				return true
-			}
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		exits := func() float64 {
 			vm.Flush()
-			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
-			return exits > 0
+			v, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
+			return v
+		}
+		require.Eventually(t, func() bool {
+			err := vm.Run(context.Background())
+			vm.Reset()
+			return err != nil || exits() > 0
 		}, 5*time.Second, time.Millisecond)
-		require.NoError(t, runErr)
-		require.NoError(t, popErr)
+
+		require.NoError(t, vm.Run(context.Background()))
+		gotSum, gotCount, err := popLoop(vm)
+		require.NoError(t, err)
 		require.Equal(t, wantSum, gotSum)
 		require.Equal(t, wantCount, gotCount)
+		require.Positive(t, exits())
 	})
 
 	t.Run("an uncaught trap inside a resumed call's callee reports threaded's error", func(t *testing.T) {
@@ -4364,6 +4585,7 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("an indirect self call through a parameter runs native and matches threaded, including RefCount", func(t *testing.T) {
 		native(t)
+		// Both dynamic sites are recorded before fib compiles.
 		prog := indirectFibCallsProgram(t, 20, 50)
 
 		wantVM := interp.New(indirectFibCallsProgram(t, 20, 50))
@@ -4382,7 +4604,7 @@ func TestWithThreshold(t *testing.T) {
 		var compiles, entries, deopts float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
-			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			vm := interp.New(prog, interp.WithThreshold(100), interp.WithProfiler(profiler))
 			defer vm.Close()
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
@@ -4415,11 +4637,52 @@ func TestWithThreshold(t *testing.T) {
 		require.Zero(t, deopts)
 	})
 
-	t.Run("a unit that declined before its dynamic sites ran recompiles once they are recorded", func(t *testing.T) {
+	t.Run("a unit retired by a trap at a site recorded since recompiles from the new feedback and stays native", func(t *testing.T) {
 		native(t)
 		prog := indirectFibCallsProgram(t, 20, 50)
+		want := runProgram(t, prog)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		metric := func(name string, labels ...prof.Label) float64 {
+			vm.Flush()
+			v, _ := profiler.Metric(name, labels...)
+			return v
+		}
+		run := func() {
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			vm.Reset()
+		}
+		compiled := prof.Label{Key: "tier", Value: "baseline"}
+		ok := prof.Label{Key: "outcome", Value: "ok"}
+		require.Eventually(t, func() bool {
+			err := vm.Run(context.Background())
+			vm.Reset()
+			return err != nil || metric("vm_jit_compiles_total", compiled, ok) >= 2
+		}, 5*time.Second, time.Millisecond)
+		// Settled: the recompiled code traps at no site.
+		for range 16 {
+			run()
+			time.Sleep(time.Millisecond)
+		}
+		deopts := metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+		for range 16 {
+			run()
+		}
+		require.Equal(t, deopts, metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"}))
+	})
+
+	t.Run("a unit compiled before its dynamic sites ran compiles and traps at them instead of declining, matching threaded", func(t *testing.T) {
+		native(t)
+		prog := indirectFibCallsProgram(t, 20, 50)
+		want := runProgram(t, prog)
 
 		var runErr, popErr error
+		var got types.Value
 		var unsupported, ok float64
 		require.Eventually(t, func() bool {
 			profiler := prof.New()
@@ -4429,19 +4692,19 @@ func TestWithThreshold(t *testing.T) {
 			if runErr != nil {
 				return true
 			}
-			_, popErr = vm.Pop()
+			got, popErr = vm.Pop()
 			if popErr != nil {
 				return true
 			}
 			vm.Flush()
 			unsupported, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "unsupported"})
 			ok, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
-			return unsupported >= 1 && ok >= 1
+			return ok >= 1
 		}, 5*time.Second, time.Millisecond)
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
-		require.GreaterOrEqual(t, unsupported, float64(1))
-		require.GreaterOrEqual(t, ok, float64(1))
+		require.Equal(t, want, got)
+		require.Zero(t, unsupported)
 	})
 
 	t.Run("a speculated callee refuted by a second function deopts, retires, and matches threaded, including RefCount", func(t *testing.T) {
@@ -4511,7 +4774,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Less(t, deopts, float64(3000))
 	})
 
-	t.Run("a closure callee leaves its site unrecorded and the caller stays threaded", func(t *testing.T) {
+	t.Run("a closure callee's site traps until native code records it, and the caller matches threaded", func(t *testing.T) {
 		native(t)
 		prog := closureCallsProgram(t, 50)
 		want := runProgram(t, prog)

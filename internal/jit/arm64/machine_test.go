@@ -1721,6 +1721,28 @@ func TestMachine_Call(t *testing.T) {
 		), a.Rows()[start:])
 	})
 
+	t.Run("stores its arguments and always branches to its bridge when the callee is unknown", func(t *testing.T) {
+		m, a := arm64.New(), asm.New(target.New())
+		m.Prologue(a, 0, true, compile.Layout{}, nil)
+		bridge, join := a.Label(), a.Label()
+		start := len(a.Rows())
+		require.True(t, m.Call(a, compile.Call{
+			Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
+			Base: 4, Size: 1, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Join: join, Owned: true, Generic: true,
+		}, r))
+
+		require.Equal(t, slices.Concat(
+			[]asm.Instruction{target.UXTW(target.X16, r.Reg(1))},
+			target.LDI(target.X17, types.Tag(types.KindI32)),
+			[]asm.Instruction{
+				target.ORR(target.X16, target.X16, target.X17),
+				target.STR(target.X16, target.X25, 32),
+				target.BLabel(bridge),
+				target.LDR(r.Reg(3), target.X25, 32),
+			},
+		), a.Rows()[start:])
+	})
+
 	t.Run("passes a closure callee's upvals base through the context", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
 		m.Prologue(a, 0, true, compile.Layout{}, nil)

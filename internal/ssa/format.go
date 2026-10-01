@@ -112,15 +112,17 @@ func slot(s Slot) string {
 	return fmt.Sprintf("%s[%d]", s.Space, s.Index)
 }
 
-// shape renders an OpGuardShape's Shape, or the closure Shape a CALL
-// carries; no other operation carries one.
+// shape renders an OpGuardShape's Shape, or the Shape a CALL carries; no
+// other operation carries one.
 func shape(o Operation) string {
 	s := o.Shape
-	if o.Op != OpGuardShape && s.Function == 0 {
+	if o.Op != OpGuardShape && s.Function == 0 && s.Type == 0 {
 		return ""
 	}
 	var sb strings.Builder
 	switch {
+	case o.Op != OpGuardShape && s.Function == 0:
+		fmt.Fprintf(&sb, " callee type 0x%x", s.Type)
 	case s.Function != 0:
 		fmt.Fprintf(&sb, " closure %d type 0x%x captures %d", s.Function, s.Type, s.Captures)
 	case s.Struct:

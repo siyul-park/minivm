@@ -140,7 +140,9 @@ func (m *machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 		a.Emit(arm64.USE(u))
 	}
 	a.Emit(arm64.BLabel(c.Bridge))
-	a.Bind(c.Resume)
+	if !c.Generic {
+		a.Bind(c.Resume)
+	}
 	for _, v := range c.Results {
 		a.Emit(arm64.LDI(s.Reg(v), 0)...)
 	}
@@ -522,6 +524,7 @@ func TestLower(t *testing.T) {
 			{
 				Kind:   jit.ExitCall,
 				Callee: 2,
+				Args:   1,
 				Owned:  false,
 				Frame: jit.Frame{Address: 1, IP: 1, Returns: 1, Stack: []jit.Operand{
 					{Value: jit.Value{Kind: types.KindI32, Loc: asm.Loc{Reg: arm64.W0}}},
@@ -560,8 +563,8 @@ func TestLower(t *testing.T) {
 		require.False(t, m.sites[0].Owned)
 		require.Equal(t, jit.ExitCall, exits[0].Kind)
 		require.Equal(t, 2, exits[0].Callee)
-		require.NotNil(t, exits[0].Closure)
-		require.Equal(t, types.KindRef, exits[0].Closure.Kind)
+		require.NotNil(t, exits[0].Target)
+		require.Equal(t, types.KindRef, exits[0].Target.Kind)
 	})
 
 	t.Run("rejects a direct call of a function that captures", func(t *testing.T) {
@@ -843,6 +846,42 @@ func TestLower(t *testing.T) {
 
 		_, _, _, err := compile.Lower(b.Build(), new(machine), function(0, 0, instr.New(instr.CALL)), nil, 0, false, true)
 		require.ErrorIs(t, err, compile.ErrUnsupported)
+	})
+
+	t.Run("calls an unknown callee of one signature through its bridge alone, owning the callee", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		arg := constant(b, entry, types.BoxI32(7))
+		callee := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 1}, Results: []ssa.Value{callee}})
+		at := state(b, entry, 0, ssa.Operand{Value: arg, Owned: false}, ssa.Operand{Value: callee, Owned: true})
+		got := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Shape: ssa.Shape{Type: 1}, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+
+		m := new(machine)
+		caller := &types.Function{
+			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}},
+			Code: instr.Marshal([]instr.Instruction{instr.New(instr.CALL)}),
+		}
+		_, exits, _, err := compile.Lower(b.Build(), m, caller, nil, 0, false, true)
+		require.NoError(t, err)
+		require.Len(t, m.sites, 1)
+		site := m.sites[0]
+		site.Bridge, site.Join = 0, 0
+		require.Equal(t, compile.Call{
+			Callee: callee, Args: []ssa.Value{arg}, Results: []ssa.Value{got},
+			Base: 2, Size: 1, Exit: 0, Owned: true, Generic: true,
+			Live: site.Live,
+		}, site)
+		require.Equal(t, []jit.Exit{{
+			Kind:    jit.ExitCall,
+			Args:    1,
+			Returns: []types.Kind{types.KindI32},
+			Owned:   true,
+			Target:  &jit.Value{Kind: types.KindRef, Loc: asm.Loc{Reg: arm64.X0}},
+			Frame:   jit.Frame{Address: 1, IP: 1, Returns: 1},
+		}}, exits)
 	})
 
 	t.Run("register-passes a call returning an i64", func(t *testing.T) {

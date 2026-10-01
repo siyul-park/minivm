@@ -17,12 +17,22 @@ type Exit struct {
 	// Adopts is how many of those arguments, topmost, Code takes ownership
 	// of (transform.Adopts): native code hands each its own reference.
 	Adopts int
-	// Callee is the function address an ExitCall calls.
+	// Callee is the function address an ExitCall calls, zero when the call
+	// names none: its callee is whatever Target holds.
 	Callee int
-	// Closure is where an ExitCall's closure over Callee lives, nil when the
-	// call names Callee directly: the interpreter calls through it, and a
-	// callee materialized from this call runs through it.
-	Closure *Value
+	// Target is where an ExitCall's callee value lives, nil when the call
+	// names Callee directly: a closure over Callee, or any function or
+	// closure of the call's signature when Callee is zero. The interpreter
+	// calls through it, and a callee materialized from this call runs
+	// through it.
+	Target *Value
+	// Args is how many arguments an ExitCall passes: the callee's parameter
+	// count.
+	Args int
+	// Returns are the kinds of the results a generic ExitCall reads back from
+	// the callee frame's slots, nil for any other: the interpreter serves it
+	// only for a callee that returns exactly these.
+	Returns []types.Kind
 	// Owned reports whether the call site retained its callee's reference: the
 	// interpreter must retain a borrowed callee's reference itself before
 	// pushing it, so its own CALL has one of its own to release.

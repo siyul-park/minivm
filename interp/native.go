@@ -35,14 +35,19 @@ type native struct {
 	bridges []bridge
 	// failed records permanent compile failure per address and tier.
 	failed [][2]bool
+	// built is the feedback each address's published code was compiled from,
+	// per tier: a retire blocks a recompile only when feedback has not moved
+	// since.
+	built [][2]map[int]transform.Callee
 	// sites indexes every observed OSR site by (address, ip): drain looks a
 	// failed OSR unit's site up here to restore its threaded handler.
 	sites map[key]*site
-	// callees records each dynamic CALL's one observed callee, by caller
+	// callees records each dynamic CALL's observed callees, by caller
 	// address then ip: the zero Callee means unseen, a mixed Function more
-	// than one seen, any other the one callee seen there so far. A caller's
-	// own ip slice is allocated lazily, sized to its own code. feedback reads
-	// this to snapshot a unit's own single-callee sites at submit time.
+	// than one seen (Type their shared signature, nil when they differ), any
+	// other the one callee seen there so far. A caller's own ip slice is
+	// allocated lazily, sized to its own code. feedback reads this to
+	// snapshot a unit's own sites at submit time.
 	callees [][]transform.Callee
 
 	// exact caches unfused threaded code for materialized frames, by address.
@@ -274,6 +279,7 @@ func newNative(i *Interpreter, threshold int) *native {
 		deopts:    make([]int, len(i.code)),
 		bridges:   make([]bridge, len(i.code)),
 		failed:    make([][2]bool, len(i.code)),
+		built:     make([][2]map[int]transform.Callee, len(i.code)),
 		exact:     make([][]func(*Interpreter), len(i.code)),
 		borrows:   make([][]bool, len(i.code)),
 		sites:     map[key]*site{},
@@ -356,8 +362,10 @@ func (n *native) attempt(i *Interpreter, addr int, fn *types.Function, release b
 	}
 	if retire {
 		n.store.Retire(addr)
-		// The unchanged input has no new feedback for a recompile at this tier.
-		n.markFailed(addr, code.Tier)
+		// Unchanged feedback gives a recompile at this tier no new input.
+		if maps.Equal(n.built[addr][code.Tier-1], n.feedback(addr).Callees) {
+			n.markFailed(addr, code.Tier)
+		}
 		// Counters restart; the failed tier stays blocked.
 		n.calls[addr].Store(0)
 		n.entries[addr], n.deopts[addr], n.bridges[addr] = 0, 0, bridge{}
@@ -376,11 +384,12 @@ func (n *native) count(i *Interpreter, addr int, fn *types.Function) {
 	n.queue.Submit(compile.Unit{Address: addr, Function: fn, Module: n.feedback(addr), Tier: jit.Baseline})
 }
 
-// see records the one callee seen at the current dynamic CALL: i.fr's own
+// see records the callee seen at the current dynamic CALL: i.fr's own
 // address and ip (the CALL's own, per call's doc). A caller past construction
 // (bound dynamically) is skipped; its own ip slice is allocated lazily, sized
 // to its own code, on first use. The transition is unset -> callee -> mixed
-// once a second, different callee is seen; it never moves back.
+// once a second, different callee is seen; it never moves back, and a mixed
+// site keeps its signature until a callee of another one is seen.
 func (n *native) see(i *Interpreter, callee transform.Callee) {
 	addr, ip := i.fr.addr, i.fr.ip
 	if addr >= len(n.callees) {
@@ -389,19 +398,22 @@ func (n *native) see(i *Interpreter, callee transform.Callee) {
 	if n.callees[addr] == nil {
 		n.callees[addr] = make([]transform.Callee, len(i.code[addr]))
 	}
+	callee.Type = i.function(callee.Function).Typ
 	sites := n.callees[addr]
-	switch sites[ip] {
-	case transform.Callee{}:
+	switch site := sites[ip]; {
+	case site == transform.Callee{}:
 		sites[ip] = callee
-	case callee, transform.Callee{Function: mixed}:
-	default:
+	case site == callee:
+	case site.Type != nil && !site.Type.Equals(callee.Type):
 		sites[ip] = transform.Callee{Function: mixed}
+	default:
+		sites[ip] = transform.Callee{Function: mixed, Type: site.Type}
 	}
 }
 
-// feedback is addr's compile-time snapshot of n.module: its own single-callee
-// dynamic CALL sites (see), an unseen or mixed one absent. The snapshot is
-// never mutated after Submit: a fresh map every call.
+// feedback is addr's compile-time snapshot of n.module: its own dynamic CALL
+// sites (see), an unseen one absent, a mixed one without its function. The
+// snapshot is never mutated after Submit: a fresh map every call.
 func (n *native) feedback(addr int) transform.Module {
 	m := n.module
 	if addr >= len(n.callees) || n.callees[addr] == nil {
@@ -409,7 +421,11 @@ func (n *native) feedback(addr int) transform.Module {
 	}
 	callees := map[int]transform.Callee{}
 	for ip, callee := range n.callees[addr] {
-		if callee.Function > 0 {
+		switch {
+		case callee == transform.Callee{}:
+		case callee.Function == mixed:
+			callees[ip] = transform.Callee{Type: callee.Type}
+		default:
 			callees[ip] = callee
 		}
 	}
@@ -462,6 +478,9 @@ func (n *native) drain(i *Interpreter) {
 			continue
 		}
 		n.store.Publish(job.Code)
+		if !job.Unit.OSR {
+			n.built[job.Unit.Address][job.Code.Tier-1] = job.Unit.Module.Callees
+		}
 		if job.Code.Tier == jit.Baseline {
 			n.nominate(job.Unit.Address)
 		}
@@ -564,7 +583,7 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, account *
 		case jit.ExitCall:
 			account.spend(ctx)
 			ref := n.callee(int(ctx.Depth)-1, exit)
-			if !n.nests(i, exit) {
+			if addr, ok := n.target(i, exit, ref); !ok || !n.nests(i, exit, addr) {
 				deopt(exit)
 				n.replay(i, exit, ref)
 				return false, refute(), nil
@@ -842,8 +861,7 @@ func (n *native) replay(i *Interpreter, exit jit.Exit, ref int) {
 	for _, p := range exit.Lent {
 		i.retainBox(i.stack[i.sp+p])
 	}
-	callee := i.heap[exit.Callee].(*types.Function)
-	i.sp += len(callee.Typ.Params)
+	i.sp += exit.Args
 	boxed := types.BoxRef(ref)
 	if !exit.Owned {
 		i.retainBox(boxed)
@@ -853,25 +871,59 @@ func (n *native) replay(i *Interpreter, exit jit.Exit, ref int) {
 	// CALL is one byte (interp.go's handler walk relies on the same fact),
 	// so its own ip is the map's IP, recorded past it, minus one.
 	i.fr.ip--
-	if exit.Closure != nil {
-		n.see(i, transform.Callee{Function: exit.Callee, Closure: true})
-		if n.store.Code(exit.Callee) == nil {
-			n.count(i, exit.Callee, callee)
+	if ref > 0 && ref < len(i.heap) {
+		if closure, ok := i.heap[ref].(*types.Closure); ok {
+			addr := int(closure.Fn)
+			n.see(i, transform.Callee{Function: addr, Closure: true})
+			if n.store.Code(addr) == nil {
+				n.count(i, addr, i.function(addr))
+			}
 		}
 	}
 }
 
-// nests reports whether exit's call can run while its caller stays
-// suspended: not a coroutine, whose CALL returns a handle instead of the
-// results native code expects, and with room to push the callee.
-func (n *native) nests(i *Interpreter, exit jit.Exit) bool {
-	callee := i.heap[exit.Callee].(*types.Function)
-	if exit.Callee < len(i.coros) && i.coros[exit.Callee] {
+// target resolves exit's callee, the value ref, to the address of the
+// function it runs. A generic call, which names none, is served only for a
+// function or closure that takes the call's arguments and returns the kinds
+// it reads back; any other callee ok reports false and the caller deoptimizes
+// to run its own CALL.
+func (n *native) target(i *Interpreter, exit jit.Exit, ref int) (addr int, ok bool) {
+	if exit.Callee != 0 {
+		return exit.Callee, true
+	}
+	if ref <= 0 || ref >= len(i.heap) {
+		return 0, false
+	}
+	var typ *types.FunctionType
+	switch callee := i.heap[ref].(type) {
+	case *types.Function:
+		addr, typ = ref, callee.Typ
+	case *types.Closure:
+		addr, typ = int(callee.Fn), callee.Typ
+	default:
+		return 0, false
+	}
+	if len(typ.Params) != exit.Args || len(typ.Returns) != len(exit.Returns) {
+		return 0, false
+	}
+	for j, t := range typ.Returns {
+		if t.Kind() != exit.Returns[j] {
+			return 0, false
+		}
+	}
+	return addr, true
+}
+
+// nests reports whether exit's call to the function at addr can run while its
+// caller stays suspended: not a coroutine, whose CALL returns a handle instead
+// of the results native code expects, and with room to push the callee.
+func (n *native) nests(i *Interpreter, exit jit.Exit, addr int) bool {
+	if addr < len(i.coros) && i.coros[addr] {
 		return false
 	}
 	k := int(n.ctx.Depth) - 1
 	bp := int((n.ctx.Records[k].FB - base(i.stack)) / unsafe.Sizeof(types.Boxed(0)))
-	return bp+slots(i.function(exit.Frame.Address))+len(exit.Frame.Stack)+len(callee.Typ.Params) < len(i.stack)
+	return bp+slots(i.function(exit.Frame.Address))+len(exit.Frame.Stack)+exit.Args < len(i.stack)
 }
 
 // nest runs exit's call in the interpreter while its native caller stays
@@ -954,10 +1006,10 @@ func (n *native) dispatch(i *Interpreter) (fault any, err error) {
 // callee is the reference activation k's ExitCall e calls through: the
 // closure it maps, or else its function.
 func (n *native) callee(k int, e jit.Exit) int {
-	if e.Closure == nil {
+	if e.Target == nil {
 		return e.Callee
 	}
-	return types.Boxed(n.ctx.Read(k, *e.Closure)).Ref()
+	return types.Boxed(n.ctx.Read(k, *e.Target)).Ref()
 }
 
 // frame materializes activation k from m as frame at, entered through ref.

@@ -120,6 +120,10 @@ func (w *walker) translate(s span) (ssa.Terminator, bool) {
 			return w.leave(ip), true
 		case instr.RETURN_CALL:
 			return w.tail(ip)
+		case instr.CALL:
+			if w.unseen() {
+				return w.exit(ip), true
+			}
 		case instr.YIELD, instr.RESUME:
 			return ssa.Terminator{}, false
 		}
@@ -337,14 +341,20 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		if target == nil {
 			target = w.speculate(at)
 		}
-		if target == nil {
+		var typ *types.FunctionType
+		if target != nil {
+			typ = target.Typ
+		} else if callee := w.callees[w.ip]; callee.Function == 0 {
+			typ = callee.Type
+		}
+		if typ == nil {
 			return false
 		}
-		results := make([]fact, len(target.Typ.Returns))
-		for i, t := range target.Typ.Returns {
+		results := make([]fact, len(typ.Returns))
+		for i, t := range typ.Returns {
 			results[i] = fact{kind: t.Kind()}
 		}
-		return w.emit(operation, 1+len(target.Typ.Params), results)
+		return w.emit(operation, 1+len(typ.Params), results)
 	case instr.CLOSURE_NEW:
 		if len(w.stack) == 0 {
 			return false
@@ -472,6 +482,16 @@ func (w *walker) callee(at int) *types.Function {
 		return nil
 	}
 	return target
+}
+
+// unseen reports whether the CALL at w.ip has no resolvable callee at a site
+// that has never run: native code never reaches it, so it ends in an exit.
+func (w *walker) unseen() bool {
+	if len(w.stack) == 0 || w.callee(len(w.stack)-1) != nil {
+		return false
+	}
+	_, seen := w.callees[w.ip]
+	return !seen
 }
 
 // speculate admits an unresolved CALL's callee from the unit's recorded
@@ -708,10 +728,15 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 // adopted here, since the callee may overwrite that cell, and released by
 // emit after the call instead of by the callee. It returns the resolved
 // target's Borrows and, for a closure callee, the closure Shape the CALL
-// carries: CALL reaches emit only after callee or speculate has resolved one.
+// carries. A CALL of no resolved target adopts every entry and carries the
+// function type its site's callees share: nothing is lent or borrowed.
 func (w *walker) call() ([]bool, ssa.Shape) {
 	top := len(w.stack) - 1
 	target := w.callee(top)
+	if target == nil {
+		w.adopt()
+		return nil, ssa.Shape{Type: uintptr(unsafe.Pointer(w.callees[w.ip].Type))}
+	}
 	var shape ssa.Shape
 	if ref := w.stack[top].closure; ref != 0 {
 		shape = closure(ref, target)

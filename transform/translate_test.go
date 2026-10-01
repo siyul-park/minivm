@@ -240,15 +240,6 @@ blk3: (v6:ref) <-- (blk1)
 		require.Nil(t, out)
 	})
 
-	t.Run("declines what bytecode alone cannot resolve/an unresolved callee", func(t *testing.T) {
-		fn := &types.Function{
-			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
-			Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.REF_NULL).Emit(instr.CALL).Emit(instr.RETURN) })}
-		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
-		require.NoError(t, err)
-		require.Nil(t, out)
-	})
-
 	t.Run("declines what bytecode alone cannot resolve/a constant read no object resolves", func(t *testing.T) {
 		fn := &types.Function{
 			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
@@ -570,7 +561,7 @@ blk0: ()
 `, uintptr(unsafe.Pointer(target.Typ))), ssa.Format(out))
 	})
 
-	t.Run("declines a closure callee through a local another path re-stores", func(t *testing.T) {
+	t.Run("does not call a closure through a local another path re-stores", func(t *testing.T) {
 		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}}
 		fn := &types.Function{
 			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI1, types.TypeAny}},
@@ -587,7 +578,8 @@ blk0: ()
 
 		out, err := transform.Translate(m, 1, fn, 0)
 		require.NoError(t, err)
-		require.Nil(t, out)
+		require.NotNil(t, out)
+		require.NotContains(t, ssa.Format(out), "call")
 	})
 
 	t.Run("speculates a closure callee its feedback observed and lends it from its local", func(t *testing.T) {
@@ -672,13 +664,29 @@ blk0: ()
 `, ssa.Format(out))
 	})
 
-	t.Run("declines a dynamic callee without feedback", func(t *testing.T) {
-		fn, _ := indirectRecursiveFib(t)
-		m := transform.Module{
-			Constants: []types.Boxed{types.BoxRef(1)},
-			Objects:   transform.Objects{1: {Function: fn}},
-		}
+	t.Run("ends a never-executed dynamic call's block in an exit and leaves out what only follows it", func(t *testing.T) {
+		fn, ip := coldCallFunction(t)
+		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, wantColdCall(ip), ssa.Format(out))
+	})
 
+	t.Run("calls a dynamic callee of one shared signature through an owned, signature-carrying call", func(t *testing.T) {
+		fn, ip := coldCallFunction(t)
+		sig := fn.Typ.Params[1].(*types.FunctionType)
+		m := transform.Module{Callees: map[int]transform.Callee{ip: {Type: sig}}}
+		out, err := transform.Translate(m, 1, fn, 0)
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, wantGenericCall(ip, sig), ssa.Format(out))
+	})
+
+	t.Run("declines a dynamic callee whose feedback shares no signature", func(t *testing.T) {
+		fn, ip := coldCallFunction(t)
+		m := transform.Module{Callees: map[int]transform.Callee{ip: {}}}
 		out, err := transform.Translate(m, 1, fn, 0)
 		require.NoError(t, err)
 		require.Nil(t, out)
@@ -985,4 +993,76 @@ func assemble(t *testing.T, emit func(b *instr.Builder)) []byte {
 	instructions, err := b.Assemble()
 	require.NoError(t, err)
 	return instr.Marshal(instructions)
+}
+
+// coldCallFunction builds func(i32, func() i32) i32 whose cold branch calls
+// param 1 and branches on its result, and reports that CALL's own ip. The
+// two blocks after the call are reached only through it.
+func coldCallFunction(t *testing.T) (*types.Function, int) {
+	t.Helper()
+	b := instr.NewBuilder()
+	cold, done := b.Label(), b.Label()
+	b.Emit(instr.LOCAL_GET, 0).BrIf(cold)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
+	b.Bind(cold).Emit(instr.LOCAL_GET, 1).Emit(instr.CALL).BrIf(done)
+	b.Emit(instr.I32_CONST, 7).Emit(instr.RETURN)
+	b.Bind(done).Emit(instr.I32_CONST, 9).Emit(instr.RETURN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	fn := &types.Function{
+		Typ: &types.FunctionType{
+			Params:  []types.Type{types.TypeI32, &types.FunctionType{Returns: []types.Type{types.TypeI32}}},
+			Returns: []types.Type{types.TypeI32},
+		},
+		Code: instr.Marshal(code),
+	}
+	return fn, calls(fn.Code)[0]
+}
+
+// wantColdCall is coldCallFunction's SSA text without feedback: the cold
+// block retains the callee it adopts and exits at the CALL, and the blocks
+// after the call are absent.
+func wantColdCall(ip int) string {
+	return fmt.Sprintf(`func 1:0
+blk0: ()
+	v1:i32 = load local[0]
+	br v1, blk1(), blk2()
+blk1: () <-- (blk0)
+	v2:ref = load local[1]
+	retain v2
+	v3:state = state {addr=1 base=0 ip=%d returns=1 stack=[v2 owned]}
+	exit state v3
+blk2: () <-- (blk0)
+	v4:i32 = load local[0]
+	v5:state = state {addr=1 base=0 ip=7 returns=1 stack=[v4]}
+	return v4 state v5
+`, ip)
+}
+
+// wantGenericCall is coldCallFunction's SSA text once its site saw callees of
+// type sig: the call owns its callee and carries sig.
+func wantGenericCall(ip int, sig *types.FunctionType) string {
+	return fmt.Sprintf(`func 1:0
+blk0: ()
+	v1:i32 = load local[0]
+	br v1, blk1(), blk2()
+blk1: () <-- (blk0)
+	v2:ref = load local[1]
+	retain v2
+	v4:state = state {addr=1 base=0 ip=%d returns=1 stack=[v2 owned]}
+	v3:i32 = call v2 callee type 0x%x state v4
+	br v3, blk3(), blk4()
+blk2: () <-- (blk0)
+	v5:i32 = load local[0]
+	v6:state = state {addr=1 base=0 ip=7 returns=1 stack=[v5]}
+	return v5 state v6
+blk3: () <-- (blk1)
+	v7:i32 = const 9
+	v8:state = state {addr=1 base=0 ip=25 returns=1 stack=[v7]}
+	return v7 state v8
+blk4: () <-- (blk1)
+	v9:i32 = const 7
+	v10:state = state {addr=1 base=0 ip=19 returns=1 stack=[v9]}
+	return v9 state v10
+`, ip, uintptr(unsafe.Pointer(sig)))
 }

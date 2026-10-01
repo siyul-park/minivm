@@ -21,18 +21,23 @@ type Module struct {
 	Objects Objects
 	// Types is the declared-type table.
 	Types []types.Type
-	// Callees maps a dynamic CALL's offset in the translated function to the
-	// one callee observed there. A recorded snapshot, never live state; unset
-	// for a site never seen or seen with more than one callee.
+	// Callees maps a dynamic CALL's offset in the translated function to what
+	// was observed there. A recorded snapshot, never live state; absent for a
+	// site never seen, the zero Callee for a site that saw callees of
+	// differing types.
 	Callees map[int]Callee
 }
 
-// Callee is the one target a dynamic CALL site observed.
+// Callee is what a dynamic CALL site observed.
 type Callee struct {
-	// Function is the called function's reference.
+	// Function is the called function's reference when the site saw one
+	// callee, zero when it saw several.
 	Function int
 	// Closure reports that the site calls Function through a closure.
 	Closure bool
+	// Type is the function type of the callee a site saw, or shared by the
+	// several it saw; nil when they differ.
+	Type *types.FunctionType
 }
 
 // Objects maps constant references to object facts.
@@ -87,12 +92,12 @@ func Translate(module Module, address int, function *types.Function, entry int) 
 		if !seen[root] {
 			return nil, nil
 		}
-		states, _, ok = f.analyze(activation, spans, root, owned(states[root]))
+		states, seen, ok = f.analyze(activation, spans, root, owned(states[root]))
 		if !ok {
 			return nil, nil
 		}
 	}
-	built := f.build(activation, spans, states, root)
+	built := f.build(activation, spans, states, seen, root)
 	if built != nil && len(built.Pred(0)) > 0 {
 		built = rotate(built)
 	}

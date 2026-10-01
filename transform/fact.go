@@ -72,9 +72,10 @@ func deopt(stack []operand) []ssa.Operand {
 }
 
 // analyze returns the facts live at each span's entry and which spans are
-// reached from root. A reached span's stack is nil, not just absent, when
-// nothing is live there (e.g. an empty operand stack at a loop header): seen
-// is what tells reached apart from never visited.
+// reached from root; nothing flows past a span that ends in an exit. A
+// reached span's stack is nil, not just absent, when nothing is live there
+// (e.g. an empty operand stack at a loop header): seen is what tells reached
+// apart from never visited.
 func (f facts) analyze(entry activation, spans []span, root int, in frame) ([]frame, []bool, bool) {
 	if len(entry.function.Handlers) > 0 {
 		return nil, nil, false
@@ -87,9 +88,12 @@ func (f facts) analyze(entry activation, spans []span, root int, in frame) ([]fr
 	for len(work) > 0 {
 		id := work[len(work)-1]
 		work = work[:len(work)-1]
-		exit, ok := f.transfer(entry, spans[id], states[id])
+		exit, leaves, ok := f.transfer(entry, spans[id], states[id])
 		if !ok {
 			return nil, nil, false
+		}
+		if leaves {
+			continue
 		}
 		for _, succ := range spans[id].flow {
 			if !seen[succ] {
@@ -110,26 +114,29 @@ func (f facts) analyze(entry activation, spans []span, root int, in frame) ([]fr
 	return states, seen, true
 }
 
-func (f facts) transfer(activation activation, s span, in frame) (frame, bool) {
+// transfer returns the facts at s's end and whether s leaves native code
+// there, which no span follows.
+func (f facts) transfer(activation activation, s span, in frame) (frame, bool, bool) {
 	b := ssa.New("")
 	block := b.Block()
 	stack := make([]operand, len(in.stack))
 	for i, e := range in.stack {
 		t, ok := typ(e.kind)
 		if !ok {
-			return frame{}, false
+			return frame{}, false, false
 		}
 		stack[i] = operand{value: b.Param(block, t), fact: e}
 	}
 	w := &walker{facts: f, builder: b, block: block, activation: activation, stack: stack, closures: slices.Clone(in.closures)}
-	if _, ok := w.translate(s); !ok {
-		return frame{}, false
+	term, ok := w.translate(s)
+	if !ok {
+		return frame{}, false, false
 	}
 	out := make([]fact, len(w.stack))
 	for i, o := range w.stack {
 		out[i] = o.fact
 	}
-	return frame{stack: out, closures: w.closures}, true
+	return frame{stack: out, closures: w.closures}, term.Op == ssa.OpExit, true
 }
 
 // merge joins src into f and reports whether f changed; a stack shape
@@ -227,14 +234,16 @@ func (activation activation) returns() int {
 	return len(activation.function.Typ.Returns)
 }
 
-func (f facts) build(entry activation, spans []span, states []frame, root int) *ssa.Function {
-	seen := make([]bool, len(spans))
-	seen[root] = true
+// build emits the spans analyze reached, in the order a walk from root over
+// their successors visits them.
+func (f facts) build(entry activation, spans []span, states []frame, seen []bool, root int) *ssa.Function {
+	queued := make([]bool, len(spans))
+	queued[root] = true
 	order := []int{root}
 	for n := 0; n < len(order); n++ {
 		for _, successor := range spans[order[n]].succs {
-			if !seen[successor] {
-				seen[successor] = true
+			if seen[successor] && !queued[successor] {
+				queued[successor] = true
 				order = append(order, successor)
 			}
 		}
@@ -263,8 +272,10 @@ func (f facts) build(entry activation, spans []span, states []frame, root int) *
 		if !ok {
 			return nil
 		}
-		if term.Edges, ok = w.edges(spans[id], states, ids); !ok {
-			return nil
+		if term.Op != ssa.OpExit {
+			if term.Edges, ok = w.edges(spans[id], states, ids); !ok {
+				return nil
+			}
 		}
 		b.Term(ids[id], term)
 	}

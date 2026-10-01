@@ -197,7 +197,7 @@ func TestFormat(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 3, Results: []ssa.Value{three}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.SELECT, Args: []ssa.Value{kind, three, three}, State: state, Results: []ssa.Value{picked}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_SET, Args: []ssa.Value{target, three, picked}, State: state})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee, three}, State: state, Results: []ssa.Value{returned}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Shape: ssa.Shape{Type: 0x50}, Args: []ssa.Value{callee, three}, State: state, Results: []ssa.Value{returned}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_NEW_DEFAULT, Args: []ssa.Value{returned}, State: state, Results: []ssa.Value{fresh}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{fresh}, State: state})
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Struct: true, Type: 0x40, Host: reflect.Int16}, Args: []ssa.Value{target}, State: state, Results: []ssa.Value{record}})
@@ -222,7 +222,7 @@ func TestFormat(t *testing.T) {
 			"\tv6:i32 = const 3\n"+
 			"\tv7:i32 = select v5, v6, v6 state v1\n"+
 			"\tarray.set v4, v6, v7 state v1\n"+
-			"\tv8:i32 = call v2, v6 state v1\n"+
+			"\tv8:i32 = call v2, v6 callee type 0x50 state v1\n"+
 			"\tv9:ref = array.new_default v8 state v1\n"+
 			"\trelease v9 state v1\n"+
 			"\tv11:ref = guard.shape v4 struct type 0x40 host int16 state v1\n"+

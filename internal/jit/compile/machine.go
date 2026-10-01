@@ -103,9 +103,11 @@ type Site interface {
 	Box(word asm.VReg) (exit, resume asm.Label)
 }
 
-// Call describes a statically resolved CALL.
+// Call describes a CALL: one to a statically resolved callee, or, when
+// Generic, to any callee of its signature.
 type Call struct {
-	// Address is the callee's function address, its Context.Natives index.
+	// Address is the callee's function address, its Context.Natives index;
+	// zero when Generic.
 	Address int
 	// Callee is the function or closure reference the call adopts when
 	// Owned; a borrowed Callee lives in the constant pool or a caller's
@@ -152,6 +154,10 @@ type Call struct {
 	// captures: the call writes the closure's upvals base to
 	// Context.Upvals.
 	Upvals bool
+	// Generic reports that the callee is unknown: the call stores its
+	// arguments and always takes Bridge, which serves it and resumes at Join,
+	// where results are read from slots. Safepoint and Resume are unset.
+	Generic bool
 }
 
 // ErrUnsupported reports SSA the backend does not lower.

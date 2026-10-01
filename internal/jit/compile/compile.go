@@ -666,22 +666,27 @@ func (l *lowering) stub(id int) (exit, resume asm.Label) {
 	return s.label, s.resume
 }
 
-// call lowers a CALL of a constant function, or of the closure its Shape
-// names, and records the post-call state. A function with captures runs
-// only through its closure: called directly, it has no upvals to read.
+// call lowers a CALL of a constant function, of the closure its Shape
+// names, or, when its Shape names only a function type, of any callee of that
+// type, and records the post-call state. A function with captures runs only
+// through its closure: called directly, it has no upvals to read.
 func (l *lowering) call(op ssa.Operation) error {
 	callee := op.Args[len(op.Args)-1]
+	generic := op.Shape.Function == 0 && op.Shape.Type != 0
 	ref, closure := op.Shape.Function, op.Shape.Function != 0
-	if !closure {
-		c, ok := l.consts[callee]
-		if !ok || l.f.Type(callee) != ssa.TypeRef {
-			return fmt.Errorf("%w: call of v%d", ErrUnsupported, callee)
+	var target *types.Function
+	if !generic {
+		if !closure {
+			c, ok := l.consts[callee]
+			if !ok || l.f.Type(callee) != ssa.TypeRef {
+				return fmt.Errorf("%w: call of v%d", ErrUnsupported, callee)
+			}
+			ref = types.Boxed(c).Ref()
 		}
-		ref = types.Boxed(c).Ref()
-	}
-	target := l.objects[ref].Function
-	if target == nil || target.Typ == nil || len(target.Captures) > 0 && !closure {
-		return fmt.Errorf("%w: call of %d", ErrUnsupported, ref)
+		target = l.objects[ref].Function
+		if target == nil || target.Typ == nil || len(target.Captures) > 0 && !closure {
+			return fmt.Errorf("%w: call of %d", ErrUnsupported, ref)
+		}
 	}
 	if registers(target) == nil {
 		for _, v := range op.Results {
@@ -705,10 +710,16 @@ func (l *lowering) call(op ssa.Operation) error {
 	id := l.exit(jit.ExitCall)
 	out := &l.outlets[id]
 	out.exit.Callee = ref
+	out.exit.Args = len(op.Args) - 1
 	out.exit.Owned = owned
-	if closure {
-		out.exit.Closure = &jit.Value{}
-		l.place(id, out.exit.Closure, callee)
+	if closure || generic {
+		out.exit.Target = &jit.Value{}
+		l.place(id, out.exit.Target, callee)
+	}
+	if generic {
+		for _, v := range op.Results {
+			out.exit.Returns = append(out.exit.Returns, l.f.Type(v).Kind())
+		}
 	}
 	for j, b := range transform.Borrows(target) {
 		switch {
@@ -726,27 +737,30 @@ func (l *lowering) call(op ssa.Operation) error {
 		}
 	}
 	bridge, join := l.stub(id)
-	sid := l.exit(jit.ExitSafepoint)
-	safepoint, resume := l.stub(sid)
 	site := Call{
 		Address:   ref,
 		Callee:    callee,
 		Args:      op.Args[:len(op.Args)-1],
 		Results:   op.Results,
 		Base:      len(l.fn.Slots()) + below,
-		Size:      max(len(target.Slots()), len(target.Typ.Returns)),
 		Exit:      id,
-		Live:      l.live(id),
 		Bridge:    bridge,
-		Safepoint: safepoint,
-		Resume:    resume,
 		Join:      join,
 		Owned:     owned,
-		Self:      !l.osr && ref == l.address,
 		Registers: registers(target),
 		Arguments: arguments(target),
-		Upvals:    closure && len(target.Captures) > 0,
+		Generic:   generic,
 	}
+	if generic {
+		site.Size = max(len(op.Args)-1, len(op.Results))
+	} else {
+		sid := l.exit(jit.ExitSafepoint)
+		site.Safepoint, site.Resume = l.stub(sid)
+		site.Size = max(len(target.Slots()), len(target.Typ.Returns))
+		site.Self = !l.osr && ref == l.address
+		site.Upvals = closure && len(target.Captures) > 0
+	}
+	site.Live = l.live(id)
 	if !l.m.Call(l.a, site, l) {
 		return fmt.Errorf("%w: call of %d", ErrUnsupported, ref)
 	}

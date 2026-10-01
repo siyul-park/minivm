@@ -30,7 +30,8 @@ type Slot struct {
 // Struct is set, a *types.Struct of struct type Type; when Function is set,
 // a *types.Closure over that function of function type Type holding at
 // least Captures upvals. A CALL carries the closure Shape its callee is
-// known to have.
+// known to have, or, when its callee is unknown, Type alone: the function
+// type every callee shares.
 type Shape struct {
 	// Kind is the admitted array element kind; meaningless when Struct or
 	// Function.

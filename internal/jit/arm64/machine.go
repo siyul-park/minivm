@@ -399,12 +399,13 @@ func (m *Machine) Results(a *asm.Assembler, regs []asm.VReg) {
 	}
 }
 
-// Call writes boxed arguments at the callee frame base, passes a closure
-// callee's upvals base through Context.Upvals when Upvals, and dispatches
-// through Context.Natives, or, when Self, branches directly to the unit's
-// own entry. Missing code, depth, or space takes ExitCall, which resumes at
-// Join; an owned Callee is released once a native callee returns, a
-// borrowed one left alone.
+// Call writes boxed arguments at the callee frame base and, when Generic,
+// branches to Bridge, which serves the call and resumes at Join. Otherwise it
+// passes a closure callee's upvals base through Context.Upvals when Upvals,
+// and dispatches through Context.Natives, or, when Self, branches directly to
+// the unit's own entry. Missing code, depth, or space takes ExitCall, which
+// resumes at Join; an owned Callee is released once a native callee returns,
+// a borrowed one left alone.
 func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	if 8*(c.Base+c.Size) > 4095 {
 		return false
@@ -412,6 +413,11 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	record := func(field uintptr) int16 { return int16(jit.OffsetRecords - unsafe.Sizeof(jit.Record{}) + field) }
 	for i, v := range c.Args {
 		a.Emit(target.STR(m.box(a, s, v), target.X25, int16((c.Base+i)*8)))
+	}
+	if c.Generic {
+		a.Emit(target.BLabel(c.Bridge))
+		m.join(a, c, s)
+		return true
 	}
 	var code asm.VReg
 	if !c.Self {
@@ -482,11 +488,16 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 		a.Bind(c.Join)
 		return true
 	}
+	m.join(a, c, s)
+	return true
+}
+
+// join binds c.Join and loads c's results from the callee frame's slots.
+func (m *Machine) join(a *asm.Assembler, c compile.Call, s compile.Site) {
 	a.Bind(c.Join)
 	for j, v := range c.Results {
 		a.Emit(target.LDR(s.Reg(v), target.X25, int16((c.Base+j)*8)))
 	}
-	return true
 }
 
 // Move copies src into dst of the same bank.
