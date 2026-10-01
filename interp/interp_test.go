@@ -18,68 +18,9 @@ import (
 
 type upperCodec byte
 
-type contextKey byte
-
 type trackedValue struct {
 	refs   []types.Ref
 	closed int
-}
-
-// hostLoopFields is the Go struct TestARM64_HostStructLoop reads and writes
-// through. It carries an unexported field so the codec picks a live view, one
-// exported field per Go kind the lowerer has a row for, a string field it has
-// none for, and an int64 field holding more than a box payload fits.
-type hostLoopFields struct {
-	Flag   bool
-	I8     int8
-	I16    int16
-	I32    int32
-	Int    int
-	I64    int64
-	U8     uint8
-	U16    uint16
-	U32    uint32
-	U64    uint64
-	F32    float32
-	F64    float64
-	Text   string
-	Big    int64
-	hidden int32
-}
-
-// hostNarrowField and hostWideField hold one field of the same VM kind in two
-// Go widths, which is what makes a lowered read of one wrong for the other.
-type hostNarrowField struct {
-	V      int16
-	hidden int32
-}
-
-type hostWideField struct {
-	V      int32
-	hidden int32
-}
-
-// hostFieldKinds is the Go struct the *HostStruct field-kind tests below read
-// through a live view: one field per Go kind this backend's hostRead lowers.
-// The unexported field forces the codec to publish that view rather than
-// copying the struct into a plain VM one (see hostCounter).
-type hostFieldKinds struct {
-	Bool    bool
-	Int8    int8
-	Int16   int16
-	Uint16  uint16
-	Int32   int32
-	Float32 float32
-	Float64 float64
-	hidden  int32
-}
-
-// resumeSnapshot is the interpreter state its hook records at its last
-// firing during one Run: the resumed IP, operand-stack depth, and refcount of
-// constant 0. The tests use STRUCT_GET as the final opcode, so the last hook
-// firing always lands there.
-type resumeSnapshot struct {
-	ip, sp, refcount int
 }
 
 type structGetHostFields struct {
@@ -1979,8 +1920,8 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Empty(t, missing)
 
 		// A derived name collides when two cases render the same program, which
-		// is not itself wrong (Go's testing package disambiguates with a "#01"
-		// suffix) but is worth surfacing: one of the two is likely redundant.
+		// is not itself wrong but is worth surfacing: one of the two is likely
+		// redundant.
 		var collisions int
 		for name, count := range names {
 			if count > 1 {
@@ -1990,6 +1931,36 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 		if collisions > 0 {
 			t.Logf("%d runTests case(s) collide on their derived name", collisions)
+		}
+	})
+
+	t.Run("runs every program standalone and fused", func(t *testing.T) {
+		for _, mode := range []struct {
+			name string
+			opts []interp.Option
+		}{
+			{name: "standalone", opts: []interp.Option{interp.WithTick(1)}},
+			{name: "fused", opts: []interp.Option{}},
+		} {
+			for _, tt := range runTests {
+				name := runTestName(tt.program) + "/" + mode.name
+				i := interp.New(tt.program, mode.opts...)
+
+				err := i.Run(context.Background())
+				if tt.err != nil {
+					require.ErrorIs(t, err, tt.err, name)
+					require.NoError(t, i.Close(), name)
+					continue
+				}
+				require.NoError(t, err, name)
+				for _, want := range tt.values {
+					got, err := i.Pop()
+					require.NoError(t, err, name)
+					require.Equal(t, want, got, name)
+				}
+				require.Equal(t, len(tt.program.Locals), i.Len(), name)
+				require.NoError(t, i.Close(), name)
+			}
 		}
 	})
 
@@ -2087,21 +2058,21 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, types.BoxI32(4*heapRunway), got)
 	})
 
-	for _, tt := range []struct {
-		name        string
-		typ         types.Type
-		initial     types.Boxed
-		replacement types.Boxed
-		want        types.Value
-	}{
-		{name: "i1", typ: types.TypeI1, initial: types.BoxI1(false), replacement: types.BoxI1(true), want: types.I1(true)},
-		{name: "i8", typ: types.TypeI8, initial: types.BoxI8(1), replacement: types.BoxI8(2), want: types.I8(2)},
-		{name: "i32", typ: types.TypeI32, initial: types.BoxI32(1), replacement: types.BoxI32(2), want: types.I32(2)},
-		{name: "i64", typ: types.TypeI64, initial: types.BoxI64(1), replacement: types.BoxI64(2), want: types.I64(2)},
-		{name: "f32", typ: types.TypeF32, initial: types.BoxF32(1), replacement: types.BoxF32(2), want: types.F32(2)},
-		{name: "f64", typ: types.TypeF64, initial: types.BoxF64(1), replacement: types.BoxF64(2), want: types.F64(2)},
-	} {
-		t.Run("ref set and get round-trip/"+tt.name, func(t *testing.T) {
+	t.Run("round-trips a ref set and get", func(t *testing.T) {
+		for _, tt := range []struct {
+			name        string
+			typ         types.Type
+			initial     types.Boxed
+			replacement types.Boxed
+			want        types.Value
+		}{
+			{name: "i1", typ: types.TypeI1, initial: types.BoxI1(false), replacement: types.BoxI1(true), want: types.I1(true)},
+			{name: "i8", typ: types.TypeI8, initial: types.BoxI8(1), replacement: types.BoxI8(2), want: types.I8(2)},
+			{name: "i32", typ: types.TypeI32, initial: types.BoxI32(1), replacement: types.BoxI32(2), want: types.I32(2)},
+			{name: "i64", typ: types.TypeI64, initial: types.BoxI64(1), replacement: types.BoxI64(2), want: types.I64(2)},
+			{name: "f32", typ: types.TypeF32, initial: types.BoxF32(1), replacement: types.BoxF32(2), want: types.F32(2)},
+			{name: "f64", typ: types.TypeF64, initial: types.BoxF64(1), replacement: types.BoxF64(2), want: types.F64(2)},
+		} {
 			prog := program.New([]instr.Instruction{
 				instr.New(instr.GLOBAL_GET, 0),
 				instr.New(instr.REF_NEW),
@@ -2111,156 +2082,225 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.REF_GET),
 			}, program.WithGlobals(tt.typ, tt.typ))
 			i := interp.New(prog)
-			defer i.Close()
-			require.NoError(t, i.SetGlobal(0, tt.initial))
-			require.NoError(t, i.SetGlobal(1, tt.replacement))
+			require.NoError(t, i.SetGlobal(0, tt.initial), tt.name)
+			require.NoError(t, i.SetGlobal(1, tt.replacement), tt.name)
 
-			require.NoError(t, i.Run(context.Background()))
+			require.NoError(t, i.Run(context.Background()), tt.name)
 			got, err := i.Pop()
-			require.NoError(t, err)
-			require.Equal(t, tt.want, got)
-		})
-	}
-
-	modes := []struct {
-		name string
-		opts []interp.Option
-	}{
-		{name: "standalone", opts: []interp.Option{interp.WithTick(1)}},
-		{name: "fused", opts: []interp.Option{}},
-	}
-	for _, tt := range runTests {
-		name := runTestName(tt.program)
-		for _, mode := range modes {
-			t.Run(name+"/"+mode.name, func(t *testing.T) {
-				i := interp.New(tt.program, mode.opts...)
-
-				err := i.Run(context.Background())
-				if tt.err != nil {
-					require.ErrorIs(t, err, tt.err)
-					require.NoError(t, i.Close())
-					return
-				}
-				require.NoError(t, err)
-				for _, want := range tt.values {
-					got, err := i.Pop()
-					require.NoError(t, err)
-					require.Equal(t, want, got)
-				}
-				require.Equal(t, len(tt.program.Locals), i.Len())
-				require.NoError(t, i.Close())
-			})
+			require.NoError(t, err, tt.name)
+			require.Equal(t, tt.want, got, tt.name)
+			require.NoError(t, i.Close(), tt.name)
 		}
-	}
+	})
 
-	var benchmarkNumeric []instr.Instruction
-	for range 64 {
-		benchmarkNumeric = append(benchmarkNumeric,
+	t.Run("matches exact and fused state", func(t *testing.T) {
+		type state struct {
+			code    types.ErrorCode
+			ip      int
+			fp      int
+			sp      int
+			stack   []types.Boxed
+			globals []types.Boxed
+			rc      map[int]int
+		}
+
+		huge := int64(1) << 50
+		fn := types.NewFunctionBuilder(nil).Emit(instr.New(instr.RETURN)).MustBuild()
+		coroutine := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
 			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.I32_CONST, 2),
-			instr.New(instr.I32_ADD),
-			instr.New(instr.DROP),
-		)
-	}
-	benchmarkNumeric = append(benchmarkNumeric, instr.New(instr.I32_CONST, 42))
-
-	parityPrograms := []struct {
-		name string
-		prog *program.Program
-	}{
-		{
-			name: "integer arithmetic",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 20),
-				instr.New(instr.I32_CONST, 22),
-				instr.New(instr.I32_ADD),
-			}),
-		},
-		{
-			name: "local arithmetic store",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 5),
-				instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.LOCAL_GET, 0),
-				instr.New(instr.I32_CONST, 3),
-				instr.New(instr.I32_ADD),
-				instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.LOCAL_GET, 0),
-			}, program.WithLocals(types.TypeI32)),
-		},
-		{
-			name: "global mutation",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 7),
-				instr.New(instr.GLOBAL_SET, 0),
-				instr.New(instr.GLOBAL_GET, 0),
-			}, program.WithGlobals(types.TypeI32)),
-		},
-		{
-			name: "array access",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.ARRAY_GET),
-			}, program.WithConstants(types.TypedArray[int32]{10, 20, 30})),
-		},
-		{
-			name: "divide by zero trap",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.I32_CONST, 0),
-				instr.New(instr.I32_DIV_S),
-			}),
-		},
-		{
-			name: "coroutine state",
-			prog: program.New(
-				[]instr.Instruction{
+			instr.New(instr.YIELD),
+			instr.New(instr.RETURN),
+		).MustBuild()
+		for _, tt := range []struct {
+			name string
+			prog *program.Program
+			err  error
+		}{
+			{
+				name: "integer arithmetic",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 20),
+					instr.New(instr.I32_CONST, 22),
+					instr.New(instr.I32_ADD),
+				}),
+			},
+			{
+				name: "local arithmetic store",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 5),
+					instr.New(instr.LOCAL_SET, 0),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_CONST, 3),
+					instr.New(instr.I32_ADD),
+					instr.New(instr.LOCAL_SET, 0),
+					instr.New(instr.LOCAL_GET, 0),
+				}, program.WithLocals(types.TypeI32)),
+			},
+			{
+				name: "global mutation",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 7),
+					instr.New(instr.GLOBAL_SET, 0),
+					instr.New(instr.GLOBAL_GET, 0),
+				}, program.WithGlobals(types.TypeI32)),
+			},
+			{
+				name: "array access",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.ARRAY_GET),
+				}, program.WithConstants(types.TypedArray[int32]{10, 20, 30})),
+			},
+			{
+				name: "coroutine state",
+				prog: program.New([]instr.Instruction{
 					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.CALL),
 					instr.New(instr.CORO_DONE),
-				},
-				program.WithConstants(
-					types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-						instr.New(instr.I32_CONST, 1),
-						instr.New(instr.YIELD),
-						instr.New(instr.RETURN),
-					).MustBuild(),
-				),
-			),
-		},
-	}
-	type outcome struct {
-		values  []types.Value
-		globals []types.Boxed
-		code    types.ErrorCode
-	}
-	run := func(t *testing.T, prog *program.Program, opts ...interp.Option) outcome {
-		t.Helper()
-		i := interp.New(prog, opts...)
-		defer i.Close()
-		err := i.Run(context.Background())
-		result := outcome{code: interp.ErrorCode(err)}
-		for i.Len() > 0 {
-			value, popErr := i.Pop()
-			require.NoError(t, popErr)
-			result.values = append(result.values, value)
-		}
-		for index := range prog.Globals {
-			value, globalErr := i.Global(index)
-			require.NoError(t, globalErr)
-			result.globals = append(result.globals, value)
-		}
-		return result
-	}
-	for _, tt := range parityPrograms {
-		t.Run(tt.name, func(t *testing.T) {
-			oracle := run(t, tt.prog, interp.WithTick(1))
-			require.Equal(t, oracle, run(t, tt.prog))
-		})
-	}
+				}, program.WithConstants(coroutine)),
+			},
+			{
+				name: "promoted i64 eqz branch",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I64_CONST, i64operand(huge)),
+					instr.New(instr.I64_EQZ),
+					instr.New(instr.BR_IF, 0),
+				}),
+			},
+			{
+				name: "promoted i64 comparison branch",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I64_CONST, i64operand(huge)),
+					instr.New(instr.I64_CONST, i64operand(huge)),
+					instr.New(instr.I64_EQ),
+					instr.New(instr.BR_IF, 0),
+				}),
+			},
+			{
+				name: "promoted i64 local binary",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I64_CONST, i64operand(1)),
+					instr.New(instr.LOCAL_SET, 0),
+					instr.New(instr.I64_CONST, i64operand(huge)),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I64_ADD),
+					instr.New(instr.DROP),
+				}, program.WithLocals(types.TypeI64)),
+			},
+			{
+				name: "local ref drop",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 7),
+					instr.New(instr.REF_NEW),
+					instr.New(instr.LOCAL_SET, 0),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.DROP),
+				}, program.WithLocals(types.TypeAny)),
+			},
+			{
+				name: "function constant drop",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.DROP),
+				}, program.WithConstants(fn)),
+			},
+			{
+				name: "string constant drop",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.DROP),
+				}, program.WithConstants(types.String("value"))),
+			},
+			{
+				name: "i32 divide by zero",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 90),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.I32_DIV_S),
+				}),
+				err: interp.ErrDivideByZero,
+			},
+			{
+				name: "promoted i64 divide by zero",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I64_CONST, i64operand(huge)),
+					instr.New(instr.I64_CONST, 0),
+					instr.New(instr.I64_DIV_S),
+				}),
+				err: interp.ErrDivideByZero,
+			},
+			{
+				name: "promoted i64 local divide by zero",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I64_CONST, i64operand(huge)),
+					instr.New(instr.LOCAL_SET, 0),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I64_CONST, 0),
+					instr.New(instr.I64_DIV_S),
+				}, program.WithLocals(types.TypeI64)),
+				err: interp.ErrDivideByZero,
+			},
+			{
+				name: "module completion adopts a borrowed constant reference",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+				}, program.WithConstants(types.TypedArray[int32]{1, 2, 3})),
+			},
+			{
+				name: "owned reference dropped before module completion",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.REF_NULL),
+					instr.New(instr.DROP),
+					instr.New(instr.CONST_GET, 0),
+				}, program.WithConstants(types.TypedArray[int32]{1, 2, 3})),
+			},
+		} {
+			states := make([]state, 0, 2)
+			for _, opts := range [][]interp.Option{
+				{interp.WithTick(1)},
+				{},
+			} {
+				i := interp.New(tt.prog, opts...)
+				err := i.Run(context.Background())
+				if tt.err == nil {
+					require.NoError(t, err, tt.name)
+				} else {
+					require.ErrorIs(t, err, tt.err, tt.name)
+				}
 
-	t.Run("entry frame yield resumes on the next Run call", func(t *testing.T) {
+				got := state{
+					code: interp.ErrorCode(err),
+					ip:   i.IP(),
+					fp:   i.FP(),
+					sp:   i.Len(),
+					rc:   make(map[int]int),
+				}
+				for idx := 0; idx < got.sp; idx++ {
+					v, peekErr := i.Peek(got.sp - 1 - idx)
+					require.NoError(t, peekErr, tt.name)
+					got.stack = append(got.stack, v)
+				}
+				for idx := range tt.prog.Globals {
+					v, globalErr := i.Global(idx)
+					require.NoError(t, globalErr, tt.name)
+					got.globals = append(got.globals, v)
+				}
+				for addr := 1; addr < i.HeapLen(); addr++ {
+					count, rcErr := i.RefCount(addr)
+					if rcErr != nil || count == 0 {
+						continue
+					}
+					got.rc[addr] = count
+				}
+				states = append(states, got)
+				require.NoError(t, i.Close(), tt.name)
+			}
+			require.Equal(t, states[0], states[1], tt.name)
+		}
+	})
+
+	t.Run("resumes an entry-frame yield on the next call", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.YIELD),
@@ -2277,7 +2317,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, types.I32(3), v)
 	})
 
-	t.Run("SELECT keeps the selected ref and releases the discarded ref", func(t *testing.T) {
+	t.Run("SELECT keeps the selected ref and releases the discarded one", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
 			instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW), // heap[2]
@@ -2299,7 +2339,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.ErrorIs(t, err, interp.ErrSegmentationFault) // discarded ref released to zero
 	})
 
-	t.Run("GLOBAL_TEE retains the ref stored into the global slot", func(t *testing.T) {
+	t.Run("GLOBAL_TEE retains the ref stored into the global", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
 			instr.New(instr.GLOBAL_TEE, 0), // duplicates ownership: stack + global
@@ -2318,7 +2358,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 1, rc) // global slot keeps the ref alive
 	})
 
-	t.Run("LOCAL_TEE retains the ref stored into the local slot", func(t *testing.T) {
+	t.Run("LOCAL_TEE retains the ref stored into the local", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
 			instr.New(instr.LOCAL_TEE, 0), // duplicates ownership: stack + local
@@ -2337,66 +2377,56 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 1, rc) // local slot keeps the ref alive
 	})
 
-	t.Run("REF_EQ releases both consumed refs", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
-			instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW), // heap[2]
-			instr.New(instr.REF_EQ),
-		})
-		i := interp.New(prog)
-		defer i.Close()
+	t.Run("ref operations release the refs they consume", func(t *testing.T) {
+		for _, tt := range []struct {
+			name     string
+			prog     *program.Program
+			released []int
+		}{
+			{
+				name: "REF_EQ",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
+					instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW), // heap[2]
+					instr.New(instr.REF_EQ),
+				}),
+				released: []int{1, 2},
+			},
+			{
+				name: "REF_NE",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
+					instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW), // heap[2]
+					instr.New(instr.REF_NE),
+				}),
+				released: []int{1, 2},
+			},
+			{
+				name: "REF_TEST",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
+					instr.New(instr.REF_TEST, 0),
+				}, program.WithTypes(types.TypeI32)),
+				released: []int{1},
+			},
+			{
+				name: "REF_IS_NULL",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
+					instr.New(instr.REF_IS_NULL),
+				}),
+				released: []int{1},
+			},
+		} {
+			i := interp.New(tt.prog)
 
-		require.NoError(t, i.Run(context.Background()))
-
-		_, err := i.RefCount(1)
-		require.ErrorIs(t, err, interp.ErrSegmentationFault)
-		_, err = i.RefCount(2)
-		require.ErrorIs(t, err, interp.ErrSegmentationFault)
-	})
-
-	t.Run("REF_NE releases both consumed refs", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
-			instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW), // heap[2]
-			instr.New(instr.REF_NE),
-		})
-		i := interp.New(prog)
-		defer i.Close()
-
-		require.NoError(t, i.Run(context.Background()))
-
-		_, err := i.RefCount(1)
-		require.ErrorIs(t, err, interp.ErrSegmentationFault)
-		_, err = i.RefCount(2)
-		require.ErrorIs(t, err, interp.ErrSegmentationFault)
-	})
-
-	t.Run("REF_TEST releases the consumed ref", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
-			instr.New(instr.REF_TEST, 0),
-		}, program.WithTypes(types.TypeI32))
-		i := interp.New(prog)
-		defer i.Close()
-
-		require.NoError(t, i.Run(context.Background()))
-
-		_, err := i.RefCount(1)
-		require.ErrorIs(t, err, interp.ErrSegmentationFault)
-	})
-
-	t.Run("REF_IS_NULL releases the consumed ref", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
-			instr.New(instr.REF_IS_NULL),
-		})
-		i := interp.New(prog)
-		defer i.Close()
-
-		require.NoError(t, i.Run(context.Background()))
-
-		_, err := i.RefCount(1)
-		require.ErrorIs(t, err, interp.ErrSegmentationFault)
+			require.NoError(t, i.Run(context.Background()), tt.name)
+			for _, addr := range tt.released {
+				_, err := i.RefCount(addr)
+				require.ErrorIs(t, err, interp.ErrSegmentationFault, tt.name)
+			}
+			require.NoError(t, i.Close(), tt.name)
+		}
 	})
 
 	t.Run("STRUCT_NEW_DEFAULT reports stack overflow before mutating sp", func(t *testing.T) {
@@ -2411,74 +2441,75 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 1, i.Len())
 	})
 
-	t.Run("LOCAL_GET rejects one-past-current local slot", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.DROP),
-			instr.New(instr.LOCAL_GET, 0),
-		}, program.WithLocals(types.TypeI32))
-		i := interp.New(prog, interp.WithTick(1))
-		defer i.Close()
+	t.Run("faults on an invalid slot or size", func(t *testing.T) {
+		for _, tt := range []struct {
+			name string
+			prog *program.Program
+			opts []interp.Option
+		}{
+			{
+				name: "LOCAL_GET one past the current locals",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.DROP),
+					instr.New(instr.LOCAL_GET, 0),
+				}, program.WithLocals(types.TypeI32)),
+				opts: []interp.Option{interp.WithTick(1)},
+			},
+			{
+				name: "LOCAL_GET undeclared",
+				prog: program.New([]instr.Instruction{instr.New(instr.LOCAL_GET, 0)}),
+				opts: []interp.Option{interp.WithTick(1)},
+			},
+			{
+				name: "LOCAL_SET one past the current locals",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.DROP),
+					instr.New(instr.DROP),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.LOCAL_SET, 1),
+				}, program.WithLocals(types.TypeI32, types.TypeI32)),
+				opts: []interp.Option{interp.WithTick(1)},
+			},
+			{
+				name: "LOCAL_TEE one past the current locals",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.DROP),
+					instr.New(instr.DROP),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.LOCAL_TEE, 1),
+				}, program.WithLocals(types.TypeI32, types.TypeI32)),
+				opts: []interp.Option{interp.WithTick(1)},
+			},
+			{
+				name: "GLOBAL_SET undeclared",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.GLOBAL_SET, 0),
+				}),
+			},
+			{
+				name: "GLOBAL_TEE undeclared",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.GLOBAL_TEE, 0),
+				}),
+			},
+			{
+				name: "ARRAY_NEW_DEFAULT negative size",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, i32operand(-1)),
+					instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				}, program.WithTypes(types.TypeI32Array)),
+			},
+		} {
+			i := interp.New(tt.prog, tt.opts...)
 
-		require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault)
+			require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault, tt.name)
+			require.NoError(t, i.Close(), tt.name)
+		}
 	})
 
-	t.Run("LOCAL_GET rejects undeclared metadata without panicking during threading", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.LOCAL_GET, 0)})
-		i := interp.New(prog, interp.WithTick(1))
-		defer i.Close()
-
-		require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault)
-	})
-
-	t.Run("LOCAL_SET rejects one-past-current local slot", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.DROP),
-			instr.New(instr.DROP),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.LOCAL_SET, 1),
-		}, program.WithLocals(types.TypeI32, types.TypeI32))
-		i := interp.New(prog, interp.WithTick(1))
-		defer i.Close()
-
-		require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault)
-	})
-
-	t.Run("LOCAL_TEE rejects one-past-current local slot", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.DROP),
-			instr.New(instr.DROP),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.LOCAL_TEE, 1),
-		}, program.WithLocals(types.TypeI32, types.TypeI32))
-		i := interp.New(prog, interp.WithTick(1))
-		defer i.Close()
-
-		require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault)
-	})
-
-	t.Run("GLOBAL_SET rejects an undeclared global slot", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.GLOBAL_SET, 0),
-		})
-		i := interp.New(prog)
-		defer i.Close()
-
-		require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault)
-	})
-
-	t.Run("GLOBAL_TEE rejects an undeclared global slot", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.GLOBAL_TEE, 0),
-		})
-		i := interp.New(prog)
-		defer i.Close()
-
-		require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault)
-	})
-
-	t.Run("unseeded declared globals read kind-correct zeros", func(t *testing.T) {
+	t.Run("reads kind-correct zeros from unseeded globals", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.GLOBAL_GET, 0),
 			instr.New(instr.I32_CONST, i32operand(2)),
@@ -2502,7 +2533,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, types.BoxedNull, v2)
 	})
 
-	t.Run("GLOBAL_GET declares and reads an I32 global with a fused superinstruction", func(t *testing.T) {
+	t.Run("GLOBAL_GET declares and reads an I32 global when fused", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5),
 			instr.New(instr.GLOBAL_SET, 0),
@@ -2518,36 +2549,6 @@ func TestInterpreter_Run(t *testing.T) {
 		v, err := i.Peek(0)
 		require.NoError(t, err)
 		require.Equal(t, types.BoxI32(7), v)
-	})
-
-	t.Run("GLOBAL_TEE retains the ref stored into a declared ref global", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
-			instr.New(instr.GLOBAL_TEE, 0),
-			instr.New(instr.DROP),
-		}, program.WithGlobals(types.TypeAny))
-		i := interp.New(prog)
-		defer i.Close()
-
-		require.NoError(t, i.Run(context.Background()))
-
-		g, err := i.Global(0)
-		require.NoError(t, err)
-		require.Equal(t, 1, g.Ref())
-		rc, err := i.RefCount(1)
-		require.NoError(t, err)
-		require.Equal(t, 1, rc)
-	})
-
-	t.Run("ARRAY_NEW_DEFAULT rejects negative size with VM error", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, i32operand(-1)),
-			instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-		}, program.WithTypes(types.TypeI32Array))
-		i := interp.New(prog)
-		defer i.Close()
-
-		require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault)
 	})
 
 	t.Run("ARRAY_FILL releases every overwritten ref element", func(t *testing.T) {
@@ -2582,7 +2583,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 3, rc5) // fill value owned once per filled slot
 	})
 
-	t.Run("host call with an all-scalar signature works through the generic path (exact, fusion disabled)", func(t *testing.T) {
+	t.Run("calls a host function with a scalar signature on the generic path", func(t *testing.T) {
 		hostFn := interp.NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}},
 			func(_ *interp.Interpreter, args []types.Boxed) ([]types.Boxed, error) {
 				return []types.Boxed{types.BoxI32(args[0].I32() * args[1].I32())}, nil
@@ -2600,48 +2601,39 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, types.I32(42), v)
 	})
 
-	t.Run("host call releases a ref param the callee does not return (fused)", func(t *testing.T) {
-		hostFn := interp.NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}},
-			func(_ *interp.Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
-				return []types.Boxed{types.BoxI32(1)}, nil
-			})
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 9), instr.New(instr.REF_NEW), // heap[1] is hostFn; heap[2] is this ref
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-		}, program.WithConstants(hostFn))
-		i := interp.New(prog)
-		defer i.Close()
+	t.Run("host call releases a ref param the callee does not return", func(t *testing.T) {
+		for _, tt := range []struct {
+			name string
+			opts []interp.Option
+		}{
+			{name: "fused"},
+			{name: "generic", opts: []interp.Option{interp.WithTick(1)}},
+		} {
+			hostFn := interp.NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}},
+				func(_ *interp.Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+					return []types.Boxed{types.BoxI32(1)}, nil
+				})
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 9), instr.New(instr.REF_NEW), // heap[1] is hostFn; heap[2] is this ref
+				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			}, program.WithConstants(hostFn))
+			i := interp.New(prog, tt.opts...)
 
-		require.NoError(t, i.Run(context.Background()))
-		_, err := i.RefCount(2)
-		require.ErrorIs(t, err, interp.ErrSegmentationFault) // arg not returned: host cleanup released it
+			require.NoError(t, i.Run(context.Background()), tt.name)
+			_, err := i.RefCount(2)
+			require.ErrorIs(t, err, interp.ErrSegmentationFault, tt.name) // arg not returned: host cleanup released it
+			require.NoError(t, i.Close(), tt.name)
+		}
 	})
 
-	t.Run("host call releases a ref param the callee does not return (generic, exact)", func(t *testing.T) {
-		hostFn := interp.NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}},
-			func(_ *interp.Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
-				return []types.Boxed{types.BoxI32(1)}, nil
-			})
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 9), instr.New(instr.REF_NEW),
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-		}, program.WithConstants(hostFn))
-		i := interp.New(prog, interp.WithTick(1))
-		defer i.Close()
-
-		require.NoError(t, i.Run(context.Background()))
-		_, err := i.RefCount(2)
-		require.ErrorIs(t, err, interp.ErrSegmentationFault)
-	})
-
-	for _, tt := range []struct {
-		name string
-		opts []interp.Option
-	}{
-		{name: "fused"},
-		{name: "generic", opts: []interp.Option{interp.WithTick(1)}},
-	} {
-		t.Run("host call releases the consumed callable ref/"+tt.name, func(t *testing.T) {
+	t.Run("host call releases the consumed callable ref", func(t *testing.T) {
+		for _, tt := range []struct {
+			name string
+			opts []interp.Option
+		}{
+			{name: "fused"},
+			{name: "generic", opts: []interp.Option{interp.WithTick(1)}},
+		} {
 			hostFn := interp.NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
 				func(_ *interp.Interpreter, args []types.Boxed) ([]types.Boxed, error) {
 					return []types.Boxed{args[0]}, nil
@@ -2651,14 +2643,14 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
 			}, program.WithConstants(hostFn))
 			i := interp.New(prog, tt.opts...)
-			defer i.Close()
 
-			require.NoError(t, i.Run(context.Background()))
+			require.NoError(t, i.Run(context.Background()), tt.name)
 			rc, err := i.RefCount(1)
-			require.NoError(t, err)
-			require.Equal(t, 1, rc)
-		})
-	}
+			require.NoError(t, err, tt.name)
+			require.Equal(t, 1, rc, tt.name)
+			require.NoError(t, i.Close(), tt.name)
+		}
+	})
 
 	t.Run("generic host call can return the consumed callable ref", func(t *testing.T) {
 		hostFn := interp.NewHostFunction(&types.FunctionType{Returns: []types.Type{types.TypeAny}},
@@ -2681,7 +2673,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 2, rc)
 	})
 
-	t.Run("host call releases a promoted i64 param even though I64 is declared (not the scalar fast path)", func(t *testing.T) {
+	t.Run("host call releases a promoted i64 param", func(t *testing.T) {
 		huge := int64(1) << 50
 		hostFn := interp.NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI32}},
 			func(_ *interp.Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
@@ -2699,7 +2691,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.ErrorIs(t, err, interp.ErrSegmentationFault) // promoted i64 arg released: I64 params keep the generic scanning path
 	})
 
-	t.Run("UPVAL_GET retains a ref capture (generic path)", func(t *testing.T) {
+	t.Run("UPVAL_GET retains a ref capture", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{}).
 			Captures(types.TypeAny).Emit(
 			instr.New(instr.UPVAL_GET, 0), instr.New(instr.DROP),
@@ -2725,7 +2717,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 2, maxRC) // UPVAL_GET's retainBox held the capture live alongside its pushed copy
 	})
 
-	t.Run("UPVAL_SET releases a ref capture when overwritten (generic path)", func(t *testing.T) {
+	t.Run("UPVAL_SET releases the overwritten ref capture", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
 			Captures(types.TypeAny).Emit(
 			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
@@ -2746,7 +2738,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.ErrorIs(t, err, interp.ErrSegmentationFault) // old ref capture released on overwrite
 	})
 
-	t.Run("UPVAL_SET releases a promoted i64 capture even though I64 is declared (not the scalar fast path)", func(t *testing.T) {
+	t.Run("UPVAL_SET releases the overwritten promoted i64 capture", func(t *testing.T) {
 		oldHuge := int64(1) << 50
 		newHuge := int64(1) << 51
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI64}}).
@@ -2770,382 +2762,233 @@ func TestInterpreter_Run(t *testing.T) {
 		require.ErrorIs(t, err, interp.ErrSegmentationFault) // old promoted capture released: I64 captures keep the generic ref-aware path
 	})
 
-	type parityState struct {
-		code    types.ErrorCode
-		ip      int
-		fp      int
-		sp      int
-		stack   []types.Boxed
-		globals []types.Boxed
-		rc      map[int]int
-	}
+	t.Run("fused loaders compute the same result", func(t *testing.T) {
+		upvalI32Const := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			Captures(types.TypeI32).Emit(
+			instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+		).MustBuild()
+		upvalI64Const := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI64}}).
+			Captures(types.TypeI64).Emit(
+			instr.New(instr.UPVAL_GET, 0), instr.New(instr.I64_CONST, i64operand(3)), instr.New(instr.I64_ADD), instr.New(instr.RETURN),
+		).MustBuild()
+		upvalF32Const := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeF32}}).
+			Captures(types.TypeF32).Emit(
+			instr.New(instr.UPVAL_GET, 0), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_ADD), instr.New(instr.RETURN),
+		).MustBuild()
+		upvalF64Const := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeF64}}).
+			Captures(types.TypeF64).Emit(
+			instr.New(instr.UPVAL_GET, 0), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_ADD), instr.New(instr.RETURN),
+		).MustBuild()
+		upvalLocal := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			Captures(types.TypeI32).Locals(types.TypeI32).Emit(
+			instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.UPVAL_GET, 0), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+		).MustBuild()
+		globalUpval := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI64}}).
+			Captures(types.TypeI64).Emit(
+			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.UPVAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.RETURN),
+		).MustBuild()
+		upvalPair := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			Captures(types.TypeI32, types.TypeI32).Emit(
+			instr.New(instr.UPVAL_GET, 0), instr.New(instr.UPVAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+		).MustBuild()
 
-	huge := int64(1) << 50
-	fn := types.NewFunctionBuilder(nil).Emit(instr.New(instr.RETURN)).MustBuild()
-	parity := []struct {
-		name string
-		prog *program.Program
-		err  error
-	}{
-		{
-			name: "promoted i64 eqz branch preserves state",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I64_CONST, i64operand(huge)),
-				instr.New(instr.I64_EQZ),
-				instr.New(instr.BR_IF, 0),
-			}),
-		},
-		{
-			name: "promoted i64 comparison branch preserves state",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I64_CONST, i64operand(huge)),
-				instr.New(instr.I64_CONST, i64operand(huge)),
-				instr.New(instr.I64_EQ),
-				instr.New(instr.BR_IF, 0),
-			}),
-		},
-		{
-			name: "promoted i64 local binary preserves state",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I64_CONST, i64operand(1)),
-				instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.I64_CONST, i64operand(huge)),
-				instr.New(instr.LOCAL_GET, 0),
-				instr.New(instr.I64_ADD),
-				instr.New(instr.DROP),
-			}, program.WithLocals(types.TypeI64)),
-		},
-		{
-			name: "local ref drop preserves ownership",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 7),
-				instr.New(instr.REF_NEW),
-				instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.LOCAL_GET, 0),
-				instr.New(instr.DROP),
-			}, program.WithLocals(types.TypeAny)),
-		},
-		{
-			name: "function constant drop preserves ownership",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.DROP),
-			}, program.WithConstants(fn)),
-		},
-		{
-			name: "string constant drop preserves ownership",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.DROP),
-			}, program.WithConstants(types.String("value"))),
-		},
-		{
-			name: "i32 divide by zero preserves trap state",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 90),
-				instr.New(instr.I32_CONST, 0),
-				instr.New(instr.I32_DIV_S),
-			}),
-			err: interp.ErrDivideByZero,
-		},
-		{
-			name: "promoted i64 divide by zero preserves trap state",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I64_CONST, i64operand(huge)),
-				instr.New(instr.I64_CONST, 0),
-				instr.New(instr.I64_DIV_S),
-			}),
-			err: interp.ErrDivideByZero,
-		},
-		{
-			name: "promoted i64 local divide by zero preserves trap state",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I64_CONST, i64operand(huge)),
-				instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.LOCAL_GET, 0),
-				instr.New(instr.I64_CONST, 0),
-				instr.New(instr.I64_DIV_S),
-			}, program.WithLocals(types.TypeI64)),
-			err: interp.ErrDivideByZero,
-		},
-		{
-			name: "module completion adopts a borrowed constant reference",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-			}, program.WithConstants(types.TypedArray[int32]{1, 2, 3})),
-		},
-		{
-			name: "an owned reference dropped before module completion keeps every count",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.REF_NULL),
-				instr.New(instr.DROP),
-				instr.New(instr.CONST_GET, 0),
-			}, program.WithConstants(types.TypedArray[int32]{1, 2, 3})),
-		},
-	}
-	for _, tt := range parity {
-		t.Run(tt.name, func(t *testing.T) {
-			states := make([]parityState, 0, 2)
-			for _, opts := range [][]interp.Option{
-				{interp.WithTick(1)},
-				{},
-			} {
-				i := interp.New(tt.prog, opts...)
-				err := i.Run(context.Background())
-				if tt.err == nil {
-					require.NoError(t, err)
-				} else {
-					require.ErrorIs(t, err, tt.err)
-				}
+		for _, tt := range []struct {
+			name string
+			prog *program.Program
+			opts []interp.Option
+			want types.Value
+		}{
+			{
+				name: "local and local i64",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I64_CONST, i64operand(5)), instr.New(instr.LOCAL_SET, 0),
+					instr.New(instr.I64_CONST, i64operand(3)), instr.New(instr.LOCAL_SET, 1),
+					instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_ADD),
+				}, program.WithLocals(types.TypeI64, types.TypeI64)),
+				want: types.I64(8),
+			},
+			{
+				name: "local and local f32",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.F32_CONST, uint64(math.Float32bits(5))), instr.New(instr.LOCAL_SET, 0),
+					instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.LOCAL_SET, 1),
+					instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.F32_ADD),
+				}, program.WithLocals(types.TypeF32, types.TypeF32)),
+				want: types.F32(8),
+			},
+			{
+				name: "local and local f64",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.F64_CONST, math.Float64bits(5)), instr.New(instr.LOCAL_SET, 0),
+					instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.LOCAL_SET, 1),
+					instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_ADD),
+				}, program.WithLocals(types.TypeF64, types.TypeF64)),
+				want: types.F64(8),
+			},
+			{
+				name: "upval and i32 constant",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
+				}, program.WithConstants(upvalI32Const)),
+				want: types.I32(8),
+			},
+			{
+				name: "upval and i64 constant",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I64_CONST, i64operand(5)), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
+				}, program.WithConstants(upvalI64Const)),
+				want: types.I64(8),
+			},
+			{
+				name: "upval and f32 constant",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.F32_CONST, uint64(math.Float32bits(5))), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
+				}, program.WithConstants(upvalF32Const)),
+				want: types.F32(8),
+			},
+			{
+				name: "upval and f64 constant",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.F64_CONST, math.Float64bits(5)), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
+				}, program.WithConstants(upvalF64Const)),
+				want: types.F64(8),
+			},
+			{
+				name: "upval and local",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
+				}, program.WithConstants(upvalLocal)),
+				want: types.I32(8),
+			},
+			{
+				name: "global and i32 constant",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.GLOBAL_SET, 0),
+					instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.I32_ADD),
+				}, program.WithGlobals(types.TypeI32)),
+				want: types.I32(8),
+			},
+			{
+				name: "two globals",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.GLOBAL_SET, 0),
+					instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.GLOBAL_SET, 1),
+					instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.I32_ADD),
+				}, program.WithGlobals(types.TypeI32, types.TypeI32)),
+				want: types.I32(8),
+			},
+			{
+				// Exact mode disables fusion, forcing the generic path.
+				name: "two globals unfused",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.GLOBAL_SET, 0),
+					instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.GLOBAL_SET, 1),
+					instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.I32_ADD),
+				}, program.WithGlobals(types.TypeI32, types.TypeI32)),
+				opts: []interp.Option{interp.WithTick(1)},
+				want: types.I32(8),
+			},
+			{
+				name: "global and upval",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I64_CONST, i64operand(5)), instr.New(instr.GLOBAL_SET, 0),
+					instr.New(instr.I64_CONST, i64operand(3)), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
+				}, program.WithConstants(globalUpval), program.WithGlobals(types.TypeI64)),
+				want: types.I64(8),
+			},
+			{
+				name: "two upvals",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.I32_CONST, i32operand(3)),
+					instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
+				}, program.WithConstants(upvalPair)),
+				want: types.I32(8),
+			},
+		} {
+			i := interp.New(tt.prog, tt.opts...)
 
-				state := parityState{
-					code: interp.ErrorCode(err),
-					ip:   i.IP(),
-					fp:   i.FP(),
-					sp:   i.Len(),
-					rc:   make(map[int]int),
-				}
-				for idx := 0; idx < state.sp; idx++ {
-					v, peekErr := i.Peek(state.sp - 1 - idx)
-					require.NoError(t, peekErr)
-					state.stack = append(state.stack, v)
-				}
-				for idx := range tt.prog.Globals {
-					v, globalErr := i.Global(idx)
-					require.NoError(t, globalErr)
-					state.globals = append(state.globals, v)
-				}
-				for addr := 1; addr < i.HeapLen(); addr++ {
-					count, rcErr := i.RefCount(addr)
-					if rcErr != nil || count == 0 {
-						continue
-					}
-					state.rc[addr] = count
-				}
-				states = append(states, state)
-				require.NoError(t, i.Close())
-			}
-			require.Equal(t, states[0], states[1])
-		})
-	}
-
-	// Regression: fused rhs loaders must borrow promoted I64 values without
-	// releasing the reference owned by the source slot.
-	huge = int64(1) << 62
-	upval := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI64}}).
-		Captures(types.TypeI64).Emit(
-		instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.UPVAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.DROP),
-		instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.UPVAL_GET, 0), instr.New(instr.I64_ADD),
-		instr.New(instr.RETURN),
-	).MustBuild()
-
-	upvalI32Const := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-		Captures(types.TypeI32).Emit(
-		instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
-	).MustBuild()
-	upvalI64Const := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI64}}).
-		Captures(types.TypeI64).Emit(
-		instr.New(instr.UPVAL_GET, 0), instr.New(instr.I64_CONST, i64operand(3)), instr.New(instr.I64_ADD), instr.New(instr.RETURN),
-	).MustBuild()
-	upvalF32Const := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeF32}}).
-		Captures(types.TypeF32).Emit(
-		instr.New(instr.UPVAL_GET, 0), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_ADD), instr.New(instr.RETURN),
-	).MustBuild()
-	upvalF64Const := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeF64}}).
-		Captures(types.TypeF64).Emit(
-		instr.New(instr.UPVAL_GET, 0), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_ADD), instr.New(instr.RETURN),
-	).MustBuild()
-	upvalLocal := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-		Captures(types.TypeI32).Locals(types.TypeI32).Emit(
-		instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.LOCAL_SET, 0),
-		instr.New(instr.UPVAL_GET, 0), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
-	).MustBuild()
-	globalUpval := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI64}}).
-		Captures(types.TypeI64).Emit(
-		instr.New(instr.GLOBAL_GET, 0), instr.New(instr.UPVAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.RETURN),
-	).MustBuild()
-	upvalPair := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-		Captures(types.TypeI32, types.TypeI32).Emit(
-		instr.New(instr.UPVAL_GET, 0), instr.New(instr.UPVAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
-	).MustBuild()
-	fusions := []struct {
-		name string
-		prog *program.Program
-		want types.Value
-	}{
-		{
-			name: "local and local i64",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I64_CONST, i64operand(5)), instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.I64_CONST, i64operand(3)), instr.New(instr.LOCAL_SET, 1),
-				instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_ADD),
-			}, program.WithLocals(types.TypeI64, types.TypeI64)),
-			want: types.I64(8),
-		},
-		{
-			name: "local and local f32",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.F32_CONST, uint64(math.Float32bits(5))), instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.LOCAL_SET, 1),
-				instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.F32_ADD),
-			}, program.WithLocals(types.TypeF32, types.TypeF32)),
-			want: types.F32(8),
-		},
-		{
-			name: "local and local f64",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.F64_CONST, math.Float64bits(5)), instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.LOCAL_SET, 1),
-				instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_ADD),
-			}, program.WithLocals(types.TypeF64, types.TypeF64)),
-			want: types.F64(8),
-		},
-		{
-			name: "upval and i32 constant",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
-			}, program.WithConstants(upvalI32Const)),
-			want: types.I32(8),
-		},
-		{
-			name: "upval and i64 constant",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I64_CONST, i64operand(5)), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
-			}, program.WithConstants(upvalI64Const)),
-			want: types.I64(8),
-		},
-		{
-			name: "upval and f32 constant",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.F32_CONST, uint64(math.Float32bits(5))), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
-			}, program.WithConstants(upvalF32Const)),
-			want: types.F32(8),
-		},
-		{
-			name: "upval and f64 constant",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.F64_CONST, math.Float64bits(5)), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
-			}, program.WithConstants(upvalF64Const)),
-			want: types.F64(8),
-		},
-		{
-			name: "upval and local",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
-			}, program.WithConstants(upvalLocal)),
-			want: types.I32(8),
-		},
-		{
-			name: "global and i32 constant",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.GLOBAL_SET, 0),
-				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.I32_ADD),
-			}, program.WithGlobals(types.TypeI32)),
-			want: types.I32(8),
-		},
-		{
-			name: "two globals",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.GLOBAL_SET, 0),
-				instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.GLOBAL_SET, 1),
-				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.I32_ADD),
-			}, program.WithGlobals(types.TypeI32, types.TypeI32)),
-			want: types.I32(8),
-		},
-		{
-			name: "global and upval",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I64_CONST, i64operand(5)), instr.New(instr.GLOBAL_SET, 0),
-				instr.New(instr.I64_CONST, i64operand(3)), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
-			}, program.WithConstants(globalUpval), program.WithGlobals(types.TypeI64)),
-			want: types.I64(8),
-		},
-		{
-			name: "two upvals",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.I32_CONST, i32operand(3)),
-				instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
-			}, program.WithConstants(upvalPair)),
-			want: types.I32(8),
-		},
-	}
-	for _, tt := range fusions {
-		t.Run(tt.name, func(t *testing.T) {
-			i := interp.New(tt.prog)
-			defer i.Close()
-
-			require.NoError(t, i.Run(context.Background()))
+			require.NoError(t, i.Run(context.Background()), tt.name)
 			got, err := i.Pop()
-			require.NoError(t, err)
-			require.Equal(t, tt.want, got)
-		})
-	}
+			require.NoError(t, err, tt.name)
+			require.Equal(t, tt.want, got, tt.name)
+			require.NoError(t, i.Close(), tt.name)
+		}
+	})
 
-	refs := []struct {
-		name string
-		prog *program.Program
-		want types.Value
-		refs int
-	}{
-		{
-			name: "repeated local reads keep the local reference",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I64_CONST, i64operand(huge)), instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.DROP),
-				instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_ADD),
-			}, program.WithLocals(types.TypeI64)),
-			want: types.I64(huge + 1),
-			refs: 1,
-		},
-		{
-			name: "mixed local reads keep the local reference",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I64_CONST, i64operand(huge)), instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.I64_ADD), instr.New(instr.DROP),
-				instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_ADD),
-			}, program.WithLocals(types.TypeI64)),
-			want: types.I64(2 * huge),
-			refs: 1,
-		},
-		{
-			name: "repeated global reads keep the global reference",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I64_CONST, i64operand(huge)), instr.New(instr.GLOBAL_SET, 0),
-				instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.DROP),
-				instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I64_ADD),
-			}, program.WithGlobals(types.TypeI64)),
-			want: types.I64(huge + 1),
-			refs: 1,
-		},
-		{
-			name: "repeated upval reads preserve the captured value",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I64_CONST, i64operand(huge)),
-				instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
-			}, program.WithConstants(upval)),
-			want: types.I64(huge + 1),
-			refs: 1,
-		},
-		{
-			name: "paired global reads preserve the global reference",
-			prog: program.New([]instr.Instruction{
-				instr.New(instr.I64_CONST, i64operand(huge)), instr.New(instr.GLOBAL_SET, 0),
-				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.DROP),
-				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I64_ADD),
-			}, program.WithGlobals(types.TypeI64)),
-			want: types.I64(2 * huge),
-			refs: 1,
-		},
-	}
-	for _, tt := range refs {
-		t.Run(tt.name, func(t *testing.T) {
+	t.Run("fused loaders borrow promoted i64 refs", func(t *testing.T) {
+		// Regression: fused rhs loaders must borrow promoted I64 values without
+		// releasing the reference owned by the source slot.
+		huge := int64(1) << 62
+		upval := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI64}}).
+			Captures(types.TypeI64).Emit(
+			instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.UPVAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.DROP),
+			instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.UPVAL_GET, 0), instr.New(instr.I64_ADD),
+			instr.New(instr.RETURN),
+		).MustBuild()
+
+		for _, tt := range []struct {
+			name string
+			prog *program.Program
+			want types.Value
+			refs int
+		}{
+			{
+				name: "repeated local reads keep the local reference",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I64_CONST, i64operand(huge)), instr.New(instr.LOCAL_SET, 0),
+					instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.DROP),
+					instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_ADD),
+				}, program.WithLocals(types.TypeI64)),
+				want: types.I64(huge + 1),
+				refs: 1,
+			},
+			{
+				name: "mixed local reads keep the local reference",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I64_CONST, i64operand(huge)), instr.New(instr.LOCAL_SET, 0),
+					instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.I64_ADD), instr.New(instr.DROP),
+					instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_ADD),
+				}, program.WithLocals(types.TypeI64)),
+				want: types.I64(2 * huge),
+				refs: 1,
+			},
+			{
+				name: "repeated global reads keep the global reference",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I64_CONST, i64operand(huge)), instr.New(instr.GLOBAL_SET, 0),
+					instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.DROP),
+					instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I64_ADD),
+				}, program.WithGlobals(types.TypeI64)),
+				want: types.I64(huge + 1),
+				refs: 1,
+			},
+			{
+				name: "repeated upval reads preserve the captured value",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I64_CONST, i64operand(huge)),
+					instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
+				}, program.WithConstants(upval)),
+				want: types.I64(huge + 1),
+				refs: 1,
+			},
+			{
+				name: "paired global reads preserve the global reference",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I64_CONST, i64operand(huge)), instr.New(instr.GLOBAL_SET, 0),
+					instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.DROP),
+					instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I64_ADD),
+				}, program.WithGlobals(types.TypeI64)),
+				want: types.I64(2 * huge),
+				refs: 1,
+			},
+		} {
 			i := interp.New(tt.prog)
-			defer i.Close()
 
-			require.NoError(t, i.Run(context.Background()))
+			require.NoError(t, i.Run(context.Background()), tt.name)
 			got, err := i.Pop()
-			require.NoError(t, err)
-			require.Equal(t, tt.want, got)
+			require.NoError(t, err, tt.name)
+			require.Equal(t, tt.want, got, tt.name)
 			live := 0
 			for addr := 1; addr < i.HeapLen(); addr++ {
 				count, rcErr := i.RefCount(addr)
@@ -3154,25 +2997,176 @@ func TestInterpreter_Run(t *testing.T) {
 				}
 				live += count
 			}
-			require.Equal(t, tt.refs, live)
-		})
-	}
-
-	t.Run("global/upval pair fusion is disabled in exact mode and still computes correctly", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.GLOBAL_SET, 0),
-			instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.GLOBAL_SET, 1),
-			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.I32_ADD),
-		}, program.WithGlobals(types.TypeI32, types.TypeI32))
-		i := interp.New(prog, interp.WithTick(1)) // exact: disables fusion, forcing the generic path
-		defer i.Close()
-
-		require.NoError(t, i.Run(context.Background()))
-		v, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(8), v)
+			require.Equal(t, tt.refs, live, tt.name)
+			require.NoError(t, i.Close(), tt.name)
+		}
 	})
 
+	t.Run("keeps coroutine captures live without duplicate collector edges", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeAny},
+			Returns: []types.Type{types.TypeI32}}).Captures(types.TypeAny).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.UPVAL_GET, 0),
+			instr.New(instr.I32_CONST, 30),
+			instr.New(instr.REF_NEW),
+			instr.New(instr.YIELD),
+			instr.New(instr.DROP),
+			instr.New(instr.REF_GET),
+			instr.New(instr.SWAP),
+			instr.New(instr.REF_GET),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN)).MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 10),
+			instr.New(instr.REF_NEW),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CLOSURE_NEW),
+			instr.New(instr.DUP),
+			instr.New(instr.I32_CONST, 20),
+			instr.New(instr.REF_NEW),
+			instr.New(instr.SWAP),
+			instr.New(instr.CALL),
+			instr.New(instr.DUP),
+			instr.New(instr.CORO_VALUE),
+			instr.New(instr.REF_GET),
+			instr.New(instr.RESUME),
+			instr.New(instr.CORO_VALUE)}, program.WithConstants(fn))
+		collected := false
+		var callableStoreErr error
+		var coroutineStoreErr error
+		var functionStoreErr error
+		vm := interp.New(prog,
+			interp.WithHeap(8),
+			interp.WithHeapLimit(8),
+			interp.WithTick(1),
+			interp.WithHook(func(vm *interp.Interpreter) error {
+				if collected || vm.IP() != 19 {
+					return nil
+				}
+				collected = true
+				callable, err := vm.Peek(1)
+				if err != nil {
+					return err
+				}
+				callableStoreErr = vm.Store(callable.Ref(), types.I32(99))
+				coroutine, err := vm.Peek(0)
+				if err != nil {
+					return err
+				}
+				coroutineStoreErr = vm.Store(coroutine.Ref(), types.I32(99))
+				value, err := vm.Load(callable.Ref())
+				if err != nil {
+					return err
+				}
+				closure, ok := value.(*types.Closure)
+				if !ok {
+					return interp.ErrTypeMismatch
+				}
+				functionStoreErr = vm.Store(int(closure.Fn), types.I32(99))
+				selfCycle(t, vm)
+				pressure, err := vm.Alloc(types.I32(1))
+				if err != nil {
+					return err
+				}
+				return vm.Release(pressure)
+			}))
+		defer vm.Close()
+
+		require.NoError(t, vm.Run(context.Background()))
+		require.True(t, collected)
+		require.ErrorIs(t, callableStoreErr, interp.ErrTypeMismatch)
+		require.ErrorIs(t, coroutineStoreErr, interp.ErrTypeMismatch)
+		require.ErrorIs(t, functionStoreErr, interp.ErrTypeMismatch)
+		value, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(30), value)
+	})
+
+	t.Run("preserves coroutine identity through tail calls", func(t *testing.T) {
+		for _, tt := range []struct {
+			name string
+			tail types.Value
+		}{
+			{
+				name: "function",
+				tail: types.NewFunctionBuilder(nil).
+					Returns(types.TypeI32).
+					Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
+					MustBuild(),
+			},
+			{
+				name: "host function",
+				tail: interp.NewHostFunction(
+					&types.FunctionType{Returns: []types.Type{types.TypeI32}},
+					func(*interp.Interpreter, []types.Boxed) ([]types.Boxed, error) {
+						return []types.Boxed{types.BoxI32(42)}, nil
+					}),
+			},
+		} {
+			fn := types.NewFunctionBuilder(nil).
+				Returns(types.TypeI32).
+				Emit(
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.YIELD),
+					instr.New(instr.DROP),
+					instr.New(instr.CONST_GET, 1),
+					instr.New(instr.RETURN_CALL)).
+				MustBuild()
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+				instr.New(instr.REF_NULL),
+				instr.New(instr.RESUME),
+				instr.New(instr.CORO_VALUE)}, program.WithConstants(fn, tt.tail))
+			vm := interp.New(prog)
+
+			require.NoError(t, vm.Run(context.Background()), tt.name)
+			value, err := vm.Pop()
+			require.NoError(t, err, tt.name)
+			require.Equal(t, types.I32(42), value, tt.name)
+			require.NoError(t, vm.Close(), tt.name)
+		}
+	})
+
+	t.Run("releases discarded coroutine completion values", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(nil).
+			Returns(types.TypeAny, types.TypeAny).
+			Emit(
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.YIELD),
+				instr.New(instr.DROP),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.REF_NEW),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.REF_NEW),
+				instr.New(instr.RETURN)).
+			MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.REF_NULL),
+			instr.New(instr.RESUME),
+			instr.New(instr.DUP),
+			instr.New(instr.CORO_VALUE),
+			instr.New(instr.REF_GET),
+			instr.New(instr.SWAP),
+			instr.New(instr.DROP),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 3),
+			instr.New(instr.REF_NEW),
+			instr.New(instr.I32_CONST, 4),
+			instr.New(instr.REF_NEW),
+			instr.New(instr.I32_CONST, 5),
+			instr.New(instr.REF_NEW)}, program.WithConstants(fn))
+		vm := interp.New(prog,
+			interp.WithHeap(5),
+			interp.WithHeapLimit(5))
+		defer vm.Close()
+
+		require.NoError(t, vm.Run(context.Background()))
+		require.Equal(t, 3, vm.Len())
+	})
 }
 
 func TestInterpreter_Marshal(t *testing.T) {
@@ -3473,18 +3467,20 @@ func TestInterpreter_Store(t *testing.T) {
 		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
 
-	t.Run("ignores same-address reference", func(t *testing.T) {
+	t.Run("ignores same-address ref", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		value := &trackedValue{}
 		addr, err := i.Alloc(value)
 		require.NoError(t, err)
-		require.NoError(t, i.Store(addr, types.BoxRef(addr)))
-		require.Equal(t, 0, value.closed)
-		v, err := i.Load(addr)
-		require.NoError(t, err)
-		require.Same(t, value, v)
+		for _, ref := range []types.Value{types.BoxRef(addr), types.Ref(addr)} {
+			require.NoError(t, i.Store(addr, ref))
+			require.Equal(t, 0, value.closed)
+			v, err := i.Load(addr)
+			require.NoError(t, err)
+			require.Same(t, value, v)
+		}
 	})
 
 	t.Run("ignores identical value", func(t *testing.T) {
@@ -3500,7 +3496,7 @@ func TestInterpreter_Store(t *testing.T) {
 		require.Equal(t, 0, value.closed)
 	})
 
-	t.Run("rejects different-address reference", func(t *testing.T) {
+	t.Run("rejects different-address ref", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		defer i.Close()
 
@@ -3510,11 +3506,13 @@ func TestInterpreter_Store(t *testing.T) {
 		targetAddr, err := i.Alloc(types.I32(5))
 		require.NoError(t, err)
 
-		require.ErrorIs(t, i.Store(targetAddr, types.BoxRef(sourceAddr)), interp.ErrTypeMismatch)
-		require.Equal(t, 0, source.closed)
-		v, err := i.Load(targetAddr)
-		require.NoError(t, err)
-		require.Equal(t, types.I32(5), v)
+		for _, ref := range []types.Value{types.BoxRef(sourceAddr), types.Ref(sourceAddr)} {
+			require.ErrorIs(t, i.Store(targetAddr, ref), interp.ErrTypeMismatch)
+			require.Equal(t, 0, source.closed)
+			v, err := i.Load(targetAddr)
+			require.NoError(t, err)
+			require.Equal(t, types.I32(5), v)
+		}
 	})
 
 	t.Run("rejects owned pointer", func(t *testing.T) {
@@ -3534,57 +3532,18 @@ func TestInterpreter_Store(t *testing.T) {
 		require.Equal(t, types.I32(5), v)
 	})
 
-	t.Run("ignores same-address ref", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		defer i.Close()
-
-		value := &trackedValue{}
-		addr, err := i.Alloc(value)
-		require.NoError(t, err)
-		require.NoError(t, i.Store(addr, types.Ref(addr)))
-		require.Equal(t, 0, value.closed)
-		v, err := i.Load(addr)
-		require.NoError(t, err)
-		require.Same(t, value, v)
-	})
-
-	t.Run("rejects different-address ref", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		defer i.Close()
-
-		sourceAddr, err := i.Alloc(types.I32(7))
-		require.NoError(t, err)
-		targetAddr, err := i.Alloc(types.I32(5))
-		require.NoError(t, err)
-
-		require.ErrorIs(t, i.Store(targetAddr, types.Ref(sourceAddr)), interp.ErrTypeMismatch)
-		v, err := i.Load(targetAddr)
-		require.NoError(t, err)
-		require.Equal(t, types.I32(5), v)
-	})
-
 	t.Run("rejects invalid ref", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.I32(5))
 		require.NoError(t, err)
-		require.ErrorIs(t, i.Store(addr, types.Ref(9999)), interp.ErrSegmentationFault)
-		v, err := i.Load(addr)
-		require.NoError(t, err)
-		require.Equal(t, types.I32(5), v)
-	})
-
-	t.Run("rejects invalid boxed ref", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		defer i.Close()
-
-		addr, err := i.Alloc(types.I32(5))
-		require.NoError(t, err)
-		require.ErrorIs(t, i.Store(addr, types.BoxRef(9999)), interp.ErrSegmentationFault)
-		v, err := i.Load(addr)
-		require.NoError(t, err)
-		require.Equal(t, types.I32(5), v)
+		for _, ref := range []types.Value{types.Ref(9999), types.BoxRef(9999)} {
+			require.ErrorIs(t, i.Store(addr, ref), interp.ErrSegmentationFault)
+			v, err := i.Load(addr)
+			require.NoError(t, err)
+			require.Equal(t, types.I32(5), v)
+		}
 	})
 }
 
@@ -3746,7 +3705,7 @@ func TestInterpreter_RefCount(t *testing.T) {
 	})
 }
 
-func TestInterpreter_HeapCap(t *testing.T) {
+func TestInterpreter_HeapLen(t *testing.T) {
 	t.Run("grows to cover a new allocation", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		defer i.Close()
@@ -3929,6 +3888,28 @@ func TestInterpreter_Len(t *testing.T) {
 	require.Equal(t, 1, i.Len())
 }
 
+func TestInterpreter_Flush(t *testing.T) {
+	t.Run("publishes pending samples to the profiler", func(t *testing.T) {
+		profiler := prof.New()
+		i := interp.New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)}), interp.WithProfiler(profiler), interp.WithTick(1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+
+		i.Flush()
+		samples, ok := profiler.Metric("vm_samples_total")
+		require.True(t, ok)
+		require.Equal(t, float64(1), samples)
+	})
+
+	t.Run("does nothing without a profiler", func(t *testing.T) {
+		i := interp.New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)}), interp.WithTick(1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+
+		require.NotPanics(t, i.Flush)
+	})
+}
+
 func TestInterpreter_Close(t *testing.T) {
 	i := interp.New(program.New(nil))
 	value := &trackedValue{}
@@ -4083,7 +4064,6 @@ func TestInterpreter_Reset(t *testing.T) {
 		require.Same(t, typ, first.Typ)
 		require.Equal(t, []types.Boxed{types.BoxedNull}, first.Elems)
 	})
-
 }
 
 func TestNew(t *testing.T) {
@@ -4228,7 +4208,6 @@ func TestWithFrame(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(1), v)
 	})
-
 }
 
 func TestWithStack(t *testing.T) {
@@ -4274,13 +4253,7 @@ func TestWithHeap(t *testing.T) {
 		i := interp.New(program.New(nil), interp.WithHeap(2))
 		defer i.Close()
 
-		value := &trackedValue{}
-		addr, err := i.Alloc(value)
-		require.NoError(t, err)
-		value.refs = []types.Ref{types.Ref(addr)}
-		_, err = i.Retain(addr)
-		require.NoError(t, err)
-		require.NoError(t, i.Release(addr))
+		value, addr := selfCycle(t, i)
 
 		reused, err := i.Alloc(types.I32(1))
 		require.NoError(t, err)
@@ -4308,25 +4281,13 @@ func TestWithHeap(t *testing.T) {
 		_, err := i.Alloc(types.I32(1))
 		require.NoError(t, err)
 		for range capacity - 2 {
-			value := &trackedValue{}
-			addr, err := i.Alloc(value)
-			require.NoError(t, err)
-			value.refs = []types.Ref{types.Ref(addr)}
-			_, err = i.Retain(addr)
-			require.NoError(t, err)
-			require.NoError(t, i.Release(addr))
+			selfCycle(t, i)
 		}
 
 		_, err = i.Alloc(types.I32(2))
 		require.NoError(t, err)
 
-		cycle := &trackedValue{}
-		addr, err := i.Alloc(cycle)
-		require.NoError(t, err)
-		cycle.refs = []types.Ref{types.Ref(addr)}
-		_, err = i.Retain(addr)
-		require.NoError(t, err)
-		require.NoError(t, i.Release(addr))
+		cycle, _ := selfCycle(t, i)
 
 		// The first collection leaves two live slots, so pace sets goal to
 		// 2+heapRunway. Reuse and the new cycle occupy two of that runway.
@@ -4352,25 +4313,13 @@ func TestWithHeap(t *testing.T) {
 			require.NoError(t, err)
 		}
 		for range capacity - heapRunway - 2 {
-			value := &trackedValue{}
-			addr, err := i.Alloc(value)
-			require.NoError(t, err)
-			value.refs = []types.Ref{types.Ref(addr)}
-			_, err = i.Retain(addr)
-			require.NoError(t, err)
-			require.NoError(t, i.Release(addr))
+			selfCycle(t, i)
 		}
 
 		_, err := i.Alloc(types.I32(heapRunway + 1))
 		require.NoError(t, err)
 
-		cycle := &trackedValue{}
-		addr, err := i.Alloc(cycle)
-		require.NoError(t, err)
-		cycle.refs = []types.Ref{types.Ref(addr)}
-		_, err = i.Retain(addr)
-		require.NoError(t, err)
-		require.NoError(t, i.Release(addr))
+		cycle, _ := selfCycle(t, i)
 
 		// After the first collection, heapRunway+2 slots survive and the
 		// dynamic live set adds heapRunway+1 slots of runway.
@@ -4401,23 +4350,17 @@ func TestWithHeap(t *testing.T) {
 		}
 		i.Reset()
 
-		cycle := &trackedValue{}
-		addr, err := i.Alloc(cycle)
-		require.NoError(t, err)
-		cycle.refs = []types.Ref{types.Ref(addr)}
-		_, err = i.Retain(addr)
-		require.NoError(t, err)
-		require.NoError(t, i.Release(addr))
+		cycle, _ := selfCycle(t, i)
 
 		// Reset leaves only null, so the next goal is 1+heapRunway. The
 		// cycle consumes the first dynamic slot.
 		for n := range heapRunway - 1 {
-			_, err = i.Alloc(types.I32(n))
+			_, err := i.Alloc(types.I32(n))
 			require.NoError(t, err)
 		}
 		require.Equal(t, 0, cycle.closed)
 
-		_, err = i.Alloc(types.I32(heapRunway - 1))
+		_, err := i.Alloc(types.I32(heapRunway - 1))
 		require.NoError(t, err)
 		require.Equal(t, 1, cycle.closed)
 	})
@@ -4543,13 +4486,7 @@ func TestWithHeapLimit(t *testing.T) {
 		i := interp.New(program.New(nil), interp.WithHeap(2), interp.WithHeapLimit(2))
 		defer i.Close()
 
-		value := &trackedValue{}
-		addr, err := i.Alloc(value)
-		require.NoError(t, err)
-		value.refs = []types.Ref{types.Ref(addr)}
-		_, err = i.Retain(addr)
-		require.NoError(t, err)
-		require.NoError(t, i.Release(addr))
+		value, _ := selfCycle(t, i)
 
 		reused, err := i.Alloc(types.String("reused"))
 		require.NoError(t, err)
@@ -5200,14 +5137,6 @@ func (upperCodec) Unmarshal(_ *interp.Interpreter, v types.Value, dst any) error
 	return nil
 }
 
-func (h *hostLoopFields) Hidden() int32 { return h.hidden }
-
-func (h *hostNarrowField) Hidden() int32 { return h.hidden }
-
-func (h *hostWideField) Hidden() int32 { return h.hidden }
-
-func (h *hostFieldKinds) Hidden() int32 { return h.hidden }
-
 func (h *structGetHostFields) Bump(n int32) int32 {
 	h.Count += n
 	h.hidden++
@@ -5252,28 +5181,18 @@ func runTestName(prog *program.Program) string {
 	return strings.Join(parts, "; ")
 }
 
-// refCountAt reads one address's reference count through the public API. The
-// callers below assert on an address they just observed live, so a lookup
-// error is a test failure rather than a case to handle.
-func refCountAt(t *testing.T, i *interp.Interpreter, addr int) int {
+// selfCycle allocates a value that references only itself, held by the heap
+// alone: it stays reachable from no root, so only cycle collection frees it.
+func selfCycle(t *testing.T, i *interp.Interpreter) (*trackedValue, int) {
 	t.Helper()
-	count, err := i.RefCount(addr)
+	value := &trackedValue{}
+	addr, err := i.Alloc(value)
 	require.NoError(t, err)
-	return count
-}
-
-// refCounts snapshots every live heap address's reference count, so two
-// interpreters that ran the same program can be compared for ownership parity.
-func refCounts(i *interp.Interpreter) map[int]int {
-	out := map[int]int{}
-	for addr := 1; addr < i.HeapLen(); addr++ {
-		count, err := i.RefCount(addr)
-		if err != nil {
-			continue
-		}
-		out[addr] = count
-	}
-	return out
+	value.refs = []types.Ref{types.Ref(addr)}
+	_, err = i.Retain(addr)
+	require.NoError(t, err)
+	require.NoError(t, i.Release(addr))
+	return value, addr
 }
 
 func i32operand(v int32) uint64 {

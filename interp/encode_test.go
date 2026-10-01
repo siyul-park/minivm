@@ -45,7 +45,7 @@ func TestEncoder_Interp(t *testing.T) {
 	require.Same(t, i, got)
 }
 
-func TestEncoder_Marshal(t *testing.T) {
+func TestEncoder_Encode(t *testing.T) {
 	// The injected encoder resolves dependencies through the registry that
 	// started the conversion, so a registration on the dependency applies to
 	// the delegating marshaler too.
