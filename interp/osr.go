@@ -179,12 +179,13 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	}
 	if s.count++; s.count%s.cadence == 0 {
 		n.drain(i)
+		if n.depth == 0 {
+			n.quiesce()
+		}
 	}
-	n.store.Enter()
 	c := s.code
 	if c.Retired() {
 		if c = n.store.CodeAt(s.address, s.ip); c == nil {
-			n.store.Leave()
 			s.code = nil
 			return false
 		}
@@ -237,11 +238,9 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 			delete(n.sites, key{s.address, s.ip})
 		}
 	}
-	n.store.Leave()
 	if fault != nil {
 		panic(fault)
 	}
-	_ = n.store.Reclaim()
 	return true
 }
 

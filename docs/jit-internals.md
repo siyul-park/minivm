@@ -167,7 +167,7 @@ A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every ad
 | State | `asm.State`, `Limit`, `Budget`, and `Depth` are saved before and restored after; the nested run spends its own budget. |
 | Callee | A generic call has `Exit.Callee` 0: the interpreter resolves its `Target` value to a function or closure whose parameter count is `Exit.Args` and whose return kinds are `Exit.Returns`; any other callee deopts and replays the call. |
 | Results | Register results are unboxed into `Context.Results`; slot results stay at the callee frame base. |
-| Leaving | A cancellation materializes the caller under the callee's live frames and continues threaded; a `THROW` whose search stopped at the floor is pushed back and runs again over them; any other panic materializes them and re-panics after the entering call leaves the store. None refutes the caller. A coroutine callee, whose `CALL` returns a handle, deopts and replays the call. |
+| Leaving | A cancellation materializes the caller under the callee's live frames and continues threaded; a `THROW` whose search stopped at the floor is pushed back and runs again over them; any other panic materializes them and re-panics after the entering call returns from native code. None refutes the caller. A coroutine callee, whose `CALL` returns a handle, deopts and replays the call. |
 
 ## Store and tiers
 
@@ -175,7 +175,7 @@ A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every ad
 |---|---|
 | Publish | Non-OSR code replaces only a lower tier at an address; OSR code installs once at `(address, ip)`. |
 | Retire | `Retire`/`RetireAt` unpublish; retired code remains discoverable until safe to reclaim. |
-| Reclaim | `Reclaim` frees code only after no interpreter remains native. |
+| Reclaim | Quiescent-state: each retire stamps its code with the next store epoch. Each interpreter attaches a `jit.Reader`, which publishes the epoch it observed at a quiescent point — `Run` end, or an OSR site's drain cadence at native depth 0 — with no atomic read-modify-write and a store only when the epoch moved, never per entry; `Reclaim` runs there and frees every code whose epoch all attached readers have observed. An idle interpreter, Pool members included, holds code retired since its last quiescent point until it runs again or closes. Entry re-checks a cached code's `Retired`. |
 | Promotion | Baseline entries count calls; a live Baseline reaching the interpreter's graduate threshold queues Optimized. Optimized/OSR entries do not count. |
 | Failure | Code retires by its exit policy (Exits). A compile failure, or a retire, is permanent only when feedback (`Callees`, `Refuted`) is unchanged from the snapshot the code was compiled from. |
 | Async | `compile.Queue` compiles one unit per address; publication is drained at the next call, OSR observation or entry, or safepoint. |

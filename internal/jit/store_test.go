@@ -175,10 +175,11 @@ func TestStore_Publish(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				s.Enter()
+				r := s.Attach()
 				s.Find(0)
-				s.Leave()
+				r.Quiesce()
 				_ = s.Reclaim()
+				r.Detach()
 			}()
 		}
 		wg.Wait()
@@ -273,35 +274,91 @@ func TestStore_Find(t *testing.T) {
 	require.Equal(t, o, s.Find(o.Entry()))
 }
 
+func TestStore_Attach(t *testing.T) {
+	s := jit.NewStore(1)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+	c := code(t, 0, jit.Baseline)
+	require.True(t, s.Publish(c))
+	s.Retire(0)
+
+	// A reader attached after the retire never saw c.
+	s.Attach()
+	require.NoError(t, s.Reclaim())
+	require.Nil(t, s.Find(c.Entry()))
+}
+
 func TestStore_Reclaim(t *testing.T) {
-	t.Run("frees a retired code only once no interpreter is inside native code", func(t *testing.T) {
+	t.Run("frees every retired code when no reader is attached", func(t *testing.T) {
 		s := jit.NewStore(1)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 		c := code(t, 0, jit.Baseline)
 		require.True(t, s.Publish(c))
 		s.Retire(0)
-
-		s.Enter()
-		require.NoError(t, s.Reclaim())
-		require.Equal(t, c, s.Find(c.Entry()))
-
-		s.Leave()
-		require.NoError(t, s.Reclaim())
-		require.Nil(t, s.Find(c.Entry()))
-	})
-
-	t.Run("frees an OSR code retired through RetireAt", func(t *testing.T) {
-		s := jit.NewStore(1)
-		t.Cleanup(func() { require.NoError(t, s.Close()) })
-
-		c := osrCode(t, 0, 12, jit.Optimized)
-		require.True(t, s.Publish(c))
+		o := osrCode(t, 0, 12, jit.Optimized)
+		require.True(t, s.Publish(o))
 		s.RetireAt(0, 12)
 
 		require.NoError(t, s.Reclaim())
 		require.Nil(t, s.Find(c.Entry()))
+		require.Nil(t, s.Find(o.Entry()))
 	})
+
+	t.Run("keeps a retired code until every attached reader quiesces after its retire", func(t *testing.T) {
+		s := jit.NewStore(1)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+		a, b := s.Attach(), s.Attach()
+
+		c := code(t, 0, jit.Baseline)
+		require.True(t, s.Publish(c))
+		s.Retire(0)
+
+		require.NoError(t, s.Reclaim())
+		require.Equal(t, c, s.Find(c.Entry()))
+
+		a.Quiesce()
+		require.NoError(t, s.Reclaim())
+		require.Equal(t, c, s.Find(c.Entry()))
+
+		b.Quiesce()
+		require.NoError(t, s.Reclaim())
+		require.Nil(t, s.Find(c.Entry()))
+	})
+}
+
+func TestReader_Quiesce(t *testing.T) {
+	s := jit.NewStore(2)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+	r := s.Attach()
+
+	before := code(t, 0, jit.Baseline)
+	require.True(t, s.Publish(before))
+	s.Retire(0)
+	r.Quiesce()
+
+	// Retired after r's quiescent point: r may still run it.
+	after := code(t, 1, jit.Baseline)
+	require.True(t, s.Publish(after))
+	s.Retire(1)
+
+	require.NoError(t, s.Reclaim())
+	require.Nil(t, s.Find(before.Entry()))
+	require.Equal(t, after, s.Find(after.Entry()))
+}
+
+func TestReader_Detach(t *testing.T) {
+	s := jit.NewStore(1)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+	r := s.Attach()
+
+	c := code(t, 0, jit.Baseline)
+	require.True(t, s.Publish(c))
+	s.Retire(0)
+
+	r.Detach()
+	require.NoError(t, s.Reclaim())
+	require.Nil(t, s.Find(c.Entry()))
 }
 
 func TestStore_Close(t *testing.T) {

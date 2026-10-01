@@ -22,6 +22,8 @@ import (
 type native struct {
 	ctx *jit.Context
 	*shared
+	// reader is n's registration with its shared store.
+	reader *jit.Reader
 
 	threshold int
 	// entries is native-writable: Context.Entries points at it, and every
@@ -273,9 +275,11 @@ func newNative(i *Interpreter, threshold int) *native {
 	if err != nil {
 		panic(err)
 	}
+	r := newShared(i)
 	n := &native{
 		ctx:       ctx,
-		shared:    newShared(i),
+		shared:    r,
+		reader:    r.store.Attach(),
 		threshold: threshold,
 		entries:   make([]int64, len(i.code)),
 		refutes:   make([]int, len(i.code)),
@@ -303,7 +307,24 @@ func newNative(i *Interpreter, threshold int) *native {
 
 // close releases n's reference to its shared runtime.
 func (n *native) close() error {
+	n.reader.Detach()
 	return n.shared.release()
+}
+
+// join moves n onto r, a Pool's runtime, releasing its own; n has never
+// entered native code.
+func (n *native) join(r *shared) error {
+	n.reader.Detach()
+	own := n.shared
+	n.shared, n.reader = r, r.store.Attach()
+	return own.release()
+}
+
+// quiesce marks a quiescent point, where n runs no native activation and
+// holds no code it read before, then frees what every reader has passed.
+func (n *native) quiesce() {
+	n.reader.Quiesce()
+	_ = n.store.Reclaim()
 }
 
 // call is the CALL handler's hook for a *types.Function target at addr,
@@ -337,11 +358,8 @@ func (n *native) attempt(i *Interpreter, addr int, fn *types.Function, release b
 		return false
 	}
 
-	n.store.Enter()
-	// Re-read after Enter; the code may have been retired between lookups.
 	code := n.store.Code(addr)
 	if code == nil {
-		n.store.Leave()
 		n.count(i, addr, fn)
 		return false
 	}
@@ -354,19 +372,16 @@ func (n *native) attempt(i *Interpreter, addr int, fn *types.Function, release b
 	}
 	for index, k := range code.Arguments {
 		if k == types.KindI64 && i.stack[bp+index].Kind() == types.KindRef {
-			n.store.Leave()
 			return false
 		}
 	}
 	retire, fault := n.run(i, addr, fn, code, bp, release, advance)
-	n.store.Leave()
 	if fault != nil {
 		panic(fault)
 	}
 	if retire {
 		n.retire(addr, code.Tier)
 	}
-	_ = n.store.Reclaim()
 	return true
 }
 
@@ -550,7 +565,7 @@ func (n *native) drain(i *Interpreter) {
 // calls; the entered activation materializes as frame start. ok reports that
 // the activation reached TrapReturn; retire reports whether the code retires;
 // fault is a panic a call raised past its native caller, which the caller
-// re-raises once it leaves the store.
+// re-raises once native code has returned.
 //
 // Each exit costs the code by its class (jit.Class): a trap nothing; a guard
 // its refutation (judge); a bridge or call its price, charged to ledger before it is

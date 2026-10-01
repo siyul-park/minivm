@@ -166,12 +166,10 @@ func (p *Pool) share(i *Interpreter) {
 	if !reflect.DeepEqual(i.native.shared.module, p.shared.module) {
 		return
 	}
-	own := i.native.shared
-	i.native.shared = p.shared.retain()
-	// own is unpublished and unreferenced from here: i runs on the pool
-	// runtime, so a release failure only leaks its mappings and no caller
-	// can recover it.
-	_ = own.release()
+	// i's own runtime is unpublished and unreferenced from here: i runs on
+	// the pool runtime, so a release failure only leaks its mappings and no
+	// caller can recover it.
+	_ = i.native.join(p.shared.retain())
 }
 
 func (p *Pool) drop(i *Interpreter) {

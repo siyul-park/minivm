@@ -2,12 +2,18 @@ package jit
 
 import (
 	"errors"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"unsafe"
 )
 
 // Store owns published code and the native entry table.
+//
+// Retired code is reclaimed by quiescent states: each retire advances the
+// store's epoch and stamps the code with it, and each attached Reader
+// publishes the epoch it observed at its last quiescent point. A code is
+// freed once every Reader has observed its epoch.
 type Store struct {
 	// natives is the table read by native CALLs.
 	natives []uintptr
@@ -15,14 +21,25 @@ type Store struct {
 	codes []atomic.Pointer[Code]
 	// osr publishes OSR code per (address, IP): never a call target, so it
 	// is never in natives, and is looked up only through Find or CodeAt.
-	osr     map[key]*Code
+	osr map[key]*Code
+	// retired is in retire order, so its epochs ascend.
 	retired []*Code
-	active  atomic.Int64
+	readers []*Reader
+	// epoch counts retires; written under mu.
+	epoch atomic.Uint64
 	// pending is len(retired), readable without mu so Reclaim with nothing
 	// retired — the common case — takes no lock.
 	pending atomic.Int64
 
 	mu sync.Mutex
+}
+
+// Reader is one interpreter's registration with a Store: Reclaim frees no
+// code retired after the Reader's last quiescent point.
+type Reader struct {
+	store *Store
+	// seen is the store epoch at the Reader's last quiescent point.
+	seen atomic.Uint64
 }
 
 // key identifies one OSR unit's published code.
@@ -152,39 +169,39 @@ func (s *Store) RetireAt(address, ip int) {
 	s.retire(c)
 }
 
-// Enter brackets an interpreter's native execution, suspended exits
-// included. An interpreter MUST Enter before it uses a code it read: a code
-// is retired only after its natives entry is cleared, so an interpreter
-// that saw the old entry is counted.
-func (s *Store) Enter() {
-	s.active.Add(1)
+// Attach registers a Reader that has observed the current epoch: no code
+// retired so far is reachable to it.
+func (s *Store) Attach() *Reader {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r := &Reader{store: s}
+	r.seen.Store(s.epoch.Load())
+	s.readers = append(s.readers, r)
+	return r
 }
 
-// Leave ends the bracket Enter began.
-func (s *Store) Leave() {
-	s.active.Add(-1)
-}
-
-// Reclaim frees every retired code when no interpreter is inside native
-// code, else does nothing. It takes the retired list before it reads the
-// count: a code retired later may be running in an interpreter that entered
-// after the read.
+// Reclaim frees every retired code each attached Reader has passed a
+// quiescent point since; with no Reader attached, every retired code.
 func (s *Store) Reclaim() error {
 	if s.pending.Load() == 0 {
 		return nil
 	}
 	s.mu.Lock()
-	retired := s.retired
-	if s.active.Load() != 0 {
-		s.mu.Unlock()
-		return nil
+	floor := s.epoch.Load()
+	for _, r := range s.readers {
+		floor = min(floor, r.seen.Load())
 	}
-	s.retired = nil
-	s.pending.Add(-int64(len(retired)))
+	n := 0
+	for n < len(s.retired) && s.retired[n].retired.Load() <= floor {
+		n++
+	}
+	freed := slices.Clone(s.retired[:n])
+	s.retired = slices.Delete(s.retired, 0, n)
+	s.pending.Add(-int64(n))
 	s.mu.Unlock()
 
 	var err error
-	for _, c := range retired {
+	for _, c := range freed {
 		err = errors.Join(err, c.Free())
 	}
 	return err
@@ -213,9 +230,33 @@ func (s *Store) Close() error {
 	return err
 }
 
-// retire queues c for Reclaim; the caller holds mu.
+// Quiesce marks a quiescent point: r holds no code it read before, so
+// Reclaim may free every code retired up to now. Entry re-checks a cached
+// code's Retired after it. It stores only when the epoch moved, so a
+// steady quiescent point issues no store.
+func (r *Reader) Quiesce() {
+	if e := r.store.epoch.Load(); r.seen.Load() != e {
+		r.seen.Store(e)
+	}
+}
+
+// Detach unregisters r; its interpreter must hold no code from then on.
+func (r *Reader) Detach() {
+	s := r.store
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if k := slices.Index(s.readers, r); k >= 0 {
+		s.readers = slices.Delete(s.readers, k, k+1)
+	}
+}
+
+// retire stamps c with the next epoch and queues it for Reclaim; the caller
+// holds mu. The stamp precedes the epoch store, so a Reader that observes
+// the epoch also observes c as retired.
 func (s *Store) retire(c *Code) {
-	c.retired.Store(true)
+	e := s.epoch.Load() + 1
+	c.retired.Store(e)
+	s.epoch.Store(e)
 	s.retired = append(s.retired, c)
 	s.pending.Add(1)
 }

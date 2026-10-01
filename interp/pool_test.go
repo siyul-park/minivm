@@ -3,6 +3,7 @@ package interp_test
 import (
 	"context"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -157,6 +158,64 @@ func TestPool_Get(t *testing.T) {
 		// Retired sites stop deopting long before every round does.
 		require.Less(t, deopts, float64(2*rounds))
 		require.Greater(t, deopts, float64(0))
+	})
+
+	t.Run("pooled interpreters entering and retiring shared code concurrently match threaded", func(t *testing.T) {
+		native(t)
+		const calls = 200
+		const rounds = 300
+		prog := applyGlobalProgram(t, calls)
+
+		var wantInc, wantDec int32
+		for i := int32(0); i < calls; i++ {
+			wantInc += i + 1
+			wantDec += i - 1
+		}
+
+		p := interp.NewPool(prog, 2, interp.WithThreshold(0))
+		defer p.Close()
+
+		// a always calls inc and b always dec, through one dynamic CALL site:
+		// each refutes and retires code the other may be running.
+		a, err := p.Get(context.Background())
+		require.NoError(t, err)
+		b, err := p.Get(context.Background())
+		require.NoError(t, err)
+
+		var got [2][]types.Value
+		var errs [2]error
+		var wg sync.WaitGroup
+		for k, vm := range []*interp.Interpreter{a, b} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for range rounds {
+					if errs[k] = vm.SetGlobal(1, types.BoxI32(int32(k))); errs[k] != nil {
+						return
+					}
+					if errs[k] = vm.Run(context.Background()); errs[k] != nil {
+						return
+					}
+					var v types.Value
+					if v, errs[k] = vm.Pop(); errs[k] != nil {
+						return
+					}
+					got[k] = append(got[k], v)
+					vm.Reset()
+				}
+			}()
+		}
+		wg.Wait()
+
+		require.NoError(t, errs[0])
+		require.NoError(t, errs[1])
+		for round := range rounds {
+			require.Equal(t, types.I32(wantInc), got[0][round], "round %d", round)
+			require.Equal(t, types.I32(wantDec), got[1][round], "round %d", round)
+		}
+
+		p.Put(a)
+		p.Put(b)
 	})
 
 	t.Run("a pooled interpreter promotes code another interpreter drained", func(t *testing.T) {

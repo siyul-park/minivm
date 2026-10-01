@@ -356,6 +356,9 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 		}
 		i.ctx = nil
 		i.done = nil
+		if i.native != nil {
+			i.native.quiesce()
+		}
 		return err
 	}
 }

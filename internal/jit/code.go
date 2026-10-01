@@ -45,8 +45,9 @@ type Code struct {
 	entry  uintptr
 	size   int
 	buffer *asm.Buffer
-	// retired is set by Store under its lock before c joins the retired list.
-	retired atomic.Bool
+	// retired is the store epoch of c's retire, zero while published; set by
+	// Store under its lock before c joins the retired list.
+	retired atomic.Uint64
 }
 
 // Tier values published by the native runtime.
@@ -102,9 +103,9 @@ func (c *Code) Entry() uintptr {
 }
 
 // Retired reports whether Store has retired c: an interpreter that cached c
-// and called Store.Enter may still run it until then without a lookup.
+// may run it without a lookup until then.
 func (c *Code) Retired() bool {
-	return c.retired.Load()
+	return c.retired.Load() != 0
 }
 
 // Free unmaps c's executable memory; a second call is a no-op. Nothing may
