@@ -36,7 +36,16 @@ func TestNew(t *testing.T) {
 
 	t.Run("suspends at the loop safepoint until the budget is refilled", func(t *testing.T) {
 		stack := []types.Boxed{types.BoxI32(10), types.BoxI32(99), types.BoxI32(99)}
-		fn := sum(t)
+		// sum(n) = 0 + 1 + ... + n-1 over one parameter and two locals.
+		fn := function(t, []types.Type{types.TypeI32}, []types.Type{types.TypeI32, types.TypeI32}, func(b *instr.Builder) {
+			loop, done := b.Label(), b.Label()
+			b.Bind(loop)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+			b.Br(loop)
+			b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.RETURN)
+		})
 		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 		ctx := enter(t, stack)
 		ctx.Budget = 3
@@ -403,28 +412,28 @@ func TestNew(t *testing.T) {
 		require.Equal(t, consts, stack)
 	})
 
-	// returns runs a function returning c through Return's X0 and the Go
-	// entry stub's boxing.
-	returns := func(t *testing.T, c types.Boxed) {
-		b := ssa.New("f")
-		entry := b.Block()
-		v := b.Value(ssa.TypeOf(c.Kind()))
-		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: ssa.Word(c), Results: []ssa.Value{v}})
-		at := state(b, entry)
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{v}, State: at})
+	t.Run("returns each kind through Return's X0 and the Go entry stub's boxing", func(t *testing.T) {
+		for _, c := range []struct {
+			word types.Boxed
+			typ  types.Type
+		}{
+			{types.BoxI1(true), types.TypeI1}, {types.BoxI8(-1), types.TypeI8}, {types.BoxI32(-7), types.TypeI32},
+			{types.BoxF32(-2), types.TypeF32}, {types.BoxF64(1.5), types.TypeF64}, {types.BoxRef(4), types.TypeString},
+		} {
+			b := ssa.New("f")
+			entry := b.Block()
+			v := b.Value(ssa.TypeOf(c.word.Kind()))
+			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: ssa.Word(c.word), Results: []ssa.Value{v}})
+			at := state(b, entry)
+			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{v}, State: at})
 
-		fn := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{kindType(t, c.Kind())}}}
-		stack := make([]types.Boxed, 1)
-		code, _ := lower(t, arm64.New(), b.Build(), fn, nil, 0, false)
-		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, stack)))
-		require.Equal(t, c, stack[0])
-	}
-	t.Run("returns i1 through the Go entry stub", func(t *testing.T) { returns(t, types.BoxI1(true)) })
-	t.Run("returns i8 through the Go entry stub", func(t *testing.T) { returns(t, types.BoxI8(-1)) })
-	t.Run("returns i32 through the Go entry stub", func(t *testing.T) { returns(t, types.BoxI32(-7)) })
-	t.Run("returns f32 through the Go entry stub", func(t *testing.T) { returns(t, types.BoxF32(-2)) })
-	t.Run("returns f64 through the Go entry stub", func(t *testing.T) { returns(t, types.BoxF64(1.5)) })
-	t.Run("returns ref through the Go entry stub", func(t *testing.T) { returns(t, types.BoxRef(4)) })
+			fn := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{c.typ}}}
+			stack := make([]types.Boxed, 1)
+			code, _ := lower(t, arm64.New(), b.Build(), fn, nil, 0, false)
+			require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, stack)))
+			require.Equal(t, c.word, stack[0])
+		}
+	})
 
 	t.Run("returns two register-convention results through X0 and X1", func(t *testing.T) {
 		b := ssa.New("f")
@@ -902,19 +911,6 @@ func TestNew(t *testing.T) {
 	})
 }
 
-// sum is sum(n) = 0 + 1 + ... + n-1 over one parameter and two locals.
-func sum(t *testing.T) *types.Function {
-	return function(t, []types.Type{types.TypeI32}, []types.Type{types.TypeI32, types.TypeI32}, func(b *instr.Builder) {
-		loop, done := b.Label(), b.Label()
-		b.Bind(loop)
-		b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_GE_S).BrIf(done)
-		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
-		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
-		b.Br(loop)
-		b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.RETURN)
-	})
-}
-
 // fibonacci is fib(n) = n < 2 ? n : fib(n-1) + fib(n-2) at function
 // address 2, calling itself through constant 0.
 func fibonacci(t *testing.T) (*types.Function, transform.Module) {
@@ -935,29 +931,6 @@ func fibonacciOf(n int32) int32 {
 		return n
 	}
 	return fibonacciOf(n-1) + fibonacciOf(n-2)
-}
-
-// kindType is a representative types.Type for k, for a Returns declaration
-// a test builds directly (types.Kinds goes the other way).
-func kindType(t *testing.T, k types.Kind) types.Type {
-	t.Helper()
-	switch k {
-	case types.KindI1:
-		return types.TypeI1
-	case types.KindI8:
-		return types.TypeI8
-	case types.KindI32:
-		return types.TypeI32
-	case types.KindF32:
-		return types.TypeF32
-	case types.KindF64:
-		return types.TypeF64
-	case types.KindRef:
-		return types.TypeString
-	default:
-		t.Fatalf("kindType: unsupported kind %v", k)
-		return nil
-	}
 }
 
 // frame is a function without code whose slots are params then locals.

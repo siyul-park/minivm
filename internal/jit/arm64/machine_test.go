@@ -65,6 +65,17 @@ func (r regs) Reg(v ssa.Value) asm.VReg {
 	}
 }
 
+func TestMachine_Arch(t *testing.T) {
+	require.Equal(t, target.New(), arm64.New().Arch())
+}
+
+func TestMachine_Spill(t *testing.T) {
+	a := asm.New(target.New())
+	w := asm.NewVReg(1, asm.RegTypeInt, asm.Width32)
+	arm64.New().Spill(a, w, 2)
+	require.Equal(t, []asm.Instruction{target.New().Spill(w, 2)}, a.Rows())
+}
+
 func TestMachine_Reserve(t *testing.T) {
 	require.Equal(t, []asm.PReg{target.X16, target.X17, target.X24, target.X25, target.X27}, arm64.New().Reserve())
 }
@@ -156,28 +167,32 @@ func TestMachine_Prologue(t *testing.T) {
 		}, a.Rows()[8:])
 	})
 
-	t.Run("moves a float register-passed parameter by FMOV", func(t *testing.T) {
-		a := asm.New(target.New())
-		args := []asm.VReg{asm.NewVReg(1, asm.RegTypeFloat, asm.Width32), asm.NewVReg(2, asm.RegTypeFloat, asm.Width64)}
-		arm64.New().Prologue(a, 0, false, compile.Layout{Kinds: []types.Kind{types.KindF32, types.KindF64}, Arguments: []types.Kind{types.KindF32, types.KindF64}}, args)
-		require.Equal(t, []asm.Instruction{
-			target.DEF(target.X0),
-			target.DEF(target.X1),
-			target.FMOV(args[0], target.X0),
-			target.FMOV(args[1], target.X1),
-		}, a.Rows()[8:])
-	})
-
-	t.Run("moves an i64 register-passed parameter by a raw 64-bit MOV", func(t *testing.T) {
-		a := asm.New(target.New())
-		args := []asm.VReg{asm.NewVReg(1, asm.RegTypeInt, asm.Width64), asm.NewVReg(2, asm.RegTypeInt, asm.Width64)}
-		arm64.New().Prologue(a, 0, false, compile.Layout{Kinds: []types.Kind{types.KindI64, types.KindRef}, Arguments: []types.Kind{types.KindI64, types.KindRef}}, args)
-		require.Equal(t, []asm.Instruction{
-			target.DEF(target.X0),
-			target.DEF(target.X1),
-			target.MOV(args[0], target.X0),
-			target.MOV(args[1], target.X1),
-		}, a.Rows()[8:])
+	t.Run("moves a float register-passed parameter by FMOV and an i64 by a raw 64-bit MOV", func(t *testing.T) {
+		for _, c := range []struct {
+			kinds []types.Kind
+			args  []asm.VReg
+			move  func(dst, src asm.Reg) asm.Instruction
+		}{
+			{
+				[]types.Kind{types.KindF32, types.KindF64},
+				[]asm.VReg{asm.NewVReg(1, asm.RegTypeFloat, asm.Width32), asm.NewVReg(2, asm.RegTypeFloat, asm.Width64)},
+				target.FMOV,
+			},
+			{
+				[]types.Kind{types.KindI64, types.KindRef},
+				[]asm.VReg{asm.NewVReg(1, asm.RegTypeInt, asm.Width64), asm.NewVReg(2, asm.RegTypeInt, asm.Width64)},
+				target.MOV,
+			},
+		} {
+			a := asm.New(target.New())
+			arm64.New().Prologue(a, 0, false, compile.Layout{Kinds: c.kinds, Arguments: c.kinds}, c.args)
+			require.Equal(t, []asm.Instruction{
+				target.DEF(target.X0),
+				target.DEF(target.X1),
+				c.move(c.args[0], target.X0),
+				c.move(c.args[1], target.X1),
+			}, a.Rows()[8:])
+		}
 	})
 }
 
@@ -229,14 +244,8 @@ func TestMachine_Enter(t *testing.T) {
 		require.Len(t, code, len(a.Rows())*4)
 	})
 
-	t.Run("boxes a narrow result by tag in slot 0 and a ref raw in slot 1", func(t *testing.T) {
-		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{}, nil)
-		m.Epilogue(a)
-		start := len(a.Rows())
-		m.Enter(a, compile.Layout{Results: []types.Kind{types.KindI32, types.KindRef}})
-
-		want := []asm.Instruction{
+	t.Run("boxes results by kind: a narrow one by tag in slot 0, a ref raw in slot 1, a wide one raw", func(t *testing.T) {
+		head := []asm.Instruction{
 			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
 			target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
 			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
@@ -244,131 +253,74 @@ func TestMachine_Enter(t *testing.T) {
 			target.STR(target.LR, target.SP, 8),
 			target.BLLabel(1),
 			target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
-			target.UXTW(target.X16, target.X0),
 		}
-		want = append(want, target.LDI(target.X17, types.Tag(types.KindI32))...)
-		want = append(want,
-			target.ORR(target.X16, target.X16, target.X17),
-			target.STR(target.X16, target.X25, 0),
-			target.STR(target.X1, target.X25, 8),
+		tail := []asm.Instruction{
 			target.LDR(target.LR, target.SP, 8),
 			target.ADDI(target.SP, target.SP, 16),
 			target.RET(),
-		)
-		require.Equal(t, want, a.Rows()[start:])
-	})
-
-	t.Run("boxes an f64 result raw", func(t *testing.T) {
-		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{}, nil)
-		m.Epilogue(a)
-		start := len(a.Rows())
-		m.Enter(a, compile.Layout{Results: []types.Kind{types.KindF64}})
-
-		require.Equal(t, []asm.Instruction{
-			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
-			target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
-			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
-			target.SUBI(target.SP, target.SP, 16),
-			target.STR(target.LR, target.SP, 8),
-			target.BLLabel(1),
-			target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
-			target.STR(target.X0, target.X25, 0),
-			target.LDR(target.LR, target.SP, 8),
-			target.ADDI(target.SP, target.SP, 16),
-			target.RET(),
-		}, a.Rows()[start:])
-	})
-
-	t.Run("stores an i64 result raw", func(t *testing.T) {
-		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{}, nil)
-		m.Epilogue(a)
-		start := len(a.Rows())
-		m.Enter(a, compile.Layout{Results: []types.Kind{types.KindI64}})
-
-		require.Equal(t, []asm.Instruction{
-			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
-			target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
-			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
-			target.SUBI(target.SP, target.SP, 16),
-			target.STR(target.LR, target.SP, 8),
-			target.BLLabel(1),
-			target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
-			target.STR(target.X0, target.X25, 0),
-			target.LDR(target.LR, target.SP, 8),
-			target.ADDI(target.SP, target.SP, 16),
-			target.RET(),
-		}, a.Rows()[start:])
+		}
+		for _, c := range []struct {
+			results []types.Kind
+			body    []asm.Instruction
+		}{
+			{[]types.Kind{types.KindI32, types.KindRef}, slices.Concat(
+				[]asm.Instruction{target.UXTW(target.X16, target.X0)},
+				target.LDI(target.X17, types.Tag(types.KindI32)),
+				[]asm.Instruction{
+					target.ORR(target.X16, target.X16, target.X17),
+					target.STR(target.X16, target.X25, 0),
+					target.STR(target.X1, target.X25, 8),
+				},
+			)},
+			{[]types.Kind{types.KindF64}, []asm.Instruction{target.STR(target.X0, target.X25, 0)}},
+			{[]types.Kind{types.KindI64}, []asm.Instruction{target.STR(target.X0, target.X25, 0)}},
+		} {
+			m, a := arm64.New(), asm.New(target.New())
+			m.Prologue(a, 0, true, compile.Layout{}, nil)
+			m.Epilogue(a)
+			start := len(a.Rows())
+			m.Enter(a, compile.Layout{Results: c.results})
+			require.Equal(t, slices.Concat(head, c.body, tail), a.Rows()[start:])
+		}
 	})
 
 	t.Run("loads and unboxes register-passed parameters from their slots before the body", func(t *testing.T) {
-		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{}, nil)
-		m.Epilogue(a)
-		start := len(a.Rows())
-		m.Enter(a, compile.Layout{Arguments: []types.Kind{types.KindI32, types.KindRef}})
-
-		require.Equal(t, []asm.Instruction{
+		pin := []asm.Instruction{
 			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
 			target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
 			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+		}
+		call := []asm.Instruction{
+			target.SUBI(target.SP, target.SP, 16),
+			target.STR(target.LR, target.SP, 8),
+			target.BLLabel(1),
+			target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+			target.LDR(target.LR, target.SP, 8),
+			target.ADDI(target.SP, target.SP, 16),
+			target.RET(),
+		}
+		narrow := []asm.Instruction{
 			target.LDR(asm.NewPReg(target.X0.ID(), asm.RegTypeInt, asm.Width32), target.X25, 0),
 			target.LDR(target.X1, target.X25, 8),
-			target.SUBI(target.SP, target.SP, 16),
-			target.STR(target.LR, target.SP, 8),
-			target.BLLabel(1),
-			target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
-			target.LDR(target.LR, target.SP, 8),
-			target.ADDI(target.SP, target.SP, 16),
-			target.RET(),
-		}, a.Rows()[start:])
-	})
-
-	t.Run("loads an f32 register-passed parameter's low word and an f64's whole word", func(t *testing.T) {
-		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{}, nil)
-		m.Epilogue(a)
-		start := len(a.Rows())
-		m.Enter(a, compile.Layout{Arguments: []types.Kind{types.KindF32, types.KindF64}})
-
-		require.Equal(t, []asm.Instruction{
-			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
-			target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
-			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
-			target.LDR(asm.NewPReg(target.X0.ID(), asm.RegTypeInt, asm.Width32), target.X25, 0),
-			target.LDR(target.X1, target.X25, 8),
-			target.SUBI(target.SP, target.SP, 16),
-			target.STR(target.LR, target.SP, 8),
-			target.BLLabel(1),
-			target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
-			target.LDR(target.LR, target.SP, 8),
-			target.ADDI(target.SP, target.SP, 16),
-			target.RET(),
-		}, a.Rows()[start:])
-	})
-
-	t.Run("loads an i64 register-passed parameter's slot and unboxes its 49-bit payload inline", func(t *testing.T) {
-		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{}, nil)
-		m.Epilogue(a)
-		start := len(a.Rows())
-		m.Enter(a, compile.Layout{Arguments: []types.Kind{types.KindI64}})
-
-		require.Equal(t, []asm.Instruction{
-			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
-			target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
-			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
-			target.LDR(target.X0, target.X25, 0),
-			target.SBFX(target.X0, target.X0, 0, 49),
-			target.SUBI(target.SP, target.SP, 16),
-			target.STR(target.LR, target.SP, 8),
-			target.BLLabel(1),
-			target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
-			target.LDR(target.LR, target.SP, 8),
-			target.ADDI(target.SP, target.SP, 16),
-			target.RET(),
-		}, a.Rows()[start:])
+		}
+		for _, c := range []struct {
+			arguments []types.Kind
+			loads     []asm.Instruction
+		}{
+			{[]types.Kind{types.KindI32, types.KindRef}, narrow},
+			{[]types.Kind{types.KindF32, types.KindF64}, narrow},
+			{[]types.Kind{types.KindI64}, []asm.Instruction{
+				target.LDR(target.X0, target.X25, 0),
+				target.SBFX(target.X0, target.X0, 0, 49),
+			}},
+		} {
+			m, a := arm64.New(), asm.New(target.New())
+			m.Prologue(a, 0, true, compile.Layout{}, nil)
+			m.Epilogue(a)
+			start := len(a.Rows())
+			m.Enter(a, compile.Layout{Arguments: c.arguments})
+			require.Equal(t, slices.Concat(pin, c.loads, call), a.Rows()[start:])
+		}
 	})
 }
 
@@ -1415,60 +1367,52 @@ func TestMachine_Branch(t *testing.T) {
 	index := r.Reg(1)
 	br := ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{1}}
 
-	t.Run("jumps to a label that is not next", func(t *testing.T) {
+	t.Run("jumps to a label that is not next and falls through to next", func(t *testing.T) {
 		a := asm.New(target.New())
 		to, next := a.Label(), a.Label()
 		arm64.New().Branch(a, ssa.Terminator{Op: ssa.OpJump}, r, []asm.Label{to}, next)
 		require.Equal(t, []asm.Instruction{target.BLabel(to)}, a.Rows())
-	})
 
-	t.Run("falls through a jump to next", func(t *testing.T) {
-		a := asm.New(target.New())
-		next := a.Label()
+		a = asm.New(target.New())
+		next = a.Label()
 		arm64.New().Branch(a, ssa.Terminator{Op: ssa.OpJump}, r, []asm.Label{next}, next)
 		require.Empty(t, a.Rows())
 	})
 
-	t.Run("takes the first label on nonzero", func(t *testing.T) {
+	t.Run("branches on nonzero, inverting to fall through to whichever label is next", func(t *testing.T) {
 		a := asm.New(target.New())
 		yes, no, next := a.Label(), a.Label(), a.Label()
 		arm64.New().Branch(a, br, r, []asm.Label{yes, no}, next)
 		require.Equal(t, []asm.Instruction{target.CBNZLabel(index, yes), target.BLabel(no)}, a.Rows())
-	})
 
-	t.Run("falls through to the zero label", func(t *testing.T) {
-		a := asm.New(target.New())
-		yes, no := a.Label(), a.Label()
+		a = asm.New(target.New())
+		yes, no = a.Label(), a.Label()
 		arm64.New().Branch(a, br, r, []asm.Label{yes, no}, no)
 		require.Equal(t, []asm.Instruction{target.CBNZLabel(index, yes)}, a.Rows())
-	})
 
-	t.Run("inverts to fall through to the nonzero label", func(t *testing.T) {
-		a := asm.New(target.New())
-		yes, no := a.Label(), a.Label()
+		a = asm.New(target.New())
+		yes, no = a.Label(), a.Label()
 		arm64.New().Branch(a, br, r, []asm.Label{yes, no}, yes)
 		require.Equal(t, []asm.Instruction{target.CBZLabel(index, no)}, a.Rows())
 	})
 
-	t.Run("branches on the flags of a fused compare", func(t *testing.T) {
+	t.Run("branches on the flags of a fused compare, inverting to fall through to the nonzero label", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
 		s := fused{regs{1: ssa.TypeI1, 2: ssa.TypeI32, 3: ssa.TypeI32}}
 		yes, no := a.Label(), a.Label()
 		require.True(t, m.Lower(a, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{2, 3}, Results: []ssa.Value{1}}, s))
 		m.Branch(a, br, s, []asm.Label{yes, no}, no)
 		require.Equal(t, []asm.Instruction{target.CMP(s.Reg(2), s.Reg(3)), target.BCondLabel(target.OpBLT, yes)}, a.Rows())
-	})
 
-	t.Run("inverts the flags of a fused compare to fall through to the nonzero label", func(t *testing.T) {
-		m, a := arm64.New(), asm.New(target.New())
-		s := fused{regs{1: ssa.TypeI1, 2: ssa.TypeF64, 3: ssa.TypeF64}}
-		yes, no := a.Label(), a.Label()
+		m, a = arm64.New(), asm.New(target.New())
+		s = fused{regs{1: ssa.TypeI1, 2: ssa.TypeF64, 3: ssa.TypeF64}}
+		yes, no = a.Label(), a.Label()
 		require.True(t, m.Lower(a, ssa.Operation{Op: ssa.OpExec, Code: instr.F64_LT, Args: []ssa.Value{2, 3}, Results: []ssa.Value{1}}, s))
 		m.Branch(a, br, s, []asm.Label{yes, no}, yes)
 		require.Equal(t, []asm.Instruction{target.FCMP(s.Reg(2), s.Reg(3)), target.BCondLabel(target.OpBPL, no)}, a.Rows())
 	})
 
-	t.Run("takes the last label for an index out of range", func(t *testing.T) {
+	t.Run("takes the last label for an index out of range, falling through when it is next", func(t *testing.T) {
 		a := asm.New(target.New())
 		first, second, rest, next := a.Label(), a.Label(), a.Label(), a.Label()
 		arm64.New().Branch(a, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{1}}, r, []asm.Label{first, second, rest}, next)
@@ -1477,11 +1421,9 @@ func TestMachine_Branch(t *testing.T) {
 			target.CMPI(index, 1), target.BCondLabel(target.OpBEQ, second),
 			target.BLabel(rest),
 		}, a.Rows())
-	})
 
-	t.Run("falls through to the out-of-range label", func(t *testing.T) {
-		a := asm.New(target.New())
-		first, rest := a.Label(), a.Label()
+		a = asm.New(target.New())
+		first, rest = a.Label(), a.Label()
 		arm64.New().Branch(a, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{1}}, r, []asm.Label{first, rest}, rest)
 		require.Equal(t, []asm.Instruction{target.CMPI(index, 0), target.BCondLabel(target.OpBEQ, first)}, a.Rows())
 	})
@@ -1510,20 +1452,17 @@ func TestMachine_Return(t *testing.T) {
 	}
 	scalars := []types.Kind{types.KindI32, types.KindF64}
 
-	t.Run("stores results from slot zero", func(t *testing.T) {
-		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{Kinds: scalars}, nil)
-		start := len(a.Rows())
-		m.Return(a, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{1}}, r)
-		require.Equal(t, rows(0), a.Rows()[start:])
-	})
-
-	t.Run("stores completed operands past the locals", func(t *testing.T) {
-		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{Kinds: scalars}, nil)
-		start := len(a.Rows())
-		m.Return(a, ssa.Terminator{Op: ssa.OpComplete, Args: []ssa.Value{1}}, r)
-		require.Equal(t, rows(16), a.Rows()[start:])
+	t.Run("stores results from slot zero and completed operands past the locals", func(t *testing.T) {
+		for _, c := range []struct {
+			op   ssa.Op
+			slot int16
+		}{{ssa.OpReturn, 0}, {ssa.OpComplete, 16}} {
+			m, a := arm64.New(), asm.New(target.New())
+			m.Prologue(a, 0, true, compile.Layout{Kinds: scalars}, nil)
+			start := len(a.Rows())
+			m.Return(a, ssa.Terminator{Op: c.op, Args: []ssa.Value{1}}, r)
+			require.Equal(t, rows(c.slot), a.Rows()[start:])
+		}
 	})
 
 	t.Run("releases and clears every slot that can hold a reference first", func(t *testing.T) {
@@ -1613,33 +1552,35 @@ func TestMachine_Return(t *testing.T) {
 		require.Equal(t, []asm.Instruction{target.SUBI(target.X24, target.X24, 1), target.BLabel(0)}, a.Rows()[start:])
 	})
 
-	t.Run("moves one register-convention result to X0 instead of boxing it", func(t *testing.T) {
-		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{Kinds: scalars, Results: []types.Kind{types.KindI32}}, nil)
-		start := len(a.Rows())
-		m.Return(a, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{1}}, r)
-		require.Equal(t, []asm.Instruction{
-			target.MOV(target.W0, r.Reg(1)),
-			target.USE(target.X0),
-			target.SUBI(target.X24, target.X24, 1),
-			target.BLabel(0),
-		}, a.Rows()[start:])
-	})
-
-	t.Run("moves two register-convention results to X0 and X1, a float by FMOV", func(t *testing.T) {
+	t.Run("moves register-convention results to X0 and X1 instead of boxing them, a float by FMOV", func(t *testing.T) {
 		r2 := regs{1: ssa.TypeF64, 2: ssa.TypeRef}
-		m, a := arm64.New(), asm.New(target.New())
-		m.Prologue(a, 0, true, compile.Layout{Kinds: scalars, Results: []types.Kind{types.KindF64, types.KindRef}}, nil)
-		start := len(a.Rows())
-		m.Return(a, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{1, 2}}, r2)
-		require.Equal(t, []asm.Instruction{
-			target.FMOV(target.X0, r2.Reg(1)),
-			target.MOV(target.X1, r2.Reg(2)),
-			target.USE(target.X0),
-			target.USE(target.X1),
-			target.SUBI(target.X24, target.X24, 1),
-			target.BLabel(0),
-		}, a.Rows()[start:])
+		for _, c := range []struct {
+			regs    regs
+			results []types.Kind
+			args    []ssa.Value
+			rows    []asm.Instruction
+		}{
+			{r, []types.Kind{types.KindI32}, []ssa.Value{1}, []asm.Instruction{
+				target.MOV(target.W0, r.Reg(1)),
+				target.USE(target.X0),
+				target.SUBI(target.X24, target.X24, 1),
+				target.BLabel(0),
+			}},
+			{r2, []types.Kind{types.KindF64, types.KindRef}, []ssa.Value{1, 2}, []asm.Instruction{
+				target.FMOV(target.X0, r2.Reg(1)),
+				target.MOV(target.X1, r2.Reg(2)),
+				target.USE(target.X0),
+				target.USE(target.X1),
+				target.SUBI(target.X24, target.X24, 1),
+				target.BLabel(0),
+			}},
+		} {
+			m, a := arm64.New(), asm.New(target.New())
+			m.Prologue(a, 0, true, compile.Layout{Kinds: scalars, Results: c.results}, nil)
+			start := len(a.Rows())
+			m.Return(a, ssa.Terminator{Op: ssa.OpReturn, Args: c.args}, c.regs)
+			require.Equal(t, c.rows, a.Rows()[start:])
+		}
 	})
 
 	t.Run("keeps OpComplete boxing to slots even under the register convention", func(t *testing.T) {
@@ -2110,23 +2051,23 @@ func TestMachine_Exit(t *testing.T) {
 		)
 	}
 
-	t.Run("suspends a resumable exit", func(t *testing.T) {
-		a := asm.New(target.New())
-		arm64.New().Exit(a, 3, jit.ExitBridge, uses)
-		require.Equal(t, append(rows(3, jit.TrapBridge), target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget))), a.Rows())
-	})
-
-	t.Run("never returns from a deopt", func(t *testing.T) {
-		a := asm.New(target.New())
-		arm64.New().Exit(a, 4, jit.ExitDeopt, uses)
-		require.Equal(t, append(rows(4, jit.TrapDeopt), target.BRK(0)), a.Rows())
-	})
-
-	t.Run("suspends a call for the interpreter to run", func(t *testing.T) {
-		a := asm.New(target.New())
-		arm64.New().Exit(a, 5, jit.ExitCall, uses)
-		require.Equal(t, append(rows(5, jit.TrapBridge), target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget))), a.Rows())
-	})
+	for _, c := range []struct {
+		name string
+		id   int
+		kind jit.Kind
+		trap jit.Trap
+		tail asm.Instruction
+	}{
+		{"suspends a resumable exit", 3, jit.ExitBridge, jit.TrapBridge, target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget))},
+		{"never returns from a deopt", 4, jit.ExitDeopt, jit.TrapDeopt, target.BRK(0)},
+		{"suspends a call for the interpreter to run", 5, jit.ExitCall, jit.TrapBridge, target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget))},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			a := asm.New(target.New())
+			arm64.New().Exit(a, c.id, c.kind, uses)
+			require.Equal(t, append(rows(uint64(c.id), c.trap), c.tail), a.Rows())
+		})
+	}
 }
 
 func TestMachine_Results(t *testing.T) {
