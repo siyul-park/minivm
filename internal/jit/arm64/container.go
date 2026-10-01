@@ -14,7 +14,7 @@ import (
 // A closure guard first deopts a word that is no reference at all, since a
 // dynamic callee may hold any value.
 func (m *Machine) shape(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	if len(op.Args) != 1 || len(op.Results) != 1 {
+	if !has(op, 1, 1) {
 		return false
 	}
 	expected := itab(op.Shape)
@@ -23,19 +23,15 @@ func (m *Machine) shape(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 	}
 	ref, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
 	if op.Shape.Function != 0 {
-		a.Emit(target.LSRI(target.X16, ref, types.VBits))
-		a.Emit(target.LDI(target.X17, types.Tag(types.KindRef)>>types.VBits)...)
-		a.Emit(target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, s.Deopt()))
+		expectRef(a, ref, s.Deopt())
 	}
 	addr := m.heap(a, ref)
 	a.Emit(target.LDR(target.X16, addr, 0))
-	a.Emit(target.LDI(target.X17, uint64(expected))...)
-	a.Emit(target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, s.Deopt()))
+	expect(a, uint64(expected), s.Deopt())
 	if op.Shape.Struct && op.Shape.Type != 0 {
 		a.Emit(target.LDR(target.X16, addr, int16(jit.OffsetData)))
 		a.Emit(target.LDR(target.X16, target.X16, int16(jit.OffsetStructTyp)))
-		a.Emit(target.LDI(target.X17, uint64(op.Shape.Type))...)
-		a.Emit(target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, s.Deopt()))
+		expect(a, uint64(op.Shape.Type), s.Deopt())
 	}
 	if op.Shape.Function != 0 {
 		m.closure(a, addr, op.Shape, s)
@@ -52,18 +48,14 @@ func (m *Machine) closure(a *asm.Assembler, addr asm.VReg, shape ssa.Shape, s co
 	data := m.vreg()
 	a.Emit(target.LDR(data, addr, int16(jit.OffsetData)))
 	a.Emit(target.LDR(target.W16, data, int16(jit.OffsetClosureFn)))
-	a.Emit(target.LDI(target.X17, uint64(shape.Function))...)
-	a.Emit(
-		target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, s.Deopt()),
-		target.LDR(target.X16, data, int16(jit.OffsetClosureTyp)),
-	)
-	a.Emit(target.LDI(target.X17, uint64(shape.Type))...)
-	a.Emit(target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, s.Deopt()))
+	expect(a, uint64(shape.Function), s.Deopt())
+	a.Emit(target.LDR(target.X16, data, int16(jit.OffsetClosureTyp)))
+	expect(a, uint64(shape.Type), s.Deopt())
 	if shape.Captures == 0 {
 		return
 	}
 	a.Emit(target.LDR(target.X16, data, int16(jit.OffsetClosureUpvals+jit.OffsetSliceLen)))
-	if shape.Captures <= 0xFFF {
+	if shape.Captures <= imm12 {
 		a.Emit(target.CMPI(target.X16, uint16(shape.Captures)))
 	} else {
 		a.Emit(target.LDI(target.X17, uint64(shape.Captures))...)
@@ -104,8 +96,8 @@ func itab(shape ssa.Shape) uintptr {
 
 // refIsNull tests the low word of a boxed ref for a null heap index; no
 // container guard applies since it never dereferences the heap.
-func (m *Machine) refIsNull(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	if len(op.Args) != 1 || len(op.Results) != 1 {
+func refIsNull(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	if !has(op, 1, 1) {
 		return false
 	}
 	src, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
@@ -118,7 +110,7 @@ func (m *Machine) refIsNull(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 
 // arrayLen loads the element count of a guarded array.
 func (m *Machine) arrayLen(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	if len(op.Args) != 1 || len(op.Results) != 1 {
+	if !has(op, 1, 1) {
 		return false
 	}
 	shape, ok := m.guards[op.Args[0]]
@@ -133,7 +125,7 @@ func (m *Machine) arrayLen(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 // arrayGet loads the element at a bounds-checked index off a guarded array.
 // A ref element is retained, matching interp.(*Interpreter).arrayGet.
 func (m *Machine) arrayGet(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	if len(op.Args) != 2 || len(op.Results) != 1 {
+	if !has(op, 2, 1) {
 		return false
 	}
 	shape, ok := m.guards[op.Args[0]]
@@ -166,10 +158,10 @@ func (m *Machine) arrayGet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 }
 
 // arraySet writes val at a bounds-checked index into a guarded array. A ref
-// element release the old element and adopts val, matching
+// element releases the old one and adopts val, matching
 // interp.(*Interpreter).arraySet.
 func (m *Machine) arraySet(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	if len(op.Args) != 3 || len(op.Results) != 0 {
+	if !has(op, 3, 0) {
 		return false
 	}
 	shape, ok := m.guards[op.Args[0]]
@@ -203,11 +195,7 @@ func (m *Machine) arraySet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 		off := m.offset(a, ptr, idx, 3)
 		if shape.Kind == types.KindRef {
 			// A []any element is a Boxed word; box is a no-op for a ref.
-			boxed := m.box(a, s, op.Args[2])
-			old := m.vreg()
-			a.Emit(target.LDR(old, off, 0))
-			a.Emit(target.STR(boxed, off, 0))
-			m.release(a, old, s)
+			m.replace(a, s, off, box(a, s, op.Args[2]))
 		} else {
 			a.Emit(target.STR(val, off, 0))
 		}
@@ -215,13 +203,12 @@ func (m *Machine) arraySet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 	return true
 }
 
-// structGet loads the field at a translate-time-constant index off a
-// guarded struct: the shape guard already pinned the exact struct type, so
-// the field's kind — and index bounds — are the ones the frontend resolved,
-// carried here as Results[0]'s own static type. No further guard or bounds
-// check applies. A ref field is retained, matching threaded STRUCT_GET.
+// structGet loads the field at a constant index off a guarded struct. The
+// shape guard pinned the struct type, so the field kind is Results[0]'s own
+// static type and no bounds check applies. A ref field is retained, matching
+// threaded STRUCT_GET.
 func (m *Machine) structGet(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	if len(op.Args) != 2 || len(op.Results) != 1 {
+	if !has(op, 2, 1) {
 		return false
 	}
 	shape, ok := m.guards[op.Args[0]]
@@ -257,7 +244,7 @@ func (m *Machine) structGet(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 // differs from the value's deopts, since threaded SetField converts by the
 // declared kind; ref fields release the old value and adopt the new one.
 func (m *Machine) structSet(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	if len(op.Args) != 3 || len(op.Results) != 0 {
+	if !has(op, 3, 0) {
 		return false
 	}
 	shape, ok := m.guards[op.Args[0]]
@@ -286,12 +273,9 @@ func (m *Machine) structSet(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 	a.Emit(target.LDR(base, data, int16(jit.OffsetStructData)))
 	off := m.offset(a, base, idx, 3)
 
-	val := m.field(a, s, op.Args[2])
+	val := field(a, s, op.Args[2])
 	if kind == types.KindRef {
-		old := m.vreg()
-		a.Emit(target.LDR(old, off, 0))
-		a.Emit(target.STR(val, off, 0))
-		m.release(a, old, s)
+		m.replace(a, s, off, val)
 	} else {
 		a.Emit(target.STR(val, off, 0))
 	}
@@ -349,11 +333,17 @@ func (m *Machine) offset(a *asm.Assembler, ptr, idx asm.Reg, shift uint8) asm.VR
 	return off
 }
 
-// field returns v's own kind boxed to a struct.Data slot's full 64-bit
-// width: the same widening m.box applies, except an i64 or f64 lane stores
-// its raw bits unmodified — struct.Data is plain 64-bit storage, not
-// NaN-boxed, so a value outside the boxed inline range is still exact.
-func (m *Machine) field(a *asm.Assembler, s compile.Site, v ssa.Value) asm.Reg {
+// replace stores ref word at off, then releases the word it overwrote.
+func (m *Machine) replace(a *asm.Assembler, s compile.Site, off asm.Reg, word asm.Reg) {
+	old := m.vreg()
+	a.Emit(target.LDR(old, off, 0))
+	a.Emit(target.STR(word, off, 0))
+	m.release(a, old, s)
+}
+
+// field returns v widened to a struct.Data slot's 64 bits. Unlike box, an i64
+// or f64 stores its raw bits, since struct.Data is not NaN-boxed.
+func field(a *asm.Assembler, s compile.Site, v ssa.Value) asm.Reg {
 	src, k := s.Reg(v), s.Type(v).Kind()
 	switch k {
 	case types.KindI64, types.KindF64, types.KindRef:
@@ -361,12 +351,8 @@ func (m *Machine) field(a *asm.Assembler, s compile.Site, v ssa.Value) asm.Reg {
 	case types.KindF32:
 		a.Emit(target.FMOV(target.W16, src))
 	case types.KindI8:
-		// types.(*Struct).SetField's KindI8 case computes
-		// uint64(uint32(int32(val.I8()))): sign-extend to 32 bits, then
-		// zero-extend to 64. SBFX into the 32-bit W16 does exactly that in
-		// one step — bits[8:32) of X16 come out sign-extended from bit 7,
-		// and writing W16 zeroes X16's upper 32 bits per the ARM64 register
-		// convention, matching the zero-extend without a further mask.
+		// SetField stores uint64(uint32(int32(val.I8()))): SBFX into W16
+		// sign-extends to 32 bits and zeroes the upper 32.
 		a.Emit(target.SBFX(target.W16, src, 0, 8))
 	default: // KindI1, KindI32
 		a.Emit(target.UXTW(target.X16, src))

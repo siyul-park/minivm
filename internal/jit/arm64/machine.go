@@ -27,8 +27,7 @@ type Machine struct {
 	entry asm.Label
 	// guards is the shape every OpGuardShape result admits, so a container
 	// exec op can assert its own container argument is one (compile.Site
-	// carries no such query, and the fact is Machine-local across the whole
-	// function, like kinds and temp).
+	// carries no such query).
 	guards map[ssa.Value]ssa.Shape
 	// registers is this function's register-convention results (see compile's
 	// registers), empty when OpReturn boxes to the VM frame instead.
@@ -46,6 +45,9 @@ type Machine struct {
 	flag ssa.Value
 	cond uint8
 }
+
+// imm12 is the largest immediate the lowerings place in one 12-bit field.
+const imm12 = 0xFFF
 
 // jumps is the conditional branch taken under each condition code.
 var jumps = [...]target.Op{
@@ -80,9 +82,8 @@ func (m *Machine) Reserve() []asm.PReg {
 // enabled, and starts non-parameter locals at their zeros, loading each
 // distinct zero once. Register-convention arguments move from X0/X1 into args
 // before those registers are repurposed; the upvals base loads after them.
-// A Machine lowers many functions in
-// sequence (a Queue worker reuses one), so Prologue resets all per-function
-// state.
+// A Machine lowers many functions in sequence (a Queue worker reuses one), so
+// Prologue resets all per-function state.
 func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.Layout, args []asm.VReg) {
 	// upvals, flag, and cond restart zero, which is unreadable: the upval
 	// read guards on a nonzero VReg, and ssa.NoValue names no branch
@@ -101,22 +102,17 @@ func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.
 	)
 	if count {
 		a.Emit(target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)))
-		if 8*address <= 0xFFF {
-			a.Emit(
-				target.LDR(target.X17, target.X16, int16(8*address)),
-				target.ADDI(target.X17, target.X17, 1),
-				target.STR(target.X17, target.X16, int16(8*address)),
-			)
-		} else {
-			// Past the LDR/STR imm12 offset range.
+		off := int16(8 * address)
+		if 8*address > imm12 {
 			a.Emit(target.LDI(target.X17, uint64(8*address))...)
-			a.Emit(
-				target.ADD(target.X16, target.X16, target.X17),
-				target.LDR(target.X17, target.X16, 0),
-				target.ADDI(target.X17, target.X17, 1),
-				target.STR(target.X17, target.X16, 0),
-			)
+			a.Emit(target.ADD(target.X16, target.X16, target.X17))
+			off = 0
 		}
+		a.Emit(
+			target.LDR(target.X17, target.X16, off),
+			target.ADDI(target.X17, target.X17, 1),
+			target.STR(target.X17, target.X16, off),
+		)
 	}
 	base := len(l.Kinds) - len(l.Zeros)
 	for i, word := range l.Zeros {
@@ -270,8 +266,7 @@ func (m *Machine) Branch(a *asm.Assembler, t ssa.Terminator, s compile.Site, lab
 			scratch = target.W16
 		}
 		for i, label := range labels[:len(labels)-1] {
-			// Past the CMPI imm12 range.
-			if i <= 0xFFF {
+			if i <= imm12 {
 				a.Emit(target.CMPI(index, uint16(i)), target.BCondLabel(target.OpBEQ, label))
 			} else {
 				a.Emit(target.LDI(scratch, uint64(i))...)
@@ -290,11 +285,7 @@ func (m *Machine) Return(a *asm.Assembler, t ssa.Terminator, s compile.Site) {
 	base := len(m.kinds)
 	if t.Op == ssa.OpReturn {
 		base = 0
-		lent := false
-		for _, borrowed := range m.borrows {
-			lent = lent || borrowed
-		}
-		if lent {
+		if slices.Contains(m.borrows, true) {
 			skip := a.Label()
 			a.Emit(target.CMPI(target.X27, 1), target.BCondLabel(target.OpBNE, skip))
 			for i, borrowed := range m.borrows {
@@ -333,11 +324,10 @@ func (m *Machine) Return(a *asm.Assembler, t ssa.Terminator, s compile.Site) {
 		if len(t.Args) > 1 {
 			a.Emit(target.USE(target.X1))
 		}
-		a.Emit(target.SUBI(target.X24, target.X24, 1), target.BLabel(m.end))
-		return
-	}
-	for i, v := range t.Args {
-		a.Emit(target.STR(m.box(a, s, v), target.X25, int16((base+i)*8)))
+	} else {
+		for i, v := range t.Args {
+			a.Emit(target.STR(box(a, s, v), target.X25, int16((base+i)*8)))
+		}
 	}
 	a.Emit(target.SUBI(target.X24, target.X24, 1), target.BLabel(m.end))
 }
@@ -354,9 +344,9 @@ func (m *Machine) Budget(a *asm.Assembler, safepoint asm.Label) {
 // Exit stores X27 to Context.Depth and X24 to Context.Budget (their only
 // writer, so both are exact at every trap), writes the exit id and trap,
 // then calls the preserving stub through EXIT; a resumed exit reloads X24,
-// which Go may have refilled. EXIT has BLR encoding with FlowNext, so use intervals stay
-// live across the stub; a non-resuming exit does not resume and other exits
-// resume in native code.
+// which Go may have refilled. EXIT has BLR encoding with FlowNext, so use
+// intervals stay live across the stub; a non-resuming exit does not resume
+// and other exits resume in native code.
 func (m *Machine) Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg) {
 	trap := jit.TrapBridge
 	if k == jit.ExitDeopt {
@@ -407,12 +397,12 @@ func (m *Machine) Results(a *asm.Assembler, regs []asm.VReg) {
 // resumes at Join; an owned Callee is released once a native callee returns,
 // a borrowed one left alone.
 func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
-	if 8*(c.Base+c.Size) > 4095 {
+	if 8*(c.Base+c.Size) > imm12 {
 		return false
 	}
 	record := func(field uintptr) int16 { return int16(jit.OffsetRecords - unsafe.Sizeof(jit.Record{}) + field) }
 	for i, v := range c.Args {
-		a.Emit(target.STR(m.box(a, s, v), target.X25, int16((c.Base+i)*8)))
+		a.Emit(target.STR(box(a, s, v), target.X25, int16((c.Base+i)*8)))
 	}
 	if c.Generic {
 		a.Emit(target.BLabel(c.Bridge))
@@ -481,23 +471,15 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	if c.Owned {
 		m.release(a, s.Reg(c.Callee), s)
 	}
-	if len(c.Registers) > 0 {
-		for j, v := range c.Results {
-			convention(a, s.Reg(v), j, true)
-		}
-		a.Bind(c.Join)
+	if len(c.Registers) == 0 {
+		m.join(a, c, s)
 		return true
 	}
-	m.join(a, c, s)
-	return true
-}
-
-// join binds c.Join and loads c's results from the callee frame's slots.
-func (m *Machine) join(a *asm.Assembler, c compile.Call, s compile.Site) {
-	a.Bind(c.Join)
 	for j, v := range c.Results {
-		a.Emit(target.LDR(s.Reg(v), target.X25, int16((c.Base+j)*8)))
+		convention(a, s.Reg(v), j, true)
 	}
+	a.Bind(c.Join)
+	return true
 }
 
 // Move copies src into dst of the same bank.
@@ -522,6 +504,642 @@ func (m *Machine) Const(a *asm.Assembler, dst asm.VReg, word uint64) {
 	}
 	a.Emit(target.LDI(target.X16, word)...)
 	a.Emit(target.FMOV(dst, target.X16))
+}
+
+// load unboxes a slot: a narrow or f32 payload is the slot's low 32 bits,
+// f64 and ref are the whole word. An i64 slot holds the word unchecked; its
+// kind guard unboxes it.
+func (m *Machine) load(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	if len(op.Results) != 1 {
+		return false
+	}
+	base, ok := m.base(a, op.Slot)
+	if !ok {
+		return false
+	}
+	a.Emit(target.LDR(s.Reg(op.Results[0]), base, int16(op.Slot.Index*8)))
+	return true
+}
+
+// store overwrites a slot, releasing its old reference when its declared
+// representation is boxed.
+func (m *Machine) store(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	if len(op.Args) != 1 {
+		return false
+	}
+	base, ok := m.base(a, op.Slot)
+	if !ok {
+		return false
+	}
+	// Box first: a box exit that deopts leaves the old occupant to threaded.
+	word := box(a, s, op.Args[0])
+	// An i64 slot may hold a heap-promoted ref; release skips inline words.
+	if k := s.Slot(op.Slot); k == ssa.TypeRef || k == ssa.TypeI64 {
+		if _, ok := word.(asm.VReg); !ok {
+			// Release clobbers the X16 box result.
+			boxed := m.vreg()
+			a.Emit(target.MOV(boxed, word))
+			word = boxed
+		}
+		old := m.vreg()
+		a.Emit(target.LDR(old, base, int16(op.Slot.Index*8)))
+		m.release(a, old, s)
+	}
+	a.Emit(target.STR(word, base, int16(op.Slot.Index*8)))
+	return true
+}
+
+// base is the register a slot is addressed from: X25 for a local of this
+// activation, the globals base for a global, the upvals base for an upval.
+func (m *Machine) base(a *asm.Assembler, slot ssa.Slot) (asm.Reg, bool) {
+	if slot.Index < 0 || slot.Index > imm12 {
+		return nil, false
+	}
+	switch {
+	case slot.Space == ssa.SpaceLocal && slot.Base == 0:
+		return target.X25, true
+	case slot.Space == ssa.SpaceGlobal:
+		base := m.vreg()
+		a.Emit(target.LDR(base, target.Ctx, int16(jit.OffsetGlobals)))
+		return base, true
+	case slot.Space == ssa.SpaceUpval && m.upvals != asm.VReg{}:
+		return m.upvals, true
+	default:
+		return nil, false
+	}
+}
+
+// exec lowers an OpExec by its instruction code.
+func (m *Machine) exec(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	switch op.Code {
+	case instr.I32_ADD, instr.I64_ADD:
+		return binary(a, op, s, target.ADD)
+	case instr.I32_SUB, instr.I64_SUB:
+		return binary(a, op, s, target.SUB)
+	case instr.I32_MUL, instr.I64_MUL:
+		return binary(a, op, s, target.MUL)
+	case instr.I32_AND, instr.I64_AND:
+		return binary(a, op, s, target.AND)
+	case instr.I32_OR, instr.I64_OR:
+		return binary(a, op, s, target.ORR)
+	case instr.I32_XOR, instr.I64_XOR:
+		return binary(a, op, s, target.EOR)
+	case instr.I32_SHL, instr.I64_SHL:
+		return binary(a, op, s, target.LSL)
+	case instr.I32_SHR_S, instr.I64_SHR_S:
+		return binary(a, op, s, target.ASR)
+	case instr.I32_SHR_U, instr.I64_SHR_U:
+		return binary(a, op, s, target.LSR)
+	case instr.I32_ROTR, instr.I64_ROTR:
+		return binary(a, op, s, target.ROR)
+	case instr.I32_ROTL:
+		return m.rotl(a, op, s, asm.Width32)
+	case instr.I64_ROTL:
+		return m.rotl(a, op, s, asm.Width64)
+	case instr.I32_DIV_S, instr.I32_DIV_U, instr.I32_REM_S, instr.I32_REM_U:
+		return divide(a, op, s, asm.Width32)
+	case instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U:
+		return divide(a, op, s, asm.Width64)
+	case instr.I32_EQZ:
+		return m.eqz(a, op, s, asm.Width32)
+	case instr.I64_EQZ:
+		return m.eqz(a, op, s, asm.Width64)
+	case instr.I32_EQ, instr.F32_EQ:
+		return m.compare(a, op, s, target.CondEQ, asm.Width32)
+	case instr.I32_NE, instr.F32_NE:
+		return m.compare(a, op, s, target.CondNE, asm.Width32)
+	case instr.I32_LT_S:
+		return m.compare(a, op, s, target.CondLT, asm.Width32)
+	case instr.I32_LT_U:
+		return m.compare(a, op, s, target.CondCC, asm.Width32)
+	case instr.I32_GT_S, instr.F32_GT:
+		return m.compare(a, op, s, target.CondGT, asm.Width32)
+	case instr.I32_GT_U:
+		return m.compare(a, op, s, target.CondHI, asm.Width32)
+	case instr.I32_LE_S:
+		return m.compare(a, op, s, target.CondLE, asm.Width32)
+	case instr.I32_LE_U:
+		return m.compare(a, op, s, target.CondLS, asm.Width32)
+	case instr.I32_GE_S, instr.F32_GE:
+		return m.compare(a, op, s, target.CondGE, asm.Width32)
+	case instr.I32_GE_U:
+		return m.compare(a, op, s, target.CondCS, asm.Width32)
+	case instr.I64_EQ, instr.F64_EQ:
+		return m.compare(a, op, s, target.CondEQ, asm.Width64)
+	case instr.I64_NE, instr.F64_NE:
+		return m.compare(a, op, s, target.CondNE, asm.Width64)
+	case instr.I64_LT_S:
+		return m.compare(a, op, s, target.CondLT, asm.Width64)
+	case instr.I64_LT_U:
+		return m.compare(a, op, s, target.CondCC, asm.Width64)
+	case instr.I64_GT_S, instr.F64_GT:
+		return m.compare(a, op, s, target.CondGT, asm.Width64)
+	case instr.I64_GT_U:
+		return m.compare(a, op, s, target.CondHI, asm.Width64)
+	case instr.I64_LE_S:
+		return m.compare(a, op, s, target.CondLE, asm.Width64)
+	case instr.I64_LE_U:
+		return m.compare(a, op, s, target.CondLS, asm.Width64)
+	case instr.I64_GE_S, instr.F64_GE:
+		return m.compare(a, op, s, target.CondGE, asm.Width64)
+	case instr.I64_GE_U:
+		return m.compare(a, op, s, target.CondCS, asm.Width64)
+	case instr.F32_LT:
+		return m.compare(a, op, s, target.CondMI, asm.Width32)
+	case instr.F32_LE:
+		return m.compare(a, op, s, target.CondLS, asm.Width32)
+	case instr.F64_LT:
+		return m.compare(a, op, s, target.CondMI, asm.Width64)
+	case instr.F64_LE:
+		return m.compare(a, op, s, target.CondLS, asm.Width64)
+	case instr.I32_EXTEND8_S, instr.I64_EXTEND8_S:
+		return unary(a, op, s, target.SXTB)
+	case instr.I32_EXTEND16_S, instr.I64_EXTEND16_S:
+		return unary(a, op, s, target.SXTH)
+	case instr.I64_EXTEND32_S:
+		return unary(a, op, s, target.SXTW)
+	case instr.I32_CLZ, instr.I64_CLZ:
+		return unary(a, op, s, target.CLZ)
+	case instr.I32_CTZ:
+		return m.ctz(a, op, s, asm.Width32)
+	case instr.I64_CTZ:
+		return m.ctz(a, op, s, asm.Width64)
+	case instr.I32_POPCNT:
+		return m.popcnt(a, op, s, asm.Width32)
+	case instr.I64_POPCNT:
+		return m.popcnt(a, op, s, asm.Width64)
+	case instr.I32_TO_I64_S:
+		return convert(a, op, s, target.SXTW)
+	case instr.I32_TO_I64_U:
+		return convert(a, op, s, target.UXTW)
+	case instr.I32_TO_F32_S, instr.I32_TO_F64_S, instr.I64_TO_F32_S, instr.I64_TO_F64_S:
+		return convert(a, op, s, target.SCVTF)
+	case instr.I32_TO_F32_U, instr.I32_TO_F64_U, instr.I64_TO_F32_U, instr.I64_TO_F64_U:
+		return convert(a, op, s, target.UCVTF)
+	case instr.F32_TO_F64, instr.F64_TO_F32:
+		return convert(a, op, s, target.FCVT)
+	case instr.I64_TO_I32:
+		return narrow(a, op, s)
+	case instr.I32_REINTERPRET_F32, instr.I64_REINTERPRET_F64, instr.F32_REINTERPRET_I32, instr.F64_REINTERPRET_I64:
+		return reinterpret(a, op, s)
+	case instr.F32_ADD, instr.F64_ADD:
+		return binary(a, op, s, target.FADD)
+	case instr.F32_SUB, instr.F64_SUB:
+		return binary(a, op, s, target.FSUB)
+	case instr.F32_MUL, instr.F64_MUL:
+		return binary(a, op, s, target.FMUL)
+	case instr.F32_DIV, instr.F64_DIV:
+		return binary(a, op, s, target.FDIV)
+	case instr.F32_MIN, instr.F64_MIN:
+		return binary(a, op, s, target.FMIN)
+	case instr.F32_MAX, instr.F64_MAX:
+		return binary(a, op, s, target.FMAX)
+	case instr.F32_ABS, instr.F64_ABS:
+		return unary(a, op, s, target.FABS)
+	case instr.F32_NEG, instr.F64_NEG:
+		return unary(a, op, s, target.FNEG)
+	case instr.F32_SQRT, instr.F64_SQRT:
+		return unary(a, op, s, target.FSQRT)
+	case instr.F32_CEIL, instr.F64_CEIL:
+		return unary(a, op, s, target.FRINTP)
+	case instr.F32_FLOOR, instr.F64_FLOOR:
+		return unary(a, op, s, target.FRINTM)
+	case instr.F32_TRUNC, instr.F64_TRUNC:
+		return unary(a, op, s, target.FRINTZ)
+	case instr.F32_NEAREST, instr.F64_NEAREST:
+		return unary(a, op, s, target.FRINTN)
+	case instr.F32_COPYSIGN:
+		return m.copysign(a, op, s, asm.Width32)
+	case instr.F64_COPYSIGN:
+		return m.copysign(a, op, s, asm.Width64)
+	case instr.F32_TO_I32_S:
+		return truncate(a, op, s, target.FCVTZS, asm.Width32, asm.Width32)
+	case instr.F32_TO_I32_U:
+		return truncate(a, op, s, target.FCVTZU, asm.Width32, asm.Width32)
+	case instr.F32_TO_I64_S:
+		return truncate(a, op, s, target.FCVTZS, asm.Width32, asm.Width64)
+	case instr.F32_TO_I64_U:
+		return truncate(a, op, s, target.FCVTZU, asm.Width32, asm.Width64)
+	case instr.F64_TO_I32_S:
+		return truncate(a, op, s, target.FCVTZS, asm.Width64, asm.Width32)
+	case instr.F64_TO_I32_U:
+		return truncate(a, op, s, target.FCVTZU, asm.Width64, asm.Width32)
+	case instr.F64_TO_I64_S:
+		return truncate(a, op, s, target.FCVTZS, asm.Width64, asm.Width64)
+	case instr.F64_TO_I64_U:
+		return truncate(a, op, s, target.FCVTZU, asm.Width64, asm.Width64)
+	case instr.SELECT:
+		return choose(a, op, s)
+	case instr.REF_IS_NULL:
+		return refIsNull(a, op, s)
+	case instr.ARRAY_GET:
+		return m.arrayGet(a, op, s)
+	case instr.ARRAY_SET:
+		return m.arraySet(a, op, s)
+	case instr.ARRAY_LEN:
+		return m.arrayLen(a, op, s)
+	case instr.STRUCT_GET:
+		return m.structGet(a, op, s)
+	case instr.STRUCT_SET:
+		return m.structSet(a, op, s)
+	default:
+		return false
+	}
+}
+
+func binary(a *asm.Assembler, op ssa.Operation, s compile.Site, emit func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
+	if !has(op, 2, 1) {
+		return false
+	}
+	x, y, dst := s.Reg(op.Args[0]), s.Reg(op.Args[1]), s.Reg(op.Results[0])
+	if !same(x, y, dst) {
+		return false
+	}
+	a.Emit(emit(dst, x, y))
+	return true
+}
+
+func unary(a *asm.Assembler, op ssa.Operation, s compile.Site, emit func(dst, src asm.Reg) asm.Instruction) bool {
+	if !has(op, 1, 1) {
+		return false
+	}
+	x, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
+	if !same(x, dst) {
+		return false
+	}
+	a.Emit(emit(dst, x))
+	return true
+}
+
+// ctz counts trailing zeros as RBIT then CLZ: bit-reversal turns the
+// trailing run into a leading one, matching bits.TrailingZeros for every
+// input including zero (RBIT(0)=0, CLZ(0)=width).
+func (m *Machine) ctz(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth) bool {
+	if !has(op, 1, 1) {
+		return false
+	}
+	x, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
+	if !match(asm.RegTypeInt, width, x, dst) {
+		return false
+	}
+	t := m.ivreg(width)
+	a.Emit(target.RBIT(t, x))
+	a.Emit(target.CLZ(dst, t))
+	return true
+}
+
+// popcnt counts set bits via the SIMD byte-wise CNT, summed by ADDV and
+// moved back through the general registers: ARM64 has no scalar popcount.
+func (m *Machine) popcnt(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth) bool {
+	if !has(op, 1, 1) {
+		return false
+	}
+	x, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
+	if !match(asm.RegTypeInt, width, x, dst) {
+		return false
+	}
+	v, c, sum := m.fvreg(width), m.fvreg(width), m.fvreg(width)
+	a.Emit(target.FMOV(v, x))
+	a.Emit(target.CNT(c, v))
+	a.Emit(target.ADDV(sum, c))
+	a.Emit(target.FMOV(dst, sum))
+	return true
+}
+
+// rotl rotates left by negating the count and reusing RORV: ARM64 has no
+// left-rotate register form, and RORV's right rotate by -k is a left
+// rotate by k mod width, matching bits.RotateLeft's own negation rule.
+func (m *Machine) rotl(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth) bool {
+	if !has(op, 2, 1) {
+		return false
+	}
+	x, y, dst := s.Reg(op.Args[0]), s.Reg(op.Args[1]), s.Reg(op.Results[0])
+	if !match(asm.RegTypeInt, width, x, y, dst) {
+		return false
+	}
+	t := m.ivreg(width)
+	a.Emit(target.NEG(t, y))
+	a.Emit(target.ROR(dst, x, t))
+	return true
+}
+
+// copysign combines x's magnitude with y's sign through the integer
+// registers, the same bit trick math.Copysign uses, so it is exact for
+// every input including NaN payloads.
+func (m *Machine) copysign(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth) bool {
+	if !has(op, 2, 1) {
+		return false
+	}
+	x, y, dst := s.Reg(op.Args[0]), s.Reg(op.Args[1]), s.Reg(op.Results[0])
+	if !match(asm.RegTypeFloat, width, x, y, dst) {
+		return false
+	}
+	signBit, magMask := uint64(1)<<63, uint64(1)<<63-1
+	if width == asm.Width32 {
+		signBit, magMask = uint64(1)<<31, uint64(1)<<31-1
+	}
+	mag, sign := m.ivreg(width), m.ivreg(width)
+	a.Emit(target.FMOV(mag, x))
+	a.Emit(target.FMOV(sign, y))
+	a.Emit(target.ANDI(mag, mag, magMask))
+	a.Emit(target.ANDI(sign, sign, signBit))
+	a.Emit(target.ORR(mag, mag, sign))
+	a.Emit(target.FMOV(dst, mag))
+	return true
+}
+
+// divide traps on a zero divisor, then emits the quotient, or for a remainder
+// x - quotient*y.
+func divide(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth) bool {
+	if !has(op, 2, 1) {
+		return false
+	}
+	x, y, dst := s.Reg(op.Args[0]), s.Reg(op.Args[1]), s.Reg(op.Results[0])
+	if !match(asm.RegTypeInt, width, x, y, dst) {
+		return false
+	}
+	a.Emit(target.CBZLabel(y, s.Trap()))
+	div, rem := target.UDIV, false
+	switch op.Code {
+	case instr.I32_DIV_S, instr.I64_DIV_S:
+		div = target.SDIV
+	case instr.I32_REM_S, instr.I64_REM_S:
+		div, rem = target.SDIV, true
+	case instr.I32_REM_U, instr.I64_REM_U:
+		rem = true
+	}
+	if !rem {
+		a.Emit(div(dst, x, y))
+		return true
+	}
+	q := target.W16
+	if width == asm.Width64 {
+		q = target.X16
+	}
+	a.Emit(div(q, x, y))
+	a.Emit(target.MSUB(dst, q, y, x))
+	return true
+}
+
+func (m *Machine) eqz(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth) bool {
+	if !has(op, 1, 1) {
+		return false
+	}
+	src, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
+	if !match(asm.RegTypeInt, width, src) || !match(asm.RegTypeInt, asm.Width32, dst) {
+		return false
+	}
+	a.Emit(target.CMPI(src, 0))
+	m.set(a, s, op.Results[0], dst, target.CondEQ)
+	return true
+}
+
+// compare lowers integer and float comparisons.
+func (m *Machine) compare(a *asm.Assembler, op ssa.Operation, s compile.Site, cond uint8, width asm.RegWidth) bool {
+	if !has(op, 2, 1) {
+		return false
+	}
+	x, y, dst := s.Reg(op.Args[0]), s.Reg(op.Args[1]), s.Reg(op.Results[0])
+	if !match(x.Type(), width, x, y) || !match(asm.RegTypeInt, asm.Width32, dst) {
+		return false
+	}
+	switch x.Type() {
+	case asm.RegTypeFloat:
+		// FCMP sets NZCV to 0011 on unordered, where every cond but NE
+		// reads false, as the comparison requires.
+		a.Emit(target.FCMP(x, y))
+	case asm.RegTypeInt:
+		a.Emit(target.CMP(x, y))
+	default:
+		return false
+	}
+	m.set(a, s, op.Results[0], dst, cond)
+	return true
+}
+
+// set materializes cond into dst, v's register, unless v is fused into the
+// branch right after it: then the flags carry cond to Branch.
+func (m *Machine) set(a *asm.Assembler, s compile.Site, v ssa.Value, dst asm.VReg, cond uint8) {
+	if s.Fuse(v) {
+		m.flag, m.cond = v, cond
+		return
+	}
+	a.Emit(target.CSET(dst, cond))
+}
+
+// convert lowers an int-to-int or int-to-float width change, or a float
+// conversion between f32 and f64.
+func convert(a *asm.Assembler, op ssa.Operation, s compile.Site, emit func(dst, src asm.Reg) asm.Instruction) bool {
+	if !has(op, 1, 1) {
+		return false
+	}
+	x, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
+	switch {
+	case x.Type() == asm.RegTypeInt && dst.Type() == asm.RegTypeFloat:
+	case x.Type() == asm.RegTypeInt && dst.Type() == asm.RegTypeInt && x.Width() != dst.Width():
+	case x.Type() == asm.RegTypeFloat && dst.Type() == asm.RegTypeFloat && (op.Code == instr.F32_TO_F64 || op.Code == instr.F64_TO_F32):
+	default:
+		return false
+	}
+	a.Emit(emit(dst, x))
+	return true
+}
+
+func truncate(a *asm.Assembler, op ssa.Operation, s compile.Site, emit func(dst, src asm.Reg) asm.Instruction, from, to asm.RegWidth) bool {
+	if !has(op, 1, 1) {
+		return false
+	}
+	x, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
+	if !match(asm.RegTypeFloat, from, x) || !match(asm.RegTypeInt, to, dst) {
+		return false
+	}
+	a.Emit(emit(dst, x))
+	return true
+}
+
+func narrow(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	if !has(op, 1, 1) {
+		return false
+	}
+	x, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
+	if !match(asm.RegTypeInt, asm.Width64, x) || !match(asm.RegTypeInt, asm.Width32, dst) {
+		return false
+	}
+	a.Emit(target.MOVW(dst, x))
+	return true
+}
+
+func reinterpret(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	if !has(op, 1, 1) {
+		return false
+	}
+	x, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
+	if x.Type() == dst.Type() || x.Width() != dst.Width() {
+		return false
+	}
+	a.Emit(target.FMOV(dst, x))
+	return true
+}
+
+func choose(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	if !has(op, 3, 1) {
+		return false
+	}
+	yes, no, cond := s.Reg(op.Args[0]), s.Reg(op.Args[1]), s.Reg(op.Args[2])
+	dst := s.Reg(op.Results[0])
+	if !match(asm.RegTypeInt, asm.Width32, cond) || !same(yes, no, dst) {
+		return false
+	}
+	a.Emit(target.CMPI(cond, 0))
+	if dst.Type() == asm.RegTypeFloat {
+		a.Emit(target.FCSEL(dst, yes, no, target.CondNE))
+	} else {
+		a.Emit(target.CSEL(dst, yes, no, target.CondNE))
+	}
+	return true
+}
+
+// guard unboxes an i64 operand as threaded borrowI64 does: a word tagged
+// Ref reads the heap-promoted I64 through its itab (any other object
+// deopts) and data word, a borrow; every other word sign-extends its 49-bit
+// payload. I64 and Ref tags differ only in bit 49, so the inline path tests
+// that bit and branches past the ref path.
+func (m *Machine) guard(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	word, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
+	inline, done := a.Label(), a.Label()
+	a.Emit(target.LSRI(target.X16, word, types.VBits), target.TSTI(target.X16, 1), target.BCondLabel(target.OpBEQ, inline))
+	expect(a, types.Tag(types.KindRef)>>types.VBits, inline)
+	heap := m.heap(a, word)
+	a.Emit(target.LDR(target.X16, heap, 0))
+	expect(a, uint64(jit.Itab(types.I64(0))), s.Deopt())
+	a.Emit(target.LDR(dst, heap, int16(jit.OffsetData)), target.LDR(dst, dst, 0), target.BLabel(done))
+
+	a.Bind(inline)
+	a.Emit(target.SBFX(dst, word, 0, types.VBits))
+	a.Bind(done)
+	return true
+}
+
+// value lowers guard.value: Args[0] must equal the admitted word Args[1],
+// or the guard deopts. Result is Args[0]'s own word.
+func (m *Machine) value(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	if !has(op, 2, 1) {
+		return false
+	}
+	got, want := s.Reg(op.Args[0]), s.Reg(op.Args[1])
+	a.Emit(target.CMP(got, want), target.BCondLabel(target.OpBNE, s.Deopt()))
+	m.Move(a, s.Reg(op.Results[0]), got)
+	return true
+}
+
+// retain counts one more reference to ref, as the interpreter's retainBox:
+// any reference, the null one included.
+func (m *Machine) retain(a *asm.Assembler, ref asm.VReg) {
+	skip := a.Label()
+	m.count(a, ref, skip, true)
+	a.Emit(target.ADDI(target.X17, target.X17, 1), target.STR(target.X17, target.X16, 0))
+	a.Bind(skip)
+}
+
+// release counts one reference to ref less, as the interpreter's releaseBox:
+// never the null one. The last reference exits for the interpreter to
+// release the object and what it holds.
+func (m *Machine) release(a *asm.Assembler, ref asm.VReg, s compile.Site) {
+	last, resume := s.Release(ref)
+	m.count(a, ref, resume, false)
+	a.Emit(
+		target.CMPI(target.X17, 1),
+		target.BCondLabel(target.OpBLE, last),
+		target.SUBI(target.X17, target.X17, 1),
+		target.STR(target.X17, target.X16, 0),
+	)
+	a.Bind(resume)
+}
+
+// count points X16 at the reference count of ref and loads it into X17. A
+// value that is no reference skips; so does the null reference, a zero index,
+// unless null is counted.
+func (m *Machine) count(a *asm.Assembler, ref asm.VReg, skip asm.Label, null bool) {
+	expectRef(a, ref, skip)
+	a.Emit(target.SBFX(target.X17, ref, 0, 32))
+	if !null {
+		a.Emit(target.CBZLabel(target.X17, skip))
+	}
+	a.Emit(
+		target.LDR(target.X16, target.Ctx, int16(jit.OffsetRC)),
+		target.LSLI(target.X17, target.X17, 3),
+		target.ADD(target.X16, target.X16, target.X17),
+		target.LDR(target.X17, target.X16, 0),
+	)
+}
+
+// box returns the register holding v as a boxed word. An i64 outside the
+// inline range exits through Box and resumes with its heap ref in X16.
+func box(a *asm.Assembler, s compile.Site, v ssa.Value) asm.Reg {
+	src, k := s.Reg(v), s.Type(v).Kind()
+	switch k {
+	case types.KindF64, types.KindRef:
+		return src
+	case types.KindI64:
+		a.Emit(target.LDI(target.X16, 1<<(types.VBits-1))...)
+		a.Emit(target.ADD(target.X17, src, target.X16), target.LSRI(target.X17, target.X17, types.VBits))
+		exit, resume := s.Box(src)
+		a.Emit(
+			target.CBNZLabel(target.X17, exit),
+			target.ANDI(target.X16, src, types.VMask),
+		)
+		a.Emit(target.LDI(target.X17, types.Tag(k))...)
+		a.Emit(target.ORR(target.X16, target.X16, target.X17))
+		a.Bind(resume)
+		return target.X16
+	case types.KindF32:
+		a.Emit(target.FMOV(target.W16, src))
+	default:
+		a.Emit(target.UXTW(target.X16, src))
+	}
+	a.Emit(target.LDI(target.X17, types.Tag(k))...)
+	a.Emit(target.ORR(target.X16, target.X16, target.X17))
+	return target.X16
+}
+
+// expect branches to miss unless X16 holds word; X17 is scratch.
+func expect(a *asm.Assembler, word uint64, miss asm.Label) {
+	a.Emit(target.LDI(target.X17, word)...)
+	a.Emit(target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, miss))
+}
+
+// expectRef branches to miss unless ref is tagged Ref, leaving its tag in X16.
+func expectRef(a *asm.Assembler, ref asm.Reg, miss asm.Label) {
+	a.Emit(target.LSRI(target.X16, ref, types.VBits))
+	expect(a, types.Tag(types.KindRef)>>types.VBits, miss)
+}
+
+// has reports whether op has exactly args operands and results results.
+func has(op ssa.Operation, args, results int) bool {
+	return len(op.Args) == args && len(op.Results) == results
+}
+
+// match reports whether every register is of bank typ and width.
+func match(typ asm.RegType, width asm.RegWidth, regs ...asm.Reg) bool {
+	for _, r := range regs {
+		if r.Type() != typ || r.Width() != width {
+			return false
+		}
+	}
+	return true
+}
+
+// same reports whether every register shares the first one's bank and width.
+func same(regs ...asm.Reg) bool {
+	return match(regs[0].Type(), regs[0].Width(), regs[1:]...)
+}
+
+// join binds c.Join and loads c's results from the callee frame's slots.
+func (m *Machine) join(a *asm.Assembler, c compile.Call, s compile.Site) {
+	a.Bind(c.Join)
+	for j, v := range c.Results {
+		a.Emit(target.LDR(s.Reg(v), target.X25, int16((c.Base+j)*8)))
+	}
 }
 
 // register is the register-convention register at index i (0 or 1).
@@ -561,675 +1179,6 @@ func convention(a *asm.Assembler, v asm.Reg, i int, into bool) {
 	}
 }
 
-// load unboxes a slot: a narrow or f32 payload is the slot's low 32 bits,
-// f64 and ref are the whole word. An i64 slot holds the word unchecked; its
-// kind guard unboxes it.
-func (m *Machine) load(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	if len(op.Results) != 1 {
-		return false
-	}
-	base, ok := m.base(a, op.Slot)
-	if !ok {
-		return false
-	}
-	a.Emit(target.LDR(s.Reg(op.Results[0]), base, int16(op.Slot.Index*8)))
-	return true
-}
-
-// store overwrites a slot, releasing its old reference when its declared
-// representation is boxed.
-func (m *Machine) store(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	if len(op.Args) != 1 {
-		return false
-	}
-	base, ok := m.base(a, op.Slot)
-	if !ok {
-		return false
-	}
-	// Box first: a box exit that deopts leaves the old occupant to threaded.
-	word := m.box(a, s, op.Args[0])
-	// An i64 slot may hold a heap-promoted ref; release skips inline words.
-	if k := s.Slot(op.Slot); k == ssa.TypeRef || k == ssa.TypeI64 {
-		if _, ok := word.(asm.VReg); !ok {
-			// Release clobbers the X16 box result.
-			boxed := m.vreg()
-			a.Emit(target.MOV(boxed, word))
-			word = boxed
-		}
-		old := m.vreg()
-		a.Emit(target.LDR(old, base, int16(op.Slot.Index*8)))
-		m.release(a, old, s)
-	}
-	a.Emit(target.STR(word, base, int16(op.Slot.Index*8)))
-	return true
-}
-
-// base is the register a slot is addressed from: X25 for a local of this
-// activation, the globals base for a global, the upvals base for an upval.
-func (m *Machine) base(a *asm.Assembler, slot ssa.Slot) (asm.Reg, bool) {
-	if slot.Index < 0 || slot.Index > 4095 {
-		return nil, false
-	}
-	switch {
-	case slot.Space == ssa.SpaceLocal && slot.Base == 0:
-		return target.X25, true
-	case slot.Space == ssa.SpaceGlobal:
-		base := m.vreg()
-		a.Emit(target.LDR(base, target.Ctx, int16(jit.OffsetGlobals)))
-		return base, true
-	case slot.Space == ssa.SpaceUpval && m.upvals != asm.VReg{}:
-		return m.upvals, true
-	default:
-		return nil, false
-	}
-}
-
-func (m *Machine) exec(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	switch op.Code {
-	case instr.I32_ADD:
-		return m.binary(a, op, s, target.ADD)
-	case instr.I32_SUB:
-		return m.binary(a, op, s, target.SUB)
-	case instr.I32_MUL:
-		return m.binary(a, op, s, target.MUL)
-	case instr.I32_AND:
-		return m.binary(a, op, s, target.AND)
-	case instr.I32_OR:
-		return m.binary(a, op, s, target.ORR)
-	case instr.I32_XOR:
-		return m.binary(a, op, s, target.EOR)
-	case instr.I32_SHL:
-		return m.binary(a, op, s, target.LSL)
-	case instr.I32_SHR_S:
-		return m.binary(a, op, s, target.ASR)
-	case instr.I32_SHR_U:
-		return m.binary(a, op, s, target.LSR)
-	case instr.I32_DIV_S, instr.I32_DIV_U, instr.I32_REM_S, instr.I32_REM_U:
-		return m.divide(a, op, s, asm.Width32)
-	case instr.I32_EQZ:
-		return m.eqz(a, op, s, asm.Width32)
-	case instr.I32_EQ:
-		return m.compare(a, op, s, target.CondEQ, asm.Width32)
-	case instr.I32_NE:
-		return m.compare(a, op, s, target.CondNE, asm.Width32)
-	case instr.I32_LT_S:
-		return m.compare(a, op, s, target.CondLT, asm.Width32)
-	case instr.I32_LT_U:
-		return m.compare(a, op, s, target.CondCC, asm.Width32)
-	case instr.I32_GT_S:
-		return m.compare(a, op, s, target.CondGT, asm.Width32)
-	case instr.I32_GT_U:
-		return m.compare(a, op, s, target.CondHI, asm.Width32)
-	case instr.I32_LE_S:
-		return m.compare(a, op, s, target.CondLE, asm.Width32)
-	case instr.I32_LE_U:
-		return m.compare(a, op, s, target.CondLS, asm.Width32)
-	case instr.I32_GE_S:
-		return m.compare(a, op, s, target.CondGE, asm.Width32)
-	case instr.I32_GE_U:
-		return m.compare(a, op, s, target.CondCS, asm.Width32)
-	case instr.I32_EXTEND8_S:
-		return m.unary(a, op, s, target.SXTB)
-	case instr.I32_EXTEND16_S:
-		return m.unary(a, op, s, target.SXTH)
-	case instr.I32_TO_I64_S:
-		return m.convert(a, op, s, target.SXTW)
-	case instr.I32_TO_I64_U:
-		return m.convert(a, op, s, target.UXTW)
-	case instr.I32_TO_F32_S:
-		return m.convert(a, op, s, target.SCVTF)
-	case instr.I32_TO_F32_U:
-		return m.convert(a, op, s, target.UCVTF)
-	case instr.I32_TO_F64_S:
-		return m.convert(a, op, s, target.SCVTF)
-	case instr.I32_TO_F64_U:
-		return m.convert(a, op, s, target.UCVTF)
-	case instr.I32_REINTERPRET_F32:
-		return m.reinterpret(a, op, s)
-	case instr.I64_ADD:
-		return m.binary(a, op, s, target.ADD)
-	case instr.I64_SUB:
-		return m.binary(a, op, s, target.SUB)
-	case instr.I64_MUL:
-		return m.binary(a, op, s, target.MUL)
-	case instr.I64_AND:
-		return m.binary(a, op, s, target.AND)
-	case instr.I64_OR:
-		return m.binary(a, op, s, target.ORR)
-	case instr.I64_XOR:
-		return m.binary(a, op, s, target.EOR)
-	case instr.I64_SHL:
-		return m.binary(a, op, s, target.LSL)
-	case instr.I64_SHR_S:
-		return m.binary(a, op, s, target.ASR)
-	case instr.I64_SHR_U:
-		return m.binary(a, op, s, target.LSR)
-	case instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U:
-		return m.divide(a, op, s, asm.Width64)
-	case instr.I64_EQZ:
-		return m.eqz(a, op, s, asm.Width64)
-	case instr.I64_EQ:
-		return m.compare(a, op, s, target.CondEQ, asm.Width64)
-	case instr.I64_NE:
-		return m.compare(a, op, s, target.CondNE, asm.Width64)
-	case instr.I64_LT_S:
-		return m.compare(a, op, s, target.CondLT, asm.Width64)
-	case instr.I64_LT_U:
-		return m.compare(a, op, s, target.CondCC, asm.Width64)
-	case instr.I64_GT_S:
-		return m.compare(a, op, s, target.CondGT, asm.Width64)
-	case instr.I64_GT_U:
-		return m.compare(a, op, s, target.CondHI, asm.Width64)
-	case instr.I64_LE_S:
-		return m.compare(a, op, s, target.CondLE, asm.Width64)
-	case instr.I64_LE_U:
-		return m.compare(a, op, s, target.CondLS, asm.Width64)
-	case instr.I64_GE_S:
-		return m.compare(a, op, s, target.CondGE, asm.Width64)
-	case instr.I64_GE_U:
-		return m.compare(a, op, s, target.CondCS, asm.Width64)
-	case instr.I64_EXTEND8_S:
-		return m.unary(a, op, s, target.SXTB)
-	case instr.I64_EXTEND16_S:
-		return m.unary(a, op, s, target.SXTH)
-	case instr.I64_EXTEND32_S:
-		return m.unary(a, op, s, target.SXTW)
-	case instr.I64_TO_I32:
-		return m.narrow(a, op, s)
-	case instr.I64_TO_F32_S:
-		return m.convert(a, op, s, target.SCVTF)
-	case instr.I64_TO_F32_U:
-		return m.convert(a, op, s, target.UCVTF)
-	case instr.I64_TO_F64_S:
-		return m.convert(a, op, s, target.SCVTF)
-	case instr.I64_TO_F64_U:
-		return m.convert(a, op, s, target.UCVTF)
-	case instr.I64_REINTERPRET_F64:
-		return m.reinterpret(a, op, s)
-	case instr.I32_CLZ:
-		return m.unary(a, op, s, target.CLZ)
-	case instr.I32_CTZ:
-		return m.ctz(a, op, s, asm.Width32)
-	case instr.I32_POPCNT:
-		return m.popcnt(a, op, s, asm.Width32)
-	case instr.I32_ROTL:
-		return m.rotl(a, op, s, asm.Width32)
-	case instr.I32_ROTR:
-		return m.binary(a, op, s, target.ROR)
-	case instr.I64_CLZ:
-		return m.unary(a, op, s, target.CLZ)
-	case instr.I64_CTZ:
-		return m.ctz(a, op, s, asm.Width64)
-	case instr.I64_POPCNT:
-		return m.popcnt(a, op, s, asm.Width64)
-	case instr.I64_ROTL:
-		return m.rotl(a, op, s, asm.Width64)
-	case instr.I64_ROTR:
-		return m.binary(a, op, s, target.ROR)
-
-	case instr.F32_ADD:
-		return m.binary(a, op, s, target.FADD)
-	case instr.F32_SUB:
-		return m.binary(a, op, s, target.FSUB)
-	case instr.F32_MUL:
-		return m.binary(a, op, s, target.FMUL)
-	case instr.F32_DIV:
-		return m.binary(a, op, s, target.FDIV)
-	case instr.F32_ABS:
-		return m.unary(a, op, s, target.FABS)
-	case instr.F32_NEG:
-		return m.unary(a, op, s, target.FNEG)
-	case instr.F32_SQRT:
-		return m.unary(a, op, s, target.FSQRT)
-	case instr.F32_CEIL:
-		return m.unary(a, op, s, target.FRINTP)
-	case instr.F32_FLOOR:
-		return m.unary(a, op, s, target.FRINTM)
-	case instr.F32_TRUNC:
-		return m.unary(a, op, s, target.FRINTZ)
-	case instr.F32_NEAREST:
-		return m.unary(a, op, s, target.FRINTN)
-	case instr.F32_MIN:
-		return m.binary(a, op, s, target.FMIN)
-	case instr.F32_MAX:
-		return m.binary(a, op, s, target.FMAX)
-	case instr.F32_COPYSIGN:
-		return m.copysign(a, op, s, asm.Width32)
-	case instr.F32_EQ:
-		return m.compare(a, op, s, target.CondEQ, asm.Width32)
-	case instr.F32_NE:
-		return m.compare(a, op, s, target.CondNE, asm.Width32)
-	case instr.F32_LT:
-		return m.compare(a, op, s, target.CondMI, asm.Width32)
-	case instr.F32_LE:
-		return m.compare(a, op, s, target.CondLS, asm.Width32)
-	case instr.F32_GT:
-		return m.compare(a, op, s, target.CondGT, asm.Width32)
-	case instr.F32_GE:
-		return m.compare(a, op, s, target.CondGE, asm.Width32)
-	case instr.F32_TO_I32_S:
-		return m.truncate(a, op, s, target.FCVTZS, asm.Width32)
-	case instr.F32_TO_I32_U:
-		return m.truncate(a, op, s, target.FCVTZU, asm.Width32)
-	case instr.F32_TO_I64_S:
-		return m.truncate(a, op, s, target.FCVTZS, asm.Width64)
-	case instr.F32_TO_I64_U:
-		return m.truncate(a, op, s, target.FCVTZU, asm.Width64)
-	case instr.F32_TO_F64:
-		return m.convert(a, op, s, target.FCVT)
-	case instr.F32_REINTERPRET_I32:
-		return m.reinterpret(a, op, s)
-
-	case instr.F64_ADD:
-		return m.binary(a, op, s, target.FADD)
-	case instr.F64_SUB:
-		return m.binary(a, op, s, target.FSUB)
-	case instr.F64_MUL:
-		return m.binary(a, op, s, target.FMUL)
-	case instr.F64_DIV:
-		return m.binary(a, op, s, target.FDIV)
-	case instr.F64_ABS:
-		return m.unary(a, op, s, target.FABS)
-	case instr.F64_NEG:
-		return m.unary(a, op, s, target.FNEG)
-	case instr.F64_SQRT:
-		return m.unary(a, op, s, target.FSQRT)
-	case instr.F64_CEIL:
-		return m.unary(a, op, s, target.FRINTP)
-	case instr.F64_FLOOR:
-		return m.unary(a, op, s, target.FRINTM)
-	case instr.F64_TRUNC:
-		return m.unary(a, op, s, target.FRINTZ)
-	case instr.F64_NEAREST:
-		return m.unary(a, op, s, target.FRINTN)
-	case instr.F64_MIN:
-		return m.binary(a, op, s, target.FMIN)
-	case instr.F64_MAX:
-		return m.binary(a, op, s, target.FMAX)
-	case instr.F64_COPYSIGN:
-		return m.copysign(a, op, s, asm.Width64)
-	case instr.F64_EQ:
-		return m.compare(a, op, s, target.CondEQ, asm.Width64)
-	case instr.F64_NE:
-		return m.compare(a, op, s, target.CondNE, asm.Width64)
-	case instr.F64_LT:
-		return m.compare(a, op, s, target.CondMI, asm.Width64)
-	case instr.F64_LE:
-		return m.compare(a, op, s, target.CondLS, asm.Width64)
-	case instr.F64_GT:
-		return m.compare(a, op, s, target.CondGT, asm.Width64)
-	case instr.F64_GE:
-		return m.compare(a, op, s, target.CondGE, asm.Width64)
-	case instr.F64_TO_I32_S:
-		return m.truncate(a, op, s, target.FCVTZS, asm.Width32)
-	case instr.F64_TO_I32_U:
-		return m.truncate(a, op, s, target.FCVTZU, asm.Width32)
-	case instr.F64_TO_I64_S:
-		return m.truncate(a, op, s, target.FCVTZS, asm.Width64)
-	case instr.F64_TO_I64_U:
-		return m.truncate(a, op, s, target.FCVTZU, asm.Width64)
-	case instr.F64_TO_F32:
-		return m.convert(a, op, s, target.FCVT)
-	case instr.F64_REINTERPRET_I64:
-		return m.reinterpret(a, op, s)
-	case instr.SELECT:
-		return m.choose(a, op, s)
-	case instr.REF_IS_NULL:
-		return m.refIsNull(a, op, s)
-	case instr.ARRAY_GET:
-		return m.arrayGet(a, op, s)
-	case instr.ARRAY_SET:
-		return m.arraySet(a, op, s)
-	case instr.ARRAY_LEN:
-		return m.arrayLen(a, op, s)
-	case instr.STRUCT_GET:
-		return m.structGet(a, op, s)
-	case instr.STRUCT_SET:
-		return m.structSet(a, op, s)
-	default:
-		return false
-	}
-}
-
-func (m *Machine) binary(a *asm.Assembler, op ssa.Operation, s compile.Site, emit func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
-	if len(op.Args) != 2 || len(op.Results) != 1 {
-		return false
-	}
-	x, y, dst := s.Reg(op.Args[0]), s.Reg(op.Args[1]), s.Reg(op.Results[0])
-	if x.Type() != y.Type() || dst.Type() != x.Type() || x.Width() != y.Width() || x.Width() != dst.Width() {
-		return false
-	}
-	a.Emit(emit(dst, x, y))
-	return true
-}
-
-func (m *Machine) unary(a *asm.Assembler, op ssa.Operation, s compile.Site, emit func(dst, src asm.Reg) asm.Instruction) bool {
-	if len(op.Args) != 1 || len(op.Results) != 1 {
-		return false
-	}
-	x, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
-	if x.Type() != dst.Type() || x.Width() != dst.Width() {
-		return false
-	}
-	a.Emit(emit(dst, x))
-	return true
-}
-
-// ctz counts trailing zeros as RBIT then CLZ: bit-reversal turns the
-// trailing run into a leading one, matching bits.TrailingZeros for every
-// input including zero (RBIT(0)=0, CLZ(0)=width).
-func (m *Machine) ctz(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth) bool {
-	if len(op.Args) != 1 || len(op.Results) != 1 {
-		return false
-	}
-	x, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
-	if x.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt || x.Width() != width || dst.Width() != width {
-		return false
-	}
-	t := m.ivreg(width)
-	a.Emit(target.RBIT(t, x))
-	a.Emit(target.CLZ(dst, t))
-	return true
-}
-
-// popcnt counts set bits via the SIMD byte-wise CNT, summed by ADDV and
-// moved back through the general registers: ARM64 has no scalar popcount.
-func (m *Machine) popcnt(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth) bool {
-	if len(op.Args) != 1 || len(op.Results) != 1 {
-		return false
-	}
-	x, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
-	if x.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt || x.Width() != width || dst.Width() != width {
-		return false
-	}
-	v, c, sum := m.fvreg(width), m.fvreg(width), m.fvreg(width)
-	a.Emit(target.FMOV(v, x))
-	a.Emit(target.CNT(c, v))
-	a.Emit(target.ADDV(sum, c))
-	a.Emit(target.FMOV(dst, sum))
-	return true
-}
-
-// rotl rotates left by negating the count and reusing RORV: ARM64 has no
-// left-rotate register form, and RORV's right rotate by -k is a left
-// rotate by k mod width, matching bits.RotateLeft's own negation rule.
-func (m *Machine) rotl(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth) bool {
-	if len(op.Args) != 2 || len(op.Results) != 1 {
-		return false
-	}
-	x, y, dst := s.Reg(op.Args[0]), s.Reg(op.Args[1]), s.Reg(op.Results[0])
-	if x.Type() != asm.RegTypeInt || y.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt ||
-		x.Width() != width || y.Width() != width || dst.Width() != width {
-		return false
-	}
-	t := m.ivreg(width)
-	a.Emit(target.NEG(t, y))
-	a.Emit(target.ROR(dst, x, t))
-	return true
-}
-
-// copysign combines x's magnitude with y's sign through the integer
-// registers, the same bit trick math.Copysign uses, so it is exact for
-// every input including NaN payloads.
-func (m *Machine) copysign(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth) bool {
-	if len(op.Args) != 2 || len(op.Results) != 1 {
-		return false
-	}
-	x, y, dst := s.Reg(op.Args[0]), s.Reg(op.Args[1]), s.Reg(op.Results[0])
-	if x.Type() != asm.RegTypeFloat || y.Type() != asm.RegTypeFloat || dst.Type() != asm.RegTypeFloat ||
-		x.Width() != width || y.Width() != width || dst.Width() != width {
-		return false
-	}
-	signBit, magMask := uint64(1)<<63, uint64(1)<<63-1
-	if width == asm.Width32 {
-		signBit, magMask = uint64(1)<<31, uint64(1)<<31-1
-	}
-	mag, sign := m.ivreg(width), m.ivreg(width)
-	a.Emit(target.FMOV(mag, x))
-	a.Emit(target.FMOV(sign, y))
-	a.Emit(target.ANDI(mag, mag, magMask))
-	a.Emit(target.ANDI(sign, sign, signBit))
-	a.Emit(target.ORR(mag, mag, sign))
-	a.Emit(target.FMOV(dst, mag))
-	return true
-}
-
-func (m *Machine) divide(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth) bool {
-	if len(op.Args) != 2 || len(op.Results) != 1 {
-		return false
-	}
-	x, y, dst := s.Reg(op.Args[0]), s.Reg(op.Args[1]), s.Reg(op.Results[0])
-	if x.Type() != asm.RegTypeInt || y.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt || x.Width() != width || y.Width() != width || dst.Width() != width {
-		return false
-	}
-	a.Emit(target.CBZLabel(y, s.Trap()))
-	rem := op.Code == instr.I32_REM_S || op.Code == instr.I32_REM_U || op.Code == instr.I64_REM_S || op.Code == instr.I64_REM_U
-	if rem {
-		q := target.W16
-		if width == asm.Width64 {
-			q = target.X16
-		}
-		if op.Code == instr.I32_REM_S || op.Code == instr.I64_REM_S {
-			a.Emit(target.SDIV(q, x, y))
-		} else {
-			a.Emit(target.UDIV(q, x, y))
-		}
-		a.Emit(target.MSUB(dst, q, y, x))
-		return true
-	}
-	if op.Code == instr.I32_DIV_S || op.Code == instr.I64_DIV_S {
-		a.Emit(target.SDIV(dst, x, y))
-	} else {
-		a.Emit(target.UDIV(dst, x, y))
-	}
-	return true
-}
-
-func (m *Machine) eqz(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth) bool {
-	if len(op.Args) != 1 || len(op.Results) != 1 {
-		return false
-	}
-	src, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
-	if src.Type() != asm.RegTypeInt || dst.Type() != asm.RegTypeInt || src.Width() != width || dst.Width() != asm.Width32 {
-		return false
-	}
-	a.Emit(target.CMPI(src, 0))
-	m.set(a, s, op.Results[0], dst, target.CondEQ)
-	return true
-}
-
-// compare lowers integer and float comparisons.
-func (m *Machine) compare(a *asm.Assembler, op ssa.Operation, s compile.Site, cond uint8, width asm.RegWidth) bool {
-	if len(op.Args) != 2 || len(op.Results) != 1 {
-		return false
-	}
-	x, y, dst := s.Reg(op.Args[0]), s.Reg(op.Args[1]), s.Reg(op.Results[0])
-	if x.Type() != y.Type() || dst.Type() != asm.RegTypeInt || x.Width() != width || y.Width() != width || dst.Width() != asm.Width32 {
-		return false
-	}
-	switch x.Type() {
-	case asm.RegTypeFloat:
-		// FCMP sets NZCV to 0011 on unordered, where every cond but NE
-		// reads false, as the comparison requires.
-		a.Emit(target.FCMP(x, y))
-	case asm.RegTypeInt:
-		a.Emit(target.CMP(x, y))
-	default:
-		return false
-	}
-	m.set(a, s, op.Results[0], dst, cond)
-	return true
-}
-
-// set materializes cond into dst, v's register, unless v is fused into the
-// branch right after it: then the flags carry cond to Branch.
-func (m *Machine) set(a *asm.Assembler, s compile.Site, v ssa.Value, dst asm.VReg, cond uint8) {
-	if s.Fuse(v) {
-		m.flag, m.cond = v, cond
-		return
-	}
-	a.Emit(target.CSET(dst, cond))
-}
-
-func (m *Machine) convert(a *asm.Assembler, op ssa.Operation, s compile.Site, emit func(dst, src asm.Reg) asm.Instruction) bool {
-	if len(op.Args) != 1 || len(op.Results) != 1 {
-		return false
-	}
-	x, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
-	if x.Type() == dst.Type() {
-		if x.Type() == asm.RegTypeFloat && op.Code != instr.F32_TO_F64 && op.Code != instr.F64_TO_F32 {
-			return false
-		}
-		if x.Type() == asm.RegTypeInt && x.Width() == dst.Width() {
-			return false
-		}
-	} else if !(x.Type() == asm.RegTypeInt && dst.Type() == asm.RegTypeFloat) {
-		return false
-	}
-	a.Emit(emit(dst, x))
-	return true
-}
-
-func (m *Machine) truncate(a *asm.Assembler, op ssa.Operation, s compile.Site, emit func(dst, src asm.Reg) asm.Instruction, width asm.RegWidth) bool {
-	if len(op.Args) != 1 || len(op.Results) != 1 {
-		return false
-	}
-	x, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
-	fw := asm.Width32
-	switch op.Code {
-	case instr.F64_TO_I32_S, instr.F64_TO_I32_U, instr.F64_TO_I64_S, instr.F64_TO_I64_U:
-		fw = asm.Width64
-	}
-	if x.Type() != asm.RegTypeFloat || dst.Type() != asm.RegTypeInt || x.Width() != fw || dst.Width() != width {
-		return false
-	}
-	a.Emit(emit(dst, x))
-	return true
-}
-
-func (m *Machine) narrow(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	if len(op.Args) != 1 || len(op.Results) != 1 {
-		return false
-	}
-	x, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
-	if x.Type() != asm.RegTypeInt || x.Width() != asm.Width64 || dst.Type() != asm.RegTypeInt || dst.Width() != asm.Width32 {
-		return false
-	}
-	a.Emit(target.MOVW(dst, x))
-	return true
-}
-
-func (m *Machine) reinterpret(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	if len(op.Args) != 1 || len(op.Results) != 1 {
-		return false
-	}
-	x, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
-	if x.Type() == dst.Type() || x.Width() != dst.Width() {
-		return false
-	}
-	a.Emit(target.FMOV(dst, x))
-	return true
-}
-
-func (m *Machine) choose(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	if len(op.Args) != 3 || len(op.Results) != 1 {
-		return false
-	}
-	yes, no, cond := s.Reg(op.Args[0]), s.Reg(op.Args[1]), s.Reg(op.Args[2])
-	dst := s.Reg(op.Results[0])
-	if cond.Type() != asm.RegTypeInt || cond.Width() != asm.Width32 || dst.Type() != yes.Type() || yes.Type() != no.Type() || dst.Width() != yes.Width() || yes.Width() != no.Width() {
-		return false
-	}
-	a.Emit(target.CMPI(cond, 0))
-	if dst.Type() == asm.RegTypeFloat {
-		a.Emit(target.FCSEL(dst, yes, no, target.CondNE))
-	} else {
-		a.Emit(target.CSEL(dst, yes, no, target.CondNE))
-	}
-	return true
-}
-
-// guard unboxes an i64 operand as threaded borrowI64 does: a word tagged
-// Ref reads the heap-promoted I64 through its itab (any other object
-// deopts) and data word, a borrow; every other word sign-extends its 49-bit
-// payload. I64 and Ref tags differ only in bit 49, so the inline path tests
-// that bit and branches past the ref path.
-func (m *Machine) guard(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	word, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
-	inline, done := a.Label(), a.Label()
-	a.Emit(target.LSRI(target.X16, word, types.VBits), target.TSTI(target.X16, 1), target.BCondLabel(target.OpBEQ, inline))
-	a.Emit(target.LDI(target.X17, types.Tag(types.KindRef)>>types.VBits)...)
-	a.Emit(target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, inline))
-	heap := m.heap(a, word)
-	a.Emit(target.LDR(target.X16, heap, 0))
-	a.Emit(target.LDI(target.X17, uint64(jit.Itab(types.I64(0))))...)
-	a.Emit(target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, s.Deopt()))
-	a.Emit(target.LDR(dst, heap, int16(jit.OffsetData)), target.LDR(dst, dst, 0), target.BLabel(done))
-
-	a.Bind(inline)
-	a.Emit(target.SBFX(dst, word, 0, types.VBits))
-	a.Bind(done)
-	return true
-}
-
-// value lowers guard.value: Args[0] must equal the admitted word Args[1],
-// or the guard deopts. Result is Args[0]'s own word.
-func (m *Machine) value(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	if len(op.Args) != 2 || len(op.Results) != 1 {
-		return false
-	}
-	got, want := s.Reg(op.Args[0]), s.Reg(op.Args[1])
-	a.Emit(target.CMP(got, want), target.BCondLabel(target.OpBNE, s.Deopt()))
-	m.Move(a, s.Reg(op.Results[0]), got)
-	return true
-}
-
-// retain counts one more reference to ref, as the interpreter's retainBox:
-// any reference, the null one included.
-func (m *Machine) retain(a *asm.Assembler, ref asm.VReg) {
-	skip := a.Label()
-	m.count(a, ref, skip, true)
-	a.Emit(target.ADDI(target.X17, target.X17, 1), target.STR(target.X17, target.X16, 0))
-	a.Bind(skip)
-}
-
-// release counts one reference to ref less, as the interpreter's releaseBox:
-// never the null one. The last reference exits for the interpreter to
-// release the object and what it holds.
-func (m *Machine) release(a *asm.Assembler, ref asm.VReg, s compile.Site) {
-	last, resume := s.Release(ref)
-	m.count(a, ref, resume, false)
-	a.Emit(
-		target.CMPI(target.X17, 1),
-		target.BCondLabel(target.OpBLE, last),
-		target.SUBI(target.X17, target.X17, 1),
-		target.STR(target.X17, target.X16, 0),
-	)
-	a.Bind(resume)
-}
-
-// count points X16 at the reference count of ref and loads it into X17. A
-// value that is no reference skips; so does the null reference, a zero index,
-// unless null is counted.
-func (m *Machine) count(a *asm.Assembler, ref asm.VReg, skip asm.Label, null bool) {
-	a.Emit(target.LSRI(target.X16, ref, types.VBits))
-	a.Emit(target.LDI(target.X17, types.Tag(types.KindRef)>>types.VBits)...)
-	a.Emit(
-		target.CMP(target.X16, target.X17),
-		target.BCondLabel(target.OpBNE, skip),
-		target.SBFX(target.X17, ref, 0, 32),
-	)
-	if !null {
-		a.Emit(target.CBZLabel(target.X17, skip))
-	}
-	a.Emit(
-		target.LDR(target.X16, target.Ctx, int16(jit.OffsetRC)),
-		target.LSLI(target.X17, target.X17, 3),
-		target.ADD(target.X16, target.X16, target.X17),
-		target.LDR(target.X17, target.X16, 0),
-	)
-}
-
 // vreg is a fresh 64-bit register no SSA value names.
 func (m *Machine) vreg() asm.VReg { return m.ivreg(asm.Width64) }
 
@@ -1244,33 +1193,4 @@ func (m *Machine) ivreg(width asm.RegWidth) asm.VReg {
 func (m *Machine) fvreg(width asm.RegWidth) asm.VReg {
 	m.temp--
 	return asm.NewVReg(m.temp, asm.RegTypeFloat, width)
-}
-
-// box returns the register holding v as a boxed word. An i64 outside the
-// inline range exits through Box and resumes with its heap ref in X16.
-func (m *Machine) box(a *asm.Assembler, s compile.Site, v ssa.Value) asm.Reg {
-	src, k := s.Reg(v), s.Type(v).Kind()
-	switch k {
-	case types.KindF64, types.KindRef:
-		return src
-	case types.KindI64:
-		a.Emit(target.LDI(target.X16, 1<<(types.VBits-1))...)
-		a.Emit(target.ADD(target.X17, src, target.X16), target.LSRI(target.X17, target.X17, types.VBits))
-		exit, resume := s.Box(src)
-		a.Emit(
-			target.CBNZLabel(target.X17, exit),
-			target.ANDI(target.X16, src, types.VMask),
-		)
-		a.Emit(target.LDI(target.X17, types.Tag(k))...)
-		a.Emit(target.ORR(target.X16, target.X16, target.X17))
-		a.Bind(resume)
-		return target.X16
-	case types.KindF32:
-		a.Emit(target.FMOV(target.W16, src))
-	default:
-		a.Emit(target.UXTW(target.X16, src))
-	}
-	a.Emit(target.LDI(target.X17, types.Tag(k))...)
-	a.Emit(target.ORR(target.X16, target.X16, target.X17))
-	return target.X16
 }
