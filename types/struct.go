@@ -24,6 +24,12 @@ type StructField struct {
 var _ Traceable = (*Struct)(nil)
 var _ Type = (*StructType)(nil)
 
+func FieldWithName(name string) func(*StructField) {
+	return func(f *StructField) {
+		f.Name = name
+	}
+}
+
 func NewStruct(typ *StructType, fields ...Boxed) *Struct {
 	s := &Struct{}
 	s.Reset(typ)
@@ -35,12 +41,6 @@ func NewStruct(typ *StructType, fields ...Boxed) *Struct {
 
 func NewStructType(fields ...StructField) *StructType {
 	return &StructType{Fields: fields}
-}
-
-func FieldWithName(name string) func(*StructField) {
-	return func(f *StructField) {
-		f.Name = name
-	}
 }
 
 func NewStructField(typ Type, opts ...func(field *StructField)) StructField {
@@ -229,23 +229,5 @@ func (t *StructType) Equals(other Type) bool {
 }
 
 func (s *Struct) field(i int, f StructField) Boxed {
-	bits := s.Data[i]
-	switch f.Kind {
-	case KindI32:
-		return BoxI32(int32(uint32(bits)))
-	case KindI8:
-		return BoxI8(int8(uint32(bits)))
-	case KindI1:
-		return BoxI1(bits != 0)
-	case KindI64:
-		return BoxI64(int64(bits))
-	case KindF32:
-		return BoxF32(math.Float32frombits(uint32(bits)))
-	case KindF64:
-		return BoxF64(math.Float64frombits(bits))
-	case KindRef:
-		return Boxed(bits)
-	default:
-		return 0
-	}
+	return BoxWord(f.Kind, s.Data[i])
 }

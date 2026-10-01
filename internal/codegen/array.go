@@ -8,6 +8,24 @@ import (
 	"github.com/siyul-park/minivm/instr"
 )
 
+// typedElem is one types.TypedArray instantiation: the Go type its elements
+// have, the instr.Kind it stores, and how a boxed operand reads as an element.
+type typedElem struct {
+	typ  string
+	kind instr.Kind
+	read func(word jen.Code) jen.Code
+}
+
+// typedElems lists the instantiations in dispatch order.
+var typedElems = []typedElem{
+	{"bool", instr.KindI1, func(word jen.Code) jen.Code { return jen.Add(word).Dot("Bool").Call() }},
+	{"int8", instr.KindI8, func(word jen.Code) jen.Code { return jen.Id("int8").Call(jen.Add(word).Dot("I32").Call()) }},
+	{"int32", instr.KindI32, func(word jen.Code) jen.Code { return jen.Add(word).Dot("I32").Call() }},
+	{"int64", instr.KindI64, func(word jen.Code) jen.Code { return jen.Id("i").Dot("unboxI64").Call(word) }},
+	{"float32", instr.KindF32, func(word jen.Code) jen.Code { return jen.Add(word).Dot("F32").Call() }},
+	{"float64", instr.KindF64, func(word jen.Code) jen.Code { return jen.Add(word).Dot("F64").Call() }},
+}
+
 func containerGet(state *state, current step) (value, error) {
 	if state.standalone {
 		body := []jen.Code{
@@ -257,24 +275,6 @@ func boxElem(kind instr.Kind, array, index jen.Code) jen.Code {
 
 func typeName(typ reflect.Type) jen.Code {
 	return jen.Qual(typ.PkgPath(), typ.Name())
-}
-
-// typedElem is one types.TypedArray instantiation: the Go type its elements
-// have, the instr.Kind it stores, and how a boxed operand reads as an element.
-type typedElem struct {
-	typ  string
-	kind instr.Kind
-	read func(word jen.Code) jen.Code
-}
-
-// typedElems lists the instantiations in dispatch order.
-var typedElems = []typedElem{
-	{"bool", instr.KindI1, func(word jen.Code) jen.Code { return jen.Add(word).Dot("Bool").Call() }},
-	{"int8", instr.KindI8, func(word jen.Code) jen.Code { return jen.Id("int8").Call(jen.Add(word).Dot("I32").Call()) }},
-	{"int32", instr.KindI32, func(word jen.Code) jen.Code { return jen.Add(word).Dot("I32").Call() }},
-	{"int64", instr.KindI64, func(word jen.Code) jen.Code { return jen.Id("i").Dot("unboxI64").Call(word) }},
-	{"float32", instr.KindF32, func(word jen.Code) jen.Code { return jen.Add(word).Dot("F32").Call() }},
-	{"float64", instr.KindF64, func(word jen.Code) jen.Code { return jen.Add(word).Dot("F64").Call() }},
 }
 
 // array is the type of a typed array of e.

@@ -17,18 +17,18 @@ type Unit struct {
 	Function *types.Function
 	Module   transform.Module
 	Tier     jit.Tier
-	// Entry is the bytecode offset translation and lowering root at.
-	Entry int
+	// IP is the bytecode offset translation and lowering root at.
+	IP int
 	// OSR marks u as rooted at a loop header instead of the function's own
-	// entry: Entry alone cannot say this, since a header can sit at offset
+	// entry: IP alone cannot say this, since a header can sit at offset
 	// 0 too.
 	OSR bool
 }
 
-// Compile translates u at its Entry, optimizes it for its tier, and lowers
+// Compile translates u at its IP, optimizes it for its tier, and lowers
 // it with m.
 func Compile(u Unit, m Machine) (*jit.Code, error) {
-	f, err := transform.Translate(u.Module, u.Address, u.Function, u.Entry)
+	f, err := transform.Translate(u.Module, u.Address, u.Function, u.IP)
 	if err != nil {
 		return nil, fmt.Errorf("compile: translate: %w", err)
 	}
@@ -63,7 +63,7 @@ func Compile(u Unit, m Machine) (*jit.Code, error) {
 		args = arguments(u.Function)
 	}
 	c, err := jit.NewCode(
-		u.Address, u.Entry, u.OSR, u.Tier, completion(f),
+		u.Address, u.IP, u.OSR, u.Tier, completion(f),
 		registers(u.Function), args, code, exits, entry,
 	)
 	if err != nil {

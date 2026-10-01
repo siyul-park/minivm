@@ -3,7 +3,6 @@ package interp
 import (
 	"errors"
 	"maps"
-	"math"
 	"runtime"
 	"slices"
 	"sync"
@@ -29,8 +28,8 @@ type native struct {
 	// Baseline function prologue increments its own address there, including
 	// native-to-native entries.
 	entries []int64
-	// deopts counts each address's refuted speculations since its last retire.
-	deopts []int
+	// refutes counts each address's refuted speculations since its last retire.
+	refutes []int
 	// ledgers weighs each address's native work against its exits' cost
 	// across Go entries.
 	ledgers []jit.Ledger
@@ -73,19 +72,6 @@ type native struct {
 	compile func(fn *types.Function, exact bool) []func(*Interpreter)
 }
 
-// nativeStack is the native stack size per interpreter.
-const nativeStack = 1 << 20
-
-// budget is the back-edge count between safepoints.
-const budget = 1 << 16
-
-// tolerance is the count of refuted speculations under unchanged feedback that
-// retires native code.
-const tolerance = 8
-
-// graduate is the Baseline entry count that tiers an address to Optimized.
-const graduate = 1024
-
 // hold is one heap operand of a bridge attempt and its count before it.
 type hold struct {
 	ref, count int
@@ -120,6 +106,48 @@ type shared struct {
 
 	refs atomic.Int64
 }
+
+// nativeStack is the native stack size per interpreter.
+const nativeStack = 1 << 20
+
+// budget is the back-edge count between safepoints.
+const budget = 1 << 16
+
+// tolerance is the count of refuted speculations under unchanged feedback that
+// retires native code.
+const tolerance = 8
+
+// graduate is the Baseline entry count that tiers an address to Optimized.
+const graduate = 1024
+
+// mixed marks a dynamic CALL site (native.callees) that has seen more than
+// one callee: it never speculates.
+const mixed = -1
+
+const (
+	metricCompiles = "vm_jit_compiles_total"
+	metricEntries  = "vm_jit_entries_total"
+	metricExits    = "vm_jit_exits_total"
+)
+
+// bridgeable reports, by opcode, whether an ExitBridge for it runs its
+// threaded handler in Go and resumes native code; otherwise the exit
+// deoptimizes and threaded code runs the op once. It denies:
+//   - a control transfer (the op writes Branch): no next instruction to resume;
+//   - ARRAY_NEW: instr.Type declares two operands, not the 1+count it pops,
+//     so its SSA arguments do not cover its operands;
+//   - MAP_KEYS: it allocates every string or wide i64 key before the result
+//     array, so a heap-exhaustion trap between them would leave the keys a
+//     failed attempt allocated.
+//
+// It is a table because every bridge exit reads it.
+var bridgeable = func() (out [256]bool) {
+	for code := range out {
+		op := instr.Opcode(code)
+		out[code] = !op.Writes(instr.Branch) && op != instr.ARRAY_NEW && op != instr.MAP_KEYS
+	}
+	return out
+}()
 
 // total returns r's pool-wide entry counter for the OSR/entry site k,
 // creating it for the first native that observes k.
@@ -164,16 +192,6 @@ func (r *shared) sweep(visit func(addr int) (live bool)) {
 	r.candidates = live
 	r.nominated.Store(int64(len(live)))
 }
-
-// mixed marks a dynamic CALL site (native.callees) that has seen more than
-// one callee: it never speculates.
-const mixed = -1
-
-const (
-	metricCompiles = "vm_jit_compiles_total"
-	metricEntries  = "vm_jit_entries_total"
-	metricExits    = "vm_jit_exits_total"
-)
 
 // jitEnabled reports whether opt selects the JIT: WithThreshold(n) with n >=
 // 0, on arm64, without WithHook or WithFuel (their per-tick semantics need
@@ -260,7 +278,7 @@ func newNative(i *Interpreter, threshold int) *native {
 		shared:    newShared(i),
 		threshold: threshold,
 		entries:   make([]int64, len(i.code)),
-		deopts:    make([]int, len(i.code)),
+		refutes:   make([]int, len(i.code)),
 		ledgers:   make([]jit.Ledger, len(i.code)),
 		failed:    make([][2]bool, len(i.code)),
 		built:     make([][2]transform.Module, len(i.code)),
@@ -451,8 +469,8 @@ func (n *native) record(i *Interpreter, exit jit.Exit) {
 // reports whether it retires: at once when feedback moved since the code was
 // built, which a recompile can use, else at the tolerance count.
 func (n *native) refute(addr int, tier jit.Tier) bool {
-	n.deopts[addr]++
-	return n.moved(addr, tier) || n.deopts[addr] >= tolerance
+	n.refutes[addr]++
+	return n.moved(addr, tier) || n.refutes[addr] >= tolerance
 }
 
 // retire unpublishes addr's code at tier and restarts its counters. The tier
@@ -464,7 +482,7 @@ func (n *native) retire(addr int, tier jit.Tier) {
 		n.markFailed(addr, tier)
 	}
 	n.calls[addr].Store(0)
-	n.entries[addr], n.deopts[addr], n.ledgers[addr] = 0, 0, jit.Ledger{}
+	n.entries[addr], n.refutes[addr], n.ledgers[addr] = 0, 0, jit.Ledger{}
 }
 
 // hasFailed reports whether addr's compile at tier permanently failed.
@@ -486,7 +504,7 @@ func (n *native) drain(i *Interpreter) {
 			// A failed OSR unit restores its site's threaded handler; failed
 			// tracks entry-0 tiering only.
 			if job.Unit.OSR {
-				k := key{job.Unit.Address, job.Unit.Entry}
+				k := key{job.Unit.Address, job.Unit.IP}
 				if s, ok := n.sites[k]; ok {
 					i.code[s.address][s.ip] = s.inner
 					delete(n.sites, k)
@@ -506,7 +524,7 @@ func (n *native) drain(i *Interpreter) {
 		n.store.Publish(job.Code)
 		if !job.Unit.OSR {
 			n.built[job.Unit.Address][job.Code.Tier-1] = job.Unit.Module
-		} else if s, ok := n.sites[key{job.Unit.Address, job.Unit.Entry}]; ok {
+		} else if s, ok := n.sites[key{job.Unit.Address, job.Unit.IP}]; ok {
 			s.built = job.Unit.Module
 		}
 		if job.Code.Tier == jit.Baseline {
@@ -729,25 +747,6 @@ func boxRegisters(i *Interpreter, code *jit.Code, bp int) {
 		}
 	}
 }
-
-// bridgeable reports, by opcode, whether an ExitBridge for it runs its
-// threaded handler in Go and resumes native code; otherwise the exit
-// deoptimizes and threaded code runs the op once. It denies:
-//   - a control transfer (the op writes Branch): no next instruction to resume;
-//   - ARRAY_NEW: instr.Type declares two operands, not the 1+count it pops,
-//     so its SSA arguments do not cover its operands;
-//   - MAP_KEYS: it allocates every string or wide i64 key before the result
-//     array, so a heap-exhaustion trap between them would leave the keys a
-//     failed attempt allocated.
-//
-// It is a table because every bridge exit reads it.
-var bridgeable = func() (out [256]bool) {
-	for code := range out {
-		op := instr.Opcode(code)
-		out[code] = !op.Writes(instr.Branch) && op != instr.ARRAY_NEW && op != instr.MAP_KEYS
-	}
-	return out
-}()
 
 // bridge runs exit's threaded handler once against its boxed operands and
 // reports the exit's class: jit.ClassBridge when native code resumes,
@@ -1126,41 +1125,19 @@ func (n *native) exactCode(i *Interpreter, addr int) []func(*Interpreter) {
 // fromWord converts a native word to the interpreter's Boxed representation.
 // Wide i64 values use the normal heap-promotion path.
 func fromWord(i *Interpreter, kind types.Kind, word uint64) types.Boxed {
-	switch kind {
-	case types.KindI1:
-		return types.BoxI1(uint32(word) != 0)
-	case types.KindI8:
-		return types.BoxI8(int8(uint32(word)))
-	case types.KindI32:
-		return types.BoxI32(int32(uint32(word)))
-	case types.KindF32:
-		return types.BoxF32(math.Float32frombits(uint32(word)))
-	case types.KindF64:
-		return types.Boxed(word)
-	case types.KindRef:
-		return types.Boxed(word)
-	case types.KindI64:
+	if kind == types.KindI64 {
 		return i.boxI64(int64(word))
-	default:
-		panic("interp: invalid native value kind " + kind.String())
 	}
+	return types.BoxWord(kind, word)
 }
 
 // toWord converts v, a value a handler pushed, to the native word of kind,
 // consuming a heap-boxed i64's reference; fromWord is its inverse.
 func toWord(i *Interpreter, kind types.Kind, v types.Boxed) uint64 {
-	switch kind {
-	case types.KindI1, types.KindI8, types.KindI32:
-		return uint64(uint32(v.I32()))
-	case types.KindI64:
+	if kind == types.KindI64 {
 		return uint64(i.unboxI64(v))
-	case types.KindF32:
-		return uint64(math.Float32bits(v.F32()))
-	case types.KindF64, types.KindRef:
-		return uint64(v)
-	default:
-		panic("interp: bridge result kind " + kind.String() + " has no native word")
 	}
+	return v.Word()
 }
 
 func metric(i *Interpreter, name string, labels ...prof.Label) {

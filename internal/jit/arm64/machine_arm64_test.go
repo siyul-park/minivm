@@ -400,7 +400,7 @@ func TestNew(t *testing.T) {
 		var args []ssa.Value
 		for _, c := range consts {
 			v := b.Value(ssa.TypeOf(c.Kind()))
-			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: ssa.Word(c), Results: []ssa.Value{v}})
+			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: c.Word(), Results: []ssa.Value{v}})
 			args = append(args, v)
 		}
 		at := state(b, entry)
@@ -423,7 +423,7 @@ func TestNew(t *testing.T) {
 			b := ssa.New("f")
 			entry := b.Block()
 			v := b.Value(ssa.TypeOf(c.word.Kind()))
-			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: ssa.Word(c.word), Results: []ssa.Value{v}})
+			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: c.word.Word(), Results: []ssa.Value{v}})
 			at := state(b, entry)
 			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{v}, State: at})
 

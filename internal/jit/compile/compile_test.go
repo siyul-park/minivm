@@ -139,7 +139,7 @@ func (m *machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	for _, u := range c.Live {
 		a.Emit(arm64.USE(u))
 	}
-	a.Emit(arm64.BLabel(c.Bridge))
+	a.Emit(arm64.BLabel(c.Stub))
 	if !c.Generic {
 		a.Bind(c.Resume)
 	}
@@ -191,7 +191,7 @@ func function(params, locals int, code ...instr.Instruction) *types.Function {
 
 func constant(b *ssa.Builder, block int, c types.Boxed) ssa.Value {
 	v := b.Value(ssa.TypeOf(c.Kind()))
-	b.Add(block, ssa.Operation{Op: ssa.OpConst, Const: ssa.Word(c), Results: []ssa.Value{v}})
+	b.Add(block, ssa.Operation{Op: ssa.OpConst, Const: c.Word(), Results: []ssa.Value{v}})
 	return v
 }
 
@@ -511,12 +511,12 @@ func TestLower(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []string{"prologue", "const", "call", "return", "exit 0 4", "results", "jump", "const", "const", "const", "exit 1 2", "jump", "epilogue", "enter"}, m.calls)
 		site := m.sites[0]
-		site.Bridge = 0
+		site.Stub = 0
 		site.Safepoint = 0
 		site.Resume = 0
 		site.Join = 0
 		require.Equal(t, compile.Call{
-			Address: 2, Callee: callee, Args: []ssa.Value{arg}, Results: []ssa.Value{got},
+			Callee: 2, Target: callee, Args: []ssa.Value{arg}, Results: []ssa.Value{got},
 			Base: 3, Size: 3, Exit: 0, Live: []asm.VReg{i32(11)}, Owned: false,
 			Registers: []types.Kind{types.KindI32},
 			Arguments: []types.Kind{types.KindI32},
@@ -558,8 +558,8 @@ func TestLower(t *testing.T) {
 		caller := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}}, Code: instr.Marshal([]instr.Instruction{instr.New(instr.CALL)})}
 		_, exits, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: target}}, 0, false, true)
 		require.NoError(t, err)
-		require.Equal(t, 2, m.sites[0].Address)
-		require.Equal(t, closure, m.sites[0].Callee)
+		require.Equal(t, 2, m.sites[0].Callee)
+		require.Equal(t, closure, m.sites[0].Target)
 		require.True(t, m.sites[0].Upvals)
 		require.False(t, m.sites[0].Owned)
 		require.Equal(t, jit.ExitCall, exits[0].Kind)
@@ -685,7 +685,7 @@ func TestLower(t *testing.T) {
 		_, _, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{9: {Function: caller}}, 9, false, true)
 		require.NoError(t, err)
 		site := m.sites[0]
-		require.Equal(t, 9, site.Address)
+		require.Equal(t, 9, site.Callee)
 		require.True(t, site.Self)
 	})
 
@@ -704,7 +704,7 @@ func TestLower(t *testing.T) {
 		_, _, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{9: {Function: caller}}, 9, true, false)
 		require.NoError(t, err)
 		site := m.sites[0]
-		require.Equal(t, 9, site.Address)
+		require.Equal(t, 9, site.Callee)
 		require.False(t, site.Self)
 	})
 	t.Run("hands the machine one register of each register-passed parameter's class", func(t *testing.T) {
@@ -870,9 +870,9 @@ func TestLower(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, m.sites, 1)
 		site := m.sites[0]
-		site.Bridge, site.Join = 0, 0
+		site.Stub, site.Join = 0, 0
 		require.Equal(t, compile.Call{
-			Callee: callee, Args: []ssa.Value{arg}, Results: []ssa.Value{got},
+			Target: callee, Args: []ssa.Value{arg}, Results: []ssa.Value{got},
 			Base: 2, Size: 1, Exit: 0, Owned: true, Generic: true,
 			Live: site.Live,
 		}, site)

@@ -6,6 +6,31 @@ type Dominance struct {
 	idom []int
 }
 
+// Frontier returns each node's dominance frontier using the
+// Cooper-Harvey-Kennedy join-predecessor walk. Unreachable predecessors contribute
+// nothing because they have no dominator chain.
+func Frontier(g Graph, d *Dominance) [][]int {
+	frontier := make([][]int, g.Len())
+	for b := range g.Len() {
+		idom := d.IDom(b)
+		preds := g.Pred(b)
+		if b != 0 && (idom < 0 || len(preds) < 2) {
+			continue
+		}
+		for _, p := range preds {
+			if !d.Dominates(0, p) {
+				continue
+			}
+			for at := p; at != idom && at >= 0; at = d.IDom(at) {
+				if len(frontier[at]) == 0 || frontier[at][len(frontier[at])-1] != b {
+					frontier[at] = append(frontier[at], b)
+				}
+			}
+		}
+	}
+	return frontier
+}
+
 // NewDominance computes the immediate dominator of every node reachable
 // from node 0 using the iterative algorithm of Cooper, Harvey, and Kennedy
 // (2001). A node unreachable from the entry keeps idom -1 and Dominates
@@ -86,31 +111,6 @@ func (d *Dominance) Children() [][]int {
 		}
 	}
 	return children
-}
-
-// Frontier returns each node's dominance frontier using the
-// Cooper-Harvey-Kennedy join-predecessor walk. Unreachable predecessors contribute
-// nothing because they have no dominator chain.
-func Frontier(g Graph, d *Dominance) [][]int {
-	frontier := make([][]int, g.Len())
-	for b := range g.Len() {
-		idom := d.IDom(b)
-		preds := g.Pred(b)
-		if b != 0 && (idom < 0 || len(preds) < 2) {
-			continue
-		}
-		for _, p := range preds {
-			if !d.Dominates(0, p) {
-				continue
-			}
-			for at := p; at != idom && at >= 0; at = d.IDom(at) {
-				if len(frontier[at]) == 0 || frontier[at][len(frontier[at])-1] != b {
-					frontier[at] = append(frontier[at], b)
-				}
-			}
-		}
-	}
-	return frontier
 }
 
 // intersect finds the nearest common ancestor of a and b in the dominator

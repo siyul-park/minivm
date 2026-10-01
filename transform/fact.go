@@ -16,13 +16,6 @@ type activation struct {
 	slots    []types.Type
 }
 
-func (a activation) returns() int {
-	if a.function.Typ == nil {
-		return 0
-	}
-	return len(a.function.Typ.Returns)
-}
-
 // frame is the facts live at a span's entry: its operand stack, and, per
 // slot, the function of the closure this unit stored there, 0 when unknown.
 type frame struct {
@@ -59,6 +52,13 @@ const (
 	backingGlobal                // deferred to a global slot
 	backingUpval                 // deferred to a closure upval slot
 )
+
+func (a activation) returns() int {
+	if a.function.Typ == nil {
+		return 0
+	}
+	return len(a.function.Typ.Returns)
+}
 
 // analyze returns the facts live at each span's entry and which spans are
 // reached from root; nothing flows past a span that ends in an exit. A

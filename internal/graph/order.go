@@ -14,9 +14,9 @@ func Order(g Graph) []int {
 	visited[0] = true
 	for len(stack) > 0 {
 		top := &stack[len(stack)-1]
-		successors := g.Succ(top.node)
-		if top.next < len(successors) {
-			next := successors[top.next]
+		succ := g.Succ(top.node)
+		if top.next < len(succ) {
+			next := succ[top.next]
 			top.next++
 			if !visited[next] {
 				visited[next] = true

@@ -35,7 +35,7 @@ func (b *Builder) Value(t Type) Value {
 
 // Type returns the type reserved for v.
 func (b *Builder) Type(v Value) Type {
-	if v <= NoValue || int(v) >= len(b.types) {
+	if !v.valid(len(b.types)) {
 		return 0
 	}
 	return b.types[v]

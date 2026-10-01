@@ -52,7 +52,7 @@ func (f *Function) Values() int {
 
 // Type returns v's type or zero for an invalid value.
 func (f *Function) Type(v Value) Type {
-	if v <= NoValue || int(v) >= len(f.types) {
+	if !v.valid(len(f.types)) {
 		return 0
 	}
 	return f.types[v]

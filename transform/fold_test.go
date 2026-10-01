@@ -223,7 +223,7 @@ func TestFoldPass_Run(t *testing.T) {
 				seed = instr.I64_REM_S
 			}
 			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: seed, Args: []ssa.Value{param, param}, State: deoptState(b, entry), Results: []ssa.Value{x}})
-			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: ssa.Word(c.constant), Results: []ssa.Value{right}})
+			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: c.constant.Word(), Results: []ssa.Value{right}})
 			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: []ssa.Value{x, right}, State: deoptState(b, entry), Results: []ssa.Value{result}})
 			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
 			fn := b.Build()
@@ -260,7 +260,7 @@ func TestFoldPass_Run(t *testing.T) {
 			entry := b.Block()
 			x := b.Param(entry, c.typ)
 			right, result := b.Value(c.typ), b.Value(c.typ)
-			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: ssa.Word(c.constant), Results: []ssa.Value{right}})
+			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: c.constant.Word(), Results: []ssa.Value{right}})
 			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: []ssa.Value{x, right}, State: deoptState(b, entry), Results: []ssa.Value{result}})
 			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
 			fn := b.Build()
@@ -377,7 +377,7 @@ func TestFoldPass_Run(t *testing.T) {
 			args := make([]ssa.Value, len(c.boxes))
 			for i, box := range c.boxes {
 				args[i] = b.Value(ssa.TypeOf(box.Kind()))
-				b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: ssa.Word(box), Results: []ssa.Value{args[i]}})
+				b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: box.Word(), Results: []ssa.Value{args[i]}})
 			}
 			result := b.Value(ssa.TypeOf(c.want.Kind()))
 			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: args, State: deoptState(b, entry), Results: []ssa.Value{result}})
@@ -391,7 +391,7 @@ func TestFoldPass_Run(t *testing.T) {
 			require.False(t, preserved, c.name)
 			require.NoError(t, ssa.Verify(fn), c.name)
 			ops := fn.Block(entry).Operations
-			require.Equal(t, ssa.Word(c.want), ops[len(ops)-1].Const, c.name)
+			require.Equal(t, c.want.Word(), ops[len(ops)-1].Const, c.name)
 		}
 	})
 	t.Run("leaves an identity over a value read out of a slot", func(t *testing.T) {

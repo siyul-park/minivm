@@ -21,19 +21,19 @@ func Headers(g Graph, d *Dominance) []int {
 func Body(g Graph, d *Dominance, header int) map[int]bool {
 	body := map[int]bool{header: true}
 	var stack []int
-	for _, predecessor := range g.Pred(header) {
-		if d.Dominates(header, predecessor) && !body[predecessor] {
-			body[predecessor] = true
-			stack = append(stack, predecessor)
+	for _, pred := range g.Pred(header) {
+		if d.Dominates(header, pred) && !body[pred] {
+			body[pred] = true
+			stack = append(stack, pred)
 		}
 	}
 	for len(stack) > 0 {
 		node := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
-		for _, predecessor := range g.Pred(node) {
-			if !body[predecessor] {
-				body[predecessor] = true
-				stack = append(stack, predecessor)
+		for _, pred := range g.Pred(node) {
+			if !body[pred] {
+				body[pred] = true
+				stack = append(stack, pred)
 			}
 		}
 	}
@@ -43,20 +43,20 @@ func Body(g Graph, d *Dominance, header int) map[int]bool {
 // Preheader returns the unique outside predecessor whose only successor is header.
 func Preheader(g Graph, body map[int]bool, header int) (int, bool) {
 	found := -1
-	for _, predecessor := range g.Pred(header) {
-		if body[predecessor] {
+	for _, pred := range g.Pred(header) {
+		if body[pred] {
 			continue
 		}
 		if found >= 0 {
 			return -1, false
 		}
-		found = predecessor
+		found = pred
 	}
 	if found < 0 {
 		return -1, false
 	}
-	successors := g.Succ(found)
-	if len(successors) != 1 || successors[0] != header {
+	succ := g.Succ(found)
+	if len(succ) != 1 || succ[0] != header {
 		return -1, false
 	}
 	return found, true

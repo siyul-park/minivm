@@ -70,7 +70,7 @@ func define(function *Function) ([]position, error) {
 		sites[i] = position{-1, -1}
 	}
 	claim := func(v Value, s position) error {
-		if v <= NoValue || int(v) >= len(sites) {
+		if !v.valid(len(sites)) {
 			return fmt.Errorf("%w: v%d is not a value of this function", ErrDefine, v)
 		}
 		if sites[v].block >= 0 {
@@ -86,8 +86,8 @@ func define(function *Function) ([]position, error) {
 				return nil, err
 			}
 		}
-		for i, operation := range block.Operations {
-			for _, v := range operation.Results {
+		for i, o := range block.Operations {
+			for _, v := range o.Results {
 				if err := claim(v, position{id, i}); err != nil {
 					return nil, err
 				}
@@ -208,22 +208,22 @@ func performs(function *Function, o Operation) error {
 	if leaves(o.Code) {
 		return fmt.Errorf("%w: %s performs a terminator", ErrForm, o.name())
 	}
-	operationType := instr.TypeOf(o.Code)
-	if operationType.Pop == nil && operationType.Push == nil {
+	typ := instr.TypeOf(o.Code)
+	if typ.Pop == nil && typ.Push == nil {
 		if o.Code.Writes(instr.Frame) && len(o.Args) == 0 {
 			return counted(o.name(), len(o.Args), len(o.Results))
 		}
 		return nil
 	}
-	if len(o.Args) != len(operationType.Pop) || len(o.Results) != len(operationType.Push) {
+	if len(o.Args) != len(typ.Pop) || len(o.Results) != len(typ.Push) {
 		return counted(o.name(), len(o.Args), len(o.Results))
 	}
-	for i, want := range operationType.Pop {
+	for i, want := range typ.Pop {
 		if got := function.Type(o.Args[len(o.Args)-1-i]); !accepts(got, want) {
 			return fmt.Errorf("%w: %s pops %s where it wants %s", ErrType, o.name(), got, want)
 		}
 	}
-	for i, want := range operationType.Push {
+	for i, want := range typ.Push {
 		if got := function.Type(o.Results[i]); !accepts(got, want) {
 			return fmt.Errorf("%w: %s pushes %s where it yields %s", ErrType, o.name(), got, want)
 		}
@@ -234,8 +234,8 @@ func performs(function *Function, o Operation) error {
 	return nil
 }
 
-func leaves(operation instr.Opcode) bool {
-	switch operation {
+func leaves(code instr.Opcode) bool {
+	switch code {
 	case instr.BR, instr.BR_IF, instr.BR_TABLE, instr.RETURN, instr.RETURN_CALL:
 		return true
 	default:
@@ -314,7 +314,7 @@ func resume(function *Function, sites []position, v Value, name string, deopts b
 		}
 		return nil
 	}
-	if v <= NoValue || int(v) >= len(sites) || function.Type(v) != TypeState {
+	if !v.valid(len(sites)) || function.Type(v) != TypeState {
 		return fmt.Errorf("%w: %s resumes into v%d", ErrState, name, v)
 	}
 	def := sites[v]
@@ -341,7 +341,7 @@ func canonical(function *Function, o Operation) error {
 }
 
 func constant(function *Function, sites []position, v Value) bool {
-	if v <= NoValue || int(v) >= len(sites) {
+	if !v.valid(len(sites)) {
 		return false
 	}
 	def := sites[v]
@@ -350,7 +350,7 @@ func constant(function *Function, sites []position, v Value) bool {
 
 func uses(function *Function, sites []position, dominance *graph.Dominance, at position, values []Value) error {
 	for _, v := range values {
-		if v <= NoValue || int(v) >= len(sites) {
+		if !v.valid(len(sites)) {
 			return fmt.Errorf("%w: v%d is not a value of this function", ErrDefine, v)
 		}
 		def := sites[v]

@@ -382,7 +382,7 @@ func (m *Machine) Spill(a *asm.Assembler, reg asm.VReg, slot int) {
 	a.Emit(target.New().Spill(reg, slot))
 }
 
-// Results loads each bridge result from Context.Results.
+// Results loads each exit result from Context.Results.
 func (m *Machine) Results(a *asm.Assembler, regs []asm.VReg) {
 	for i, r := range regs {
 		a.Emit(target.LDR(r, target.Ctx, int16(int(jit.OffsetResults)+8*i)))
@@ -390,11 +390,11 @@ func (m *Machine) Results(a *asm.Assembler, regs []asm.VReg) {
 }
 
 // Call writes boxed arguments at the callee frame base and, when Generic,
-// branches to Bridge, which serves the call and resumes at Join. Otherwise it
+// branches to Stub, which serves the call and resumes at Join. Otherwise it
 // passes a closure callee's upvals base through Context.Upvals when Upvals,
 // and dispatches through Context.Natives, or, when Self, branches directly to
 // the unit's own entry. Missing code, depth, or space takes ExitCall, which
-// resumes at Join; an owned Callee is released once a native callee returns,
+// resumes at Join; an owned Target is released once a native callee returns,
 // a borrowed one left alone.
 func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	if 8*(c.Base+c.Size) > imm12 {
@@ -405,7 +405,7 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 		a.Emit(target.STR(box(a, s, v), target.X25, int16((c.Base+i)*8)))
 	}
 	if c.Generic {
-		a.Emit(target.BLabel(c.Bridge))
+		a.Emit(target.BLabel(c.Stub))
 		m.join(a, c, s)
 		return true
 	}
@@ -413,17 +413,17 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	if !c.Self {
 		code = m.vreg()
 		a.Emit(target.LDR(code, target.Ctx, int16(jit.OffsetNatives)))
-		a.Emit(target.LDI(target.X16, uint64(c.Address))...)
-		a.Emit(target.LDRR(code, code, target.X16), target.CBZLabel(code, c.Bridge))
+		a.Emit(target.LDI(target.X16, uint64(c.Callee))...)
+		a.Emit(target.LDRR(code, code, target.X16), target.CBZLabel(code, c.Stub))
 	}
 	a.Emit(
 		target.ADDI(target.X16, target.X25, uint16(8*(c.Base+c.Size))),
 		target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
 		target.CMP(target.X16, target.X17),
-		target.BCondLabel(target.OpBHI, c.Bridge),
+		target.BCondLabel(target.OpBHI, c.Stub),
 		target.LDR(target.X17, target.Ctx, int16(jit.OffsetLimit)),
 		target.CMP(target.X27, target.X17),
-		target.BCondLabel(target.OpBCS, c.Bridge),
+		target.BCondLabel(target.OpBCS, c.Stub),
 		target.LSLI(target.X16, target.X27, recordShift),
 		target.ADD(target.X16, target.Ctx, target.X16),
 		target.ADDI(target.X17, target.SP, 0),
@@ -435,7 +435,7 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	a.Emit(target.SUBSI(target.X24, target.X24, 1), target.BCondLabel(target.OpBLE, c.Safepoint))
 	a.Bind(c.Resume)
 	if c.Upvals {
-		upvals := m.container(a, s.Reg(c.Callee))
+		upvals := m.container(a, s.Reg(c.Target))
 		a.Emit(
 			target.LDR(upvals, upvals, int16(jit.OffsetClosureUpvals)),
 			target.STR(upvals, target.Ctx, int16(jit.OffsetUpvals)),
@@ -469,7 +469,7 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	}
 	a.Emit(target.SUBI(target.X25, target.X25, uint16(8*c.Base)))
 	if c.Owned {
-		m.release(a, s.Reg(c.Callee), s)
+		m.release(a, s.Reg(c.Target), s)
 	}
 	if len(c.Registers) == 0 {
 		m.join(a, c, s)

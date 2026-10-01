@@ -1604,8 +1604,8 @@ func TestMachine_Call(t *testing.T) {
 		safe, next := a.Label(), a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
-			Address: 5, Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
-			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Safepoint: safe, Resume: next, Owned: true,
+			Callee: 5, Target: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
+			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Stub: bridge, Safepoint: safe, Resume: next, Owned: true,
 		}, r))
 
 		code := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
@@ -1670,8 +1670,8 @@ func TestMachine_Call(t *testing.T) {
 		bridge, join := a.Label(), a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
-			Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
-			Base: 4, Size: 1, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Join: join, Owned: true, Generic: true,
+			Target: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
+			Base: 4, Size: 1, Exit: 7, Live: []asm.VReg{live}, Stub: bridge, Join: join, Owned: true, Generic: true,
 		}, r))
 
 		require.Equal(t, slices.Concat(
@@ -1693,8 +1693,8 @@ func TestMachine_Call(t *testing.T) {
 		safe, next := a.Label(), a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
-			Address: 5, Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
-			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Safepoint: safe, Resume: next, Upvals: true,
+			Callee: 5, Target: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
+			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Stub: bridge, Safepoint: safe, Resume: next, Upvals: true,
 		}, r))
 
 		code, closure, upvals := vr(1), vr(2), vr(3)
@@ -1750,8 +1750,8 @@ func TestMachine_Call(t *testing.T) {
 		safe, next := a.Label(), a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
-			Address: 5, Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
-			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Safepoint: safe, Resume: next,
+			Callee: 5, Target: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
+			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Stub: bridge, Safepoint: safe, Resume: next,
 		}, r))
 
 		code := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
@@ -1800,8 +1800,8 @@ func TestMachine_Call(t *testing.T) {
 		safe, next := a.Label(), a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
-			Address: 5, Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
-			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Safepoint: safe, Resume: next,
+			Callee: 5, Target: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
+			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Stub: bridge, Safepoint: safe, Resume: next,
 			Registers: []types.Kind{types.KindF64},
 		}, r))
 
@@ -1852,8 +1852,8 @@ func TestMachine_Call(t *testing.T) {
 		safe, next := a.Label(), a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
-			Address: 5, Callee: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
-			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Bridge: bridge, Safepoint: safe, Resume: next, Owned: true, Self: true,
+			Callee: 5, Target: 2, Args: []ssa.Value{1}, Results: []ssa.Value{3},
+			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Stub: bridge, Safepoint: safe, Resume: next, Owned: true, Self: true,
 		}, r))
 
 		// entry is Prologue's own label, bound before any other row: the
@@ -1915,8 +1915,8 @@ func TestMachine_Call(t *testing.T) {
 		safe, next := a.Label(), a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
-			Address: 5, Callee: 2, Args: []ssa.Value{1, 3}, Base: 4, Size: 3, Exit: 7,
-			Bridge: bridge, Safepoint: safe, Resume: next, Self: true,
+			Callee: 5, Target: 2, Args: []ssa.Value{1, 3}, Base: 4, Size: 3, Exit: 7,
+			Stub: bridge, Safepoint: safe, Resume: next, Self: true,
 			Arguments: []types.Kind{types.KindI32, types.KindF64},
 		}, r))
 
@@ -1966,8 +1966,8 @@ func TestMachine_Call(t *testing.T) {
 		safe, next := a.Label(), a.Label()
 		start := len(a.Rows())
 		require.True(t, m.Call(a, compile.Call{
-			Address: 5, Callee: 2, Args: []ssa.Value{1}, Base: 4, Size: 3, Exit: 7,
-			Bridge: bridge, Safepoint: safe, Resume: next, Self: true,
+			Callee: 5, Target: 2, Args: []ssa.Value{1}, Base: 4, Size: 3, Exit: 7,
+			Stub: bridge, Safepoint: safe, Resume: next, Self: true,
 			Arguments: []types.Kind{types.KindI64},
 		}, r64))
 
@@ -2015,7 +2015,7 @@ func TestMachine_Call(t *testing.T) {
 	t.Run("declines a frame beyond the reach of an immediate", func(t *testing.T) {
 		m, a := arm64.New(), asm.New(target.New())
 		m.Prologue(a, 0, true, compile.Layout{}, nil)
-		require.False(t, m.Call(a, compile.Call{Address: 5, Callee: 2, Base: 510, Size: 2}, r))
+		require.False(t, m.Call(a, compile.Call{Callee: 5, Target: 2, Base: 510, Size: 2}, r))
 	})
 }
 

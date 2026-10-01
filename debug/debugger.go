@@ -159,11 +159,6 @@ func (d *Debugger) Enable(id int, enabled bool) bool {
 	return true
 }
 
-func (d *Debugger) lookup(id int) *Breakpoint {
-	d.init()
-	return d.breakpoints[id]
-}
-
 func (d *Debugger) Breakpoints() []Breakpoint {
 	d.init()
 	out := make([]Breakpoint, 0, len(d.breakpoints))
@@ -174,6 +169,11 @@ func (d *Debugger) Breakpoints() []Breakpoint {
 		return out[i].ID < out[j].ID
 	})
 	return out
+}
+
+func (d *Debugger) lookup(id int) *Breakpoint {
+	d.init()
+	return d.breakpoints[id]
 }
 
 func (d *Debugger) breakpoint(i *interp.Interpreter, fn, ip int) *Breakpoint {

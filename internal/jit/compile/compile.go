@@ -160,6 +160,75 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 	return code, exits, entry, nil
 }
 
+// Reg is v's virtual register, typed by its static representation; for a
+// remat constant, a fresh register loaded here.
+func (l *lowering) Reg(v ssa.Value) asm.VReg {
+	if c, ok := l.remat(v); ok {
+		return l.materialize(v, c)
+	}
+	return vreg(int32(v), l.f.Type(v))
+}
+
+// Type is v's static type.
+func (l *lowering) Type(v ssa.Value) ssa.Type {
+	return l.f.Type(v)
+}
+
+// Slot returns the static type of slot.
+func (l *lowering) Slot(slot ssa.Slot) ssa.Type {
+	kinds := l.fn.Slots()
+	if slot.Space == ssa.SpaceLocal && slot.Index >= 0 && slot.Index < len(kinds) {
+		return ssa.TypeOf(kinds[slot.Index])
+	}
+	if slot.Space == ssa.SpaceGlobal {
+		return ssa.TypeRef
+	}
+	if slot.Space == ssa.SpaceUpval && slot.Index >= 0 && slot.Index < len(l.fn.Captures) {
+		return ssa.TypeOf(l.fn.Captures[slot.Index].Kind())
+	}
+	return 0
+}
+
+// Fuse reports whether v is the condition of the OpBranch ending the block
+// being lowered, defined by the block's last operation and used nowhere else.
+func (l *lowering) Fuse(v ssa.Value) bool {
+	return v == l.fuse
+}
+
+// Deopt places a deopt stub at the current state, out of line after the
+// next terminator that does not fall through.
+func (l *lowering) Deopt() asm.Label {
+	s := stub{label: l.a.Label(), id: l.exit(jit.ExitDeopt)}
+	l.deopts = append(l.deopts, s)
+	return s.label
+}
+
+// Trap places a deopt stub as Deopt does, marked as the operation's own trap.
+func (l *lowering) Trap() asm.Label {
+	label := l.Deopt()
+	l.outlets[l.deopts[len(l.deopts)-1].id].exit.Trap = true
+	return label
+}
+
+// Release places a release stub for ref.
+func (l *lowering) Release(ref asm.VReg) (exit, resume asm.Label) {
+	return l.word(jit.ExitRelease, types.KindRef, ref)
+}
+
+// Box places a box stub for word, a wide i64.
+func (l *lowering) Box(word asm.VReg) (exit, resume asm.Label) {
+	return l.word(jit.ExitBox, types.KindI64, word)
+}
+
+// word places a stub of kind k whose Word is reg, of kind kind.
+func (l *lowering) word(k jit.Kind, kind types.Kind, reg asm.VReg) (exit, resume asm.Label) {
+	id := l.exit(k)
+	out := &l.outlets[id]
+	out.exit.Word.Kind = kind
+	out.places = append(out.places, place{to: &out.exit.Word, reg: reg})
+	return l.stub(id)
+}
+
 // newLowering rejects shapes the backend does not lower and scans f for what
 // lowering consults: homes, loops, uses, and remat constants.
 func newLowering(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects, address int, osr, count bool) (*lowering, error) {
@@ -274,75 +343,6 @@ func (l *lowering) scan() {
 			}
 		}
 	}
-}
-
-// Reg is v's virtual register, typed by its static representation; for a
-// remat constant, a fresh register loaded here.
-func (l *lowering) Reg(v ssa.Value) asm.VReg {
-	if c, ok := l.remat(v); ok {
-		return l.materialize(v, c)
-	}
-	return vreg(int32(v), l.f.Type(v))
-}
-
-// Type is v's static type.
-func (l *lowering) Type(v ssa.Value) ssa.Type {
-	return l.f.Type(v)
-}
-
-// Slot returns the static type of slot.
-func (l *lowering) Slot(slot ssa.Slot) ssa.Type {
-	kinds := l.fn.Slots()
-	if slot.Space == ssa.SpaceLocal && slot.Index >= 0 && slot.Index < len(kinds) {
-		return ssa.TypeOf(kinds[slot.Index])
-	}
-	if slot.Space == ssa.SpaceGlobal {
-		return ssa.TypeRef
-	}
-	if slot.Space == ssa.SpaceUpval && slot.Index >= 0 && slot.Index < len(l.fn.Captures) {
-		return ssa.TypeOf(l.fn.Captures[slot.Index].Kind())
-	}
-	return 0
-}
-
-// Fuse reports whether v is the condition of the OpBranch ending the block
-// being lowered, defined by the block's last operation and used nowhere else.
-func (l *lowering) Fuse(v ssa.Value) bool {
-	return v == l.fuse
-}
-
-// Deopt places a deopt stub at the current state, out of line after the
-// next terminator that does not fall through.
-func (l *lowering) Deopt() asm.Label {
-	s := stub{label: l.a.Label(), id: l.exit(jit.ExitDeopt)}
-	l.deopts = append(l.deopts, s)
-	return s.label
-}
-
-// Trap places a deopt stub as Deopt does, marked as the operation's own trap.
-func (l *lowering) Trap() asm.Label {
-	label := l.Deopt()
-	l.outlets[l.deopts[len(l.deopts)-1].id].exit.Trap = true
-	return label
-}
-
-// Release places a release stub for ref.
-func (l *lowering) Release(ref asm.VReg) (exit, resume asm.Label) {
-	return l.word(jit.ExitRelease, types.KindRef, ref)
-}
-
-// Box places a box stub for word, a wide i64.
-func (l *lowering) Box(word asm.VReg) (exit, resume asm.Label) {
-	return l.word(jit.ExitBox, types.KindI64, word)
-}
-
-// word places a stub of kind k whose Word is reg, of kind kind.
-func (l *lowering) word(k jit.Kind, kind types.Kind, reg asm.VReg) (exit, resume asm.Label) {
-	id := l.exit(k)
-	out := &l.outlets[id]
-	out.exit.Word.Kind = kind
-	out.places = append(out.places, place{to: &out.exit.Word, reg: reg})
-	return l.stub(id)
 }
 
 // remat reports v's constant and whether it is loaded at each use instead of
@@ -467,9 +467,10 @@ func arguments(fn *types.Function) []types.Kind {
 	return convention(fn.Typ.Params)
 }
 
-// convention is the kinds of ts when one or two values travel in registers.
+// convention is the kinds of ts when up to jit.Convention values travel in
+// registers.
 func convention(ts []types.Type) []types.Kind {
-	if len(ts) == 0 || len(ts) > 2 {
+	if len(ts) == 0 || len(ts) > jit.Convention {
 		return nil
 	}
 	return types.Kinds(ts)
@@ -766,13 +767,13 @@ func (l *lowering) call(op ssa.Operation) error {
 	}
 	bridge, join := l.stub(id)
 	site := Call{
-		Address:   ref,
-		Callee:    callee,
+		Callee:    ref,
+		Target:    callee,
 		Args:      op.Args[:len(op.Args)-1],
 		Results:   op.Results,
 		Base:      len(l.fn.Slots()) + below,
 		Exit:      id,
-		Bridge:    bridge,
+		Stub:      bridge,
 		Join:      join,
 		Owned:     owned,
 		Registers: regs,

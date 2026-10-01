@@ -44,7 +44,7 @@ type Machine interface {
 	Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg)
 	// Spill stores reg into fixed spill slot slot.
 	Spill(a *asm.Assembler, reg asm.VReg, slot int)
-	// Results loads a bridge's results from the Context into regs.
+	// Results loads an exit's results from the Context into regs.
 	Results(a *asm.Assembler, regs []asm.VReg)
 	// Call emits call site c and reports false when the target cannot.
 	Call(a *asm.Assembler, c Call, s Site) bool
@@ -109,13 +109,13 @@ type Site interface {
 // Call describes a CALL: one to a statically resolved callee, or, when
 // Generic, to any callee of its signature.
 type Call struct {
-	// Address is the callee's function address, its Context.Natives index;
+	// Callee is the callee's function address, its Context.Natives index;
 	// zero when Generic.
-	Address int
-	// Callee is the function or closure reference the call adopts when
-	// Owned; a borrowed Callee lives in the constant pool or a caller's
+	Callee int
+	// Target is the function or closure reference the call adopts when
+	// Owned; a borrowed Target lives in the constant pool or a caller's
 	// slot, and native code neither retains nor releases it.
-	Callee        ssa.Value
+	Target        ssa.Value
 	Args, Results []ssa.Value
 	// Base is the callee's frame base in slots from this activation's, and
 	// Size the slots from there the callee's frame must fit below
@@ -125,22 +125,22 @@ type Call struct {
 	// are the registers it names, which stay live across the call.
 	Exit int
 	Live []asm.VReg
-	// Bridge is the ExitCall the call takes when the callee is not native,
+	// Stub is the ExitCall stub the call takes when the callee is not native,
 	// the activation is too deep, or the frame does not fit. The interpreter
 	// runs the call itself, and native code resumes at Join.
-	Bridge asm.Label
+	Stub asm.Label
 	// Safepoint is taken when the call spends the last budget unit.
 	Safepoint asm.Label
 	// Resume is the call site after the safepoint check.
 	Resume asm.Label
-	// Join is where Bridge resumes: past the callee's release, where slot
-	// results are read, or past the moves of register results, which Bridge
+	// Join is where Stub resumes: past the callee's release, where slot
+	// results are read, or past the moves of register results, which Stub
 	// loads itself.
 	Join asm.Label
-	// Owned reports whether the call's state owns Callee's reference, so
+	// Owned reports whether the call's state owns Target's reference, so
 	// the call releases it once the callee returns.
 	Owned bool
-	// Self reports whether Address is the unit being lowered's own address
+	// Self reports whether Callee is the unit being lowered's own address
 	// and the unit is not OSR (its entry is a loop header): the call branches
 	// to its own entry instead of Context.Natives.
 	Self bool
@@ -153,12 +153,12 @@ type Call struct {
 	// arguments): each also moves into the target's register-convention
 	// registers, on top of its slot store.
 	Arguments []types.Kind
-	// Upvals reports that Callee is a closure over a function with
+	// Upvals reports that Target is a closure over a function with
 	// captures: the call writes the closure's upvals base to
 	// Context.Upvals.
 	Upvals bool
 	// Generic reports that the callee is unknown: the call stores its
-	// arguments and always takes Bridge, which serves it and resumes at Join,
+	// arguments and always takes Stub, which serves it and resumes at Join,
 	// where results are read from slots. Safepoint and Resume are unset.
 	Generic bool
 }

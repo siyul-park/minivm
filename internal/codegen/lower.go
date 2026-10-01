@@ -9,12 +9,6 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// typesPkg and instrPkg are the import paths generated code qualifies with.
-const (
-	typesPkg = "github.com/siyul-park/minivm/types"
-	instrPkg = "github.com/siyul-park/minivm/instr"
-)
-
 type value struct {
 	op       instr.Opcode
 	head     instr.Opcode
@@ -56,6 +50,12 @@ type target struct {
 }
 
 type lowerer func(*state, step) (value, error)
+
+// typesPkg and instrPkg are the import paths generated code qualifies with.
+const (
+	typesPkg = "github.com/siyul-park/minivm/types"
+	instrPkg = "github.com/siyul-park/minivm/instr"
+)
 
 var lowerers = [256]lowerer{
 	instr.ARRAY_APPEND:        emit(arrayAppend()),

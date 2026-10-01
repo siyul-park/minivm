@@ -21,6 +21,49 @@ type loader struct {
 	standalone bool
 }
 
+// slot is where a slot-writing opcode keeps its slot: the threader field with
+// its declared kinds, the operand width, the run-time bounds check, and the
+// slot itself.
+type slot struct {
+	kinds  string
+	wide   bool
+	check  func() []jen.Code
+	target func() *jen.Statement
+}
+
+var (
+	localSlot = slot{
+		kinds: "locals",
+		check: func() []jen.Code {
+			return []jen.Code{
+				jen.Id("addr").Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id("idx"),
+				jen.If(jen.Id("addr").Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+			}
+		},
+		target: func() *jen.Statement { return jen.Id("i").Dot("stack").Index(jen.Id("addr")) },
+	}
+	globalSlot = slot{
+		kinds: "globals",
+		wide:  true,
+		check: func() []jen.Code {
+			return []jen.Code{jen.If(jen.Id("idx").Op(">=").Id("len").Call(jen.Id("i").Dot("globals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault")))}
+		},
+		target: func() *jen.Statement { return jen.Id("i").Dot("globals").Index(jen.Id("idx")) },
+	}
+	upvalSlot = slot{
+		kinds: "captures",
+		check: func() []jen.Code {
+			return []jen.Code{jen.If(jen.Id("idx").Op(">=").Id("len").Call(jen.Id("i").Dot("fr").Dot("upvals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault")))}
+		},
+		target: func() *jen.Statement { return jen.Id("i").Dot("fr").Dot("upvals").Index(jen.Id("idx")) },
+	}
+)
+
+// store lowers the opcode that writes the top of the stack to s. tee keeps the
+// value on the stack; otherwise it pops. A slot declared as a scalar kind
+// holds no reference, so the compile step picks a handler that skips the
+// reference counts.
+
 func newLoader(op instr.Opcode, slot, offset int, label string, standalone bool) loader {
 	name := temp(slot)
 	at := add(jen.Id("start"), offset)
@@ -498,48 +541,6 @@ func localStore(state *state, current step) (value, error) {
 	return value{op: current.op, head: consumer.head, compile: append(compile, body...)}, nil
 }
 
-// slot is where a slot-writing opcode keeps its slot: the threader field with
-// its declared kinds, the operand width, the run-time bounds check, and the
-// slot itself.
-type slot struct {
-	kinds  string
-	wide   bool
-	check  func() []jen.Code
-	target func() *jen.Statement
-}
-
-var (
-	localSlot = slot{
-		kinds: "locals",
-		check: func() []jen.Code {
-			return []jen.Code{
-				jen.Id("addr").Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id("idx"),
-				jen.If(jen.Id("addr").Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
-			}
-		},
-		target: func() *jen.Statement { return jen.Id("i").Dot("stack").Index(jen.Id("addr")) },
-	}
-	globalSlot = slot{
-		kinds: "globals",
-		wide:  true,
-		check: func() []jen.Code {
-			return []jen.Code{jen.If(jen.Id("idx").Op(">=").Id("len").Call(jen.Id("i").Dot("globals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault")))}
-		},
-		target: func() *jen.Statement { return jen.Id("i").Dot("globals").Index(jen.Id("idx")) },
-	}
-	upvalSlot = slot{
-		kinds: "captures",
-		check: func() []jen.Code {
-			return []jen.Code{jen.If(jen.Id("idx").Op(">=").Id("len").Call(jen.Id("i").Dot("fr").Dot("upvals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault")))}
-		},
-		target: func() *jen.Statement { return jen.Id("i").Dot("fr").Dot("upvals").Index(jen.Id("idx")) },
-	}
-)
-
-// store lowers the opcode that writes the top of the stack to s. tee keeps the
-// value on the stack; otherwise it pops. A slot declared as a scalar kind
-// holds no reference, so the compile step picks a handler that skips the
-// reference counts.
 func store(s slot, tee bool) jen.Code {
 	advance, operand := 2, u8("idx", jen.Id("c").Dot("ip"))
 	if s.wide {

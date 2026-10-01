@@ -47,7 +47,7 @@ type Context struct {
 	Depth   uint64
 	Limit   uint64
 	Budget  int64
-	Results [2]uint64
+	Results [Convention]uint64
 	Records [256]Record
 }
 
@@ -65,6 +65,11 @@ const (
 	// something on its behalf; Resume continues it.
 	TrapBridge
 )
+
+// Convention is how many values a function passes or returns in registers
+// (X0, X1 on ARM64); more travel through its VM frame. Context.Results
+// stages that many words.
+const Convention = 2
 
 // Offsets of the Context fields native code writes before an exit.
 const (

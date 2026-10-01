@@ -103,8 +103,8 @@ A reference parameter its function never writes (`transform.Borrows`) is borrowe
 |---|---|
 | X25 | frame base; caller-maintained and adjusted by `8·Base` around calls |
 | X27 | activation depth; prologue/epilogue step it; exits store exact depth to `Context.Depth` |
-| X0/X1 results | one or two results, including i64; native-to-native i64 stays raw |
-| X0/X1 arguments | one or two parameters, including i64; each still has a boxed slot |
+| X0/X1 results | up to `jit.Convention` (2) results, including i64; native-to-native i64 stays raw; `compile.convention` applies the limit |
+| X0/X1 arguments | up to `jit.Convention` parameters, including i64; each still has a boxed slot |
 | Go entry | loads X25/X27, reads argument slots, calls body, stores X24 to `Context.Budget`, then boxes register results |
 
 `Code.Native()` is the body at offset 0; `Code.Entry()` is the Go stub after the epilogue. i64 entry arguments are unboxed with `SBFX #0,#49`; a threaded caller whose slot holds a heap i64 ref declines native entry. OSR reads slots.
@@ -149,9 +149,9 @@ A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every ad
 |---|---|
 | Ledger | Per Go-entered address (`native.ledgers`) and per OSR site, in work units (`Budget`'s back edges, calls, returns), credited on every exit and return. `Charge` adds the class price (bridge 2.4, release 0.75, call 3.5 units; guard and trap 0) and reports whether debt ≤ 64 units; credit is floored at −64 units. A bridge, box, or call is charged before it is served; a refusal deopts (replaying a call) and retires the run's code. A release cannot deopt: its charge takes effect at the next bridge or call. |
 | Prices | Time one served exit adds over threaded code (bridge ~53 ns, release ~17 ns, call ~76 ns on the reference arm64 machine) divided by native time saved per work unit (~22 ns in exiting kernels). |
-| Guard | Deopts. An `ExitDeopt` guard records its site (`native.refuted`, snapshot as `transform.Module.Refuted`). It is judged against the code that took it: the run's own code, or a native callee's still-published code, retired in place. That code retires at once when its feedback moved since it was built, else on the `refute` (8)th refutation. |
+| Guard | Deopts. An `ExitDeopt` guard records its site (`native.refuted`, snapshot as `transform.Module.Refuted`). It is judged against the code that took it: the run's own code, or a native callee's still-published code, retired in place. That code retires at once when its feedback moved since it was built, else on the `tolerance` (8)th refutation. |
 | Generic site | The translator emits no container `guard.shape` at a refuted offset: the op bridges. Call sites become generic through `Callees` (replay records the new callee). |
-| Oscillation | Feedback per address is monotone and finite (call sites unset → callee → mixed; refuted sites only added); a retire either consumes a feedback step or fails the tier. An OSR site whose feedback moved re-arms (resubmits) instead of disabling, and each re-arm counts toward `refute`. |
+| Oscillation | Feedback per address is monotone and finite (call sites unset → callee → mixed; refuted sites only added); a retire either consumes a feedback step or fails the tier. An OSR site whose feedback moved re-arms (resubmits) instead of disabling, and each re-arm counts toward `tolerance`. |
 
 `Exit.Lent` slots are retained when a callee is materialized or the interpreter runs an ExitCall; `Exit.Kept` slots (owned arguments to borrowed parameters, which native code releases after the call) are retained for a served call and released again if its caller never resumes. `Exit.Target` locates the callee value of a closure call or a generic call: the interpreter pushes it, and the materialized callee frame runs through it with its upvals. `Exit.Args` is the argument count of every `ExitCall`; `Exit.Returns` are the kinds a generic call reads back from slots.
 
@@ -202,7 +202,7 @@ Entry reuses the current frame (`FB = bp`, `Depth = 0`); exits rewrite it in pla
 - Bridges resume except the denied ops in Exits (above); `RETURN_CALL`'s `ExitDeopt` does not, nor an `ExitCall` to a coroutine function. `YIELD` and `RESUME` never reach an exit at all: they make the translator decline the whole unit at compile time.
 - A catch block never runs natively: the interpreter runs it after the deopt.
 - Host functions are not speculated at dynamic CALL sites; owned callees are not candidates.
-- A hoisted `guard.shape` deopts at its loop header's state, an offset no op guards: its refutation falls back to the `refute` count instead of a generic site.
+- A hoisted `guard.shape` deopts at its loop header's state, an offset no op guards: its refutation falls back to the `tolerance` count instead of a generic site.
 
 ## Metrics
 

@@ -218,7 +218,7 @@ func TestCompile(t *testing.T) {
 			// n=5, i=3 (partway through the loop), bonus=100, acc=3 (the
 			// operand-stack value the interpreter left at the header).
 			stack := []types.Boxed{types.BoxI32(5), types.BoxI32(3), types.BoxI32(100), types.BoxI32(3)}
-			u := compile.Unit{Address: 1, Function: fn, Tier: tier, Entry: entry, OSR: true}
+			u := compile.Unit{Address: 1, Function: fn, Tier: tier, IP: entry, OSR: true}
 			ctx, trap := run(t, u, stack)
 			require.Equal(t, jit.TrapReturn, trap)
 			require.Equal(t, types.BoxI32(105), stack[0])
@@ -252,7 +252,7 @@ func TestCompile(t *testing.T) {
 			instr.New(instr.I64_CONST, 0).Width() + instr.New(instr.LOCAL_SET, 2).Width()
 
 		stack := []types.Boxed{types.BoxI32(5), types.BoxI32(0), types.BoxI64(0)}
-		u := compile.Unit{Address: 1, Function: fn, Tier: jit.Optimized, Entry: entry, OSR: true}
+		u := compile.Unit{Address: 1, Function: fn, Tier: jit.Optimized, IP: entry, OSR: true}
 		ctx, trap := run(t, u, stack)
 		require.Equal(t, jit.TrapReturn, trap)
 		// 0^0^1^2^3^4 = 4, raw: a register-eligible i64 result reaches its

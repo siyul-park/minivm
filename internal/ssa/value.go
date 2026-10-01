@@ -92,3 +92,8 @@ func (t Type) String() string {
 		return "invalid"
 	}
 }
+
+// valid reports whether v names a value of a function with n value ids.
+func (v Value) valid(n int) bool {
+	return v > NoValue && int(v) < n
+}

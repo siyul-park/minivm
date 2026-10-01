@@ -70,6 +70,28 @@ func BoxRef(v int) Boxed {
 	return Box(uint64(v), KindRef)
 }
 
+// BoxWord boxes word, the native word of kind (see Boxed.Word). An i64 word
+// outside the inline range is not representable; callers promote it first.
+// An unknown kind boxes to zero.
+func BoxWord(kind Kind, word uint64) Boxed {
+	switch kind {
+	case KindI1:
+		return BoxI1(uint32(word) != 0)
+	case KindI8:
+		return BoxI8(int8(uint32(word)))
+	case KindI32:
+		return BoxI32(int32(uint32(word)))
+	case KindI64:
+		return BoxI64(int64(word))
+	case KindF32:
+		return BoxF32(math.Float32frombits(uint32(word)))
+	case KindF64, KindRef:
+		return Boxed(word)
+	default:
+		return 0
+	}
+}
+
 func Box(v uint64, kind Kind) Boxed {
 	m := (uint64(kind) << VBits) | v
 	u := (uint64(0x7FF) << 52) | m
@@ -178,4 +200,25 @@ func (v Boxed) Bool() bool {
 
 func (v Boxed) Ref() int {
 	return int(int32(v & VMask))
+}
+
+// Word returns v's native word: i1 as 0 or 1, i8 and i32 as a zero-extended
+// 32-bit lane, i64 as the full 64 bits, f32 as its bits in the low 32, and
+// f64 and ref as the boxed word itself.
+func (v Boxed) Word() uint64 {
+	switch v.Kind() {
+	case KindI1:
+		if v.Bool() {
+			return 1
+		}
+		return 0
+	case KindI8, KindI32:
+		return uint64(uint32(v.I32()))
+	case KindI64:
+		return uint64(v.I64())
+	case KindF32:
+		return uint64(math.Float32bits(v.F32()))
+	default:
+		return uint64(v)
+	}
 }

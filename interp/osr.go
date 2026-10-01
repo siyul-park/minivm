@@ -54,9 +54,9 @@ type site struct {
 	code *jit.Code
 	// built is the feedback s's published code was compiled from.
 	built transform.Module
-	// deopts counts s's refuted speculations and re-arms: never reset, so
+	// refutes counts s's refuted speculations and re-arms: never reset, so
 	// they bound s's recompiles.
-	deopts int
+	refutes int
 	// ledger weighs s's native work against its exits' cost, independently
 	// of native CALL entries at the same address.
 	ledger jit.Ledger
@@ -154,7 +154,7 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 				// compile of the same address may hold it, undrained,
 				// since its own last call.
 				n.drain(i)
-				u := compile.Unit{Address: s.address, Function: s.fn, Module: n.feedback(s.address), Tier: jit.Optimized, Entry: s.ip, OSR: true}
+				u := compile.Unit{Address: s.address, Function: s.fn, Module: n.feedback(s.address), Tier: jit.Optimized, IP: s.ip, OSR: true}
 				s.submitted = n.queue.Submit(u)
 			}
 		case s.count%s.cadence == 0:
@@ -213,8 +213,8 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 				if !same(s.built, n.feedback(s.address)) {
 					return true
 				}
-				s.deopts++
-				return s.deopts >= tolerance
+				s.refutes++
+				return s.refutes >= tolerance
 			},
 		)
 	} else {
@@ -226,10 +226,10 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	if retire {
 		n.store.RetireAt(s.address, s.ip)
 		s.code = nil
-		if s.deopts < tolerance && !same(s.built, n.feedback(s.address)) {
+		if s.refutes < tolerance && !same(s.built, n.feedback(s.address)) {
 			// Feedback moved since s's code was built: submit s again. Each
 			// re-arm counts toward tolerance, so recompiles stay bounded.
-			s.deopts++
+			s.refutes++
 			s.submitted = false
 			s.ledger = jit.Ledger{}
 		} else {

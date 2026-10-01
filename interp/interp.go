@@ -1396,20 +1396,12 @@ func (i *Interpreter) structField(addr, at int) types.Boxed {
 		if at < 0 || at >= len(value.Typ.Fields) {
 			panic(ErrSegmentationFault)
 		}
-		data := value.Data[at]
-		switch value.Typ.Fields[at].Kind {
-		case types.KindI1:
-			return types.BoxI1(data != 0)
-		case types.KindI8:
-			return types.BoxI8(int8(uint32(data)))
-		case types.KindI32:
-			return types.BoxI32(int32(uint32(data)))
+		data, kind := value.Data[at], value.Typ.Fields[at].Kind
+		switch kind {
+		case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64:
+			return types.BoxWord(kind, data)
 		case types.KindI64:
 			return i.boxI64(int64(data))
-		case types.KindF32:
-			return types.BoxF32(math.Float32frombits(uint32(data)))
-		case types.KindF64:
-			return types.BoxF64(math.Float64frombits(data))
 		case types.KindRef:
 			result := types.Boxed(data)
 			i.retainBox(result)
@@ -1601,9 +1593,8 @@ func (i *Interpreter) function(addr int) *types.Function {
 	return i.heap[addr].(*types.Function)
 }
 
-// globalDecls returns the declared kinds for threaded handler selection,
-// unlike globalKinds which observes current values. Dynamic globals stay
-// unknown so their handlers inspect each boxed value.
+// globalDecls returns the declared kinds for threaded handler selection.
+// Dynamic globals stay unknown so their handlers inspect each boxed value.
 func (i *Interpreter) globalDecls() []types.Kind {
 	kinds := make([]types.Kind, len(i.globalTypes))
 	for idx, typ := range i.globalTypes {

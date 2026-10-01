@@ -614,7 +614,7 @@ func (w *walker) fetch(index int) bool {
 		return false
 	}
 	boxed := w.Constants[index]
-	out, word := fact{kind: boxed.Kind()}, ssa.Word(boxed)
+	out, word := fact{kind: boxed.Kind()}, boxed.Word()
 	if out.kind == types.KindRef {
 		out.backing, out.reference, out.referenceKnown = backingConst, boxed.Ref(), true
 		if obj, ok := w.Objects[boxed.Ref()]; ok && obj.I64 != nil {

@@ -78,16 +78,6 @@ var (
 	ErrHandlerTarget   = errors.New("invalid exception handler target")
 )
 
-func newChecker(prog *Program, slot int, fn *types.Function) *checker {
-	c := &checker{prog: prog, code: fn.Code, captures: fn.Captures, table: fn.Handlers, slot: slot}
-	if fn.Typ != nil {
-		c.locals = append(c.locals, fn.Typ.Params...)
-		c.returns = len(fn.Typ.Returns)
-	}
-	c.locals = append(c.locals, fn.Locals...)
-	return c
-}
-
 // Verify checks every function slot of prog and returns the first violation as
 // a *VerifyError, or nil when the program is well-formed.
 func Verify(prog *Program) error {
@@ -113,6 +103,16 @@ func (e *VerifyError) Error() string {
 
 func (e *VerifyError) Unwrap() error {
 	return e.Err
+}
+
+func newChecker(prog *Program, slot int, fn *types.Function) *checker {
+	c := &checker{prog: prog, code: fn.Code, captures: fn.Captures, table: fn.Handlers, slot: slot}
+	if fn.Typ != nil {
+		c.locals = append(c.locals, fn.Typ.Params...)
+		c.returns = len(fn.Typ.Returns)
+	}
+	c.locals = append(c.locals, fn.Locals...)
+	return c
 }
 
 // run verifies the slot in four passes: structural decode/bounds, control-flow
