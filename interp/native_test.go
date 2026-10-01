@@ -2017,6 +2017,68 @@ func TestWithThreshold(t *testing.T) {
 		require.Zero(t, metric("vm_jit_exits_total", "kind", "deopt"))
 	})
 
+	t.Run("a native select between two refs keeps threaded's RefCount for both", func(t *testing.T) {
+		native(t)
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 300).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.CONST_GET, 0).Emit(instr.CONST_GET, 1)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_AND)
+		b.Emit(instr.SELECT).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(types.String("x"), types.String("y")))
+
+		threaded := interp.New(prog)
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		x, err := threaded.Const(0)
+		require.NoError(t, err)
+		y, err := threaded.Const(1)
+		require.NoError(t, err)
+		wantX, err := threaded.RefCount(x.Ref())
+		require.NoError(t, err)
+		wantY, err := threaded.RefCount(y.Ref())
+		require.NoError(t, err)
+		require.NoError(t, threaded.Close())
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		metric := func(name, key, value string) float64 {
+			vm.Flush()
+			v, _ := profiler.Metric(name, prof.Label{Key: key, Value: value})
+			return v
+		}
+
+		var runErr error
+		require.Eventually(t, func() bool {
+			runErr = vm.Run(context.Background())
+			vm.Reset()
+			return runErr != nil || metric("vm_jit_entries_total", "tier", "optimized") > 0
+		}, 5*time.Second, time.Millisecond)
+		require.NoError(t, runErr)
+
+		for range 8 {
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			xCount, err := vm.RefCount(x.Ref())
+			require.NoError(t, err)
+			yCount, err := vm.RefCount(y.Ref())
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			require.Equal(t, wantX, xCount)
+			require.Equal(t, wantY, yCount)
+			vm.Reset()
+		}
+		require.Greater(t, metric("vm_jit_entries_total", "tier", "optimized"), 0.0)
+	})
+
 	t.Run("an unlowered operator that traps deoptimizes and reports threaded's error and RefCount", func(t *testing.T) {
 		native(t)
 		const warm = 4000

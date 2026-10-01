@@ -759,6 +759,31 @@ blk0: ()
 	return v10 state v12
 `, ssa.Format(out))
 	})
+
+	t.Run("retains the ref select picks before releasing both operands", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeAny}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.REF_NULL).Emit(instr.REF_NULL).Emit(instr.I32_CONST, 1).Emit(instr.SELECT).Emit(instr.RETURN)
+			})}
+
+		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, `func 1:0
+blk0: ()
+	v1:ref = const 0
+	v2:ref = const 0
+	v3:i32 = const 1
+	v5:state = state {addr=1 base=0 ip=7 returns=1 stack=[v1 owned, v2 owned, v3]}
+	v4:ref = select v1, v2, v3 state v5
+	retain v4
+	release v1 state v5
+	release v2 state v5
+	v6:state = state {addr=1 base=0 ip=8 returns=1 stack=[v4 owned]}
+	return v4 state v6
+`, ssa.Format(out))
+	})
 }
 
 func TestAdopts(t *testing.T) {

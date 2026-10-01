@@ -683,6 +683,10 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 	for i, r := range results {
 		w.push(out[i], r)
 	}
+	// select returns one of its operands: retain it before both are released.
+	if opcode == instr.SELECT && results[0].kind == types.KindRef {
+		w.retain(out[0])
+	}
 	for i := 0; i < len(consumed)-adopted; i++ {
 		w.release(consumed[i])
 	}
