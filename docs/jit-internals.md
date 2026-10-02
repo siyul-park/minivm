@@ -6,7 +6,7 @@ Native tier: ownership, runtime contract, lifecycle.
 
 ## Status
 
-- Opt-in via `interp.WithThreshold(n)` (`n >= 0`). ARM64 only. Disabled with `WithHook`/`WithFuel`.
+- On by default; `interp.WithThreshold(n)`: `n == 0` automatic (default), `n > 0` fixed, `n < 0` off. ARM64 only. Disabled with `WithHook`/`WithFuel`.
 - Threaded execution is the semantic baseline.
 
 ```text
@@ -15,12 +15,36 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 
 | Entry | Counts | Threshold | Cadence | Root |
 |---|---|---|---|---|
-| `CALL` | interpreted calls to a `*types.Function`, served `ExitCall`s included, and `ExitCall`s of a closure call | `n` (Baseline); `graduate` (1024) native entries (Optimized) | every call | ip 0 |
-| OSR | back edges at a loop header, module code included | `n` | `interval` (256) back edges | the header |
-| Module entry, loop-free | Runs of module code | `max(n, 2)` | every Run | ip 0 |
-| Module entry, with loops | Runs of module code | `max(n, 2)` | `interval` (256) Runs | ip 0 |
+| `CALL` | interpreted calls to a `*types.Function`, served `ExitCall`s included, and `ExitCall`s of a closure call | `t` (Baseline); `graduate` (1024) native entries (Optimized); both raised by back-off (Policy) | every call | ip 0 |
+| OSR | back edges at a loop header, module code included | `t`, raised by back-off (Policy) | `interval` (256) back edges | the header |
+| Module entry, loop-free | Runs of module code | `max(t, 2)` | every Run | ip 0 |
+| Module entry, with loops | Runs of module code | `max(t, 2)` | `interval` (256) Runs | ip 0 |
+
+`t` is `n` when fixed, `floor` (256) when automatic.
 
 `compile.Unit.OSR` / `jit.Code.OSR` mark OSR units, module entry included; a header can sit at ip 0.
+
+## Policy
+
+`interp.native` owns the policy; the interpreter builds it at its first Run (a `Pool` member when it joins the pool), never in `New`.
+
+| Setting | Lifecycle | Thresholds |
+|---|---|---|
+| `n > 0` | live from the first Run | `t = n`; no back-off |
+| `n == 0` | dormant, then live | `t = floor`; back-off |
+| `n < 0` | no JIT | — |
+
+| Rule | Contract |
+|---|---|
+| Dormant | No JIT state but `Interpreter.heat` (`dormancy`, 2^21 units, ~30 ms threaded): no analysis, observers, or code. Threaded code spends one unit at every frame entry (CALL, closure call, tail call) and every taken back edge (`BR`, `BR_IF`, `BR_TABLE` to an offset ≤ its own), whatever the Run's context; a Run start spends `dormancy/32`. The unit that runs heat out parks its frame at ip `park`; dispatch leaves its loop, restores the ip, and wakes the JIT, so no handler calls or writes a pointer. |
+| Off | A program whose code is all brief (below) has nothing to repay a Go entry: waking leaves it without a JIT. |
+| Wake | `heat` reaching 0 builds the live runtime in place: store, queue, OSR observers of every function bound at construction. A `Pool` member wakes on joining. |
+| Brief | Code whose every run executes fewer than `short` (32) instructions, its constant callees' included (no loop, no other call, no tail call, no recursion), is never entered from Go: a Go entry's ~15 ns round trip outweighs ~0.5 ns saved per instruction. Module code that brief gets no entry site; a brief function's CALL hook is gated (`native.gates`), so only its native callers' served calls count it (`replay`) and it compiles for them. |
+| Back-off | Each retire of an address's code raises its call and promotion thresholds 4×, at most `steps` (4) times: `ceiling` = 65536. An OSR re-arm raises its site's threshold 4×, at most `ceiling`. Thresholds never fall. |
+| Bound | Recompiles stay bounded by monotone feedback and failed tiers (Exit policy); back-off spaces them geometrically. |
+| Cost | Dormant: one decrement per frame entry and taken back edge, one subtraction per Run. Live, fixed, or off: one compare of `heat` against zero at each frame entry and back-edge handler (forward branches are compiled without it). Thresholds are read only where counts are compared. |
+
+One wake (analysis, the first compiles, their garbage) costs ~0.3–0.6 ms of interpreter time, so dormancy is ~50× that: a program the JIT cannot repay loses at most ~2 %, and a long Run wakes after ~30 ms of threaded work.
 
 ## Owners
 
@@ -33,7 +57,7 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 | `asm.State` | Native stack, saved Go registers, native SP/PC/register file at the last exit. No Go pointer on the native stack. |
 | `asm.Enter` / `asm.Resume` | Run code on the native stack / continue a suspended activation. Report whether it stopped at an exit. |
 | exit stub | Native code `BLR`s `asm.OffsetStub`; the stub saves registers and returns to Go. `Resume` returns from that call. |
-| `jit.Context` | `asm.State` first, then `Trap`, exit id, then `Heap`, `Globals`, `RC`, `Natives`, `Entries`, `Top`, `FB`, `Upvals`, `Depth`, `Limit`, `Budget`, `Results`, `Records`. `Results` stages a bridge or box exit's result words for native code to reload on resume. The interpreter writes every base before `Enter`; only `Heap` and `RC` are rewritten before each `Resume`, since serving an exit can only relocate those two append-grown slices. |
+| `jit.Context` | Built at the interpreter's first native entry. `asm.State` first, then `Trap`, exit id, then `Heap`, `Globals`, `RC`, `Natives`, `Entries`, `Top`, `FB`, `Upvals`, `Depth`, `Limit`, `Budget`, `Results`, `Records`. `Results` stages a bridge or box exit's result words for native code to reload on resume. The interpreter writes every base before `Enter`; only `Heap` and `RC` are rewritten before each `Resume`, since serving an exit can only relocate those two append-grown slices. |
 | `Context.Upvals` | The entering activation's upvals base. Written by the interpreter before an OSR `Enter` and by a native closure call before its branch; read once by a prologue into an ordinary register. |
 | `jit.Trap` | `TrapReturn`, `TrapDeopt`, `TrapBridge`. |
 | `jit.Code` | One unit's native code at one tier. `Free` unmaps once. |
@@ -176,14 +200,14 @@ A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every ad
 | Publish | Non-OSR code replaces only a lower tier at an address; OSR code installs once at `(address, ip)`. |
 | Retire | `Retire`/`RetireAt` unpublish; retired code remains discoverable until safe to reclaim. |
 | Reclaim | Quiescent-state: each retire stamps its code with the next store epoch. Each interpreter attaches a `jit.Reader`, which publishes the epoch it observed at a quiescent point — `Run` end, or an OSR site's drain cadence at native depth 0 — with no atomic read-modify-write and a store only when the epoch moved, never per entry; `Reclaim` runs there and frees every code whose epoch all attached readers have observed. An idle interpreter, Pool members included, holds code retired since its last quiescent point until it runs again or closes. Entry re-checks a cached code's `Retired`. |
-| Promotion | Baseline entries count calls; a live Baseline reaching the interpreter's graduate threshold queues Optimized. Optimized/OSR entries do not count. |
+| Promotion | Baseline entries count calls; a live Baseline reaching its promotion threshold (`graduate`, raised by back-off) queues Optimized. Optimized/OSR entries do not count. |
 | Failure | Code retires by its exit policy (Exits). A compile failure, or a retire, is permanent only when feedback (`Callees`, `Refuted`) is unchanged from the snapshot the code was compiled from. |
-| Async | `compile.Queue` compiles one unit per address; publication is drained at the next call, OSR observation or entry, or safepoint. |
-| Pool | `Pool` shares `Store`, `Queue`, module data, the Baseline promotion candidate list, each address's CALL count, and each OSR/entry site's count until it submits, so a pooled workload compiles after about `threshold` entries in total. Each interpreter keeps its own `jit.Context`, feedback, graduate entries, refutations, ledgers, failure marks, and a submitted site's cadence. A pooled interpreter whose entries reach the graduate threshold requests Optimized even if a different interpreter drained its Baseline job. A pooled interpreter whose deopts refute shared code retires it for the pool and blocks only its own tier. |
+| Async | `compile.Queue` compiles one unit per address; its workers start at the first `Submit`; publication is drained at the next call, OSR observation or entry, or safepoint. `Close` discards units no worker started and does not wait: a worker still compiling frees that code. |
+| Pool | `Pool` shares `Store`, `Queue`, module data, the Baseline promotion candidate list, each address's CALL count, and each OSR/entry site's count until it submits, so a pooled workload compiles after about `t` entries in total. Each interpreter keeps its own `jit.Context`, feedback, graduate entries, refutations, ledgers, failure marks, and a submitted site's cadence. A pooled interpreter whose entries reach the graduate threshold requests Optimized even if a different interpreter drained its Baseline job. A pooled interpreter whose deopts refute shared code retires it for the pool and blocks only its own tier. |
 
 ## OSR
 
-Every loop header, including module code, has an observer; module code also has one at ip 0, whether or not it has loops. Each site fixes its threshold and cadence at construction (Entries table). Past the threshold it retries submission and looks up `Store.CodeAt` at its cadence; a resolved site also drains at that cadence on entry, so a callee reached only from its native code still tiers up. Compile failure, or a retire whose feedback has not moved, restores the threaded handler and disables the site; a retire whose feedback moved re-arms it (Exit policy).
+Every loop header, including module code, has an observer; module code also has one at ip 0, whether or not it has loops. Each site fixes its threshold and cadence when the JIT wakes (Entries table); an automatic re-arm raises the threshold (Policy). Past the threshold it retries submission and looks up `Store.CodeAt` at its cadence; a resolved site also drains at that cadence on entry, so a callee reached only from its native code still tiers up. Compile failure, or a retire whose feedback has not moved, restores the threaded handler and disables the site; a retire whose feedback moved re-arms it (Exit policy).
 
 Loop-free code reaches no safepoint, so its ip-0 site drains on every entry and declines an already-cancelled Run, leaving threaded code to report it. Its threshold floor of 2 keeps a module run once from compiling ahead of its callees.
 

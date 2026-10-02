@@ -20,12 +20,29 @@ import (
 
 // native holds per-interpreter native state and shared compiled-code state.
 type native struct {
+	// ctx is built by n's first entry: its native stack is the largest
+	// allocation a JIT makes, and most programs never enter native code.
 	ctx *jit.Context
 	*shared
 	// reader is n's registration with its shared store.
 	reader *jit.Reader
 
+	// threshold is the call count that compiles an address's Baseline, and
+	// each OSR site's back-edge count: WithThreshold's n, or floor when auto.
 	threshold int
+	// auto reports WithThreshold(0): a retire raises the address's thresholds
+	// (backoffs), and n stays dormant until the interpreter's heat runs out.
+	auto bool
+	// backoffs counts each address's retires, up to steps: each raises its
+	// automatic call and promotion thresholds 4×.
+	backoffs []uint8
+	// briefs marks, under the automatic policy, each address whose every run
+	// executes fewer than short instructions (span): Go runs it threaded,
+	// and only its native callers' served calls count it (replay).
+	briefs []bool
+	// gates closes the CALL hook per address: a failed Baseline or brief
+	// code. It folds both into one load to keep call inlinable.
+	gates []bool
 	// entries is native-writable: Context.Entries points at it, and every
 	// Baseline function prologue increments its own address there, including
 	// native-to-native entries.
@@ -121,6 +138,25 @@ const tolerance = 8
 
 // graduate is the Baseline entry count that tiers an address to Optimized.
 const graduate = 1024
+
+// The automatic policy (WithThreshold(0)). One wake — analysis, the first
+// compiles, and their garbage — costs ~0.3–0.6 ms of the interpreter's time,
+// so a dormant JIT waits for ~30 ms of threaded work before it can cost a
+// program 2 %: dormancy frame entries and taken back edges at ~15 ns. A Run
+// spends a 32nd of it.
+const (
+	dormancy = 1 << 21
+	// floor is the automatic call and back-edge threshold before any retire.
+	floor = 256
+	// steps caps the retires that raise an address's thresholds.
+	steps = 4
+	// ceiling is the highest automatic threshold: floor raised steps times.
+	ceiling = floor << (2 * steps)
+	// short is the fewest instructions a run must execute to repay a Go
+	// entry: the entry's ~15 ns round trip over the ~0.5 ns native code saves
+	// per threaded instruction.
+	short = 32
+)
 
 // mixed marks a dynamic CALL site (native.callees) that has seen more than
 // one callee: it never speculates.
@@ -270,29 +306,61 @@ func (r *shared) release() error {
 	return errors.Join(err, r.store.Close())
 }
 
+// newNative builds i's JIT runtime: live at once for a fixed threshold,
+// dormant for the automatic one.
 func newNative(i *Interpreter, threshold int) *native {
-	ctx, err := jit.NewContext(nativeStack)
-	if err != nil {
-		panic(err)
+	// compile is captured here, not in wake: threaded code reaches wake
+	// (Interpreter.cool), and a reference from it to i.compile closes the
+	// threaded/fusions initialization cycle.
+	if threshold == 0 {
+		return &native{auto: true, threshold: floor, compile: i.compile}
+	}
+	n := &native{threshold: threshold, compile: i.compile}
+	n.wake(i) // live: only the automatic policy turns a program away
+	return n
+}
+
+// wake builds n's live state, once, and reports whether n is live. Under the
+// automatic policy a program whose code is all brief has nothing a Go entry
+// could repay: it stays without a JIT.
+func (n *native) wake(i *Interpreter) bool {
+	if n.shared != nil {
+		return true
+	}
+	briefs := make([]bool, len(i.code))
+	if n.auto {
+		spans := map[int]int{}
+		briefs[0] = n.span(i, 0, spans) < short
+		all := briefs[0]
+		for _, c := range i.constants {
+			if c.Kind() != types.KindRef {
+				continue
+			}
+			if _, ok := i.heap[c.Ref()].(*types.Function); ok {
+				briefs[c.Ref()] = n.span(i, c.Ref(), spans) < short
+				all = all && briefs[c.Ref()]
+			}
+		}
+		if all {
+			return false
+		}
 	}
 	r := newShared(i)
-	n := &native{
-		ctx:       ctx,
-		shared:    r,
-		reader:    r.store.Attach(),
-		threshold: threshold,
-		entries:   make([]int64, len(i.code)),
-		refutes:   make([]int, len(i.code)),
-		ledgers:   make([]jit.Ledger, len(i.code)),
-		failed:    make([][2]bool, len(i.code)),
-		built:     make([][2]transform.Module, len(i.code)),
-		exact:     make([][]func(*Interpreter), len(i.code)),
-		borrows:   make([][]bool, len(i.code)),
-		sites:     map[key]*site{},
-		callees:   make([][]transform.Callee, len(i.code)),
-		refuted:   make([][]bool, len(i.code)),
-		compile:   i.compile,
-	}
+	n.shared = r
+	n.reader = r.store.Attach()
+	n.backoffs = make([]uint8, len(i.code))
+	n.entries = make([]int64, len(i.code))
+	n.refutes = make([]int, len(i.code))
+	n.ledgers = make([]jit.Ledger, len(i.code))
+	n.failed = make([][2]bool, len(i.code))
+	n.built = make([][2]transform.Module, len(i.code))
+	n.exact = make([][]func(*Interpreter), len(i.code))
+	n.borrows = make([][]bool, len(i.code))
+	n.sites = map[key]*site{}
+	n.callees = make([][]transform.Callee, len(i.code))
+	n.refuted = make([][]bool, len(i.code))
+	n.briefs = briefs
+	n.gates = slices.Clone(briefs)
 	// OSR observes every loop header of every function i compiled at
 	// construction, module code (address 0) included; a function bound
 	// later (a dynamic closure) is not.
@@ -302,11 +370,59 @@ func newNative(i *Interpreter, threshold int) *native {
 			n.observe(i, addr, obj.Function)
 		}
 	}
-	return n
+	return true
+}
+
+// span returns how many instructions one run of the code at addr executes,
+// its constant callees' included, or short when it may run more: a loop, a
+// call through anything but a constant function, a tail call, or recursion.
+func (n *native) span(i *Interpreter, addr int, spans map[int]int) int {
+	if count, ok := spans[addr]; ok {
+		return count
+	}
+	// A recursive call reaches addr again before its span is known, and
+	// every early return below leaves this.
+	spans[addr] = short
+	code := i.function(addr).Code
+	count, callee := 0, -1
+	for ip := 0; ip < len(code) && count < short; {
+		inst := instr.Instruction(code[ip:])
+		switch inst.Opcode() {
+		case instr.CALL:
+			if callee < 0 {
+				return short
+			}
+			count += n.span(i, callee, spans)
+		case instr.RETURN_CALL:
+			return short
+		case instr.BR, instr.BR_IF, instr.BR_TABLE:
+			for _, target := range instr.Targets(code, ip) {
+				if target <= ip {
+					return short
+				}
+			}
+		}
+		callee = -1
+		if inst.Opcode() == instr.CONST_GET {
+			if c := i.constants[inst.Operand(0)]; c.Kind() == types.KindRef {
+				if _, ok := i.heap[c.Ref()].(*types.Function); ok {
+					callee = c.Ref()
+				}
+			}
+		}
+		count++
+		ip += inst.Width()
+	}
+	count = min(count, short)
+	spans[addr] = count
+	return count
 }
 
 // close releases n's reference to its shared runtime.
 func (n *native) close() error {
+	if n.shared == nil {
+		return nil
+	}
 	n.reader.Detach()
 	return n.shared.release()
 }
@@ -323,6 +439,9 @@ func (n *native) join(r *shared) error {
 // quiesce marks a quiescent point, where n runs no native activation and
 // holds no code it read before, then frees what every reader has passed.
 func (n *native) quiesce() {
+	if n.shared == nil {
+		return
+	}
 	n.reader.Quiesce()
 	_ = n.store.Reclaim()
 }
@@ -334,9 +453,9 @@ func (n *native) quiesce() {
 // advance, since native completion must apply them exactly as pushFrame
 // would.
 func (n *native) call(i *Interpreter, addr int, fn *types.Function, release bool, advance int) bool {
-	// Bound after construction (Alloc, Store): never compiled. A failed
-	// Baseline never republishes: nothing is left to count.
-	if addr >= len(n.failed) || n.failed[addr][jit.Baseline-1] {
+	// Bound after construction (Alloc, Store): never compiled. A dormant n
+	// has no addresses. A gated one is never entered from Go (gates).
+	if addr >= len(n.gates) || n.gates[addr] {
 		return false
 	}
 	return n.attempt(i, addr, fn, release, advance)
@@ -389,7 +508,7 @@ func (n *native) attempt(i *Interpreter, addr int, fn *types.Function, release b
 // the total across every native sharing addr's code reaches threshold.
 func (n *native) count(i *Interpreter, addr int, fn *types.Function) {
 	total := n.calls[addr].Add(1)
-	if total < int64(n.threshold) || n.hasFailed(addr, jit.Baseline) {
+	if total < int64(n.threshold)<<n.raise(addr) || n.hasFailed(addr, jit.Baseline) {
 		return
 	}
 	n.queue.Submit(compile.Unit{Address: addr, Function: fn, Module: n.feedback(addr), Tier: jit.Baseline})
@@ -496,8 +615,17 @@ func (n *native) retire(addr int, tier jit.Tier) {
 	if !n.moved(addr, tier) {
 		n.markFailed(addr, tier)
 	}
+	if n.auto && n.backoffs[addr] < steps {
+		n.backoffs[addr]++
+	}
 	n.calls[addr].Store(0)
 	n.entries[addr], n.refutes[addr], n.ledgers[addr] = 0, 0, jit.Ledger{}
+}
+
+// raise is the shift addr's retires apply to its call and promotion
+// thresholds: 4× per retire under the automatic policy, none when fixed.
+func (n *native) raise(addr int) uint {
+	return 2 * uint(n.backoffs[addr])
 }
 
 // hasFailed reports whether addr's compile at tier permanently failed.
@@ -508,6 +636,10 @@ func (n *native) hasFailed(addr int, tier jit.Tier) bool {
 // markFailed permanently marks addr's compile at tier as failed.
 func (n *native) markFailed(addr int, tier jit.Tier) {
 	n.failed[addr][tier-1] = true
+	if tier == jit.Baseline {
+		// A failed Baseline never republishes: nothing is left to count.
+		n.gates[addr] = true
+	}
 }
 
 // drain publishes completed jobs, records permanent compile failures, and
@@ -554,7 +686,7 @@ func (n *native) drain(i *Interpreter) {
 		if code == nil || code.Tier != jit.Baseline || n.hasFailed(addr, jit.Optimized) {
 			return false
 		}
-		if n.entries[addr] >= graduate {
+		if n.entries[addr] >= graduate<<n.raise(addr) {
 			n.queue.Submit(compile.Unit{Address: addr, Function: i.function(addr), Module: n.feedback(addr), Tier: jit.Optimized})
 		}
 		return true
@@ -691,8 +823,8 @@ func (n *native) pending(addr int) bool {
 func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Code, bp int, release bool, advance int) (bool, any) {
 	returns := len(fn.Typ.Returns)
 
-	ctx := n.ctx
 	n.load(i, bp, 0)
+	ctx := n.ctx
 
 	if i.profiler != nil {
 		metric(i, metricEntries, prof.Label{Key: "tier", Value: code.Tier.String()})
@@ -927,7 +1059,8 @@ func (n *native) rebuild(i *Interpreter, exit jit.Exit, start, ref int, release 
 // replay pushes exit's callee over its arguments at i.fr's CALL, which the
 // interpreter then runs: it retains each lent argument and a borrowed ref,
 // since the CALL adopts both. A closure callee is counted and recorded here,
-// since the threaded closure CALL has no native hook.
+// since the threaded closure CALL has no native hook; so is brief code, whose
+// hook is gated.
 func (n *native) replay(i *Interpreter, exit jit.Exit, ref int) {
 	for _, p := range exit.Lent {
 		i.retainBox(i.stack[i.sp+p])
@@ -943,11 +1076,16 @@ func (n *native) replay(i *Interpreter, exit jit.Exit, ref int) {
 	// so its own ip is the map's IP, recorded past it, minus one.
 	i.fr.ip--
 	if ref > 0 && ref < len(i.heap) {
-		if closure, ok := i.heap[ref].(*types.Closure); ok {
-			addr := int(closure.Fn)
+		switch callee := i.heap[ref].(type) {
+		case *types.Closure:
+			addr := int(callee.Fn)
 			n.see(i, transform.Callee{Function: addr, Closure: true})
 			if n.store.Code(addr) == nil {
 				n.count(i, addr, i.function(addr))
+			}
+		case *types.Function:
+			if ref < len(n.briefs) && n.briefs[ref] && n.store.Code(ref) == nil {
+				n.count(i, ref, callee)
 			}
 		}
 	}
@@ -1197,6 +1335,13 @@ func (n *native) frameBase(i *Interpreter, k int) int {
 // index bp. spare is how many more nested activations the entry may start: an
 // OSR entry replaces the running frame instead of pushing one.
 func (n *native) load(i *Interpreter, bp, spare int) {
+	if n.ctx == nil {
+		ctx, err := jit.NewContext(nativeStack)
+		if err != nil {
+			panic(err)
+		}
+		n.ctx = ctx
+	}
 	ctx := n.ctx
 	n.sync(i)
 	ctx.Globals = base(i.globals)

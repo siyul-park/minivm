@@ -52,6 +52,10 @@ func br() jen.Code {
 	return threaderFunc(
 		jen.Id("offset").Op(":=").Id("instr").Dot("ParseI16").Call(jen.Id("c").Dot("code"), jen.Id("c").Dot("ip").Op("+").Lit(1)),
 		jen.Id("c").Dot("ip").Op("+=").Lit(3),
+		jen.If(jen.Id("offset").Op("+").Lit(3).Op("<=").Lit(0)).Block(jen.Return(closure(
+			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset").Op("+").Lit(3),
+			cool(nil),
+		))),
 		jen.Return(closure(
 			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset").Op("+").Lit(3),
 		)),
@@ -64,7 +68,9 @@ func brTable() jen.Code {
 		jen.Id("i").Dot("sp").Op("--"),
 		jen.Id("cond").Op(":=").Int().Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Dot("I32").Call()),
 		jen.If(jen.Id("cond").Op("<").Lit(0).Op("||").Id("cond").Op(">=").Id("count")).Block(jen.Id("cond").Op("=").Id("count")),
-		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offsets").Index(jen.Id("cond")).Op("+").Id("advance"),
+		jen.Id("jump").Op(":=").Id("offsets").Index(jen.Id("cond")).Op("+").Id("advance"),
+		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("jump"),
+		cool(jen.Id("jump").Op("<=").Lit(0)),
 		jen.Return(),
 	}
 	return jen.Func().Params(jen.Id("c").Op("*").Id("threader")).Params(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter"))).Block(

@@ -28,7 +28,7 @@ The following rules `MUST` hold for every opcode:
 
 ## Native Status
 
-Threaded execution defines semantics. `internal/jit/arm64` lowers a subset when `WithThreshold` compiles a function. Every other operation becomes an `ExitBridge`: Go runs its threaded handler and native code resumes, except for the operations whose note says they deoptimize (the rest of the call runs threaded). A bridged operation whose handler traps deoptimizes, and threaded code runs it again to report the trap; one with a host-view operand deoptimizes before Go runs it; `jit-internals.md` owns the bridge rules. `RETURN_CALL` deoptimizes directly, except a self tail call, which loops. `YIELD` and `RESUME` make the translator decline the whole unit at compile time, so it never reaches native code.
+Threaded execution defines semantics. `internal/jit/arm64` lowers a subset when the JIT compiles a function. Every other operation becomes an `ExitBridge`: Go runs its threaded handler and native code resumes, except for the operations whose note says they deoptimize (the rest of the call runs threaded). A bridged operation whose handler traps deoptimizes, and threaded code runs it again to report the trap; one with a host-view operand deoptimizes before Go runs it; `jit-internals.md` owns the bridge rules. `RETURN_CALL` deoptimizes directly, except a self tail call, which loops. `YIELD` and `RESUME` make the translator decline the whole unit at compile time, so it never reaches native code.
 
 | Status | Meaning |
 |---|---|

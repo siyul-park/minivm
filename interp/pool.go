@@ -153,6 +153,11 @@ func (p *Pool) grow() *Interpreter {
 // its reference; a mismatched runtime stays private. Interpreters without JIT
 // have no shared runtime.
 func (p *Pool) share(i *Interpreter) {
+	// A pool exists to reuse its program: its members skip dormancy, which
+	// may also leave a program without a JIT.
+	if i.attach() != nil {
+		i.spend(dormancy)
+	}
 	if i.native == nil {
 		return
 	}

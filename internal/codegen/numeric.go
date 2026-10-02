@@ -134,15 +134,23 @@ func branchTail(condition jen.Code, consume, advance int, body []jen.Code) []jen
 	if consume > 0 {
 		code = append(code, jen.Id("i").Dot("sp").Op("-=").Lit(consume))
 	}
-	path := []jen.Code{
-		jen.Id("f").Op(":=").Id("i").Dot("fr"),
-		jen.Id("f").Dot("ip").Op("+=").Id("offset").Op("+").Lit(advance),
-		jen.Return(),
+	// tail is the handler body; a back edge's also spends heat (cool).
+	tail := func(back bool) []jen.Code {
+		path := []jen.Code{
+			jen.Id("f").Op(":=").Id("i").Dot("fr"),
+			jen.Id("f").Dot("ip").Op("+=").Id("offset").Op("+").Lit(advance),
+		}
+		if back {
+			path = append(path, cool(nil))
+		}
+		path = append(path, jen.Return())
+		out := append([]jen.Code(nil), code...)
+		out = append(out, jen.If(condition).Block(path...))
+		return append(out, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
 	}
-	code = append(code, jen.If(condition).Block(path...))
-	code = append(code, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
 	return []jen.Code{
-		jen.Return(closure(code...)),
+		jen.If(jen.Id("offset").Op("+").Lit(advance).Op("<=").Lit(0)).Block(jen.Return(closure(tail(true)...))),
+		jen.Return(closure(tail(false)...)),
 	}
 }
 

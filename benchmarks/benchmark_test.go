@@ -69,8 +69,8 @@ func TestKernels(t *testing.T) {
 		name string
 		opts []interp.Option
 	}{
-		{name: "threaded"},
-		{name: "jit", opts: []interp.Option{interp.WithThreshold(0)}},
+		{name: "threaded", opts: []interp.Option{interp.WithThreshold(-1)}},
+		{name: "jit", opts: []interp.Option{interp.WithThreshold(1)}},
 	}
 	// A jit run must also cover native code published after the first runs
 	// and promoted to Optimized: at least minimum rounds, then more until
@@ -102,8 +102,8 @@ func benchmarkVM(b *testing.B, prog *program.Program, want types.Value) {
 		name string
 		opts []interp.Option
 	}{
-		{name: "threaded"},
-		{name: "jit", opts: []interp.Option{interp.WithThreshold(0)}},
+		{name: "threaded", opts: []interp.Option{interp.WithThreshold(-1)}},
+		{name: "jit"},
 	}
 	for _, mode := range modes {
 		b.Run(mode.name, func(b *testing.B) {

@@ -632,7 +632,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -653,10 +653,155 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, want, result)
 	})
 
+	t.Run("runs a hot function natively by default", func(t *testing.T) {
+		native(t)
+		prog := fibCallsProgram(t, 20)
+		want := runProgram(t, prog)
+
+		var runErr, popErr error
+		var result types.Value
+		var entries float64
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithProfiler(profiler))
+		defer vm.Close()
+		poll(t, func() bool {
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			result, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Reset()
+			vm.Flush()
+			entries = nativeEntries(profiler)
+			return entries > 0
+		})
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		require.Equal(t, want, result)
+	})
+
+	t.Run("enters native code within one long profiled Run by default", func(t *testing.T) {
+		native(t)
+		prog := fibCallsProgram(t, 2048)
+		want := runProgram(t, prog)
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithProfiler(profiler))
+		defer vm.Close()
+		require.NoError(t, vm.Run(context.Background()))
+		got, err := vm.Pop()
+		require.NoError(t, err)
+		vm.Flush()
+
+		require.Equal(t, want, got)
+		require.Greater(t, nativeEntries(profiler), float64(0))
+	})
+
+	t.Run("enters native code within one long Run without safepoints by default", func(t *testing.T) {
+		native(t)
+		for _, prog := range []*program.Program{
+			fibCallsProgram(t, 2048),
+			iterativeFibProgram(t, 4<<20),
+		} {
+			want := runProgram(t, prog)
+
+			// A tick past the Run's length: no safepoint ever runs.
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithProfiler(profiler), interp.WithTick(1<<30))
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			vm.Flush()
+			require.NoError(t, vm.Close())
+
+			require.Equal(t, want, got)
+			require.Greater(t, nativeEntries(profiler), float64(0))
+		}
+	})
+
+	t.Run("recompiles a retired function only after more calls than its first compile", func(t *testing.T) {
+		native(t)
+		// apply(x, fn) calls fn(x) through a dynamic CALL; inc and dec never
+		// compile, so every ok Baseline compile is apply's.
+		inc := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
+		refuse(inc)
+		inc.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
+		dec := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
+		refuse(dec)
+		dec.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.RETURN))
+		b := instr.NewBuilder()
+		b.Emit(instr.I32_CONST, 7).Emit(instr.GLOBAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithGlobals(types.TypeAny),
+			program.WithConstants(applyFunction(), inc.MustBuild(), dec.MustBuild()))
+
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		defer vm.Close()
+		// calls runs the program with callee constant c until apply has
+		// compiled ok compiles in total, and returns how many calls it took.
+		const step = 8
+		var runErr error
+		calls := func(c, ok int) int {
+			callee, err := vm.Const(c)
+			require.NoError(t, err)
+			n := 0
+			poll(t, func() bool {
+				for range step {
+					// Reset zeroes globals: the callee is set before every Run.
+					if runErr = vm.SetGlobal(0, callee); runErr != nil {
+						return true
+					}
+					if runErr = vm.Run(context.Background()); runErr != nil {
+						return true
+					}
+					vm.Reset()
+				}
+				n += step
+				vm.Flush()
+				v, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
+				return v >= float64(ok)
+			})
+			require.NoError(t, runErr)
+			return n
+		}
+		first := calls(1, 1)
+		second := calls(2, 2)
+
+		require.Greater(t, second, 2*first)
+	})
+
+	t.Run("runs code shorter than a Go entry threaded by default", func(t *testing.T) {
+		native(t)
+		for _, prog := range []*program.Program{
+			program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.NOP)}),
+			program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(incFunction())),
+		} {
+			profiler := prof.New()
+			vm := interp.New(prog, interp.WithProfiler(profiler))
+			// Far past waking and every threshold, with time to compile.
+			for range 8 {
+				for range 512 {
+					require.NoError(t, vm.Run(context.Background()))
+					vm.Reset()
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			vm.Flush()
+			require.NoError(t, vm.Close())
+
+			require.Zero(t, nativeEntries(profiler))
+		}
+	})
+
 	t.Run("runs a self tail call as a native loop", func(t *testing.T) {
 		native(t)
 		prog := tailRefProgram(t, 1000)
-		threaded := interp.New(prog)
+		threaded := interp.New(prog, interp.WithThreshold(-1))
 		require.NoError(t, threaded.Run(context.Background()))
 		want, err := threaded.Pop()
 		require.NoError(t, err)
@@ -667,7 +812,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, threaded.Close())
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		var runErr, popErr, countErr error
 		var result types.Value
@@ -716,7 +861,7 @@ func TestWithThreshold(t *testing.T) {
 		prog := tailRefProgram(t, 1_000_000)
 		want := runProgram(t, prog)
 
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(4))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithFrame(4))
 		defer vm.Close()
 		for range 8 {
 			require.NoError(t, vm.Run(context.Background()))
@@ -735,7 +880,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr error
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -767,7 +912,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 
 		var result types.Value
@@ -828,7 +973,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 
 		var result types.Value
@@ -893,7 +1038,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -943,7 +1088,7 @@ func TestWithThreshold(t *testing.T) {
 		var count int
 		var released float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -1001,7 +1146,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -1046,7 +1191,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -1081,11 +1226,11 @@ func TestWithThreshold(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(fn))
-		wantErr := runProgramErr(t, prog)
+		wantErr := runProgramErr(t, prog, interp.WithThreshold(-1))
 		require.Error(t, wantErr)
 
 		var gotErr error
-		vm := interp.New(prog, interp.WithThreshold(0))
+		vm := interp.New(prog, interp.WithThreshold(1))
 		defer vm.Close()
 		poll(t, func() bool {
 			gotErr = vm.Run(context.Background())
@@ -1118,7 +1263,7 @@ func TestWithThreshold(t *testing.T) {
 		var count int
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -1174,7 +1319,7 @@ func TestWithThreshold(t *testing.T) {
 		var count int
 		var bridges, deopts float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -1224,7 +1369,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var bridges, deopts float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -1271,7 +1416,7 @@ func TestWithThreshold(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32, types.TypeI32), program.WithTypes(elem))
-		wantErr := runProgramErr(t, prog)
+		wantErr := runProgramErr(t, prog, interp.WithThreshold(-1))
 		require.Error(t, wantErr)
 
 		// A declined bridge's own exit is still kind=bridge (the metric
@@ -1281,7 +1426,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotErr error
 		var bridges float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			gotErr = vm.Run(context.Background())
@@ -1300,7 +1445,7 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("bridges string ops", func(t *testing.T) {
 		native(t)
 		prog := texts(t, 20_000)
-		threaded := interp.New(prog)
+		threaded := interp.New(prog, interp.WithThreshold(-1))
 		require.NoError(t, threaded.Run(context.Background()))
 		wantValue, wantCount, err := popString(threaded)
 		require.NoError(t, err)
@@ -1315,7 +1460,7 @@ func TestWithThreshold(t *testing.T) {
 		var count, constCount int
 		var bridges, entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -1347,7 +1492,7 @@ func TestWithThreshold(t *testing.T) {
 		native(t)
 		const limit = 20_000
 		prog := texts(t, 2*limit)
-		threaded := interp.New(prog, interp.WithHeapLimit(limit))
+		threaded := interp.New(prog, interp.WithHeapLimit(limit), interp.WithThreshold(-1))
 		wantErr := threaded.Run(context.Background())
 		require.ErrorIs(t, wantErr, interp.ErrHeapExhausted)
 		ab, err := threaded.Const(1)
@@ -1360,7 +1505,7 @@ func TestWithThreshold(t *testing.T) {
 		var constCount int
 		var bridges, entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithHeapLimit(limit), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithHeapLimit(limit), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			gotErr = vm.Run(context.Background())
@@ -1445,7 +1590,7 @@ func TestWithThreshold(t *testing.T) {
 			program.WithTypes(dict, list, types.TypeString, wide, named),
 			program.WithConstants(types.String("x"), types.String("y")))
 
-		threaded := interp.New(prog)
+		threaded := interp.New(prog, interp.WithThreshold(-1))
 		require.NoError(t, threaded.Run(context.Background()))
 		boxed, err := threaded.PopBoxed()
 		require.NoError(t, err)
@@ -1460,7 +1605,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, threaded.Close())
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name, key, value string) float64 {
 			vm.Flush()
@@ -1513,7 +1658,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(types.String("x"), types.String("y")))
 
-		threaded := interp.New(prog)
+		threaded := interp.New(prog, interp.WithThreshold(-1))
 		require.NoError(t, threaded.Run(context.Background()))
 		want, err := threaded.Pop()
 		require.NoError(t, err)
@@ -1528,7 +1673,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, threaded.Close())
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name, key, value string) float64 {
 			vm.Flush()
@@ -1586,7 +1731,7 @@ func TestWithThreshold(t *testing.T) {
 			program.WithLocals(types.TypeI32, types.TypeI32, types.TypeAny),
 			program.WithConstants(types.String("x"), types.TypedArray[int32]{1}))
 
-		threaded := interp.New(prog)
+		threaded := interp.New(prog, interp.WithThreshold(-1))
 		wantErr := threaded.Run(context.Background())
 		require.ErrorIs(t, wantErr, interp.ErrTypeMismatch)
 		x, err := threaded.Const(0)
@@ -1603,7 +1748,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotX, gotArray int
 		var bridges float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			gotErr = vm.Run(context.Background())
@@ -1668,7 +1813,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 
 		// f(0) runs threaded-entered at most once per Run; enough Runs pass
@@ -1708,7 +1853,7 @@ func TestWithThreshold(t *testing.T) {
 		const n = 200_000
 		prog := store(t, n)
 
-		threaded := interp.New(store(t, n))
+		threaded := interp.New(store(t, n), interp.WithThreshold(-1))
 		require.NoError(t, threaded.Run(context.Background()))
 		wantConst, err := threaded.Const(0)
 		require.NoError(t, err)
@@ -1716,7 +1861,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, threaded.Close())
 
-		vm := interp.New(prog, interp.WithThreshold(0))
+		vm := interp.New(prog, interp.WithThreshold(1))
 		defer vm.Close()
 		require.NoError(t, vm.Run(context.Background()))
 		gotConst, err := vm.Const(0)
@@ -1750,7 +1895,7 @@ func TestWithThreshold(t *testing.T) {
 		var count int
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -1786,13 +1931,13 @@ func TestWithThreshold(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(fib))
-		wantErr := runProgramErr(t, prog, interp.WithFrame(8))
+		wantErr := runProgramErr(t, prog, interp.WithFrame(8), interp.WithThreshold(-1))
 		require.Error(t, wantErr)
 
 		var gotErr error
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(8), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithFrame(8), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			gotErr = vm.Run(context.Background())
@@ -1846,7 +1991,7 @@ func TestWithThreshold(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(fib), program.WithHandlers(b.Handlers()...))
-		wantVM := interp.New(prog, interp.WithFrame(8))
+		wantVM := interp.New(prog, interp.WithFrame(8), interp.WithThreshold(-1))
 		defer wantVM.Close()
 		require.NoError(t, wantVM.Run(context.Background()))
 		wantConst, err := wantVM.Const(0)
@@ -1859,7 +2004,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotRC int
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(8), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithFrame(8), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -1912,7 +2057,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(rec, types.String("s")), program.WithHandlers(mb.Handlers()...))
 
-		wantVM := interp.New(prog, interp.WithFrame(8))
+		wantVM := interp.New(prog, interp.WithFrame(8), interp.WithThreshold(-1))
 		defer wantVM.Close()
 		require.NoError(t, wantVM.Run(context.Background()))
 		want, err := wantVM.Pop()
@@ -1927,7 +2072,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotRC int
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(8), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithFrame(8), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -1972,14 +2117,14 @@ func TestWithThreshold(t *testing.T) {
 			{"a callee that never compiles calling native code that calls it again", loopProgram(t, 8, 64, 64, false, guardFunction(1000, false), loopFunction(4, false), s, relayFunction(0, false), relayFunction(3, true)), nil},
 			{"recursion past the native activation limit", loopProgram(t, 8, 10, 600, false, guardFunction(1000, false), sumrec, s), deep},
 		} {
-			want := interp.New(c.prog, c.opts...)
+			want := interp.New(c.prog, append([]interp.Option{interp.WithThreshold(-1)}, c.opts...)...)
 			require.NoError(t, want.Run(context.Background()), c.name)
 			wantSum, wantCount, err := popLoop(want)
 			require.NoError(t, err, c.name)
 			require.NoError(t, want.Close())
 
 			profiler := prof.New()
-			vm := interp.New(c.prog, append([]interp.Option{interp.WithThreshold(0), interp.WithProfiler(profiler)}, c.opts...)...)
+			vm := interp.New(c.prog, append([]interp.Option{interp.WithThreshold(1), interp.WithProfiler(profiler)}, c.opts...)...)
 			exits := func(kind string) float64 {
 				vm.Flush()
 				v, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: kind})
@@ -2014,7 +2159,7 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("resumes a dynamic call through call exits", func(t *testing.T) {
 		native(t)
 		prog := mixedProgram(t, 64, false)
-		want := interp.New(prog)
+		want := interp.New(prog, interp.WithThreshold(-1))
 		require.NoError(t, want.Run(context.Background()))
 		wantSum, wantCount, err := popLoop(want)
 		require.NoError(t, err)
@@ -2080,7 +2225,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		calls := func() float64 {
 			vm.Flush()
@@ -2121,7 +2266,7 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("deopts a dynamic call whose callee takes other parameters", func(t *testing.T) {
 		native(t)
 		prog := mixedProgram(t, 64, true)
-		want := interp.New(prog)
+		want := interp.New(prog, interp.WithThreshold(-1))
 		require.NoError(t, want.Run(context.Background()))
 		wantSum, wantCount, err := popLoop(want)
 		require.NoError(t, err)
@@ -2185,14 +2330,14 @@ func TestWithThreshold(t *testing.T) {
 			cold := coldBuilder.MustBuild()
 			prog := program.New(code, program.WithLocals(types.TypeI32, types.TypeI32, types.TypeString),
 				program.WithConstants(cold, bumpFunction(1), types.String("s")))
-			want := interp.New(prog)
+			want := interp.New(prog, interp.WithThreshold(-1))
 			require.NoError(t, want.Run(context.Background()), c.name)
 			wantSum, wantCount, err := popLoop(want)
 			require.NoError(t, err, c.name)
 			require.NoError(t, want.Close())
 
 			profiler := prof.New()
-			vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 			metric := func(name string, labels ...prof.Label) float64 {
 				vm.Flush()
 				v, _ := profiler.Metric(name, labels...)
@@ -2228,11 +2373,11 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("reports an uncaught trap in a resumed callee", func(t *testing.T) {
 		native(t)
 		prog := loopProgram(t, 8, 50, 100, false, guardFunction(60, false), loopFunction(0, false), types.String("s"))
-		wantErr := runProgramErr(t, prog)
+		wantErr := runProgramErr(t, prog, interp.WithThreshold(-1))
 		require.ErrorIs(t, wantErr, interp.ErrDivideByZero)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		var gotErr error
 		var exits float64
@@ -2271,14 +2416,14 @@ func TestWithThreshold(t *testing.T) {
 			{"trap with an owned argument", loopProgram(t, 8, 50, 100, true, guardFunction(60, false), loopFunction(0, true), s)},
 			{"throw", loopProgram(t, 8, 50, 100, true, guardFunction(60, true), loopFunction(0, false), s)},
 		} {
-			want := interp.New(c.prog)
+			want := interp.New(c.prog, interp.WithThreshold(-1))
 			require.NoError(t, want.Run(context.Background()), c.name)
 			wantSum, wantCount, err := popLoop(want)
 			require.NoError(t, err, c.name)
 			require.NoError(t, want.Close())
 
 			profiler := prof.New()
-			vm := interp.New(c.prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			vm := interp.New(c.prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 			exits := func() float64 {
 				vm.Flush()
 				v, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
@@ -2337,7 +2482,7 @@ func TestWithThreshold(t *testing.T) {
 		var count, innerCount int
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -2392,7 +2537,7 @@ func TestWithThreshold(t *testing.T) {
 		var count, innerCount int
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -2441,7 +2586,7 @@ func TestWithThreshold(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(fib), program.WithHandlers(b.Handlers()...))
-		wantVM := interp.New(prog, interp.WithFrame(8))
+		wantVM := interp.New(prog, interp.WithFrame(8), interp.WithThreshold(-1))
 		defer wantVM.Close()
 		require.NoError(t, wantVM.Run(context.Background()))
 		wantConst, err := wantVM.Const(0)
@@ -2453,7 +2598,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotRC int
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(8), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithFrame(8), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -2479,7 +2624,7 @@ func TestWithThreshold(t *testing.T) {
 		native(t)
 		prog := lentProgram(t, 3000)
 
-		wantVM := interp.New(lentProgram(t, 3000))
+		wantVM := interp.New(lentProgram(t, 3000), interp.WithThreshold(-1))
 		defer wantVM.Close()
 		require.NoError(t, wantVM.Run(context.Background()))
 		want, err := wantVM.Pop()
@@ -2498,7 +2643,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotIncRC, gotDecRC int
 		var deopts float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -2591,7 +2736,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithTypes(record), program.WithConstants(fn), program.WithHandlers(mb.Handlers()...))
 
-		wantVM := interp.New(prog, interp.WithFrame(8))
+		wantVM := interp.New(prog, interp.WithFrame(8), interp.WithThreshold(-1))
 		defer wantVM.Close()
 		require.NoError(t, wantVM.Run(context.Background()))
 		want, err := wantVM.Pop()
@@ -2601,7 +2746,7 @@ func TestWithThreshold(t *testing.T) {
 		var got types.Value
 		var safepoints, releases, calls float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(8), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithFrame(8), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -2648,7 +2793,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		require.NoError(t, vm.Run(context.Background()))
 		result, err := vm.Pop()
@@ -2687,7 +2832,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr, popErr error
 		var deopts, entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -2729,7 +2874,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr, popErr error
 		var deopts, entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -2789,7 +2934,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr, popErr error
 		var deopts, entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -2845,7 +2990,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr, popErr error
 		var deopts, compiles float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -2884,7 +3029,7 @@ func TestWithThreshold(t *testing.T) {
 			var runErr, popErr error
 			var deopts, compiles float64
 			profiler := prof.New()
-			vm := interp.New(c.prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+			vm := interp.New(c.prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 			defer vm.Close()
 			poll(t, func() bool {
 				runErr = vm.Run(context.Background())
@@ -2931,7 +3076,7 @@ func TestWithThreshold(t *testing.T) {
 		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithGlobals(elem),
 			program.WithConstants(fn), program.WithTypes(elem))
 
-		threaded := interp.New(prog)
+		threaded := interp.New(prog, interp.WithThreshold(-1))
 		defer threaded.Close()
 		hostVal, err := threaded.Marshal([]int32{1, 2, 3})
 		require.NoError(t, err)
@@ -2950,7 +3095,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotRC int
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			var hostVal types.Value
@@ -3013,7 +3158,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr, popErr error
 		var deopts, compiles float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -3060,7 +3205,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr, popErr error
 		var deopts, compiles float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -3106,7 +3251,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr, popErr error
 		var deopts, entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -3140,7 +3285,7 @@ func TestWithThreshold(t *testing.T) {
 		var compiles float64
 		var runErr, popErr error
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -3193,7 +3338,7 @@ func TestWithThreshold(t *testing.T) {
 		prog := program.New(code, program.WithLocals(types.TypeI32, types.TypeI32),
 			program.WithConstants(rare, divFunction(t)), program.WithHandlers(b.Handlers()...))
 
-		threaded := interp.New(prog)
+		threaded := interp.New(prog, interp.WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.Run(context.Background()))
 		want, err := threaded.Pop()
@@ -3213,7 +3358,7 @@ func TestWithThreshold(t *testing.T) {
 		wantCounts := counts(threaded)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, labels ...prof.Label) float64 {
 			vm.Flush()
@@ -3274,7 +3419,7 @@ func TestWithThreshold(t *testing.T) {
 		protected := protectedBuilder.MustBuild()
 		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(protected, types.String("owned")))
 
-		threaded := interp.New(prog)
+		threaded := interp.New(prog, interp.WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.Run(context.Background()))
 		want, err := threaded.Pop()
@@ -3289,7 +3434,7 @@ func TestWithThreshold(t *testing.T) {
 		wantCount := count(threaded)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, labels ...prof.Label) float64 {
 			vm.Flush()
@@ -3345,7 +3490,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(code, program.WithConstants(guard.MustBuild(), thrower.MustBuild(), types.String("boom!")))
 
-		threaded := interp.New(prog)
+		threaded := interp.New(prog, interp.WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.Run(context.Background()))
 		want, err := threaded.Pop()
@@ -3364,7 +3509,7 @@ func TestWithThreshold(t *testing.T) {
 		wantCounts := counts(threaded)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, labels ...prof.Label) float64 {
 			vm.Flush()
@@ -3423,11 +3568,11 @@ func TestWithThreshold(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32, types.TypeI32), program.WithHandlers(b.Handlers()...))
-		wantErr := runProgramErr(t, prog)
+		wantErr := runProgramErr(t, prog, interp.WithThreshold(-1))
 		require.ErrorIs(t, wantErr, interp.ErrDivideByZero)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		var runErr error
 		var entries float64
@@ -3466,7 +3611,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr error
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -3500,7 +3645,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(code, program.WithGlobals(types.TypeAny))
 
-		vm := interp.New(prog, interp.WithThreshold(0))
+		vm := interp.New(prog, interp.WithThreshold(1))
 		defer vm.Close()
 		addr, err := vm.Alloc(fn)
 		require.NoError(t, err)
@@ -3549,7 +3694,7 @@ func TestWithThreshold(t *testing.T) {
 		var rc int
 		var deopts, entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			if err = vm.Run(context.Background()); err != nil {
@@ -3609,7 +3754,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -3644,7 +3789,7 @@ func TestWithThreshold(t *testing.T) {
 		var count int
 		var entries float64
 		profiler := prof.New()
-		vm := interp.New(refArrayProgram(t, 20000), interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(refArrayProgram(t, 20000), interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -3676,9 +3821,9 @@ func TestWithThreshold(t *testing.T) {
 
 		var runErr, popErr error
 		var result types.Value
-		var entries float64
+		var compiles float64
 		profiler := prof.New()
-		vm := interp.New(structTreeProgram(t, 20000), interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(structTreeProgram(t, 20000), interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -3691,8 +3836,10 @@ func TestWithThreshold(t *testing.T) {
 			}
 			vm.Reset()
 			vm.Flush()
-			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
-			return entries > 0
+			// The module loop may enter by OSR before walk's first Go entry,
+			// calling walk natively: walk compiled and any native entry.
+			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
+			return compiles > 0 && nativeEntries(profiler) > 0
 		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
@@ -3729,7 +3876,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -3768,7 +3915,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithGlobals(types.NewArrayType(types.TypeI32)), program.WithConstants(lnFn))
 
-		threaded := interp.New(prog)
+		threaded := interp.New(prog, interp.WithThreshold(-1))
 		defer threaded.Close()
 		hostVal, err := threaded.Marshal([]int32{1, 2, 3, 4, 5})
 		require.NoError(t, err)
@@ -3784,7 +3931,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			hostVal, marshalErr := vm.Marshal([]int32{1, 2, 3, 4, 5})
@@ -3862,7 +4009,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, types.I32(rounds/16), want)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, labels ...prof.Label) float64 {
 			vm.Flush()
@@ -3922,7 +4069,7 @@ func TestWithThreshold(t *testing.T) {
 		var results []types.Value
 		var entries, deopts float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			errs, results = nil, nil
@@ -3979,7 +4126,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -4000,7 +4147,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, want, result)
 	})
 
-	t.Run("reports no vm_jit metrics by default", func(t *testing.T) {
+	t.Run("reports no vm_jit metrics for a short first Run by default", func(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(fibCallsProgram(t, 3), interp.WithProfiler(profiler))
 		defer vm.Close()
@@ -4021,7 +4168,7 @@ func TestWithThreshold(t *testing.T) {
 		var entries float64
 		var runErr, popErr error
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -4049,7 +4196,7 @@ func TestWithThreshold(t *testing.T) {
 		prog := concat(t, n)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		require.NoError(t, vm.Run(context.Background()))
 		got, err := vm.Pop()
@@ -4068,7 +4215,7 @@ func TestWithThreshold(t *testing.T) {
 		prog := deopt(t, n, n-10)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		require.NoError(t, vm.Run(context.Background()))
 		got, err := vm.Pop()
@@ -4089,7 +4236,7 @@ func TestWithThreshold(t *testing.T) {
 		prog := fib(t, n)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		require.NoError(t, vm.Run(context.Background()))
 		got, err := vm.Pop()
@@ -4122,7 +4269,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 
 		var got types.Value
@@ -4230,7 +4377,7 @@ func TestWithThreshold(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		prog := program.New(code, program.WithConstants(fn), program.WithHandlers(b.Handlers()...))
-		threaded := interp.New(prog)
+		threaded := interp.New(prog, interp.WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.Run(context.Background()))
 		wantCode, err := threaded.PopBoxed()
@@ -4245,7 +4392,7 @@ func TestWithThreshold(t *testing.T) {
 		var exits float64
 		var runErr, popErr, constErr, refErr error
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -4299,7 +4446,7 @@ func TestWithThreshold(t *testing.T) {
 		var unsupported float64
 		var runErr, popErr error
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -4352,7 +4499,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		ctx := context.Background()
 
@@ -4420,7 +4567,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		pool := interp.NewPool(prog, 2, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		pool := interp.NewPool(prog, 2, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer pool.Close()
 		first, err := pool.Get(context.Background())
 		require.NoError(t, err)
@@ -4466,7 +4613,7 @@ func TestWithThreshold(t *testing.T) {
 		// Both dynamic sites are recorded before fib compiles.
 		prog := indirectFibCallsProgram(t, 20, 50)
 
-		wantVM := interp.New(indirectFibCallsProgram(t, 20, 50))
+		wantVM := interp.New(indirectFibCallsProgram(t, 20, 50), interp.WithThreshold(-1))
 		defer wantVM.Close()
 		require.NoError(t, wantVM.Run(context.Background()))
 		want, err := wantVM.Pop()
@@ -4522,7 +4669,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, labels ...prof.Label) float64 {
 			vm.Flush()
@@ -4564,7 +4711,7 @@ func TestWithThreshold(t *testing.T) {
 		var got types.Value
 		var unsupported, ok float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -4591,7 +4738,7 @@ func TestWithThreshold(t *testing.T) {
 		native(t)
 		prog := applyProgram(t, 3000)
 
-		wantVM := interp.New(applyProgram(t, 3000))
+		wantVM := interp.New(applyProgram(t, 3000), interp.WithThreshold(-1))
 		defer wantVM.Close()
 		require.NoError(t, wantVM.Run(context.Background()))
 		want, err := wantVM.Pop()
@@ -4610,7 +4757,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotIncRC, gotDecRC int
 		var deopts float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -4683,7 +4830,7 @@ func TestWithThreshold(t *testing.T) {
 		prog := program.New(code, program.WithLocals(types.TypeI32, types.TypeI32, types.TypeString, types.TypeI32), program.WithGlobals(types.TypeI32),
 			program.WithConstants(relayDynamicFunction(), bumpFunction(1), bumpFunction(3), types.String("s")))
 
-		threaded := interp.New(prog)
+		threaded := interp.New(prog, interp.WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.SetGlobal(0, types.BoxI32(1)))
 		require.NoError(t, threaded.Run(context.Background()))
@@ -4691,7 +4838,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, labels ...prof.Label) float64 {
 			vm.Flush()
@@ -4763,7 +4910,7 @@ func TestWithThreshold(t *testing.T) {
 			program.WithConstants(incFunction(), wrap.MustBuild()))
 		want := runProgram(t, prog)
 
-		vm := interp.New(prog, interp.WithThreshold(0))
+		vm := interp.New(prog, interp.WithThreshold(1))
 		defer vm.Close()
 		require.NoError(t, vm.Run(context.Background()))
 		got, err := vm.Pop()
@@ -4775,7 +4922,7 @@ func TestWithThreshold(t *testing.T) {
 		native(t)
 		prog := counterProgram(t)
 
-		threaded := interp.New(prog)
+		threaded := interp.New(prog, interp.WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.Run(context.Background()))
 		wantCounter, err := threaded.Pop()
@@ -4784,7 +4931,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, label prof.Label) float64 {
 			v, _ := profiler.Metric(name, label)
@@ -4892,7 +5039,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, labels ...prof.Label) float64 {
 			v, _ := profiler.Metric(name, labels...)
@@ -4958,7 +5105,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, labels ...prof.Label) float64 {
 			v, _ := profiler.Metric(name, labels...)
@@ -5029,7 +5176,7 @@ func TestWithThreshold(t *testing.T) {
 		var count int
 		var bridges, deopts float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			if runErr = vm.Run(context.Background()); runErr != nil {
@@ -5076,10 +5223,10 @@ func TestWithThreshold(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(fb.MustBuild()))
-		want := runProgramErr(t, prog)
+		want := runProgramErr(t, prog, interp.WithThreshold(-1))
 		require.Error(t, want)
 
-		got := runProgramErr(t, prog, interp.WithThreshold(0))
+		got := runProgramErr(t, prog, interp.WithThreshold(1))
 		require.True(t, errorsEqual(got, want), "got %v, want %v", got, want)
 	})
 
@@ -5104,7 +5251,7 @@ func TestWithThreshold(t *testing.T) {
 		var entries float64
 		var runErr, popErr error
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -5153,7 +5300,7 @@ func TestWithThreshold(t *testing.T) {
 		var entries float64
 		var runErr, popErr error
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -5236,7 +5383,7 @@ func TestWithThreshold(t *testing.T) {
 				prog := program.New(code, program.WithLocals(i32), program.WithConstants(fn))
 
 				// Boxed words compare bits: NaN payloads and the sign of zero.
-				threaded := interp.New(prog)
+				threaded := interp.New(prog, interp.WithThreshold(-1))
 				require.NoError(t, threaded.Run(context.Background()))
 				want, err := threaded.PopBoxed()
 				require.NoError(t, err)
@@ -5246,7 +5393,7 @@ func TestWithThreshold(t *testing.T) {
 				var entries, deopts float64
 				var runErr, popErr error
 				profiler := prof.New()
-				vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+				vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 				defer vm.Close()
 				poll(t, func() bool {
 					if runErr = vm.Run(context.Background()); runErr != nil {
@@ -5431,7 +5578,7 @@ func poll(t *testing.T, cond func() bool) {
 // the stack.
 func runProgram(t *testing.T, prog *program.Program) types.Value {
 	t.Helper()
-	vm := interp.New(prog)
+	vm := interp.New(prog, interp.WithThreshold(-1))
 	defer vm.Close()
 	require.NoError(t, vm.Run(context.Background()))
 	v, err := vm.Pop()
@@ -5451,7 +5598,7 @@ func runProgramErr(t *testing.T, prog *program.Program, opts ...interp.Option) e
 // value it leaves, as its string content and live RefCount.
 func runProgramString(t *testing.T, prog *program.Program) (string, int) {
 	t.Helper()
-	vm := interp.New(prog)
+	vm := interp.New(prog, interp.WithThreshold(-1))
 	defer vm.Close()
 	require.NoError(t, vm.Run(context.Background()))
 	value, count, err := popString(vm)

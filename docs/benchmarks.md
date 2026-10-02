@@ -4,7 +4,7 @@ Comparisons here are tier-matched.
 
 This document owns performance evidence; `testing.md` owns test contracts.
 
-minivm `threaded` is a bytecode interpreter and is compared against interpreters. Rows labelled `jit` are the native tier: `interp.WithThreshold` compiles a hot `*types.Function` to ARM64 native code from an interpreted `CALL`, and compiles a hot loop header to ARM64 native code on-stack (OSR) — module-level loops included — from the interpreter's own threaded dispatch. An operation, call, or terminator `internal/jit/arm64` does not lower bridges into the interpreter or deoptimizes back to threaded execution (see `instruction-set.md` for per-opcode status). `jit` numbers are compared against Wazero's compiler backend; Native Go is a reference bound, not a peer.
+minivm `threaded` is a bytecode interpreter and is compared against interpreters. Rows labelled `jit` are the native tier under default options (the automatic `interp.WithThreshold(0)`); `threaded` rows pass `interp.WithThreshold(-1)`. The JIT compiles a hot `*types.Function` to ARM64 native code from an interpreted `CALL`, and compiles a hot loop header to ARM64 native code on-stack (OSR) — module-level loops included — from the interpreter's own threaded dispatch. An operation, call, or terminator `internal/jit/arm64` does not lower bridges into the interpreter or deoptimizes back to threaded execution (see `instruction-set.md` for per-opcode status). `jit` numbers are compared against Wazero's compiler backend; Native Go is a reference bound, not a peer.
 
 | Kernel | `jit` | `threaded` | Wazero |
 |---|---:|---:|---:|
@@ -31,7 +31,7 @@ minivm `threaded` is a bytecode interpreter and is compared against interpreters
 |---|---|---|
 | Interpreter | minivm `threaded` | Generated threaded execution. |
 | Interpreter | CPython, Tengo, GopherLua, Goja, gpython, Yaegi | Bytecode or AST interpreters with no native code generation. |
-| Native | minivm `jit` | `interp.WithThreshold` compiling to ARM64 native code. |
+| Native | minivm `jit` | default options: the JIT compiling to ARM64 native code. |
 | Native | Wazero | WebAssembly runtime using its optimizing compiler backend on arm64. |
 | Reference | Native Go | The same kernel written directly in Go. A lower bound, not a peer. |
 

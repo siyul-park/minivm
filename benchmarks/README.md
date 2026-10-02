@@ -56,7 +56,7 @@ Two programs use minipy host builtins that minivm has no opcode for. Both are tr
 
 ## Modes
 
-Every canonical kernel defines `threaded`, the generated interpreter with no options, and `jit`, the ARM64 native tier when the kernel reaches a compiled function. Native scope and entry rules belong to `docs/jit-internals.md`.
+Every canonical kernel defines `threaded`, the generated interpreter with the JIT off (`interp.WithThreshold(-1)`), and `jit`, default options: the ARM64 native tier when the kernel reaches a compiled function. Native scope and entry rules belong to `docs/jit-internals.md`.
 
 With the `compare` build tag, each kernel also adds the applicable external runtimes: native Go, wazero, Tengo, gopher-lua, Goja, gpython, CPython, and Yaegi. A runtime whose script is empty is skipped, so a kernel declares only the comparisons that answer a question about it; the ported minipy kernels declare `native`, `cpython`, and `gpython`, and wazero is omitted when no equivalent canonical WASM fixture exists.
 

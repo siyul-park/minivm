@@ -17,6 +17,9 @@ type Job struct {
 // Queue compiles at most one unit per address at a time.
 type Queue struct {
 	machine func() Machine
+	// workers is how many workers the first accepted Submit starts; zero
+	// once started.
+	workers int
 
 	pending []Unit
 	// active holds every address queued, compiling, or finished but not
@@ -30,11 +33,12 @@ type Queue struct {
 
 	mu   sync.Mutex
 	cond *sync.Cond
-	wg   sync.WaitGroup
 }
 
-// NewQueue returns a Queue whose workers each own one machine(). A nil
-// machine or fewer than one worker is a programmer error and panics.
+// NewQueue returns a Queue whose workers each own one machine(). Workers
+// start at the first accepted Submit, so a Queue never used costs no
+// goroutine or machine. A nil machine or fewer than one worker is a
+// programmer error and panics.
 func NewQueue(machine func() Machine, workers int) *Queue {
 	if machine == nil {
 		panic("compile: nil machine factory")
@@ -42,12 +46,8 @@ func NewQueue(machine func() Machine, workers int) *Queue {
 	if workers < 1 {
 		panic("compile: at least one worker is required")
 	}
-	q := &Queue{machine: machine, active: map[int]bool{}}
+	q := &Queue{machine: machine, workers: workers, active: map[int]bool{}}
 	q.cond = sync.NewCond(&q.mu)
-	q.wg.Add(workers)
-	for range workers {
-		go q.work()
-	}
 	return q
 }
 
@@ -62,6 +62,10 @@ func (q *Queue) Submit(u Unit) bool {
 	}
 	q.active[u.Address] = true
 	q.pending = append(q.pending, u)
+	for range q.workers {
+		go q.work()
+	}
+	q.workers = 0
 	q.cond.Signal()
 	return true
 }
@@ -83,20 +87,19 @@ func (q *Queue) Drain() []Job {
 	return jobs
 }
 
-// Close stops accepting units, lets units already queued finish, stops the
-// workers, and returns the jobs finished but not yet drained.
+// Close stops accepting units, discards units no worker has started, and
+// returns the jobs finished but not yet drained. It does not wait: a worker
+// compiling at Close frees that unit's code and exits.
 func (q *Queue) Close() []Job {
 	q.mu.Lock()
 	q.closed = true
+	q.pending = nil
 	q.cond.Broadcast()
 	q.mu.Unlock()
-
-	q.wg.Wait()
 	return q.Drain()
 }
 
 func (q *Queue) work() {
-	defer q.wg.Done()
 	m := q.machine()
 	for {
 		q.mu.Lock()
@@ -114,8 +117,16 @@ func (q *Queue) work() {
 		code, err := Compile(u, m)
 
 		q.mu.Lock()
-		q.done = append(q.done, Job{Unit: u, Code: code, Err: err})
-		q.ready.Add(1)
+		closed := q.closed
+		if !closed {
+			q.done = append(q.done, Job{Unit: u, Code: code, Err: err})
+			q.ready.Add(1)
+		}
 		q.mu.Unlock()
+		if closed && code != nil {
+			// Nothing drains a closed queue again; an unmap failure here has
+			// no caller left to report to.
+			_ = code.Free()
+		}
 	}
 }

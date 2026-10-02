@@ -24,7 +24,18 @@ type Interpreter struct {
 	profiler *prof.Profiler
 	samples  *prof.Collector
 	native   *native
-	closed   bool
+	// threshold is the JIT's WithThreshold setting, or -1 where the JIT
+	// cannot run; attach builds native from it.
+	threshold int
+	// heat is the work an automatic JIT lets pass, dormant, before it wakes:
+	// threaded code spends one at each frame entry and taken back edge, a Run
+	// start dormancy/32 (spend). Zero once the JIT is live, fixed, or off.
+	heat int
+	// parked is the ip of the frame whose handler ran heat out; the frame
+	// waits at ip park so dispatch leaves its loop and wakes the JIT
+	// (unpark).
+	parked int
+	closed bool
 
 	types       []types.Type
 	constants   []types.Boxed
@@ -173,9 +184,12 @@ func WithFuel(val uint64) Option {
 	return func(o *option) { o.fuel = val }
 }
 
-// WithThreshold enables the JIT: n calls to a *types.Function before it is
-// compiled to native code. n < 0 disables it; this is the default. The JIT
-// also requires runtime.GOARCH == "arm64" and neither WithHook nor WithFuel.
+// WithThreshold sets when the JIT compiles. n == 0, the default, is automatic:
+// the JIT starts once the program has done enough work to repay a compile and
+// adapts its thresholds from runtime metrics. n > 0 compiles a
+// *types.Function after n calls and a loop after n back edges. n < 0 disables
+// the JIT. The JIT also requires runtime.GOARCH == "arm64" and neither
+// WithHook nor WithFuel.
 func WithThreshold(n int) Option {
 	return func(o *option) { o.threshold = n }
 }
@@ -184,11 +198,10 @@ func WithThreshold(n int) Option {
 // program.Verify(prog) beforehand to reject malformed or untrusted bytecode.
 func New(prog *program.Program, opts ...Option) *Interpreter {
 	opt := option{
-		frame:     128,
-		stack:     1024,
-		heap:      128,
-		tick:      128,
-		threshold: -1,
+		frame: 128,
+		stack: 1024,
+		heap:  128,
+		tick:  128,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -333,8 +346,12 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	i.fr = &i.frames[0]
 	i.retain(0)
 
+	i.threshold = -1
 	if jitEnabled(opt) {
-		i.native = newNative(i, opt.threshold)
+		i.threshold = opt.threshold
+		if opt.threshold == 0 {
+			i.heat = dormancy
+		}
 	}
 
 	return i
@@ -346,6 +363,9 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 	i.done = nil
 	if ctx != nil {
 		i.done = ctx.Done()
+	}
+	if i.attach() != nil {
+		i.spend(dormancy / 32)
 	}
 	for {
 		// dispatch's recover absorbs every panic, so nothing escapes it and ctx is
@@ -360,6 +380,45 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 			i.native.quiesce()
 		}
 		return err
+	}
+}
+
+// attach returns i's JIT runtime, nil when the JIT is off, building it on
+// first use: an interpreter that never runs pays nothing for it.
+func (i *Interpreter) attach() *native {
+	if i.native == nil && i.threshold >= 0 {
+		i.native = newNative(i, i.threshold)
+	}
+	return i.native
+}
+
+// spend charges work against a dormant JIT's heat and wakes it once heat runs
+// out.
+func (i *Interpreter) spend(work int) {
+	if i.heat == 0 {
+		return
+	}
+	if i.heat -= work; i.heat <= 0 {
+		i.wake()
+	}
+}
+
+// park is the ip a frame waits at while the JIT wakes: past any code.
+const park = math.MaxInt
+
+// unpark returns the frame threaded code parked when heat ran out to its ip
+// and wakes the JIT.
+func (i *Interpreter) unpark() {
+	i.fr.ip = i.parked
+	i.wake()
+}
+
+// wake makes the dormant JIT live, or turns it off for a program none of
+// whose code can repay a Go entry (native.wake).
+func (i *Interpreter) wake() {
+	i.heat = 0
+	if !i.native.wake(i) {
+		i.native, i.threshold = nil, -1
 	}
 }
 
@@ -806,32 +865,43 @@ func (i *Interpreter) dispatch() (caught bool, err error) {
 	f := i.fr
 	code := f.code
 	// The fast path avoids safepoint bookkeeping when no coordination is needed.
+	// Each loop also ends when a handler parks its frame (Interpreter.parked).
 	if i.done == nil && i.gas < 0 && i.hook == nil && i.profiler == nil {
-		for f.ip < len(code) {
-			code[f.ip](i)
-			f = i.fr
-			code = f.code
+		for {
+			for f.ip < len(code) {
+				code[f.ip](i)
+				f = i.fr
+				code = f.code
+			}
+			if f.ip != park {
+				return false, nil
+			}
+			i.unpark()
 		}
-		return false, nil
 	}
 
 	tick := i.tick
 
-	for f.ip < len(code) {
-		tick--
-		if tick == 0 {
-			tick = i.tick
-			if err := i.safepoint(); err != nil {
-				return false, err
+	for {
+		for f.ip < len(code) {
+			tick--
+			if tick == 0 {
+				tick = i.tick
+				if err := i.safepoint(); err != nil {
+					return false, err
+				}
 			}
+
+			code[f.ip](i)
+
+			f = i.fr
+			code = f.code
 		}
-
-		code[f.ip](i)
-
-		f = i.fr
-		code = f.code
+		if f.ip != park {
+			return false, nil
+		}
+		i.unpark()
 	}
-	return false, nil
 }
 
 func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []types.Boxed) (returns []types.Boxed, err error) {

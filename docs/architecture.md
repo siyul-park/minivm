@@ -55,11 +55,11 @@ Behavior `MUST` follow dominant ownership, not import convenience; an owner `MUS
 program → Verify → optimize? → interp → threaded ⇄ native
 ```
 
-Threaded execution is the semantic baseline. On ARM64, `WithThreshold` may compile hot functions; native execution returns to threaded execution at unsupported or non-native boundaries.
+Threaded execution is the semantic baseline. On ARM64 the JIT, on by default (`WithThreshold`), may compile hot functions; native execution returns to threaded execution at unsupported or non-native boundaries.
 
 ## Runtime
 
-`interp.Interpreter` owns stack, frames, globals, heap/RC, threaded dispatch, tracing, and native installation. Threshold-enabled interpreters own a `jit.Context`; pooled interpreters share published code and compile state through `Pool`.
+`interp.Interpreter` owns stack, frames, globals, heap/RC, threaded dispatch, tracing, and native installation. Interpreters with the JIT on build their JIT runtime at the first Run and a `jit.Context` at the first native entry; pooled interpreters share published code and compile state through `Pool`.
 
 Execution is single-goroutine-owned. Background compilation consumes immutable input and `MUST NOT` mutate live interpreter state.
 

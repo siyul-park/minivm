@@ -1,6 +1,7 @@
 package compile_test
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,6 +28,14 @@ func TestNewQueue(t *testing.T) {
 
 	t.Run("panics on fewer than one worker", func(t *testing.T) {
 		require.Panics(t, func() { compile.NewQueue(newStub, 0) })
+	})
+
+	t.Run("builds no machine until a unit is submitted", func(t *testing.T) {
+		var built atomic.Int64
+		q := compile.NewQueue(func() compile.Machine { built.Add(1); return stub{} }, 2)
+		require.Empty(t, q.Close())
+
+		require.Zero(t, built.Load())
 	})
 }
 
@@ -75,16 +84,35 @@ func TestQueue_Drain(t *testing.T) {
 }
 
 func TestQueue_Close(t *testing.T) {
-	q := compile.NewQueue(newStub, 1)
-	require.True(t, q.Submit(unlowerable(1)))
+	t.Run("refuses submits once closed", func(t *testing.T) {
+		q := compile.NewQueue(newStub, 1)
+		require.Empty(t, q.Close())
 
-	jobs := q.Close()
-	require.Len(t, jobs, 1)
-	require.Equal(t, 1, jobs[0].Unit.Address)
-	require.ErrorIs(t, jobs[0].Err, compile.ErrUnsupported)
+		require.False(t, q.Submit(unlowerable(2)))
+		require.Empty(t, q.Close())
+	})
 
-	require.False(t, q.Submit(unlowerable(2)))
-	require.Empty(t, q.Close())
+	t.Run("returns without waiting for a unit not yet compiled", func(t *testing.T) {
+		gate := make(chan struct{})
+		defer close(gate)
+		q := compile.NewQueue(func() compile.Machine { <-gate; return stub{} }, 1)
+		require.True(t, q.Submit(unlowerable(1)))
+
+		closed := make(chan []compile.Job, 1)
+		go func() { closed <- q.Close() }()
+		var jobs []compile.Job
+		poll(t, func() bool {
+			select {
+			case jobs = <-closed:
+				return true
+			default:
+				return false
+			}
+		})
+
+		require.Empty(t, jobs)
+		require.False(t, q.Submit(unlowerable(1)))
+	})
 }
 
 // poll runs cond on the calling goroutine until it holds, so Drain never runs

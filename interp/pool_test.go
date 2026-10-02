@@ -82,7 +82,7 @@ func TestPool_Get(t *testing.T) {
 		native(t)
 		prog := fibFlatCallsProgram(t, 1000)
 		profiler := prof.New()
-		p := interp.NewPool(prog, 2, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		p := interp.NewPool(prog, 2, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer p.Close()
 
 		first, err := p.Get(context.Background())
@@ -127,7 +127,7 @@ func TestPool_Get(t *testing.T) {
 		}
 
 		profiler := prof.New()
-		p := interp.NewPool(prog, 2, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		p := interp.NewPool(prog, 2, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer p.Close()
 
 		// a always calls inc and b always dec, through one dynamic CALL site.
@@ -172,7 +172,7 @@ func TestPool_Get(t *testing.T) {
 			wantDec += i - 1
 		}
 
-		p := interp.NewPool(prog, 2, interp.WithThreshold(0))
+		p := interp.NewPool(prog, 2, interp.WithThreshold(1))
 		defer p.Close()
 
 		// a always calls inc and b always dec, through one dynamic CALL site:
@@ -227,7 +227,7 @@ func TestPool_Get(t *testing.T) {
 		prog := program.New(code, program.WithConstants(sumFunction(t)))
 
 		profiler := prof.New()
-		p := interp.NewPool(prog, 2, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		p := interp.NewPool(prog, 2, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer p.Close()
 		compiles := func(tier string) float64 {
 			v, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: tier}, prof.Label{Key: "outcome", Value: "ok"})

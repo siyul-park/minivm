@@ -4629,7 +4629,7 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 				name string
 				opts []interp.Option
 			}{
-				{name: "Threaded", opts: []interp.Option{interp.WithTick(1)}},
+				{name: "Threaded", opts: []interp.Option{interp.WithTick(1), interp.WithThreshold(-1)}},
 				{name: "Fused"},
 			} {
 				b.Run(mode.name, func(b *testing.B) {

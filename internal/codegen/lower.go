@@ -358,6 +358,25 @@ func underflow(n int) jen.Code {
 	return jen.If(cond).Block(jen.Panic(jen.Id("ErrStackUnderflow")))
 }
 
+// cool spends one unit of a dormant JIT's heat (Interpreter.heat) when cond
+// holds; a nil cond always holds. Frame entries and taken back edges end
+// with it. The unit that runs heat out parks the current frame at ip park
+// (Interpreter.parked keeps its ip) so dispatch leaves its loop and wakes the
+// JIT: the handler writes no pointer and makes no call, either of which
+// would cost every handler a stack frame.
+func cool(cond jen.Code) jen.Code {
+	check := jen.Id("i").Dot("heat").Op(">").Lit(0)
+	if cond != nil {
+		check = jen.Add(cond).Op("&&").Add(check)
+	}
+	return jen.If(check).Block(
+		jen.Id("i").Dot("heat").Op("--"),
+		jen.If(jen.Id("i").Dot("heat").Op("==").Lit(0)).Block(
+			jen.List(jen.Id("i").Dot("parked"), jen.Id("i").Dot("fr").Dot("ip")).Op("=").List(jen.Id("i").Dot("fr").Dot("ip"), jen.Id("park")),
+		),
+	)
+}
+
 // closure is the runtime handler a compile step returns.
 func closure(body ...jen.Code) jen.Code {
 	return jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)

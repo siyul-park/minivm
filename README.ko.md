@@ -13,7 +13,7 @@ Go 안에서 자원 제한, 타입이 지정된 호스트 호출, 스레디드 �
 
 - **제한된 실행** — 스택, 힙, 프레임 깊이, fuel, hook, context.
 - **직접 호스트 호출** — 타입이 지정된 리플렉션 없는 `HostFunction` 경로.
-- **네이티브 티어** — 옵트인 ARM64 실행과 스레디드 폴백.
+- **네이티브 티어** — 기본으로 켜진 ARM64 실행과 스레디드 폴백.
 
 ```bash
 go get github.com/siyul-park/minivm
@@ -85,7 +85,7 @@ lookup := interp.NewHostFunction(
 
 ## 성능
 
-스레디드 인터프리터가 현재 실행 기준입니다. `interp.WithThreshold`를 통해 arm64에서만 옵트인으로 네이티브 티어를 사용할 수 있습니다. 현재 측정값과 재현 명령은 [벤치마크](docs/benchmarks.md)가 단일 owner입니다.
+스레디드 인터프리터가 현재 실행 기준입니다. arm64에서는 네이티브 티어가 기본으로 켜지며 `interp.WithThreshold`로 조정하거나 끌 수 있습니다. 현재 측정값과 재현 명령은 [벤치마크](docs/benchmarks.md)가 단일 owner입니다.
 
 ## 런타임 도구
 
@@ -124,10 +124,10 @@ vm := interp.New(prog,
 ## 아키텍처
 
 ```text
-Program → Verify → optimize? → threaded ⇄ native (ARM64, opt-in)
+Program → Verify → optimize? → threaded ⇄ native (ARM64)
 ```
 
-스레디드 인터프리터가 의미론적 기준이자 전체 실행 엔진입니다. `WithThreshold`는 hot function에 ARM64 네이티브 실행을 추가하고, 지원하지 않는 경로는 스레디드 실행으로 돌아갑니다.
+스레디드 인터프리터가 의미론적 기준이자 전체 실행 엔진입니다. ARM64에서 JIT는 프로그램이 컴파일 비용을 회수할 만큼 실행된 뒤 hot function에 네이티브 실행을 추가하고(`WithThreshold`), 지원하지 않는 경로는 스레디드 실행으로 돌아갑니다.
 
 명령어 셋은 WebAssembly를 참고했지만 의도적으로 독자 설계했습니다. 1바이트 opcode와 고정 폭 또는 길이 접두사 피연산자를 사용합니다.
 
@@ -143,7 +143,7 @@ Program → Verify → optimize? → threaded ⇄ native (ARM64, opt-in)
 | 스레디드 인터프리터 | ✅ 사용 가능 |
 | 정적 바이트코드 검증기 | ✅ 사용 가능 |
 | AOT 최적화 (`O1`-`O3`) | ✅ 사용 가능 |
-| ARM64 네이티브 티어 (옵트인, `interp.WithThreshold`) | ✅ 사용 가능 |
+| ARM64 네이티브 티어 (기본 활성, `interp.WithThreshold`) | ✅ 사용 가능 |
 | 디버거와 프로파일러 | ✅ 사용 가능 |
 | x86-64 네이티브 백엔드 | 🔲 미구현 |
 

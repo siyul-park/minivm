@@ -111,7 +111,7 @@ func (n *native) observe(i *Interpreter, addr int, fn *types.Function) {
 	}
 	// A header already at ip 0 (the whole module is one loop) is observed
 	// above, as a header: entry semantics do not apply twice.
-	if addr == 0 && !slices.Contains(headers, 0) {
+	if addr == 0 && !slices.Contains(headers, 0) && !n.briefs[0] {
 		install(0, true)
 	}
 }
@@ -192,8 +192,8 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 		s.code = c
 	}
 
-	ctx := n.ctx
 	n.load(i, i.fr.bp, 1)
+	ctx := n.ctx
 	ctx.Upvals = base(i.fr.upvals)
 
 	if i.profiler != nil {
@@ -229,10 +229,14 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 		s.code = nil
 		if s.refutes < tolerance && !same(s.built, n.feedback(s.address)) {
 			// Feedback moved since s's code was built: submit s again. Each
-			// re-arm counts toward tolerance, so recompiles stay bounded.
+			// re-arm counts toward tolerance, so recompiles stay bounded;
+			// the automatic policy also spaces them out.
 			s.refutes++
 			s.submitted = false
 			s.ledger = jit.Ledger{}
+			if n.auto {
+				s.threshold = min(s.threshold<<2, ceiling)
+			}
 		} else {
 			code[s.ip] = inner
 			delete(n.sites, key{s.address, s.ip})

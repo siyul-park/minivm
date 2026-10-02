@@ -225,6 +225,7 @@ func pushFrame(callee target, targetSlots int, releaseTarget, native bool, advan
 		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
 		jen.Id("i").Dot("fp").Op("++"),
 		jen.Id("i").Dot("fr").Op("=").Id("f"),
+		cool(nil),
 	)
 	return body
 }
@@ -263,6 +264,7 @@ func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance in
 				jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
 				jen.Id("i").Dot("fp").Op("++"),
 				jen.Id("i").Dot("fr").Op("=").Id("f"),
+				cool(nil),
 				jen.Return(),
 			),
 			jen.Id("f").Op("=").Id("i").Dot("fr"),
@@ -286,6 +288,7 @@ func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance in
 			jen.Id("f").Dot("returns").Op("=").Id("returns"),
 			jen.Id("f").Dot("release").Op("=").Lit(releaseTarget),
 			jen.Id("i").Dot("sp").Op("=").Id("base").Op("+").Id("params").Op("+").Id("locals"),
+			cool(nil),
 		}
 		return body
 	}
@@ -311,6 +314,7 @@ func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance in
 			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
 			jen.Id("i").Dot("fp").Op("++"),
 			jen.Id("i").Dot("fr").Op("=").Id("f"),
+			cool(nil),
 			jen.Return(),
 		),
 		jen.Id("f").Op(":=").Id("i").Dot("fr"),
@@ -333,6 +337,7 @@ func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance in
 		jen.Id("f").Dot("returns").Op("=").Id("returns"),
 		jen.Id("f").Dot("release").Op("=").False(),
 		jen.Id("i").Dot("sp").Op("=").Id("base").Op("+").Id("params").Op("+").Id("locals"),
+		cool(nil),
 	)
 	return body
 }

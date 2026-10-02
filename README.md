@@ -13,7 +13,7 @@ Run dynamic logic inside Go with explicit resource limits, typed host calls, and
 
 - **Bounded execution** — stack, heap, frame depth, fuel, hooks, context.
 - **Direct host calls** — typed, reflection-free `HostFunction` path.
-- **Native tier** — opt-in ARM64 execution with threaded fallback.
+- **Native tier** — ARM64 execution, on by default, with threaded fallback.
 
 ```bash
 go get github.com/siyul-park/minivm
@@ -85,7 +85,7 @@ See [Host Integration](docs/host-integration.md) for marshaling, host objects, a
 
 ## Performance
 
-Threaded execution is the semantic baseline. ARM64 native execution is opt-in via `interp.WithThreshold`; measurements and reproduction live in [Benchmarks](docs/benchmarks.md).
+Threaded execution is the semantic baseline. ARM64 native execution is on by default and tuned or disabled with `interp.WithThreshold`; measurements and reproduction live in [Benchmarks](docs/benchmarks.md).
 
 ## Runtime Tooling
 
@@ -124,10 +124,10 @@ Use hooks for policy checks and `NewDebugger` with `WithDebugger` for instructio
 ## Architecture
 
 ```text
-Program → Verify → optimize? → threaded ⇄ native (ARM64, opt-in)
+Program → Verify → optimize? → threaded ⇄ native (ARM64)
 ```
 
-The threaded interpreter is the semantic baseline and complete execution engine. `WithThreshold` adds ARM64 native execution for hot functions; unsupported paths return to threaded execution.
+The threaded interpreter is the semantic baseline and complete execution engine. On ARM64 the JIT adds native execution for hot functions once a program has run long enough to repay a compile (`WithThreshold`); unsupported paths return to threaded execution.
 
 The instruction set is WebAssembly-inspired but intentionally custom. It uses one-byte opcodes with fixed-width or length-prefixed operands.
 
@@ -143,7 +143,7 @@ The instruction set is WebAssembly-inspired but intentionally custom. It uses on
 | Threaded interpreter | ✅ Available |
 | Static bytecode verifier | ✅ Available |
 | AOT optimizer (`O1`-`O3`) | ✅ Available |
-| ARM64 native tier (opt-in, `interp.WithThreshold`) | ✅ Available |
+| ARM64 native tier (on by default, `interp.WithThreshold`) | ✅ Available |
 | Debugger and profiler | ✅ Available |
 | x86-64 native backend | 🔲 Not implemented |
 
