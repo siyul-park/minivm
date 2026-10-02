@@ -145,19 +145,29 @@ func TestPool_Get(t *testing.T) {
 			vm.Flush()
 		}
 
-		for round := 1; round <= rounds; round++ {
+		deopts := func() float64 {
+			v, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			return v
+		}
+		round := 0
+		step := func() bool {
+			round++
 			run(a, 0, wantInc, round)
 			run(b, 1, wantDec, round)
 			a.Reset()
 			b.Reset()
+			return deopts() > 0
 		}
+		for round < rounds {
+			step()
+		}
+		// Compiles are async: run on until native code has deopted.
+		poll(t, step)
 		p.Put(a)
 		p.Put(b)
 
-		deopts, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 		// Retired sites stop deopting long before every round does.
-		require.Less(t, deopts, float64(2*rounds))
-		require.Greater(t, deopts, float64(0))
+		require.Less(t, deopts(), float64(2*round))
 	})
 
 	t.Run("pooled interpreters entering and retiring shared code concurrently match threaded", func(t *testing.T) {
