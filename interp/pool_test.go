@@ -96,11 +96,11 @@ func TestPool_Get(t *testing.T) {
 		first.Flush()
 
 		var compiles float64
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			first.Flush()
 			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
 			return compiles == 1
-		}, 5*time.Second, time.Millisecond)
+		})
 
 		require.NoError(t, second.Run(context.Background()))
 		_, err = second.Pop()
@@ -246,19 +246,19 @@ func TestPool_Get(t *testing.T) {
 		// first alone drains the Baseline compile, calling too rarely to promote it.
 		first, err := p.Get(context.Background())
 		require.NoError(t, err)
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			err = call(first)
 			return err != nil || compiles("baseline") == 1
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, err)
 
 		// second never drains a Baseline job; its own calls must promote it.
 		second, err := p.Get(context.Background())
 		require.NoError(t, err)
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			err = call(second)
 			return err != nil || compiles("optimized") >= 1
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, err)
 
 		p.Put(first)
@@ -303,7 +303,7 @@ func TestPool_Get(t *testing.T) {
 		var runs int
 		var runErr error
 		var entries float64
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			vm := a
 			if runs%2 == 1 {
 				vm = b2
@@ -315,7 +315,7 @@ func TestPool_Get(t *testing.T) {
 			}
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			return entries > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.Greater(t, entries, float64(0))
 		// A single, unshared interpreter would need threshold Runs of its

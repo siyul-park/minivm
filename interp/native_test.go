@@ -634,7 +634,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -647,7 +647,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
 			return entries > 0
-		}, 2*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, result)
@@ -673,7 +673,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var count int
 		var entries float64
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -687,7 +687,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			entries = nativeEntries(profiler)
 			return entries >= 8
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.NoError(t, countErr)
@@ -737,7 +737,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 			runErr = vm.Run(ctx)
@@ -748,7 +748,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "safepoint"})
 			return exits > 0
-		}, 20*time.Second, 10*time.Millisecond)
+		})
 		require.ErrorIs(t, runErr, context.DeadlineExceeded)
 	})
 
@@ -773,7 +773,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var runErr, popErr error
 		var entries float64
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -786,7 +786,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			return entries >= 64
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, result)
@@ -834,7 +834,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var runErr, popErr error
 		var bridges float64
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -847,7 +847,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
 			return bridges > 1
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, result)
@@ -895,7 +895,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -908,7 +908,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "safepoint"})
 			return exits > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, result)
@@ -945,7 +945,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -962,7 +962,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			released, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "release"})
 			return released > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.NoError(t, refErr)
@@ -1003,7 +1003,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -1016,7 +1016,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
 			return entries > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, result)
@@ -1048,7 +1048,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -1061,7 +1061,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return exits > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, result)
@@ -1087,11 +1087,11 @@ func TestWithThreshold(t *testing.T) {
 		var gotErr error
 		vm := interp.New(prog, interp.WithThreshold(0))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			gotErr = vm.Run(context.Background())
 			vm.Reset()
 			return gotErr != nil
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.Error(t, gotErr)
 		require.True(t, errorsEqual(gotErr, wantErr))
 	})
@@ -1120,7 +1120,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -1133,7 +1133,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
 			return exits > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, wantValue, value)
@@ -1176,7 +1176,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -1190,7 +1190,7 @@ func TestWithThreshold(t *testing.T) {
 			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
 			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return bridges > 1
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, wantValue, value)
@@ -1226,7 +1226,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -1240,7 +1240,7 @@ func TestWithThreshold(t *testing.T) {
 			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
 			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return bridges > 1
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, result)
@@ -1283,7 +1283,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			gotErr = vm.Run(context.Background())
 			if gotErr == nil {
 				return false
@@ -1292,7 +1292,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
 			return bridges > 1
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.Error(t, gotErr)
 		require.True(t, errorsEqual(gotErr, wantErr))
 	})
@@ -1317,7 +1317,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -1332,7 +1332,7 @@ func TestWithThreshold(t *testing.T) {
 			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			return bridges > entries
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.NoError(t, constErr)
@@ -1362,7 +1362,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithHeapLimit(limit), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			gotErr = vm.Run(context.Background())
 			constCount, constErr = vm.RefCount(ab.Ref())
 			vm.Reset()
@@ -1370,7 +1370,7 @@ func TestWithThreshold(t *testing.T) {
 			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			return bridges > entries
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.Greater(t, bridges, entries)
 		require.True(t, errorsEqual(gotErr, wantErr), "got %v, want %v", gotErr, wantErr)
 		require.NoError(t, constErr)
@@ -1469,11 +1469,11 @@ func TestWithThreshold(t *testing.T) {
 		}
 
 		var runErr error
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			vm.Reset()
 			return runErr != nil || metric("vm_jit_entries_total", "tier", "optimized") > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 
 		entries := metric("vm_jit_entries_total", "tier", "optimized")
@@ -1537,11 +1537,11 @@ func TestWithThreshold(t *testing.T) {
 		}
 
 		var runErr error
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			vm.Reset()
 			return runErr != nil || metric("vm_jit_entries_total", "tier", "optimized") > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 
 		for range 8 {
@@ -1605,7 +1605,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			gotErr = vm.Run(context.Background())
 			gotX, xErr = vm.RefCount(x.Ref())
 			gotArray, arrayErr = vm.RefCount(array.Ref())
@@ -1613,7 +1613,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
 			return bridges > 1
-		}, 5*time.Second, time.Millisecond)
+		})
 		// A bridge that deoptimizes leaves native code for the rest of the Run.
 		require.Greater(t, bridges, float64(1))
 		require.True(t, errorsEqual(gotErr, wantErr), "got %v, want %v", gotErr, wantErr)
@@ -1678,7 +1678,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr, popErr error
 		var round int
 		var entries, prior float64
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -1693,7 +1693,7 @@ func TestWithThreshold(t *testing.T) {
 			total, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			entries, prior = total-prior, total
 			return round >= runs && entries < n/2
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
@@ -1752,7 +1752,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -1765,7 +1765,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
 			return exits > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, wantValue, value)
@@ -1794,7 +1794,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(8), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			gotErr = vm.Run(context.Background())
 			if gotErr == nil {
 				return false
@@ -1803,7 +1803,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
 			return exits > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.Error(t, gotErr)
 		// The innermost frame's IP is ignored: a deoptimized frame runs exact
 		// code, so a trap at a fused CONST_GET;CALL call site (fib's own
@@ -1861,7 +1861,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(8), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -1872,7 +1872,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
 			return exits > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, rcErr)
 		// The module's own constant pool is fib's only live reference: a
@@ -1929,7 +1929,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(8), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -1941,7 +1941,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
 			return exits > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.NoError(t, rcErr)
@@ -1993,11 +1993,11 @@ func TestWithThreshold(t *testing.T) {
 				require.Equal(t, wantCount, count, c.name)
 				vm.Reset()
 			}
-			require.Eventually(t, func() bool {
+			poll(t, func() bool {
 				err := vm.Run(context.Background())
 				vm.Reset()
 				return err != nil || exits("call") > 0
-			}, 5*time.Second, time.Millisecond, c.name)
+			})
 			for range 16 {
 				run()
 			}
@@ -2041,11 +2041,11 @@ func TestWithThreshold(t *testing.T) {
 			vm.Reset()
 		}
 		call, deopt := prof.Label{Key: "kind", Value: "call"}, prof.Label{Key: "kind", Value: "deopt"}
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			err := vm.Run(context.Background())
 			vm.Reset()
 			return err != nil || metric("vm_jit_exits_total", call) > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		beforeEntries, beforeCalls := entries(), metric("vm_jit_exits_total", call)
 		for range 16 {
 			run()
@@ -2088,14 +2088,14 @@ func TestWithThreshold(t *testing.T) {
 			return v
 		}
 		var runErr error
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			vm.Reset()
 			return runErr != nil || calls() > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		// Until the ledger retires served.
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			before := calls()
 			for range runs {
 				if runErr = vm.Run(context.Background()); runErr != nil {
@@ -2104,7 +2104,7 @@ func TestWithThreshold(t *testing.T) {
 				vm.Reset()
 			}
 			return calls() == before
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 
 		before := calls()
@@ -2207,11 +2207,11 @@ func TestWithThreshold(t *testing.T) {
 				vm.Reset()
 			}
 			entered := prof.Label{Key: "tier", Value: "baseline"}
-			require.Eventually(t, func() bool {
+			poll(t, func() bool {
 				err := vm.Run(context.Background())
 				vm.Reset()
 				return err != nil || metric("vm_jit_entries_total", entered) > 0
-			}, 5*time.Second, time.Millisecond, c.name)
+			})
 			for range 16 {
 				run()
 			}
@@ -2236,13 +2236,13 @@ func TestWithThreshold(t *testing.T) {
 		defer vm.Close()
 		var gotErr error
 		var exits float64
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			gotErr = vm.Run(context.Background())
 			vm.Reset()
 			vm.Flush()
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
 			return !errorsEqual(gotErr, wantErr) || exits > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.True(t, errorsEqual(gotErr, wantErr), "%v != %v", gotErr, wantErr)
 		require.Positive(t, exits)
 	})
@@ -2284,11 +2284,11 @@ func TestWithThreshold(t *testing.T) {
 				v, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
 				return v
 			}
-			require.Eventually(t, func() bool {
+			poll(t, func() bool {
 				err := vm.Run(context.Background())
 				vm.Reset()
 				return err != nil || exits() > 0
-			}, 5*time.Second, time.Millisecond, c.name)
+			})
 			require.NoError(t, vm.Run(context.Background()), c.name)
 			sum, count, err := popLoop(vm)
 			require.NoError(t, err, c.name)
@@ -2339,7 +2339,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -2356,7 +2356,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
 			return exits > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.NoError(t, refErr)
@@ -2394,7 +2394,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -2411,7 +2411,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
 			return exits > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.NoError(t, refErr)
@@ -2455,7 +2455,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(8), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -2466,7 +2466,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
 			return exits > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, rcErr)
 		// The module's own constant pool is fib's only live reference: a
@@ -2500,7 +2500,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -2531,7 +2531,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return deopts >= 1
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.NoError(t, rcErr)
@@ -2603,7 +2603,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithFrame(8), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -2618,7 +2618,7 @@ func TestWithThreshold(t *testing.T) {
 			releases, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "release"})
 			calls, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
 			return safepoints > 0 && releases > 0 && calls > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
@@ -2689,7 +2689,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -2705,7 +2705,7 @@ func TestWithThreshold(t *testing.T) {
 			optimized, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			entries = baseline + optimized
 			return entries > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Zero(t, deopts)
@@ -2731,7 +2731,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -2747,7 +2747,7 @@ func TestWithThreshold(t *testing.T) {
 			optimized, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			entries = baseline + optimized
 			return entries > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Zero(t, deopts)
@@ -2791,7 +2791,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -2807,7 +2807,7 @@ func TestWithThreshold(t *testing.T) {
 			optimized, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			entries = baseline + optimized
 			return entries > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Zero(t, deopts)
@@ -2847,7 +2847,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -2861,7 +2861,7 @@ func TestWithThreshold(t *testing.T) {
 			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
 			return compiles > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Zero(t, deopts)
@@ -2886,7 +2886,7 @@ func TestWithThreshold(t *testing.T) {
 			profiler := prof.New()
 			vm := interp.New(c.prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 			defer vm.Close()
-			require.Eventually(t, func() bool {
+			poll(t, func() bool {
 				runErr = vm.Run(context.Background())
 				if runErr != nil {
 					return true
@@ -2900,7 +2900,7 @@ func TestWithThreshold(t *testing.T) {
 				deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 				compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
 				return compiles > 0
-			}, 5*time.Second, time.Millisecond, c.name)
+			})
 			require.NoError(t, runErr, c.name)
 			require.NoError(t, popErr, c.name)
 			require.Zero(t, deopts, c.name)
@@ -2952,7 +2952,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			var hostVal types.Value
 			hostVal, marshalErr = vm.Marshal([]int32{1, 2, 3})
 			if marshalErr != nil {
@@ -2980,7 +2980,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return exits > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, marshalErr)
 		require.NoError(t, allocErr)
 		require.NoError(t, globalErr)
@@ -3015,7 +3015,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -3029,7 +3029,7 @@ func TestWithThreshold(t *testing.T) {
 			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
 			return compiles > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Zero(t, deopts)
@@ -3062,7 +3062,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -3076,7 +3076,7 @@ func TestWithThreshold(t *testing.T) {
 			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
 			return compiles > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		// OpComplete's own wide box used to deopt once (B); it now resumes.
@@ -3108,7 +3108,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -3124,7 +3124,7 @@ func TestWithThreshold(t *testing.T) {
 			optimized, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			entries = baseline + optimized
 			return entries > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Zero(t, deopts)
@@ -3142,7 +3142,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -3155,7 +3155,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
 			return compiles > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
@@ -3225,11 +3225,11 @@ func TestWithThreshold(t *testing.T) {
 				metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 		}
 		var runErr error
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			vm.Reset()
 			return runErr != nil || metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"}) > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 
 		before := entries()
@@ -3301,11 +3301,11 @@ func TestWithThreshold(t *testing.T) {
 				metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 		}
 		var runErr error
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			vm.Reset()
 			return runErr != nil || metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"}) > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 
 		before := entries()
@@ -3376,11 +3376,11 @@ func TestWithThreshold(t *testing.T) {
 				metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 		}
 		var runErr error
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			vm.Reset()
 			return runErr != nil || metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"}) > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 
 		before := entries()
@@ -3431,13 +3431,13 @@ func TestWithThreshold(t *testing.T) {
 		defer vm.Close()
 		var runErr error
 		var entries float64
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			vm.Reset()
 			vm.Flush()
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			return entries > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.Greater(t, entries, float64(0))
 		require.EqualError(t, runErr, wantErr.Error())
 	})
@@ -3468,7 +3468,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			ctx, cancel := context.WithCancel(context.Background())
 			go func() {
 				time.Sleep(time.Second)
@@ -3482,7 +3482,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "safepoint"})
 			return exits > 0
-		}, 20*time.Second, time.Second)
+		})
 		require.Error(t, runErr)
 		require.ErrorIs(t, runErr, context.Canceled)
 	})
@@ -3551,7 +3551,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			if err = vm.Run(context.Background()); err != nil {
 				return true
 			}
@@ -3563,7 +3563,7 @@ func TestWithThreshold(t *testing.T) {
 			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			return entries > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, err)
 		require.Zero(t, deopts)
 		require.Equal(t, want, result)
@@ -3611,7 +3611,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -3624,7 +3624,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
 			return entries > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, result)
@@ -3646,7 +3646,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(refArrayProgram(t, 20000), interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -3659,7 +3659,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
 			return entries > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, wantValue, value)
@@ -3680,7 +3680,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(structTreeProgram(t, 20000), interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -3693,7 +3693,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
 			return entries > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, result)
@@ -3731,7 +3731,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -3744,7 +3744,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return exits > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, result)
@@ -3786,7 +3786,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			hostVal, marshalErr := vm.Marshal([]int32{1, 2, 3, 4, 5})
 			if marshalErr != nil {
 				return true
@@ -3811,7 +3811,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return exits > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, marshalErr)
 		require.NoError(t, allocErr)
 		require.NoError(t, globalErr)
@@ -3874,11 +3874,11 @@ func TestWithThreshold(t *testing.T) {
 				metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 		}
 		var runErr error
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			vm.Reset()
 			return runErr != nil || metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"}) > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		for range batches {
 			require.NoError(t, vm.Run(context.Background()))
@@ -3924,7 +3924,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			errs, results = nil, nil
 			for range runs {
 				if err := vm.Run(context.Background()); err != nil {
@@ -3944,7 +3944,7 @@ func TestWithThreshold(t *testing.T) {
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return entries >= runs/2
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.Empty(t, errs)
 		require.Len(t, results, runs)
 		for _, result := range results {
@@ -3981,7 +3981,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -3994,7 +3994,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			return entries > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, result)
@@ -4023,7 +4023,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -4036,7 +4036,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			return entries > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
@@ -4128,7 +4128,7 @@ func TestWithThreshold(t *testing.T) {
 		var got types.Value
 		var runErr, popErr error
 		var compiles float64
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -4141,7 +4141,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
 			return compiles >= 2
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
@@ -4176,7 +4176,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(threshold), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -4189,7 +4189,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			return entries > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
@@ -4247,7 +4247,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -4269,7 +4269,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return exits > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.NoError(t, constErr)
@@ -4301,7 +4301,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -4314,7 +4314,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			unsupported, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "unsupported"})
 			return unsupported > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
@@ -4365,7 +4365,7 @@ func TestWithThreshold(t *testing.T) {
 		var got types.Value
 		var runErr, popErr error
 		var compiles float64
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(ctx)
 			if runErr != nil {
 				return true
@@ -4378,7 +4378,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
 			return compiles >= 2
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
@@ -4430,7 +4430,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotFirst, gotSecond types.Value
 		var entries float64
 		var runErr, firstErr, secondErr error
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = first.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -4453,7 +4453,7 @@ func TestWithThreshold(t *testing.T) {
 			second.Flush()
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			return entries > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, firstErr)
 		require.NoError(t, secondErr)
@@ -4483,7 +4483,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(100), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -4507,7 +4507,7 @@ func TestWithThreshold(t *testing.T) {
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
 			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return compiles > 0 && entries > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.NoError(t, rcErr)
@@ -4538,11 +4538,11 @@ func TestWithThreshold(t *testing.T) {
 		}
 		compiled := prof.Label{Key: "tier", Value: "baseline"}
 		ok := prof.Label{Key: "outcome", Value: "ok"}
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			err := vm.Run(context.Background())
 			vm.Reset()
 			return err != nil || metric("vm_jit_compiles_total", compiled, ok) >= 2
-		}, 5*time.Second, time.Millisecond)
+		})
 		// Settled: the recompiled code traps at no site.
 		for range 16 {
 			run()
@@ -4566,7 +4566,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -4580,7 +4580,7 @@ func TestWithThreshold(t *testing.T) {
 			unsupported, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "unsupported"})
 			ok, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
 			return ok >= 1
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
@@ -4612,7 +4612,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -4643,7 +4643,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return deopts >= 1
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.NoError(t, rcErr)
@@ -4713,11 +4713,11 @@ func TestWithThreshold(t *testing.T) {
 		compiled := prof.Label{Key: "tier", Value: "baseline"}
 		ok := prof.Label{Key: "outcome", Value: "ok"}
 		var runErr error
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			vm.Reset()
 			return runErr != nil || metric("vm_jit_compiles_total", compiled, ok) >= 2
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		for range runs {
 			require.NoError(t, vm.Run(context.Background()))
@@ -4798,7 +4798,7 @@ func TestWithThreshold(t *testing.T) {
 		var count int
 		var runErr, popErr error
 		var compiled, entries, deopts, called float64
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			vm.Flush()
 			entered, deopted, exited := metric("vm_jit_entries_total", entry), metric("vm_jit_exits_total", deopt), metric("vm_jit_exits_total", call)
 			if runErr = vm.Run(context.Background()); runErr != nil {
@@ -4817,7 +4817,7 @@ func TestWithThreshold(t *testing.T) {
 			// called natively, or the Run takes a call exit.
 			compiled, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
 			return compiled > 0 && entries > 0 && deopts == 0 && called == 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, wantCounter, counter)
@@ -4850,7 +4850,7 @@ func TestWithThreshold(t *testing.T) {
 		var got types.Value
 		var runErr, popErr error
 		var entries, called float64
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			vm.Flush()
 			entered, exited := metric("vm_jit_entries_total", entry), metric("vm_jit_exits_total", call)
 			if runErr = vm.Run(context.Background()); runErr != nil {
@@ -4863,7 +4863,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			entries, called = metric("vm_jit_entries_total", entry)-entered, metric("vm_jit_exits_total", call)-exited
 			return entries > 0 && called == 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
@@ -4907,7 +4907,7 @@ func TestWithThreshold(t *testing.T) {
 		var got types.Value
 		var runErr, popErr error
 		var compiled, entries, called float64
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			vm.Flush()
 			before, exited := entered(), metric("vm_jit_exits_total", call)
 			if runErr = vm.Run(context.Background()); runErr != nil {
@@ -4921,7 +4921,7 @@ func TestWithThreshold(t *testing.T) {
 			compiled = metric("vm_jit_compiles_total", baseline, prof.Label{Key: "outcome", Value: "ok"})
 			entries, called = entered()-before, metric("vm_jit_exits_total", call)-exited
 			return compiled >= 2 && entries > 0 && called == 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
@@ -4971,7 +4971,7 @@ func TestWithThreshold(t *testing.T) {
 		var got types.Value
 		var runErr, popErr error
 		var compiled, bridged, called float64
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			vm.Flush()
 			declined, exited := metric("vm_jit_exits_total", bridge), metric("vm_jit_exits_total", call)
 			if runErr = vm.Run(context.Background()); runErr != nil {
@@ -4988,7 +4988,7 @@ func TestWithThreshold(t *testing.T) {
 			compiled = metric("vm_jit_compiles_total", baseline, prof.Label{Key: "outcome", Value: "ok"})
 			bridged, called = metric("vm_jit_exits_total", bridge)-declined, metric("vm_jit_exits_total", call)-exited
 			return compiled >= 2 && bridged > 0 && called == 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
@@ -5031,7 +5031,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			if runErr = vm.Run(context.Background()); runErr != nil {
 				return true
 			}
@@ -5045,7 +5045,7 @@ func TestWithThreshold(t *testing.T) {
 			// A declined bridge deopts and its site retires within a few
 			// entries; only resumed ones number in the thousands.
 			return bridges > 1000
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, wantValue, value)
@@ -5106,7 +5106,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -5123,7 +5123,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
 			return entries > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, zeroValues, got)
@@ -5155,7 +5155,7 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.Eventually(t, func() bool {
+		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
 			if runErr != nil {
 				return true
@@ -5172,7 +5172,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
 			return entries > 0
-		}, 5*time.Second, time.Millisecond)
+		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
@@ -5248,7 +5248,7 @@ func TestWithThreshold(t *testing.T) {
 				profiler := prof.New()
 				vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 				defer vm.Close()
-				require.Eventually(t, func() bool {
+				poll(t, func() bool {
 					if runErr = vm.Run(context.Background()); runErr != nil {
 						return true
 					}
@@ -5260,7 +5260,7 @@ func TestWithThreshold(t *testing.T) {
 					entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
 					deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 					return entries > 0
-				}, 5*time.Second, time.Millisecond)
+				})
 				require.NoError(t, runErr, "%s %x", c.code, args)
 				require.NoError(t, popErr, "%s %x", c.code, args)
 				require.Equal(t, want, got, "%s %x", c.code, args)
@@ -5404,6 +5404,26 @@ func fib(t *testing.T, n int) *program.Program {
 func native(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
 		t.Skip("native execution needs arm64")
+	}
+}
+
+// pollDeadline bounds poll. It is a hang guard, not a performance budget: a
+// condition holds in milliseconds, but -race plus atomic coverage on a loaded
+// CI runner slows native warmup by an order of magnitude over the 5s a plain
+// run needs.
+const pollDeadline = 60 * time.Second
+
+// poll runs cond on the calling goroutine until it holds, so nothing cond
+// touches outlives the case's deferred teardown. It fails the test after
+// pollDeadline.
+func poll(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(pollDeadline)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("condition never satisfied")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

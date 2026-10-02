@@ -38,7 +38,7 @@ func TestQueue_Submit(t *testing.T) {
 		require.True(t, q.Submit(unlowerable(1)))
 		require.False(t, q.Submit(unlowerable(1)))
 
-		require.Eventually(t, func() bool { return len(q.Drain()) == 1 }, time.Second, time.Millisecond)
+		poll(t, func() bool { return len(q.Drain()) == 1 })
 		require.True(t, q.Submit(unlowerable(1)))
 	})
 
@@ -58,10 +58,10 @@ func TestQueue_Drain(t *testing.T) {
 	require.True(t, q.Submit(unlowerable(2)))
 
 	var jobs []compile.Job
-	require.Eventually(t, func() bool {
+	poll(t, func() bool {
 		jobs = append(jobs, q.Drain()...)
 		return len(jobs) == 2
-	}, time.Second, time.Millisecond)
+	})
 
 	addresses := map[int]bool{}
 	for _, j := range jobs {
@@ -85,4 +85,18 @@ func TestQueue_Close(t *testing.T) {
 
 	require.False(t, q.Submit(unlowerable(2)))
 	require.Empty(t, q.Close())
+}
+
+// poll runs cond on the calling goroutine until it holds, so Drain never runs
+// after the case's deferred Close. It fails the test after a hang-guard
+// deadline.
+func poll(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("condition never satisfied")
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
