@@ -1,10 +1,8 @@
 # Documentation Index
 
-Each topic has one canonical owner. This document owns the topic-to-document map.
+Owns the topic-to-document map for contributors and agents looking for the owner of a fact.
 
-## Terminology
-
-Requirements use RFC 2119 keywords (`MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, `MAY`). Bare imperatives are not requirements; move normative wording into the owner document.
+## Ownership
 
 | Topic | Document |
 |---|---|
@@ -27,6 +25,7 @@ Requirements use RFC 2119 keywords (`MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, 
 | roadmap | `roadmap.md` |
 | Go code design | `coding-patterns.md` |
 | applied naming vocabulary | `symbol-naming-audit.md` |
+| document writing | `writing.md` |
 
 ## Guides
 
@@ -34,27 +33,7 @@ Requirements use RFC 2119 keywords (`MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, 
 - `guides/add-architecture.md` — target-backend procedure
 - `guides/repl.md` — REPL usage
 
-Guides `MUST` own procedure, not topic contracts; contract text stays with its canonical owner.
-
-## Style
-
-Every topic and guide document `MUST`:
-
-- use H1 for the document subject and unnumbered H2 headings;
-- place one scope sentence directly below H1;
-- use an `Ownership` section for canonical owner maps where ownership applies;
-- end with a `Related` section;
-- label every fenced code block with its language;
-- keep one blank line between prose, lists, tables, and code blocks.
-
-## Document Roles
-
-- Topic docs: current behavior and contracts; no removed behavior or duplicate ownership.
-- Guides: procedures over topic contracts.
-- `roadmap.md`: priorities only.
-- `plans/` and `superpowers/`: dated plans, audits, design records; never current authority.
-- `AGENTS.md`: repository workflow.
-
 ## Related
 
-- `AGENTS.md` — terminology, precedence, workflow
+- `writing.md` — purpose, ownership, terminology, form, and format of every document
+- `AGENTS.md` — precedence, workflow
