@@ -38,6 +38,8 @@ func (r regs) Slot(s ssa.Slot) ssa.Type {
 
 func (r regs) Fuse(ssa.Value) bool { return false }
 
+func (r regs) Const(ssa.Value) (uint64, bool) { return 0, false }
+
 func (r regs) Deopt() asm.Label { return exit }
 
 func (r regs) Trap() asm.Label { return exit }
@@ -51,6 +53,17 @@ func (r regs) Box(asm.VReg) (asm.Label, asm.Label) { return exit, resume }
 type fused struct{ regs }
 
 func (fused) Fuse(ssa.Value) bool { return true }
+
+// known is regs where an OpConst defines each value of words.
+type known struct {
+	regs
+	words map[ssa.Value]uint64
+}
+
+func (k known) Const(v ssa.Value) (uint64, bool) {
+	word, ok := k.words[v]
+	return word, ok
+}
 
 func (r regs) Reg(v ssa.Value) asm.VReg {
 	switch r[v] {
@@ -335,7 +348,11 @@ func TestMachine_Lower(t *testing.T) {
 		// guard, when set, lowers a shape guard first, unmeasured, so op's
 		// own rows can assume it already ran.
 		guard *ssa.Operation
-		op    ssa.Operation
+		// slice, when set, lowers after guard, unmeasured.
+		slice *ssa.Operation
+		// consts are the values an OpConst defines, by word.
+		consts map[ssa.Value]uint64
+		op     ssa.Operation
 		// fuse lowers op through a Site that fuses its result into the
 		// branch right after it.
 		fuse  bool
@@ -958,8 +975,7 @@ func TestMachine_Lower(t *testing.T) {
 				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
 				target.SXTW(vr(6), reg(i32, 3)),
 				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
-				target.LSLI(vr(7), vr(6), 2), target.ADD(vr(7), vr(4), vr(7)),
-				target.LDR(reg(i32, 4), vr(7), 0),
+				target.LDRR(reg(i32, 4), vr(4), vr(6)),
 			},
 			lower: true,
 		},
@@ -977,8 +993,7 @@ func TestMachine_Lower(t *testing.T) {
 				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
 				target.SXTW(vr(6), reg(i32, 3)),
 				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
-				target.ADD(vr(7), vr(4), vr(6)),
-				target.LDRSB(reg(ssa.TypeI8, 4), vr(7), 0),
+				target.LDRSBR(reg(ssa.TypeI8, 4), vr(4), vr(6)),
 			},
 			lower: true,
 		},
@@ -998,8 +1013,7 @@ func TestMachine_Lower(t *testing.T) {
 					target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
 					target.SXTW(vr(6), reg(i32, 3)),
 					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
-					target.LSLI(vr(7), vr(6), 3), target.ADD(vr(7), vr(4), vr(7)),
-					target.LDR(reg(ssa.TypeRef, 4), vr(7), 0),
+					target.LDRR(reg(ssa.TypeRef, 4), vr(4), vr(6)),
 				}
 				return append(rows, retainRows(reg(ssa.TypeRef, 4))...)
 			}(),
@@ -1021,11 +1035,10 @@ func TestMachine_Lower(t *testing.T) {
 					target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
 					target.SXTW(vr(6), reg(i32, 3)),
 					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
-					target.LSLI(vr(7), vr(6), 3), target.ADD(vr(7), vr(4), vr(7)),
-					target.LDR(vr(8), vr(7), 0),
-					target.STR(reg(ssa.TypeRef, 4), vr(7), 0),
+					target.LDRR(vr(7), vr(4), vr(6)),
+					target.STRR(reg(ssa.TypeRef, 4), vr(4), vr(6)),
 				}
-				return append(rows, releaseRows(vr(8))...)
+				return append(rows, releaseRows(vr(7))...)
 			}(),
 			lower: true,
 		},
@@ -1045,16 +1058,15 @@ func TestMachine_Lower(t *testing.T) {
 					target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
 					target.SXTW(vr(6), reg(i32, 3)),
 					target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
-					target.LSLI(vr(7), vr(6), 3), target.ADD(vr(7), vr(4), vr(7)),
 					target.UXTW(target.X16, reg(i32, 4)),
 				}
 				rows = append(rows, target.LDI(target.X17, types.Tag(types.KindI32))...)
 				rows = append(rows,
 					target.ORR(target.X16, target.X16, target.X17),
-					target.LDR(vr(8), vr(7), 0),
-					target.STR(target.X16, vr(7), 0),
+					target.LDRR(vr(7), vr(4), vr(6)),
+					target.STRR(target.X16, vr(4), vr(6)),
 				)
-				return append(rows, releaseRows(vr(8))...)
+				return append(rows, releaseRows(vr(7))...)
 			}(),
 			lower: true,
 		},
@@ -1072,8 +1084,7 @@ func TestMachine_Lower(t *testing.T) {
 				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
 				target.SXTW(vr(6), reg(i32, 3)),
 				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
-				target.LSLI(vr(7), vr(6), 2), target.ADD(vr(7), vr(4), vr(7)),
-				target.STRW(reg(i32, 4), vr(7), 0),
+				target.STRWR(reg(i32, 4), vr(4), vr(6)),
 			},
 			lower: true,
 		},
@@ -1091,8 +1102,7 @@ func TestMachine_Lower(t *testing.T) {
 				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
 				target.SXTW(vr(6), reg(i32, 3)),
 				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
-				target.ADD(vr(7), vr(4), vr(6)),
-				target.STRB(reg(ssa.TypeI8, 4), vr(7), 0),
+				target.STRBR(reg(ssa.TypeI8, 4), vr(4), vr(6)),
 			},
 			lower: true,
 		},
@@ -1110,9 +1120,123 @@ func TestMachine_Lower(t *testing.T) {
 				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
 				target.SXTW(vr(6), reg(i32, 3)),
 				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
-				target.ADD(vr(7), vr(4), vr(6)),
-				target.CMPI(reg(i32, 4), 0), target.CSET(vr(8), target.CondNE),
-				target.STRB(vr(8), vr(7), 0),
+				target.CMPI(reg(i32, 4), 0), target.CSET(vr(7), target.CondNE),
+				target.STRBR(vr(7), vr(4), vr(6)),
+			},
+			lower: true,
+		},
+		{
+			name:  "slice loads a guarded array's element pointer and length and passes the same word through",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 5: ssa.TypeRef},
+			guard: &i32array,
+			op:    ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{2}, Results: []ssa.Value{5}},
+			rows: []asm.Instruction{
+				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.ADD(vr(2), target.X16, vr(2)),
+				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+				target.LDR(vr(4), vr(3), 0),
+				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
+				target.MOV(reg(ssa.TypeRef, 5), reg(ssa.TypeRef, 2)),
+			},
+			lower: true,
+		},
+		{
+			name: "declines a slice of a container that carries no shape guard",
+			regs: regs{1: ssa.TypeRef, 5: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{1}, Results: []ssa.Value{5}},
+		},
+		{
+			name:  "array.get through a slice reads its element pointer and length, no heap word",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: i32, 5: ssa.TypeRef},
+			guard: &i32array,
+			slice: &ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{2}, Results: []ssa.Value{5}},
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{5, 3}, Results: []ssa.Value{4}},
+			rows: []asm.Instruction{
+				target.SXTW(vr(6), reg(i32, 3)),
+				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
+				target.LDRR(reg(i32, 4), vr(4), vr(6)),
+			},
+			lower: true,
+		},
+		{
+			name:  "array.len through a slice moves its length",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 5: ssa.TypeRef},
+			guard: &i32array,
+			slice: &ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{2}, Results: []ssa.Value{5}},
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{5}, Results: []ssa.Value{3}},
+			rows:  []asm.Instruction{target.MOVW(reg(i32, 3), vr(5))},
+			lower: true,
+		},
+		{
+			name:   "array.get at a constant index checks the length against it and loads at an immediate offset",
+			regs:   regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: i32},
+			consts: map[ssa.Value]uint64{3: 4095},
+			guard:  &i32array,
+			op:     ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{2, 3}, Results: []ssa.Value{4}},
+			rows: []asm.Instruction{
+				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.ADD(vr(2), target.X16, vr(2)),
+				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+				target.LDR(vr(4), vr(3), 0),
+				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
+				target.CMPI(vr(5), 4095), target.BCondLabel(target.OpBLS, exit),
+				target.LDR(reg(i32, 4), vr(4), 4*4095),
+			},
+			lower: true,
+		},
+		{
+			name:   "array.set at a constant index past the immediate range indexes through its register",
+			regs:   regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: i32},
+			consts: map[ssa.Value]uint64{3: 4096},
+			guard:  &i32array,
+			op:     ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_SET, Args: []ssa.Value{2, 3, 4}},
+			rows: []asm.Instruction{
+				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.ADD(vr(2), target.X16, vr(2)),
+				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+				target.LDR(vr(4), vr(3), 0),
+				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
+				target.SXTW(vr(6), reg(i32, 3)),
+				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
+				target.STRWR(reg(i32, 4), vr(4), vr(6)),
+			},
+			lower: true,
+		},
+		{
+			name:   "array.set at a negative constant index indexes through its register, which traps",
+			regs:   regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: ssa.TypeI8},
+			consts: map[ssa.Value]uint64{3: uint64(uint32(math.MaxUint32))},
+			guard:  &i8array,
+			op:     ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_SET, Args: []ssa.Value{2, 3, 4}},
+			rows: []asm.Instruction{
+				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.ADD(vr(2), target.X16, vr(2)),
+				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+				target.LDR(vr(4), vr(3), 0),
+				target.LDR(vr(5), vr(3), int16(jit.OffsetSliceLen)),
+				target.SXTW(vr(6), reg(i32, 3)),
+				target.CMP(vr(6), vr(5)), target.BCondLabel(target.OpBCS, exit),
+				target.STRBR(reg(ssa.TypeI8, 4), vr(4), vr(6)),
+			},
+			lower: true,
+		},
+		{
+			name:   "struct.get at a constant index loads its field at an immediate offset",
+			regs:   regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: ssa.TypeI8},
+			consts: map[ssa.Value]uint64{3: 2},
+			guard:  &structShape,
+			op:     ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_GET, Args: []ssa.Value{2, 3}, Results: []ssa.Value{4}},
+			rows: []asm.Instruction{
+				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.ADD(vr(2), target.X16, vr(2)),
+				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
+				target.LDR(vr(4), vr(3), int16(jit.OffsetStructData)),
+				target.LDRSB(reg(ssa.TypeI8, 4), vr(4), 16),
 			},
 			lower: true,
 		},
@@ -1349,9 +1473,15 @@ func TestMachine_Lower(t *testing.T) {
 			if tt.guard != nil {
 				require.True(t, m.Lower(a, *tt.guard, tt.regs))
 			}
+			if tt.slice != nil {
+				require.True(t, m.Lower(a, *tt.slice, tt.regs))
+			}
 			var s compile.Site = tt.regs
 			if tt.fuse {
 				s = fused{tt.regs}
+			}
+			if tt.consts != nil {
+				s = known{tt.regs, tt.consts}
 			}
 			start := len(a.Rows())
 			require.Equal(t, tt.lower, m.Lower(a, tt.op, s))

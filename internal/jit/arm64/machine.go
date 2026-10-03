@@ -29,6 +29,9 @@ type Machine struct {
 	// exec op can assert its own container argument is one (compile.Site
 	// carries no such query).
 	guards map[ssa.Value]ssa.Shape
+	// slices is the element pointer and length each OpSlice result's array
+	// had where the slice ran; array ops naming the result read these.
+	slices map[ssa.Value][2]asm.VReg
 	// registers is this function's register-convention results (see compile's
 	// registers), empty when OpReturn boxes to the VM frame instead.
 	registers []types.Kind
@@ -88,7 +91,7 @@ func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.
 	// upvals, flag, and cond restart zero, which is unreadable: the upval
 	// read guards on a nonzero VReg, and ssa.NoValue names no branch
 	// argument, so nothing observes them before this function writes them.
-	*m = Machine{kinds: l.Kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}, registers: l.Registers, borrows: l.Borrows}
+	*m = Machine{kinds: l.Kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}, slices: map[ssa.Value][2]asm.VReg{}, registers: l.Registers, borrows: l.Borrows}
 	a.Bind(m.entry)
 	a.Emit(
 		target.SUBI(target.SP, target.SP, 16),
@@ -224,6 +227,8 @@ func (m *Machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 		return m.shape(a, op, s)
 	case ssa.OpGuardValue:
 		return m.value(a, op, s)
+	case ssa.OpSlice:
+		return m.slice(a, op, s)
 	case ssa.OpRetain:
 		m.retain(a, s.Reg(op.Args[0]))
 		return true

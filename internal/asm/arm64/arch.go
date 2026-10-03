@@ -70,7 +70,7 @@ func (a arch) Flow(inst asm.Instruction) asm.Flow {
 // Writes reports which instruction operands are written.
 func (a arch) Writes(inst asm.Instruction) [4]bool {
 	switch Op(inst.Op) {
-	case OpSTR, OpSTRB, OpSTRH, OpSTRW, OpSTRR, OpSTP,
+	case OpSTR, OpSTRB, OpSTRH, OpSTRW, OpSTRR, OpSTRBR, OpSTRWR, OpSTP,
 		OpCMP, OpCMPI, OpCMN, OpCMNI, OpTST, OpTSTI, OpCCMP, OpCCMPI, OpFCMP, OpFCMPE:
 		return [4]bool{}
 	case OpLDP:

@@ -104,7 +104,11 @@ const (
 
 	// Load / Store register-offset
 	OpLDRR
+	OpLDRBR
+	OpLDRSBR
 	OpSTRR
+	OpSTRBR
+	OpSTRWR
 
 	// Load / Store pair
 	OpLDP
@@ -555,16 +559,38 @@ func STRW(src, base asm.Reg, offset int16) asm.Instruction {
 	return newMemReg(OpSTRW, src, base, int64(offset))
 }
 
-// Register-offset variants: LDR Xt, [Xbase, Xoffset]
+// Register-offset variants: [Xbase, Xindex, LSL #log2(size)]
 
-// LDRR returns an ARM64 instruction.
-func LDRR(dst, base, offsetReg asm.Reg) asm.Instruction {
-	return newInst(OpLDRR, regOperand(dst), regOperand(base), regOperand(offsetReg))
+// LDRR loads dst from base plus index scaled by the access size, chosen by
+// dst as LDR chooses it: W and S load 4 bytes, X and D 8.
+func LDRR(dst, base, index asm.Reg) asm.Instruction {
+	return newInst(OpLDRR, regOperand(dst), regOperand(base), regOperand(index))
 }
 
-// STRR returns an ARM64 instruction.
-func STRR(src, base, offsetReg asm.Reg) asm.Instruction {
-	return newInst(OpSTRR, regOperand(base), regOperand(src), regOperand(offsetReg))
+// LDRBR zero-extends the byte at base plus index.
+func LDRBR(dst, base, index asm.Reg) asm.Instruction {
+	return newInst(OpLDRBR, regOperand(dst), regOperand(base), regOperand(index))
+}
+
+// LDRSBR sign-extends the byte at base plus index to dst's width.
+func LDRSBR(dst, base, index asm.Reg) asm.Instruction {
+	return newInst(OpLDRSBR, regOperand(dst), regOperand(base), regOperand(index))
+}
+
+// STRR stores src at base plus index scaled by the access size, chosen by
+// src as STR chooses it: an integer stores 8 bytes, S 4, D 8.
+func STRR(src, base, index asm.Reg) asm.Instruction {
+	return newInst(OpSTRR, regOperand(base), regOperand(src), regOperand(index))
+}
+
+// STRBR stores src's low byte at base plus index.
+func STRBR(src, base, index asm.Reg) asm.Instruction {
+	return newInst(OpSTRBR, regOperand(base), regOperand(src), regOperand(index))
+}
+
+// STRWR stores src's low 4 bytes at base plus index scaled by 4.
+func STRWR(src, base, index asm.Reg) asm.Instruction {
+	return newInst(OpSTRWR, regOperand(base), regOperand(src), regOperand(index))
 }
 
 // LDP loads a 64-bit register pair; offset is in bytes and encodes as offset/8.

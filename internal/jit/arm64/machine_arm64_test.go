@@ -15,6 +15,7 @@ import (
 	"github.com/siyul-park/minivm/internal/jit/arm64"
 	"github.com/siyul-park/minivm/internal/jit/compile"
 	"github.com/siyul-park/minivm/internal/ssa"
+	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/transform"
 	"github.com/siyul-park/minivm/types"
 )
@@ -557,6 +558,68 @@ func TestNew(t *testing.T) {
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		require.Equal(t, types.BoxI32(100), stack[0])
 		require.Zero(t, ctx.Depth)
+	})
+
+	t.Run("reads a sliced array across bridge and safepoint resumes that relocate Context.Heap", func(t *testing.T) {
+		// sum(a[i] + len(s)) over i < len(a): the bridged string.len keeps
+		// the loop quiet, so the hoist pass slices a.
+		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32), types.TypeString}, []types.Type{types.TypeI32, types.TypeI32}, func(b *instr.Builder) {
+			header, done := b.Label(), b.Label()
+			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
+			b.Bind(header)
+			b.Emit(instr.LOCAL_GET, 2)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_LEN)
+			b.Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.LOCAL_GET, 3)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 2).Emit(instr.ARRAY_GET)
+			b.Emit(instr.I32_ADD)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.STRING_LEN)
+			b.Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+			b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+			b.Br(header)
+			b.Bind(done).Emit(instr.LOCAL_GET, 3).Emit(instr.RETURN)
+		})
+		f := translate(t, fn)
+		for _, p := range []pass.Pass[*ssa.Function]{transform.NewPromotePass(), transform.NewHoistPass(), transform.NewDCEPass()} {
+			_, err := p.Run(pass.NewManager(), f)
+			require.NoError(t, err)
+		}
+		require.Contains(t, ssa.Format(f), "slice")
+
+		heap := []types.Value{nil, types.TypedArray[int32]{10, 20, 30, 40, 50, 60, 70}, types.String("abc")}
+		stack := []types.Boxed{types.BoxRef(1), types.BoxRef(2), 0, 0}
+		// RETURN releases both reference params; counts above one keep
+		// those releases from reaching the last reference.
+		rc := []int{0, 2, 2}
+		code, exits := lower(t, arm64.New(), f, fn, nil, 0, false)
+		ctx := enter(t, stack)
+		ctx.Heap = address(t, heap)
+		ctx.RC = address(t, rc)
+		ctx.Budget = 2
+
+		bridges, safepoints := 0, 0
+		for trap := jit.Enter(code, ctx); trap != jit.TrapReturn; trap = jit.Resume(ctx) {
+			require.Equal(t, jit.TrapBridge, trap)
+			switch exit := exits[ctx.Exit()]; exit.Kind {
+			case jit.ExitBridge:
+				require.Equal(t, instr.STRING_LEN, exit.Code)
+				ctx.Results[0] = 3
+				bridges++
+			case jit.ExitSafepoint:
+				ctx.Budget = 2
+				safepoints++
+			default:
+				require.Fail(t, "unexpected exit", exit.Kind)
+			}
+			moved := slices.Clone(heap)
+			clear(heap)
+			heap = moved
+			ctx.Heap = address(t, heap)
+		}
+		require.Equal(t, types.BoxI32(280+7*3), stack[0])
+		require.Equal(t, 7, bridges)
+		require.Positive(t, safepoints)
 	})
 
 	t.Run("retains a ref element a guarded array.get reads, through Context.RC", func(t *testing.T) {

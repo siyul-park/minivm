@@ -189,6 +189,12 @@ func (l *lowering) Slot(slot ssa.Slot) ssa.Type {
 	return 0
 }
 
+// Const reports the word of v when an OpConst defines it.
+func (l *lowering) Const(v ssa.Value) (uint64, bool) {
+	word, ok := l.consts[v]
+	return word, ok
+}
+
 // Fuse reports whether v is the condition of the OpBranch ending the block
 // being lowered, defined by the block's last operation and used nowhere else.
 func (l *lowering) Fuse(v ssa.Value) bool {
@@ -545,7 +551,7 @@ func (l *lowering) operation(op ssa.Operation) error {
 		if i, ok := l.argument(op.Slot); ok {
 			l.args[i] = asm.VReg{}
 		}
-	case ssa.OpRetain, ssa.OpRelease, ssa.OpGuardShape, ssa.OpGuardValue:
+	case ssa.OpRetain, ssa.OpRelease, ssa.OpGuardShape, ssa.OpGuardValue, ssa.OpSlice:
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupported, op.Op)
 	}

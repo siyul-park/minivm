@@ -86,6 +86,8 @@ type Site interface {
 	Type(v ssa.Value) ssa.Type
 	// Slot returns the static type of slot.
 	Slot(slot ssa.Slot) ssa.Type
+	// Const reports the word of v when an OpConst defines it.
+	Const(v ssa.Value) (uint64, bool)
 	// Fuse reports whether v's only use is the condition of the OpBranch
 	// right after its operation, so the machine may leave v in condition
 	// flags instead of a register.

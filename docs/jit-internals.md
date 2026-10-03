@@ -54,7 +54,7 @@ One wake (analysis, the first compiles, their garbage) costs ~0.3–0.6 ms of in
 
 | Symbol | Contract |
 |---|---|
-| `asm.State` | Native stack, saved Go registers, native SP/PC/register file at the last exit. No Go pointer on the native stack. |
+| `asm.State` | Native stack, saved Go registers, native SP/PC/register file at the last exit. No Go pointer on the native stack but a slice's element pointer (below). |
 | `asm.Enter` / `asm.Resume` | Run code on the native stack / continue a suspended activation. Report whether it stopped at an exit. |
 | exit stub | Native code `BLR`s `asm.OffsetStub`; the stub saves registers and returns to Go. `Resume` returns from that call. |
 | `jit.Context` | Built at the interpreter's first native entry. `asm.State` first, then `Trap`, exit id, then `Heap`, `Globals`, `RC`, `Natives`, `Entries`, `Top`, `FB`, `Upvals`, `Depth`, `Limit`, `Budget`, `Results`, `Records`. `Results` stages a bridge or box exit's result words for native code to reload on resume. The interpreter writes every base before `Enter`; only `Heap` and `RC` are rewritten before each `Resume`, since serving an exit can only relocate those two append-grown slices. |
@@ -65,6 +65,7 @@ One wake (analysis, the first compiles, their garbage) costs ~0.3–0.6 ms of in
 
 - Native code never runs on a goroutine stack; async preemption cannot reach it, so back edges, calls, and returns spend `Budget` explicitly. Back edges and calls branch to safepoint on exhaustion; returns only credit the work. `Budget` carries across Go entries and served calls; each safepoint adds `native.quota` (Ticks).
 - Native code writes no Go pointer. It reads heap interface words through `Context.Heap` and object fields at `jit.Offset*`.
+- A slice (`ssa.OpSlice`, placed by LICM in a quiet loop's preheader: `pass-system.md`) loads a guarded array's element pointer and length once; the loop's array ops read them, not `Context.Heap`. They are never reloaded: a quiet loop resizes or replaces no container, and neither do the exits it resumes from (a safepoint, a bridge of an op that writes nothing), though a bridge may move `Context.Heap`. The pointer may sit in a register or a spill slot; it is no GC root, and its container, which a quiet loop never releases, keeps the array reachable.
 - Registers: X24 budget, X25 frame base, X27 activation depth, X26 context, X16/X17 scratch, X18/X28 untouched. Allocatable: X0–X15, X19–X23, D0–D31.
 - X24 mirrors `Context.Budget`: exits store it, resumed exits reload it, and a normal Go entry stores it back after native return.
 - Allocation: linear scan, no splitting; a value live across a call or under pressure spills for its whole life. Values whose live rows never meet share a register: a value does not hold its register through a block it is dead in, such as a later loop laid out before its out-of-line stubs. Calls clobber every allocatable register. Exit maps keep ordinary mapped values live through their stubs. Promoted locals are deopt-only state: calls and safepoints keep them live across resumption; other exits save a non-live one on their cold path into a fixed spill home.

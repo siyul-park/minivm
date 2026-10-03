@@ -10,7 +10,10 @@ import (
 	"github.com/siyul-park/minivm/pass"
 )
 
-// HoistPass moves safe loop-invariant operations to preheaders.
+// HoistPass moves safe loop-invariant operations to preheaders. An array op
+// of a quiet loop whose container is a loop-invariant array guard reads it
+// through one OpSlice in the preheader of the outermost such loop: nothing
+// in a quiet loop resizes or replaces a container.
 type HoistPass struct{}
 
 var _ pass.Pass[*ssa.Function] = (*HoistPass)(nil)
@@ -72,6 +75,7 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 
 	dest := map[site]int{}
 	entries := map[site]int{}
+	sliced := map[site]int{}
 	frames := map[int][]ssa.Frame{}
 	current := func(s site) int {
 		if b, ok := dest[s]; ok {
@@ -129,6 +133,12 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 						continue
 					}
 					frames[h], entries[s] = entry, h
+				case sliceable(function, defSite, operation):
+					if quiets[h] && invariant(operation.Args[0]) {
+						sliced[s] = h
+						changed = true
+					}
+					continue
 				case operation.Op == ssa.OpLoad:
 					if !quiets[h] || stored[h][operation.Slot] {
 						continue
@@ -155,11 +165,22 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 
 	r := newRebuilder(function)
 	states := map[int]ssa.Value{}
+	slices := map[[2]int]ssa.Value{}
 	for _, b := range blocks {
 		id := r.open(b)
 		for i, operation := range function.Block(b).Operations {
 			target := r.block(current(site{b, i}))
+			args := operation.Args
 			operation = r.operation(operation)
+			if h, ok := sliced[site{b, i}]; ok {
+				key := [2]int{int(args[0]), h}
+				if _, ok := slices[key]; !ok {
+					v := r.builder.Value(ssa.TypeRef)
+					r.builder.Add(r.block(preheaders[h]), ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{operation.Args[0]}, Results: []ssa.Value{v}})
+					slices[key] = v
+				}
+				operation.Args[0] = slices[key]
+			}
 			if h, ok := entries[site{b, i}]; ok {
 				state, ok := states[h]
 				if !ok {
@@ -257,6 +278,26 @@ func quiet(function *ssa.Function, operation ssa.Operation) bool {
 	default:
 		return true
 	}
+}
+
+// sliceable reports whether operation is an array op whose container is a
+// guard admitting an array: it reads the container only through the array's
+// element pointer and length.
+func sliceable(function *ssa.Function, sites map[ssa.Value]site, operation ssa.Operation) bool {
+	if operation.Op != ssa.OpExec {
+		return false
+	}
+	switch operation.Code {
+	case instr.ARRAY_GET, instr.ARRAY_SET, instr.ARRAY_LEN:
+	default:
+		return false
+	}
+	s, ok := sites[operation.Args[0]]
+	if !ok {
+		return false
+	}
+	guard := function.Block(s.block).Operations[s.index]
+	return guard.Op == ssa.OpGuardShape && !guard.Shape.Struct && guard.Shape.Function == 0
 }
 
 func hoistable(operation ssa.Operation) bool {

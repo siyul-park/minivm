@@ -165,6 +165,10 @@ func operation(function *Function, sites []position, o Operation) error {
 			return fmt.Errorf("%w: %s admits v%d, which is no observation", ErrForm, o.name(), o.Args[1])
 		}
 		deopts = true
+	case OpSlice:
+		if args != 1 || results != 1 {
+			return counted(o.name(), args, results)
+		}
 	case OpRetain, OpRelease:
 		if args != 1 || results != 0 {
 			return counted(o.name(), args, results)
@@ -261,6 +265,10 @@ func typed(function *Function, o Operation) error {
 	case OpGuardShape, OpGuardValue:
 		if function.Type(o.Results[0]) != function.Type(o.Args[0]) {
 			return fmt.Errorf("%w: %s refines %s into %s", ErrType, o.name(), function.Type(o.Args[0]), function.Type(o.Results[0]))
+		}
+	case OpSlice:
+		if function.Type(o.Args[0]) != TypeRef || function.Type(o.Results[0]) != TypeRef {
+			return fmt.Errorf("%w: %s of %s", ErrType, o.name(), function.Type(o.Args[0]))
 		}
 	case OpRetain, OpRelease:
 		if function.Type(o.Args[0]) != TypeRef {

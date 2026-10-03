@@ -138,6 +138,10 @@ const (
 	OpRetain
 	OpRelease
 	OpState
+	// OpSlice is its argument, a guarded array, whose element pointer and
+	// length array ops naming the result read as of the slice: nothing
+	// between them may resize or replace the array.
+	OpSlice
 
 	OpJump
 	OpBranch
@@ -189,6 +193,8 @@ func (o Op) String() string {
 		return "release"
 	case OpState:
 		return "state"
+	case OpSlice:
+		return "slice"
 	case OpJump:
 		return "jump"
 	case OpBranch:

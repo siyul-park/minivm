@@ -113,7 +113,7 @@ func (e *emitter) collect() bool {
 
 func (e *emitter) accept(id int, operation ssa.Operation) bool {
 	switch operation.Op {
-	case ssa.OpGuardKind, ssa.OpGuardShape, ssa.OpGuardValue:
+	case ssa.OpGuardKind, ssa.OpGuardShape, ssa.OpGuardValue, ssa.OpSlice:
 		e.subst[operation.Results[0]] = e.resolve(operation.Args[0])
 		return true
 	case ssa.OpGuardBounds, ssa.OpRetain, ssa.OpRelease, ssa.OpState:

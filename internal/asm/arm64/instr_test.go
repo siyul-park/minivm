@@ -518,6 +518,30 @@ func TestSTRR(t *testing.T) {
 	require.NotEmpty(t, inst.String())
 }
 
+func TestLDRBR(t *testing.T) {
+	inst := arm64.LDRBR(arm64.X0, arm64.X0, arm64.X0)
+	require.Equal(t, uint16(arm64.OpLDRBR), inst.Op)
+	require.NotEmpty(t, inst.String())
+}
+
+func TestLDRSBR(t *testing.T) {
+	inst := arm64.LDRSBR(arm64.X0, arm64.X0, arm64.X0)
+	require.Equal(t, uint16(arm64.OpLDRSBR), inst.Op)
+	require.NotEmpty(t, inst.String())
+}
+
+func TestSTRBR(t *testing.T) {
+	inst := arm64.STRBR(arm64.X0, arm64.X0, arm64.X0)
+	require.Equal(t, uint16(arm64.OpSTRBR), inst.Op)
+	require.NotEmpty(t, inst.String())
+}
+
+func TestSTRWR(t *testing.T) {
+	inst := arm64.STRWR(arm64.X0, arm64.X0, arm64.X0)
+	require.Equal(t, uint16(arm64.OpSTRWR), inst.Op)
+	require.NotEmpty(t, inst.String())
+}
+
 func TestLDP(t *testing.T) {
 	inst := arm64.LDP(arm64.X0, arm64.X0, arm64.X0, 1)
 	require.Equal(t, uint16(arm64.OpLDP), inst.Op)

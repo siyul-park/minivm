@@ -108,6 +108,23 @@ func refIsNull(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	return true
 }
 
+// slice loads a guarded array's element pointer and length for the array
+// ops naming op's result, which is the same reference.
+func (m *Machine) slice(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	if !has(op, 1, 1) {
+		return false
+	}
+	shape, ok := m.guards[op.Args[0]]
+	if !ok || shape.Struct || shape.Function != 0 {
+		return false
+	}
+	ptr, ln := m.elements(a, s, op.Args[0], shape)
+	m.Move(a, s.Reg(op.Results[0]), s.Reg(op.Args[0]))
+	m.guards[op.Results[0]] = shape
+	m.slices[op.Results[0]] = [2]asm.VReg{ptr, ln}
+	return true
+}
+
 // arrayLen loads the element count of a guarded array.
 func (m *Machine) arrayLen(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	if !has(op, 1, 1) {
@@ -117,7 +134,7 @@ func (m *Machine) arrayLen(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 	if !ok {
 		return false
 	}
-	_, ln := m.slice(a, s.Reg(op.Args[0]), shape)
+	_, ln := m.elements(a, s, op.Args[0], shape)
 	a.Emit(target.MOVW(s.Reg(op.Results[0]), ln))
 	return true
 }
@@ -132,24 +149,20 @@ func (m *Machine) arrayGet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 	if !ok {
 		return false
 	}
-	ptr, ln := m.slice(a, s.Reg(op.Args[0]), shape)
-	idx := m.index(a, s, s.Reg(op.Args[1]), ln)
+	ptr, ln := m.elements(a, s, op.Args[0], shape)
 	dst := s.Reg(op.Results[0])
 	switch width(shape.Kind) {
 	case 1:
-		addr := m.vreg()
-		a.Emit(target.ADD(addr, ptr, idx))
+		at := m.element(a, s, op.Args[1], ptr, ln, 0)
 		if shape.Kind == types.KindI8 {
-			a.Emit(target.LDRSB(dst, addr, 0))
+			a.Emit(at.row(target.LDRSB, target.LDRSBR, dst))
 		} else {
-			a.Emit(target.LDRB(dst, addr, 0))
+			a.Emit(at.row(target.LDRB, target.LDRBR, dst))
 		}
 	case 4:
-		off := m.offset(a, ptr, idx, 2)
-		a.Emit(target.LDR(dst, off, 0))
+		a.Emit(m.element(a, s, op.Args[1], ptr, ln, 2).row(target.LDR, target.LDRR, dst))
 	default:
-		off := m.offset(a, ptr, idx, 3)
-		a.Emit(target.LDR(dst, off, 0))
+		a.Emit(m.element(a, s, op.Args[1], ptr, ln, 3).row(target.LDR, target.LDRR, dst))
 		if shape.Kind == types.KindRef {
 			m.retain(a, dst)
 		}
@@ -168,45 +181,44 @@ func (m *Machine) arraySet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 	if !ok {
 		return false
 	}
-	ptr, ln := m.slice(a, s.Reg(op.Args[0]), shape)
-	idx := m.index(a, s, s.Reg(op.Args[1]), ln)
+	ptr, ln := m.elements(a, s, op.Args[0], shape)
 	val := s.Reg(op.Args[2])
 	switch width(shape.Kind) {
 	case 1:
-		addr := m.vreg()
-		a.Emit(target.ADD(addr, ptr, idx))
+		at := m.element(a, s, op.Args[1], ptr, ln, 0)
 		if shape.Kind == types.KindI1 && s.Type(op.Args[2]).Kind() != types.KindI1 {
 			// A bool byte is 0 or 1: store val != 0, as threaded does.
 			bit := m.vreg()
-			a.Emit(target.CMPI(val, 0), target.CSET(bit, target.CondNE), target.STRB(bit, addr, 0))
-		} else {
-			a.Emit(target.STRB(val, addr, 0))
+			a.Emit(target.CMPI(val, 0), target.CSET(bit, target.CondNE))
+			val = bit
 		}
+		a.Emit(at.row(target.STRB, target.STRBR, val))
 	case 4:
 		// int32 elements use STRW: array stride is 4 bytes, while generic
 		// integer STR writes 8 bytes. Float32 STR is already width-correct.
-		off := m.offset(a, ptr, idx, 2)
+		at := m.element(a, s, op.Args[1], ptr, ln, 2)
 		if shape.Kind == types.KindI32 {
-			a.Emit(target.STRW(val, off, 0))
+			a.Emit(at.row(target.STRW, target.STRWR, val))
 		} else {
-			a.Emit(target.STR(val, off, 0))
+			a.Emit(at.row(target.STR, target.STRR, val))
 		}
 	default:
-		off := m.offset(a, ptr, idx, 3)
+		at := m.element(a, s, op.Args[1], ptr, ln, 3)
 		if shape.Kind == types.KindRef {
 			// A []any element is a Boxed word; box is a no-op for a ref.
-			m.replace(a, s, off, box(a, s, op.Args[2]))
+			m.replace(a, s, at, box(a, s, op.Args[2]))
 		} else {
-			a.Emit(target.STR(val, off, 0))
+			a.Emit(at.row(target.STR, target.STRR, val))
 		}
 	}
 	return true
 }
 
-// structGet loads the field at a constant index off a guarded struct. The
-// shape guard pinned the struct type, so the field kind is Results[0]'s own
-// static type and no bounds check applies. A ref field is retained, matching
-// threaded STRUCT_GET.
+// structGet loads the field at an index off a guarded struct, at an
+// immediate offset when the index is a constant whose offset fits the
+// load. The shape guard pinned the struct type, so the field kind is
+// Results[0]'s own static type and no bounds check applies. A ref field is
+// retained, matching threaded STRUCT_GET.
 func (m *Machine) structGet(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	if !has(op, 2, 1) {
 		return false
@@ -215,26 +227,36 @@ func (m *Machine) structGet(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 	if !ok || !shape.Struct {
 		return false
 	}
-	data := m.container(a, s.Reg(op.Args[0]))
-	base := m.vreg()
-	a.Emit(target.LDR(base, data, int16(jit.OffsetStructData)))
-	idx := m.vreg()
-	a.Emit(target.SXTW(idx, s.Reg(op.Args[1])))
-	off := m.offset(a, base, idx, 3)
-
-	dst := s.Reg(op.Results[0])
+	var load func(dst, base asm.Reg, offset int16) asm.Instruction
+	size := 8
 	switch s.Type(op.Results[0]).Kind() {
-	case types.KindI64, types.KindF64, types.KindF32, types.KindI32:
-		a.Emit(target.LDR(dst, off, 0))
-	case types.KindRef:
-		a.Emit(target.LDR(dst, off, 0))
-		m.retain(a, dst)
+	case types.KindI64, types.KindF64, types.KindRef:
+		load = target.LDR
+	case types.KindF32, types.KindI32:
+		load, size = target.LDR, 4
 	case types.KindI8:
-		a.Emit(target.LDRSB(dst, off, 0))
+		load, size = target.LDRSB, 1
 	case types.KindI1:
-		a.Emit(target.LDRB(dst, off, 0))
+		load, size = target.LDRB, 1
 	default:
 		return false
+	}
+
+	data := m.container(a, s.Reg(op.Args[0]))
+	at := address{base: m.vreg()}
+	a.Emit(target.LDR(at.base, data, int16(jit.OffsetStructData)))
+	if c, ok := s.Const(op.Args[1]); ok && int32(c) >= 0 && int(int32(c))*8/size <= imm12 {
+		at.offset = int16(c * 8)
+	} else {
+		idx := m.vreg()
+		a.Emit(target.SXTW(idx, s.Reg(op.Args[1])))
+		at.base = m.offset(a, at.base, idx, 3)
+	}
+
+	dst := s.Reg(op.Results[0])
+	a.Emit(load(dst, at.base, at.offset))
+	if s.Type(op.Results[0]) == ssa.TypeRef {
+		m.retain(a, dst)
 	}
 	return true
 }
@@ -275,7 +297,7 @@ func (m *Machine) structSet(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 
 	val := field(a, s, op.Args[2])
 	if kind == types.KindRef {
-		m.replace(a, s, off, val)
+		m.replace(a, s, address{base: off}, val)
 	} else {
 		a.Emit(target.STR(val, off, 0))
 	}
@@ -301,11 +323,14 @@ func (m *Machine) heap(a *asm.Assembler, ref asm.Reg) asm.VReg {
 	return addr
 }
 
-// slice is the element pointer and length of ref's guarded array: a boxed
-// slice header for a scalar Kind's TypedArray[T], or the Elems header
-// embedded in *types.Array for KindRef.
-func (m *Machine) slice(a *asm.Assembler, ref asm.Reg, shape ssa.Shape) (ptr, ln asm.VReg) {
-	header := m.container(a, ref)
+// elements is the element pointer and length of guarded array v: the ones
+// its slice loaded, or loads of a boxed slice header for a scalar Kind's
+// TypedArray[T], or the Elems header embedded in *types.Array for KindRef.
+func (m *Machine) elements(a *asm.Assembler, s compile.Site, v ssa.Value, shape ssa.Shape) (ptr, ln asm.VReg) {
+	if sliced, ok := m.slices[v]; ok {
+		return sliced[0], sliced[1]
+	}
+	header := m.container(a, s.Reg(v))
 	if shape.Kind == types.KindRef {
 		a.Emit(target.ADDI(header, header, uint16(jit.OffsetArrayElems)))
 	}
@@ -313,6 +338,33 @@ func (m *Machine) slice(a *asm.Assembler, ref asm.Reg, shape ssa.Shape) (ptr, ln
 	a.Emit(target.LDR(ptr, header, 0))
 	a.Emit(target.LDR(ln, header, int16(jit.OffsetSliceLen)))
 	return ptr, ln
+}
+
+// address is a memory operand: base plus offset bytes, or, when index is
+// set, base plus index scaled by the access size.
+type address struct {
+	base, index asm.Reg
+	offset      int16
+}
+
+// row is the access at p: imm's form for an offset, reg's for an index.
+func (p address) row(imm func(r, base asm.Reg, offset int16) asm.Instruction, reg func(r, base, index asm.Reg) asm.Instruction, r asm.Reg) asm.Instruction {
+	if p.index == nil {
+		return imm(r, p.base, p.offset)
+	}
+	return reg(r, p.base, p.index)
+}
+
+// element deopts unless array index v is within [0, ln) and addresses its
+// element of 1<<shift bytes off ptr: at an immediate offset for a constant
+// index the 12-bit compare and scaled load fields both hold, else through
+// the index register the access scales.
+func (m *Machine) element(a *asm.Assembler, s compile.Site, v ssa.Value, ptr, ln asm.Reg, shift uint8) address {
+	if c, ok := s.Const(v); ok && int32(c) >= 0 && int32(c) <= imm12 {
+		a.Emit(target.CMPI(ln, uint16(c)), target.BCondLabel(target.OpBLS, s.Trap()))
+		return address{base: ptr, offset: int16(c << shift)}
+	}
+	return address{base: ptr, index: m.index(a, s, s.Reg(v), ln)}
 }
 
 // index sign-extends a native i32 index and deopts unless it is within
@@ -333,11 +385,11 @@ func (m *Machine) offset(a *asm.Assembler, ptr, idx asm.Reg, shift uint8) asm.VR
 	return off
 }
 
-// replace stores ref word at off, then releases the word it overwrote.
-func (m *Machine) replace(a *asm.Assembler, s compile.Site, off asm.Reg, word asm.Reg) {
+// replace stores ref word at p, then releases the word it overwrote.
+func (m *Machine) replace(a *asm.Assembler, s compile.Site, p address, word asm.Reg) {
 	old := m.vreg()
-	a.Emit(target.LDR(old, off, 0))
-	a.Emit(target.STR(word, off, 0))
+	a.Emit(p.row(target.LDR, target.LDRR, old))
+	a.Emit(p.row(target.STR, target.STRR, word))
 	m.release(a, old, s)
 }
 

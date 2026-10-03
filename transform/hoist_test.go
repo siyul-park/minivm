@@ -200,7 +200,7 @@ func TestHoistPass_Run(t *testing.T) {
 		require.NotContains(t, blockChunk(out, 0), "guard.shape")
 	})
 
-	t.Run("hoists a shape guard on an invariant ref into the preheader under the loop's entry state", func(t *testing.T) {
+	t.Run("hoists a shape guard on an invariant ref into the preheader under the loop's entry state, and slices it there", func(t *testing.T) {
 		b := ssa.New("f")
 		pre, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
 		array := b.Param(pre, ssa.TypeRef)
@@ -243,6 +243,7 @@ blk0: (v1:ref)
 	v4:i32 = const 1
 	v9:state = state {addr=1 base=0 ip=2 returns=0 stack=[v2, v3]}
 	v10:ref = guard.shape v1 kind i32 state v9
+	v11:ref = slice v10
 	jump blk1(v2)
 blk1: (v5:i32) <-- (blk0, blk2)
 	v6:state = state {addr=1 base=0 ip=2 returns=0 stack=[v5, v3]}
@@ -250,10 +251,10 @@ blk1: (v5:i32) <-- (blk0, blk2)
 	br v7, blk2(), blk3()
 blk2: () <-- (blk1)
 	v8:state = state {addr=1 base=0 ip=5 returns=0 stack=[v1, v5]}
-	v11:i32 = array.get v10, v5 state v8
-	v12:state = state {addr=1 base=0 ip=6 returns=0 stack=[v5, v4]}
-	v13:i32 = i32.add v5, v4 state v12
-	jump blk1(v13)
+	v12:i32 = array.get v11, v5 state v8
+	v13:state = state {addr=1 base=0 ip=6 returns=0 stack=[v5, v4]}
+	v14:i32 = i32.add v5, v4 state v13
+	jump blk1(v14)
 blk3: () <-- (blk1)
 	return v5
 `, ssa.Format(fn))
@@ -319,9 +320,64 @@ blk3: () <-- (blk1)
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
-		pre := blockChunk(ssa.Format(fn), l.pre)
+		out := ssa.Format(fn)
+		pre := blockChunk(out, l.pre)
 		require.Contains(t, pre, "load local[0]")
 		require.Contains(t, pre, "guard.shape")
+		require.Equal(t, 1, strings.Count(out, "slice"))
+		require.Contains(t, pre, "slice")
+		var sliced ssa.Value
+		for _, op := range fn.Block(l.pre).Operations {
+			if op.Op == ssa.OpSlice {
+				sliced = op.Results[0]
+			}
+		}
+		for _, op := range fn.Block(l.body).Operations {
+			if op.Op == ssa.OpExec && (op.Code == instr.ARRAY_SET || op.Code == instr.ARRAY_GET) {
+				require.Equal(t, sliced, op.Args[0])
+			}
+		}
+	})
+
+	t.Run("does not slice an invariant guarded array in a loop that releases", func(t *testing.T) {
+		l := newCountedLoop()
+		array, guarded, element := l.b.Param(l.pre, ssa.TypeRef), l.b.Value(ssa.TypeRef), l.b.Value(ssa.TypeRef)
+		entry := l.b.Value(ssa.TypeState)
+		l.b.Add(l.pre, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{entry}})
+		l.b.Add(l.pre, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindRef}, Args: []ssa.Value{array}, State: entry, Results: []ssa.Value{guarded}})
+		state := l.b.Value(ssa.TypeState)
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 4}}, Results: []ssa.Value{state}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{guarded, l.counter}, State: state, Results: []ssa.Value{element}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{element}, State: state})
+		fn := l.close()
+		require.NoError(t, ssa.Verify(fn))
+
+		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(fn))
+		require.NotContains(t, ssa.Format(fn), "slice")
+	})
+
+	t.Run("does not slice an invariant container no array guard admits", func(t *testing.T) {
+		l := newCountedLoop()
+		record, guarded, field := l.b.Param(l.pre, ssa.TypeRef), l.b.Value(ssa.TypeRef), l.b.Value(ssa.TypeI32)
+		array, length := l.b.Param(l.pre, ssa.TypeRef), l.b.Value(ssa.TypeI32)
+		entry := l.b.Value(ssa.TypeState)
+		l.b.Add(l.pre, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{entry}})
+		l.b.Add(l.pre, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Struct: true, Type: 0x40}, Args: []ssa.Value{record}, State: entry, Results: []ssa.Value{guarded}})
+		state := l.b.Value(ssa.TypeState)
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 4}}, Results: []ssa.Value{state}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_GET, Args: []ssa.Value{guarded, l.one}, State: state, Results: []ssa.Value{field}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{length}})
+		fn := l.close()
+		require.NoError(t, ssa.Verify(fn))
+
+		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(fn))
+		require.NotContains(t, ssa.Format(fn), "slice")
 	})
 
 	t.Run("does not hoist a load of a local the loop stores", func(t *testing.T) {

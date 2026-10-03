@@ -24,6 +24,7 @@ func TestOp_String(t *testing.T) {
 		{"retain", ssa.OpRetain, "retain"},
 		{"release", ssa.OpRelease, "release"},
 		{"state", ssa.OpState, "state"},
+		{"slice", ssa.OpSlice, "slice"},
 		{"jump", ssa.OpJump, "jump"},
 		{"branch", ssa.OpBranch, "br"},
 		{"table", ssa.OpTable, "table"},

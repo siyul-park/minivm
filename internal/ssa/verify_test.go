@@ -175,6 +175,36 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
 	})
 
+	t.Run("accepts an array read through the slice of a guarded array", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		state := b.Value(ssa.TypeState)
+		array := b.Value(ssa.TypeRef)
+		checked := b.Value(ssa.TypeRef)
+		sliced := b.Value(ssa.TypeRef)
+		length := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{array}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{checked}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{checked}, Results: []ssa.Value{sliced}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{sliced}, State: state, Results: []ssa.Value{length}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		require.NoError(t, ssa.Verify(b.Build()))
+	})
+
+	t.Run("rejects a slice of a value that is no reference", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		state := b.Value(ssa.TypeState)
+		index := b.Value(ssa.TypeI32)
+		sliced := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{index}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{index}, Results: []ssa.Value{sliced}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
+	})
+
 	t.Run("rejects a guard with no interpreter state", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()

@@ -429,6 +429,46 @@ func TestSSAPass_Run(t *testing.T) {
 		require.Equal(t, want, values)
 	})
 
+	t.Run("re-emits an array loop whose hoisted guard slices the array", func(t *testing.T) {
+		pipeline := pass.NewPipeline[*ssa.Function]()
+		pipeline.Add(transform.NewPromotePass())
+		pipeline.Add(transform.NewHoistPass())
+		pipeline.Add(transform.NewDCEPass())
+
+		total := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.NewArrayType(types.TypeI32)},
+			Returns: []types.Type{types.TypeI32}}).Locals(types.TypeI32, types.TypeI32)
+		header, done := total.Label(), total.Label()
+		total.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1))
+		total.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 2))
+		total.Bind(header)
+		total.Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 4), instr.New(instr.I32_GE_S))
+		total.BrIf(done)
+		total.Emit(
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 2), instr.New(instr.ARRAY_GET),
+			instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2))
+		total.Br(header)
+		total.Bind(done).Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.RETURN))
+		fn := total.MustBuild()
+
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 1), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(fn, types.TypedArray[int32]{1, 2, 3, 4}))
+
+		want, wantErr := executionResult(t, prog)
+		got := duplicateConstants(prog)
+		_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(got))
+
+		require.NotEqual(t, instr.Format(fn.Code), instr.Format(got.Constants[0].(*types.Function).Code))
+
+		values, message := executionResult(t, got)
+		require.Equal(t, wantErr, message)
+		require.Equal(t, want, values)
+	})
+
 	t.Run("declines a branch its own layout would put out of range", func(t *testing.T) {
 		for _, tc := range []struct {
 			name    string

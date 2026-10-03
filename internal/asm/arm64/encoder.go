@@ -485,24 +485,22 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		st := storeOpcodes[op]
 		return encodeStore(st.base, st.scale, inst)
 
-	// Load / Store  register-offset  [Xbase, Xoffset]
+	// Load / Store  register-offset  [Xbase, Xindex, LSL #log2(size)]
 
-	case OpLDRR:
-		// LDR Xt, [Xbase, Xm, LSL #3]  — extended register
+	case OpLDRR, OpLDRBR, OpLDRSBR:
 		d, base, m, err := decodeReg3(inst)
 		if err != nil {
 			return nil, err
 		}
-		return enc(0xF8607800 | reg(m)<<16 | reg(base)<<5 | reg(d)), nil
+		return enc(indexedLoad(op, d) | reg(m)<<16 | reg(base)<<5 | reg(d)), nil
 
-	case OpSTRR:
-		// STR Xt, [Xbase, Xm, LSL #3]
-		// inst encoding: Dst=base, Src1=src, Src2=offsetReg
-		d, n, m, err := decodeReg3(inst)
+	case OpSTRR, OpSTRBR, OpSTRWR:
+		// Dst=base, Src1=src, Src2=index.
+		base, src, m, err := decodeReg3(inst)
 		if err != nil {
 			return nil, err
 		}
-		return enc(0xF8207800 | reg(m)<<16 | reg(d)<<5 | reg(n)), nil
+		return enc(indexedStore(op, src) | reg(m)<<16 | reg(base)<<5 | reg(src)), nil
 
 	// Load / Store pair
 
@@ -968,6 +966,46 @@ func encodeStore(op uint32, scale int64, inst asm.Instruction) ([]byte, error) {
 	}
 	pimm := uint32(offset/scale) & 0xFFF
 	return enc(op | pimm<<10 | reg(base)<<5 | reg(src)), nil
+}
+
+// indexedLoad is the register-offset load word op names for dst, its index
+// scaled by the access size: LDRR loads as LDR does, by dst's bank and width.
+func indexedLoad(op Op, dst asm.PReg) uint32 {
+	switch {
+	case op == OpLDRBR:
+		return 0x38607800
+	case op == OpLDRSBR && dst.Width() == asm.Width64:
+		return 0x38A07800
+	case op == OpLDRSBR:
+		return 0x38E07800
+	}
+	return indexedWord(0xB8607800, dst)
+}
+
+// indexedStore is the register-offset store word op names for src: STRR
+// stores as STR does, 8 bytes from an integer register.
+func indexedStore(op Op, src asm.PReg) uint32 {
+	switch {
+	case op == OpSTRBR:
+		return 0x38207800
+	case op == OpSTRWR:
+		return 0xB8207800
+	case src.Type() == asm.RegTypeInt:
+		return 0xF8207800
+	}
+	return indexedWord(0xB8207800, src)
+}
+
+// indexedWord sets word, a 4-byte integer access, to r's size and bank: bit
+// 30 widens it to 8 bytes, bit 26 makes it a float access.
+func indexedWord(word uint32, r asm.PReg) uint32 {
+	if r.Width() == asm.Width64 {
+		word |= 1 << 30
+	}
+	if r.Type() == asm.RegTypeFloat {
+		word |= 1 << 26
+	}
+	return word
 }
 
 // isFloat reports whether op names a float register.
