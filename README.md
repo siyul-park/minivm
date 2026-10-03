@@ -119,7 +119,7 @@ vm := interp.New(prog,
 )
 ```
 
-Use hooks for policy checks and `NewDebugger` with `WithDebugger` for instruction-accurate breakpoints and stepping.
+Use hooks for policy checks and `debug.NewDebugger` with `WithHook(dbg.Hook)` and `WithTick(1)` for instruction-accurate breakpoints and stepping ([Debugging](docs/debugging.md)).
 
 ## Architecture
 

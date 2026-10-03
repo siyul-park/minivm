@@ -6,7 +6,7 @@ Native tier: ownership, runtime contract, lifecycle.
 
 ## Status
 
-- On by default; `interp.WithThreshold(n)`: `n == 0` automatic (default), `n > 0` fixed, `n < 0` off. ARM64 only. Disabled with `WithHook`/`WithFuel`.
+- On by default; `interp.WithThreshold(n)`: `n == 0` automatic (default), `n > 0` fixed, `n < 0` off. ARM64 only. Off at `WithTick(1)` (`debugging.md` Precision); runs under `WithHook` and `WithFuel` (Ticks).
 - Threaded execution is the semantic baseline.
 
 ```text
@@ -63,7 +63,7 @@ One wake (analysis, the first compiles, their garbage) costs ~0.3–0.6 ms of in
 | `jit.Code` | One unit's native code at one tier. `Free` unmaps once. |
 | `jit.Store` | Published code and `Context.Natives`. |
 
-- Native code never runs on a goroutine stack; async preemption cannot reach it, so back edges, calls, and returns spend `Budget` explicitly. Back edges and calls branch to safepoint on exhaustion; returns only credit the work.
+- Native code never runs on a goroutine stack; async preemption cannot reach it, so back edges, calls, and returns spend `Budget` explicitly. Back edges and calls branch to safepoint on exhaustion; returns only credit the work. `Budget` carries across Go entries and served calls; each safepoint adds `native.quota` (Ticks).
 - Native code writes no Go pointer. It reads heap interface words through `Context.Heap` and object fields at `jit.Offset*`.
 - Registers: X24 budget, X25 frame base, X27 activation depth, X26 context, X16/X17 scratch, X18/X28 untouched. Allocatable: X0–X15, X19–X23, D0–D31.
 - X24 mirrors `Context.Budget`: exits store it, resumed exits reload it, and a normal Go entry stores it back after native return.
@@ -139,7 +139,7 @@ A reference parameter its function never writes (`transform.Borrows`) is borrowe
 |---|---|---|
 | `ExitDeopt` | failed check, `OpExit`; `Exit.Trap` marks a check the operation itself raises (`Site.Trap`: zero divisor, index bounds) | no |
 | `ExitBridge` | unlowered `OpExec` | yes, unless denied or its handler traps |
-| `ExitSafepoint` | loop header or native call when `Budget` is spent | yes |
+| `ExitSafepoint` | loop header or native call when `Budget` is spent | yes, unless its tick runs threaded (Ticks) |
 | `ExitRelease` | dropping a last reference | yes |
 | `ExitCall` | `CALL` that cannot run natively, or a generic one | yes, unless the callee is a coroutine function, does not fit the stack, has another signature than a generic call's, or leaves by a trap, throw, or cancellation |
 | `ExitBox` | a wide (> 49-bit) i64 at a store, slot return, call argument, or `OpComplete` | yes |
@@ -166,7 +166,7 @@ A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every ad
 | served bridge or box | bridge | `jit.Ledger` price |
 | release | release | `jit.Ledger` price |
 | served `ExitCall` | call | `jit.Ledger` price; nothing while the callee has no code but may still compile (`pending`) |
-| `ExitDeopt` with `Exit.Trap`; a bridge or box whose handler panicked; a denied control-transfer bridge (`THROW`, `UNREACHABLE`); a cancelled safepoint; a trap, throw, or cancellation in a served call's callee | trap | none |
+| `ExitDeopt` with `Exit.Trap`; a bridge or box whose handler panicked; a denied control-transfer bridge (`THROW`, `UNREACHABLE`); a cancelled safepoint; a safepoint whose tick runs threaded; an `ExitCall` under a hook; a trap, throw, or cancellation in a served call's callee | trap | none |
 | `ExitDeopt` without `Exit.Trap` (guards, `OpExit` at a cold dynamic `CALL` or a `RETURN_CALL` that is not a self tail call); any other declined bridge; an `ExitCall` not served | guard | refutation |
 
 | Rule | Contract |
@@ -188,10 +188,23 @@ A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every ad
 | Frames | The caller's activations keep frame slots from the run's start; a stand-in frame for the innermost runs only its exact-code `CALL` (code cut past it), so `Interpreter.dispatch` stops when the callee returns to it. |
 | Handlers | `Interpreter.floor` hides the suspended slots from every handler search; a panic not caught above it re-panics from `dispatch` to `nest`. |
 | Native entries | Start at `Context.Depth` = the suspended depth (`native.depth`), on the same native stack below the suspended frames; `Records` bounds the total depth, and no entry starts once they are full. `Limit` counts the suspended activations. A Go entry above depth 0 releases its borrowed parameters itself after it returns, since `OpReturn` releases them only at depth 1. |
-| State | `asm.State`, `Limit`, `Budget`, and `Depth` are saved before and restored after; the nested run spends its own budget. |
+| State | `asm.State`, `Limit`, and `Depth` are saved before and restored after; the nested run spends the caller's `Budget`. |
+| Hook | Under `WithHook` no call is served: the suspended callers' frame slots stay unmaterialized below the floor, where a hook would read them. The `ExitCall` deopts and replays the call. |
 | Callee | A generic call has `Exit.Callee` 0: the interpreter resolves its `Target` value to a function or closure whose parameter count is `Exit.Args` and whose return kinds are `Exit.Returns`; any other callee deopts and replays the call. |
 | Results | Register results are unboxed into `Context.Results`; slot results stay at the callee frame base. |
 | Leaving | A cancellation materializes the caller under the callee's live frames and continues threaded; a `THROW` whose search stopped at the floor is pushed back and runs again over them; any other panic materializes them and re-panics after the entering call returns from native code. None refutes the caller. A coroutine callee, whose `CALL` returns a handle, deopts and replays the call. |
+
+## Ticks
+
+A native safepoint is the interpreter's tick (`WithTick`) when the interpreter has `WithHook` or `WithFuel`; otherwise it comes every `budget` (2^16) work units, and a `WithProfiler` interpreter samples it.
+
+| Concern | Contract |
+|---|---|
+| Quota | `native.quota` work units (Exit policy, Ledger) per safepoint: `tick` with a hook or fuel, else `budget`. |
+| Fuel, profiler | The safepoint charges one tick of fuel, if any, (`Interpreter.burn`), samples the innermost activation's `(address, ip)` (`Interpreter.sample`), and resumes; nothing materializes. |
+| Hook, or fuel spent | The safepoint deopts every native activation, points each materialized frame at its observed threaded code where its ip has a handler (`native.rethread`), and parks the innermost frame with a tick due (`Interpreter.due`). `dispatch` runs `Interpreter.safepoint` before the next instruction: the hook reads and writes the state threaded code would have, and its error or `ErrFuelExhausted` returns from `Run` as is. A loop header's observer re-enters native code. |
+| Fuel bound | `WithFuel(F)` gives ⌈F/T⌉ ticks (T = `tick`). Native code runs at most (ticks + 1)·T work units, plus returns past the last check (at most the native depth). A work unit executes at least one bytecode instruction and at most the longest loop-free bytecode path between budget points, so native code can execute more instructions than threaded code for the same fuel. |
+| Hook rate | One hook call per T native work units, against one per T threaded instructions. |
 
 ## Store and tiers
 

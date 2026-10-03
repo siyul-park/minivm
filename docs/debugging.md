@@ -8,24 +8,24 @@ Bytecode-level debugger for `interp.Run`.
 
 | Concern | Owner |
 |---|---|
-| debugger | `interp.NewDebugger` |
-| runtime integration | `interp.WithDebugger` |
-| stop result | `interp.ErrStopped` |
+| debugger | `debug.NewDebugger` |
+| runtime integration | `interp.WithHook(dbg.Hook)`, `interp.WithTick(1)` |
+| stop result | `debug.ErrStopped` |
 | REPL commands | `guides/repl.md` |
 
-The debugger exposes breakpoints, stepping, bytecode location, frames, stack, locals, globals, constants, and heap inspection. `WithDebugger` sets `WithTick(1)` so stops occur at bytecode boundaries.
+The debugger exposes breakpoints, stepping, bytecode location, frames, stack, locals, globals, constants, and heap inspection. `WithTick(1)` runs the hook at every bytecode boundary, so stops occur there.
 
 ## Setup
 
 ```go
-dbg := interp.NewDebugger()
+dbg := debug.NewDebugger()
 dbg.Break(0, 5)
-vm := interp.New(prog, interp.WithDebugger(dbg))
+vm := interp.New(prog, interp.WithHook(dbg.Hook), interp.WithTick(1))
 defer vm.Close()
 
 for {
     err := vm.Run(ctx)
-    if errors.Is(err, interp.ErrStopped) {
+    if errors.Is(err, debug.ErrStopped) {
         _ = dbg.Stop()
         dbg.Continue()
         continue
@@ -78,7 +78,7 @@ dbg.BreakIf(0, 10, func(vm *interp.Interpreter) bool { return vm.Len() > 0 })
 
 ## Precision
 
-`WithDebugger` disables optimization paths that hide bytecode boundaries; debugger execution is exact bytecode execution.
+`WithTick(1)` runs no fused or native code, which hide bytecode boundaries: debugger execution is exact bytecode execution. A larger tick runs native code (`jit-internals.md` Ticks).
 
 ## Invariants
 

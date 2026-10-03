@@ -854,6 +854,26 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		require.Equal(t, context.Background(), got)
 	})
 
+	t.Run("VM function under a hook at every instruction", func(t *testing.T) {
+		calls := 0
+		i := interp.New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)}), interp.WithTick(1), interp.WithHook(func(*interp.Interpreter) error {
+			calls++
+			return nil
+		}))
+		defer i.Close()
+		r := interp.NewRegistry()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+			instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
+
+		var call func() (int32, error)
+		require.NoError(t, r.Unmarshal(i, fn, &call))
+		value, err := call()
+		require.NoError(t, err)
+		require.Equal(t, int32(7), value)
+		require.Equal(t, 3, calls)
+		require.Zero(t, i.Len())
+	})
+
 	t.Run("VM function canceled context", func(t *testing.T) {
 		i := interp.New(program.New(nil), interp.WithTick(1))
 		r := interp.NewRegistry()

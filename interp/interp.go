@@ -31,10 +31,13 @@ type Interpreter struct {
 	// threaded code spends one at each frame entry and taken back edge, a Run
 	// start dormancy/32 (spend). Zero once the JIT is live, fixed, or off.
 	heat int
-	// parked is the ip of the frame whose handler ran heat out; the frame
-	// waits at ip park so dispatch leaves its loop and wakes the JIT
-	// (unpark).
+	// parked is the ip of the frame whose handler ran heat out, or whose
+	// native code reached a tick it cannot run (due); the frame waits at ip
+	// park so dispatch leaves its loop (unpark).
 	parked int
+	// due reports that the parked frame awaits a tick, which dispatch runs
+	// before its next instruction.
+	due    bool
 	closed bool
 
 	types       []types.Type
@@ -174,7 +177,9 @@ func WithHeapLimit(val int) Option {
 	return func(o *option) { o.maxHeap = val }
 }
 
-// WithTick sets the execution tick interval.
+// WithTick sets the execution tick interval: instructions in threaded code,
+// work units (back edges, calls, returns) in native code. A tick of 1 is
+// exact execution: no fused or native code.
 func WithTick(val int) Option {
 	return func(o *option) { o.tick = val }
 }
@@ -188,8 +193,8 @@ func WithFuel(val uint64) Option {
 // the JIT starts once the program has done enough work to repay a compile and
 // adapts its thresholds from runtime metrics. n > 0 compiles a
 // *types.Function after n calls and a loop after n back edges. n < 0 disables
-// the JIT. The JIT also requires runtime.GOARCH == "arm64" and neither
-// WithHook nor WithFuel.
+// the JIT. The JIT also requires runtime.GOARCH == "arm64" and a WithTick
+// above 1.
 func WithThreshold(n int) Option {
 	return func(o *option) { o.threshold = n }
 }
@@ -406,11 +411,16 @@ func (i *Interpreter) spend(work int) {
 // park is the ip a frame waits at while the JIT wakes: past any code.
 const park = math.MaxInt
 
-// unpark returns the frame threaded code parked when heat ran out to its ip
-// and wakes the JIT.
-func (i *Interpreter) unpark() {
+// unpark returns the parked frame to its ip and reports whether a tick is
+// due; otherwise heat ran out, and it wakes the JIT.
+func (i *Interpreter) unpark() bool {
 	i.fr.ip = i.parked
+	if i.due {
+		i.due = false
+		return true
+	}
 	i.wake()
+	return false
 }
 
 // wake makes the dormant JIT live, or turns it off for a program none of
@@ -866,7 +876,7 @@ func (i *Interpreter) dispatch() (caught bool, err error) {
 	code := f.code
 	// The fast path avoids safepoint bookkeeping when no coordination is needed.
 	// Each loop also ends when a handler parks its frame (Interpreter.parked).
-	if i.done == nil && i.gas < 0 && i.hook == nil && i.profiler == nil {
+	if i.done == nil && !i.metered() {
 		for {
 			for f.ip < len(code) {
 				code[f.ip](i)
@@ -900,7 +910,9 @@ func (i *Interpreter) dispatch() (caught bool, err error) {
 		if f.ip != park {
 			return false, nil
 		}
-		i.unpark()
+		if i.unpark() {
+			tick = 1
+		}
 	}
 }
 
@@ -991,7 +1003,7 @@ func (i *Interpreter) callable(val types.Value) (types.Value, bool) {
 }
 
 // safepoint runs per-tick interpreter coordination: context cancellation,
-// fuel metering, and the user hook.
+// fuel metering, the user hook, and the profiler sample.
 func (i *Interpreter) safepoint() error {
 	if i.done != nil {
 		select {
@@ -1000,26 +1012,42 @@ func (i *Interpreter) safepoint() error {
 		default:
 		}
 	}
-	if i.gas >= 0 {
-		if i.gas == 0 {
-			return ErrFuelExhausted
-		}
-		i.gas--
+	if !i.burn() {
+		return ErrFuelExhausted
 	}
-	f := i.fr
 	if i.hook != nil {
-		if f.addr >= 0 && f.addr < len(i.code) {
-			f.code = i.code[f.addr]
-			f.upvals = i.upvals(f.ref, f.addr)
-		}
 		if err := i.hook(i); err != nil {
 			return err
 		}
 	}
-	if i.profiler != nil {
-		i.samples.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
-	}
+	i.sample(i.fr.addr, i.fr.ip)
 	return nil
+}
+
+// metered reports whether a tick has work beyond cancellation: fuel, a hook,
+// or a profiler.
+func (i *Interpreter) metered() bool {
+	return i.gas >= 0 || i.hook != nil || i.profiler != nil
+}
+
+// burn charges one tick of fuel and reports whether any remained; without
+// fuel it always does.
+func (i *Interpreter) burn() bool {
+	if i.gas < 0 {
+		return true
+	}
+	if i.gas == 0 {
+		return false
+	}
+	i.gas--
+	return true
+}
+
+// sample records the instruction at addr's ip with the profiler, if any.
+func (i *Interpreter) sample(addr, ip int) {
+	if i.profiler != nil {
+		i.samples.Add(addr, ip, i.instrs[addr][ip])
+	}
 }
 
 func (i *Interpreter) flush() {

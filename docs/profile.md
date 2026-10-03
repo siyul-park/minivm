@@ -10,9 +10,9 @@ Runtime sampling and execution metrics.
 
 ## Sampling
 
-`Run` samples after every `WithTick` instructions (`128` by default). Each sample records function, bytecode IP, and opcode; the tick also polls context, fuel, hooks, and pool state.
+`Run` samples at every tick: every `WithTick` instructions (`128` by default) of threaded code; native code's ticks are in `jit-internals.md` Ticks. Each sample records function, bytecode IP, and opcode; the tick also polls context, fuel, hooks, and pool state.
 
-Lower ticks increase both density and cost. Debugger and REPL `.profile` use exact instruction sampling.
+Lower ticks increase both density and cost. Debugger and REPL `.profile` use exact instruction sampling (`debugging.md` Precision).
 
 ## API
 

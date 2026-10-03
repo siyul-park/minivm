@@ -30,6 +30,9 @@ type native struct {
 	// threshold is the call count that compiles an address's Baseline, and
 	// each OSR site's back-edge count: WithThreshold's n, or floor when auto.
 	threshold int
+	// quota is the work units a safepoint adds to Context.Budget: the tick
+	// of an interpreter with fuel or a hook, else budget.
+	quota int64
 	// auto reports WithThreshold(0): a retire raises the address's thresholds
 	// (backoffs), and n stays dormant until the interpreter's heat runs out.
 	auto bool
@@ -129,7 +132,7 @@ type shared struct {
 // nativeStack is the native stack size per interpreter.
 const nativeStack = 1 << 20
 
-// budget is the back-edge count between safepoints.
+// budget is the work units between safepoints of an unmetered interpreter.
 const budget = 1 << 16
 
 // tolerance is the count of refuted speculations under unchanged feedback that
@@ -232,10 +235,10 @@ func (r *shared) sweep(visit func(addr int) (live bool)) {
 }
 
 // jitEnabled reports whether opt selects the JIT: WithThreshold(n) with n >=
-// 0, on arm64, without WithHook or WithFuel (their per-tick semantics need
-// interpreter frames).
+// 0, on arm64, with a tick above 1: a tick of 1 is exact execution, every
+// instruction boundary observable, which native code does not expose.
 func jitEnabled(opt option) bool {
-	return opt.threshold >= 0 && runtime.GOARCH == "arm64" && opt.hook == nil && opt.fuel == 0
+	return opt.threshold >= 0 && runtime.GOARCH == "arm64" && opt.tick > 1
 }
 
 // newModule builds the program data compile.Unit reads: the interpreter's
@@ -312,10 +315,15 @@ func newNative(i *Interpreter, threshold int) *native {
 	// compile is captured here, not in wake: threaded code reaches wake
 	// (Interpreter.cool), and a reference from it to i.compile closes the
 	// threaded/fusions initialization cycle.
-	if threshold == 0 {
-		return &native{auto: true, threshold: floor, compile: i.compile}
+	// A profiler only samples native safepoints: a shorter quota would cost it.
+	quota := int64(budget)
+	if i.gas >= 0 || i.hook != nil {
+		quota = int64(i.tick)
 	}
-	n := &native{threshold: threshold, compile: i.compile}
+	if threshold == 0 {
+		return &native{auto: true, threshold: floor, quota: quota, compile: i.compile}
+	}
+	n := &native{threshold: threshold, quota: quota, compile: i.compile}
 	n.wake(i) // live: only the automatic policy turns a program away
 	return n
 }
@@ -694,17 +702,17 @@ func (n *native) drain(i *Interpreter) {
 }
 
 // settle serves exits from trap through safepoints, releases, bridges, and
-// calls; the entered activation materializes as frame start. ok reports that
-// the activation reached TrapReturn; retire reports whether the code retires;
-// fault is a panic a call raised past its native caller, which the caller
-// re-raises once native code has returned.
+// calls; mark is Context.Budget at entry, and the entered activation
+// materializes as frame start. ok reports that the activation reached
+// TrapReturn; retire reports whether the code retires; fault is a panic a
+// call raised past its native caller, which the caller re-raises once native
+// code has returned.
 //
 // Each exit costs the code by its class (jit.Class): a trap nothing; a guard
 // its refutation (judge); a bridge or call its price, charged to ledger before it is
 // served, which retires the code once its work no longer pays.
-func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *jit.Ledger, start int, deopt func(jit.Exit), refute func() bool) (ok, retire bool, fault any) {
+func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *jit.Ledger, mark int64, start int, deopt func(jit.Exit), refute func() bool) (ok, retire bool, fault any) {
 	ctx := n.ctx
-	mark := int64(budget)
 	for {
 		ledger.Spend(mark - ctx.Budget)
 		mark = ctx.Budget
@@ -730,8 +738,20 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 				deopt(exit)
 				return false, false, nil
 			}
+			ctx.Budget += n.quota
+			if i.metered() {
+				if i.hook != nil || !i.burn() {
+					// Threaded code runs the tick before its next instruction,
+					// over materialized frames: the hook sees and changes the
+					// VM threaded code would, and Run returns the tick's error.
+					deopt(exit)
+					n.rethread(i, start)
+					i.due, i.parked, i.fr.ip = true, i.fr.ip, park
+					return false, false, nil
+				}
+				i.sample(exit.Frame.Address, exit.Frame.IP)
+			}
 			n.sync(i)
-			ctx.Budget = budget
 			mark = ctx.Budget
 			n.drain(i)
 			trap = jit.Resume(ctx)
@@ -770,6 +790,14 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 			return false, n.judge(entered, code, refute), nil
 		case jit.ExitCall:
 			ref := n.callee(int(ctx.Depth)-1, exit)
+			if i.hook != nil {
+				// A served call keeps its native callers' frames
+				// unmaterialized below the floor, where a hook reads them.
+				deopt(exit)
+				n.replay(i, exit, ref)
+				n.rethread(i, start)
+				return false, false, nil
+			}
 			addr, ok := target(i, exit, ref)
 			if !ok || !n.nests(i, exit, addr) {
 				deopt(exit)
@@ -794,6 +822,18 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 			}
 			n.record(i, exit)
 			return false, n.judge(entered, code, refute), nil
+		}
+	}
+}
+
+// rethread points every frame materialized from start at its observed
+// threaded code where its ip has a handler, so its loop headers enter native
+// code again.
+func (n *native) rethread(i *Interpreter, start int) {
+	for at := start; at < i.fp; at++ {
+		f := &i.frames[at]
+		if code := i.code[f.addr]; f.ip < len(code) && code[f.ip] != nil {
+			f.code = code
 		}
 	}
 }
@@ -825,6 +865,7 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 
 	n.load(i, bp, 0)
 	ctx := n.ctx
+	mark := ctx.Budget
 
 	if i.profiler != nil {
 		metric(i, metricEntries, prof.Label{Key: "tier", Value: code.Tier.String()})
@@ -847,7 +888,7 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 
 	if trap := jit.Enter(code.Entry(), ctx); trap != jit.TrapReturn {
 		start := i.fp
-		ok, retire, fault := n.settle(i, code, trap, &n.ledgers[addr], start,
+		ok, retire, fault := n.settle(i, code, trap, &n.ledgers[addr], mark, start,
 			// ip advances the entering (pre-rebuild) frame, which rebuild
 			// never writes, so it applies before rebuild retargets i.fr.
 			func(exit jit.Exit) { i.fr.ip += advance; n.rebuild(i, exit, start, addr, release) },
@@ -857,7 +898,7 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 			return retire, fault
 		}
 	} else {
-		n.ledgers[addr].Spend(budget - ctx.Budget)
+		n.ledgers[addr].Spend(mark - ctx.Budget)
 	}
 	for _, v := range owned {
 		i.releaseBox(v)
@@ -1152,7 +1193,7 @@ func (n *native) nest(i *Interpreter, exit jit.Exit, ref, start int, deopt func(
 	at := start + k - int(n.depth)
 	bp := n.frameBase(i, k)
 
-	state, limit, spent, depth, floor := ctx.State, ctx.Limit, ctx.Budget, n.depth, i.floor
+	state, limit, depth, floor := ctx.State, ctx.Limit, n.depth, i.floor
 	fr, fp, sp, saved := i.fr, i.fp, i.sp, i.frames[at]
 
 	code := n.exactCode(i, m.Address)
@@ -1173,7 +1214,7 @@ func (n *native) nest(i *Interpreter, exit jit.Exit, ref, start int, deopt func(
 			ctx.Results[j] = toWord(i, kind, i.stack[i.sp-len(exit.Results)+j])
 		}
 		i.fr, i.fp, i.sp, i.frames[at] = fr, fp, sp, saved
-		ctx.State, ctx.Limit, ctx.Budget, ctx.Depth = state, limit, spent, uint64(k+1)
+		ctx.State, ctx.Limit, ctx.Depth = state, limit, uint64(k+1)
 		return nil, true
 	}
 
@@ -1340,6 +1381,7 @@ func (n *native) load(i *Interpreter, bp, spare int) {
 		if err != nil {
 			panic(err)
 		}
+		ctx.Budget = n.quota
 		n.ctx = ctx
 	}
 	ctx := n.ctx
@@ -1350,7 +1392,6 @@ func (n *native) load(i *Interpreter, bp, spare int) {
 	ctx.Top = end(i.stack)
 	ctx.FB = base(i.stack[bp:])
 	ctx.Limit = uint64(min(len(ctx.Records), int(n.depth)+len(i.frames)-i.fp+spare))
-	ctx.Budget = budget
 	ctx.Depth = n.depth
 }
 

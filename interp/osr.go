@@ -195,6 +195,7 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	n.load(i, i.fr.bp, 1)
 	ctx := n.ctx
 	ctx.Upvals = base(i.fr.upvals)
+	mark := ctx.Budget
 
 	if i.profiler != nil {
 		metric(i, metricEntries, prof.Label{Key: "tier", Value: c.Tier.String()})
@@ -208,7 +209,7 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 		// frame in place instead of pushing a new one.
 		start := i.fp - 1
 		f := i.fr
-		ok, retire, fault = n.settle(i, c, trap, &s.ledger, start,
+		ok, retire, fault = n.settle(i, c, trap, &s.ledger, mark, start,
 			func(exit jit.Exit) { n.rebuild(i, exit, start, f.ref, f.release) },
 			func() bool {
 				if !same(s.built, n.feedback(s.address)) {
@@ -219,7 +220,7 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 			},
 		)
 	} else {
-		s.ledger.Spend(budget - ctx.Budget)
+		s.ledger.Spend(mark - ctx.Budget)
 	}
 	if ok {
 		n.finish(i, s, c)
