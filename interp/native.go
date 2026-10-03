@@ -506,11 +506,6 @@ func (n *native) attempt(i *Interpreter, addr int, fn *types.Function, release b
 		return false
 	}
 	n.drain(i)
-	if n.store.Code(addr) == nil {
-		n.count(i, addr, fn)
-		return false
-	}
-
 	code := n.store.Code(addr)
 	if code == nil {
 		n.count(i, addr, fn)

@@ -5,6 +5,13 @@ import (
 	"github.com/siyul-park/minivm/internal/ssa"
 )
 
+// deduplicate replaces each keyed operation with the results of an earlier
+// operation with the same key. The table holds the dominating definitions
+// visible at the current block, so the walk goes down the dominator tree:
+// NewDominance's children place every definition before the blocks it
+// dominates, and a block's entries are retracted when the walk leaves its
+// subtree, keeping a cheaply-visible replacement value correct only where it
+// dominates the use.
 func deduplicate(function *ssa.Function, key func(*ssa.Function, ssa.Operation) (string, bool)) (*ssa.Function, bool) {
 	children := graph.NewDominance(function).Children()
 

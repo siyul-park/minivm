@@ -12,7 +12,7 @@ This is a dated history/audit document. It owns no current contract, describes n
 
 **Observed**: `Compiler.Compile` tried the SSA backend first and, when it declined, fell through to the plan pipeline for the same root. Both lowered the same opcodes behind the same guards and reported the same `prof` labels (`frontend`, `reason`, `opcode`), so an interpreter-level test could not tell which pipeline emitted the code — values and metrics agreed bit for bit. Forcing the SSA emitter to decline one opcode failed only the golden; every `interp` subtest stayed green.
 
-**Evidence**: `internal/jit/compiler.go:59-77` (`Compiler.Compile`: `native` first, then the plan frontends); `docs/testing.md` Evidence table, `Golden` row ("exact native instruction stream for a specified input shape").
+**Evidence**: `internal/jit/compile` `Compile` (`native` first, then the plan frontends); `docs/testing.md` Evidence table, `Golden` row ("exact native instruction stream for a specified input shape").
 
 **Consequence for the rebuild**: One pipeline, no fallback path to hide behind. Per-lowering goldens stay the backend specification; parity tests alone cannot discriminate two implementations of one behavior.
 
@@ -20,7 +20,7 @@ This is a dated history/audit document. It owns no current contract, describes n
 
 **Observed**: One opcode the backend could not lower ended native compilation for the entire region it appeared in; a single non-constant array read rejected a whole static plan. Six benchmark kernels ran slower with the JIT enabled than with the pure interpreter, and profiles of `PermutationFlips/default` and `StructTreeWalk/default` carried no native frames at all.
 
-**Evidence**: PR #190 ("perf(interp): bridge unlowerable opcodes and widen static JIT coverage" — Context section states the six-kernel regression and the profile finding); `internal/jit/backend/compiler.go:360` (`if op.Op == ssa.OpExec && !m.Lowers(op.Code) { return nil, false }`, declining one opcode rejects the whole function).
+**Evidence**: PR #190 ("perf(interp): bridge unlowerable opcodes and widen static JIT coverage" — Context section states the six-kernel regression and the profile finding); `internal/jit/compile` (`if op.Op == ssa.OpExec && !m.Lowers(op.Code) { return nil, false }`, declining one opcode rejects the whole function).
 
 **Consequence for the rebuild**: Every non-lowered `OpExec` becomes a bridge — exit to the interpreter for that one opcode, resume native at the next IP — never a whole-unit refusal. No `Lowers` query gates the frontend.
 
@@ -28,7 +28,7 @@ This is a dated history/audit document. It owns no current contract, describes n
 
 **Observed**: A guard failure originally unwound the whole native invocation with no resume point, no recorded assumption, and no recompile trigger — every guard miss paid the full compile-then-discard cost again. Native code also runs inside a Go-managed stack frame of a fixed literal size, which cannot support a resumable exit because Go's own stack growth can move that frame.
 
-**Evidence**: commit b7c930e ("feat(interp): implement give-up and retirement mechanisms for native entries" — introduced a give-up/resume path in place of raw abandonment); `internal/asm/arm64/abi_arm64.s:8-17` (`TEXT ·invoke(SB), $8272-16`, the coupled Go-stack-frame literal `abi_arm64.s:8` documents against `arm64.StackReserve`).
+**Evidence**: commit b7c930e ("feat(interp): implement give-up and retirement mechanisms for native entries" — introduced a give-up/resume path in place of raw abandonment); `internal/asm/enter_arm64.s` (`TEXT ·invoke(SB), $8272-16`, the coupled Go-stack-frame literal documents against `arm64.StackReserve`).
 
 **Consequence for the rebuild**: Resumable exits run on a separate native stack, not inside a Go stack frame. Deopt is a compiler feature with frame maps; invalidation records the refuted site and requeues instead of discarding.
 
@@ -60,7 +60,7 @@ This is a dated history/audit document. It owns no current contract, describes n
 
 **Observed**: The original allocator judged a spill from one linear index per value (its highest-referencing instruction) with no notion of a branch; soundness came from two all-or-nothing gates layered on top instead — any backward branch anywhere disabled spilling for the whole build, and any container store anywhere disabled it for that plan. A function containing a loop therefore could not spill at all, however far a value sat from the loop, and the gate hid the cost for months. The allocator also has no call-clobber model: a callee may clobber any allocatable register, and the float bank has no spill support at all.
 
-**Evidence**: commit f617023, part of PR #224 ("perf(asm): allocate registers over a real control-flow graph" — replaces the linear-index heuristic and both gates with basic blocks, computed dominance, and a hazard check for loop-carried self-redefinition and self-recursive calls; geomean across eighteen kernels against the pre-change baseline: +0.70%, worst case `SortStress` +3.85%); `internal/asm/rewriter.go:364-369` (documents the missing call-clobber model and the float bank's lack of spill support).
+**Evidence**: commit f617023, part of PR #224 ("perf(asm): allocate registers over a real control-flow graph" — replaces the linear-index heuristic and both gates with basic blocks, computed dominance, and a hazard check for loop-carried self-redefinition and self-recursive calls; geomean across eighteen kernels against the pre-change baseline: +0.70%, worst case `SortStress` +3.85%); `internal/asm` (documents the missing call-clobber model and the float bank's lack of spill support).
 
 **Consequence for the rebuild**: Linear scan over live intervals computed from per-block liveness, from the start. Calls clobber every allocatable register in the model; both register banks support spilling. No coexistence-only or linear-index heuristics stand in for dominance.
 
@@ -70,7 +70,7 @@ This is a dated history/audit document. It owns no current contract, describes n
 
 **Evidence**: PR #151 ("perf(interp): defer ref operand ownership to backing slots in the ARM64 JIT"); commit bebe7e4 ("feat(jit): lower reference retain and release in the SSA emitter").
 
-**Consequence for the rebuild**: `OpRetain`/`OpRelease` and an `Operand.Owned` bit stay in the kept SSA IR (`internal/ssa/operation.go:169-170`, `internal/ssa/verify.go:191,205`) as the one owner of ownership state; a lowering reads the bit instead of re-deriving it.
+**Consequence for the rebuild**: `OpRetain`/`OpRelease` and an `Operand.Owned` bit stay in the kept SSA IR (`ssa.Operand.Owned`, enforced by the `internal/ssa` verify pass) as the one owner of ownership state; a lowering reads the bit instead of re-deriving it.
 
 ### L9 — Only the callee can clear its own locals
 
@@ -92,7 +92,7 @@ This is a dated history/audit document. It owns no current contract, describes n
 
 **Observed**: Trace capture steps a speculative clone of the interpreter, but a host object holds a reference to the live interpreter it was built with and boxes field access into that interpreter's heap — so stepping a host-object read during capture mutated the live heap the clone was supposed to leave untouched, and could exhaust it.
 
-**Evidence**: PR #201 ("fix(interp): refuse to record a host object's field access" — Evidence section reproduces `heap exhausted` from the live-heap write); `internal/jit/input.go:16-29` (`Input` doc comment: "Nothing reachable through an Input is storage the interpreter keeps mutating... A compile therefore reads no cell another goroutine can change underneath it").
+**Evidence**: PR #201 ("fix(interp): refuse to record a host object's field access" — Evidence section reproduces `heap exhausted` from the live-heap write); `internal/jit/compile` `Unit` ("Nothing reachable through an Input is storage the interpreter keeps mutating... A compile therefore reads no cell another goroutine can change underneath it").
 
 **Consequence for the rebuild**: A compile unit holds `*types.Function`, constants, declared types, resolved constant objects, and a feedback snapshot — never the live heap. Any access that could touch live interpreter state is refused at capture time, not filtered after the fact.
 
@@ -108,7 +108,7 @@ This is a dated history/audit document. It owns no current contract, describes n
 
 **Observed**: A single stack-frame-size literal (`$8272`) in hand-written ARM64 assembly had to equal a Go-side `StackReserve` computation, checked only by one dedicated test; the coupling was implicit and easy to break by editing either side alone.
 
-**Evidence**: `internal/asm/arm64/abi_arm64.s:8,17` (`// calls: the $8192 literal below must equal arm64.StackReserve(...)`; `TEXT ·invoke(SB), $8272-16`); `internal/asm/arm64/stack.go:7,21-30` (`SpillBytes`, `StackReserve`, `FrameSize` — "hand-written TEXT and ADD literals must match StackReserve and FrameSize"); `internal/asm/rewriter.go:81-82` (ties the trampoline's stack-reserve literal to `TestARM64_StackReserve`).
+**Evidence**: `internal/asm/enter_arm64.s` (`// calls: the $8192 literal below must equal arm64.StackReserve(...)`; `TEXT ·invoke(SB), $8272-16`); `internal/asm` (`SpillBytes`, `StackReserve`, `FrameSize` — "hand-written TEXT and ADD literals must match StackReserve and FrameSize"); `internal/asm` (ties the trampoline's stack-reserve literal to `TestARM64_StackReserve`).
 
 **Consequence for the rebuild**: The native stack is a Go-allocated region of one configured size, checked by a prologue frame-limit test that deopts on overflow — no hand-written literal duplicated in assembly.
 
@@ -116,7 +116,7 @@ This is a dated history/audit document. It owns no current contract, describes n
 
 **Observed**: A call from native code into native code must save and restore the caller's spill-base register around the call, because the callee's own prologue repoints that register at its own frame; skipping the save/restore leaves the caller reading through the wrong frame after the callee returns.
 
-**Evidence**: `internal/jit/arm64/call.go:151-165` (documents and implements the save/restore: "X26 is this activation's spill base... Save and restore X26 around the [call] so X26 still names the right one on return"); `internal/jit/arm64/machine_test.go:2288-2334` (`TestARM64_CallSpillsAcrossBLR`, golden-pins the save-before/reload-after sequence around the call instruction).
+**Evidence**: `internal/jit/arm64` `Machine` (documents and implements the save/restore: "X26 is this activation's spill base... Save and restore X26 around the [call] so X26 still names the right one on return"); `internal/jit/arm64` `TestMachine_Call` (golden-pins the save-before/reload-after sequence around the call instruction).
 
 **Consequence for the rebuild**: Every prologue reloads pinned registers from the runtime context rather than trusting a caller to have preserved them; nothing addresses closure state through a register that a call can silently repoint.
 
@@ -132,7 +132,7 @@ This is a dated history/audit document. It owns no current contract, describes n
 
 **Observed**: Symbols moved between packages during earlier restructuring carried over their old shape and multi-word names instead of being re-cut for the new package's responsibility.
 
-**Evidence**: commit 668d2d4 ("docs(coding-patterns): enhance dependency direction and physical cohesion guidelines"); commit 281e4e6 ("docs(coding-patterns): refine design principles and clarify structural rules"); `docs/coding-patterns.md:25` ("When extracting shared functionality, code `MUST NOT` merely be moved into a lower layer. The responsibility and its dependencies `MUST` be generalized..."); `docs/coding-patterns.md:63` ("One word is the rule, not a preference...").
+**Evidence**: commit 668d2d4 ("docs(coding-patterns): enhance dependency direction and physical cohesion guidelines"); commit 281e4e6 ("docs(coding-patterns): refine design principles and clarify structural rules"); `docs/coding-patterns.md` Dependency Direction ("When extracting shared functionality, code `MUST NOT` merely be moved into a lower layer. The responsibility and its dependencies `MUST` be generalized..."); `docs/coding-patterns.md` Naming ("One word is the rule, not a preference...").
 
 **Consequence for the rebuild**: Every move brief states explicitly: re-cut symbol boundaries for the destination package, delete every symbol without a caller, minimize the exported surface, one-word names by default, and never repeat the package name in a symbol it belongs to.
 

@@ -227,6 +227,7 @@ func (s *Store) Close() error {
 	for _, c := range retired {
 		err = errors.Join(err, c.Free())
 	}
+	s.pending.Store(0)
 	return err
 }
 

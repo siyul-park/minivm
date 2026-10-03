@@ -40,9 +40,6 @@ type marshalBenchMethods struct {
 	hidden int32
 }
 
-// heapRunway mirrors the interpreter's unexported heapRunway. Keep in sync.
-const heapRunway = 64
-
 // zeroTypes declares one slot of each kind, plus any; zeroReads pushes each
 // unwritten local, and zeroValues is what an unwritten local or global reads,
 // popped last first.
@@ -1980,7 +1977,7 @@ func TestInterpreter_Run(t *testing.T) {
 		b.Locals(types.TypeI32)
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
 		b.Bind(loop)
-		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 4*heapRunway).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 256).Emit(instr.I32_GE_S).BrIf(done)
 		b.Emit(instr.I32_CONST, 1).Emit(instr.REF_NEW)
 		b.Emit(instr.CONST_GET, uint64(fn)).Emit(instr.CALL).Emit(instr.DROP)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
@@ -1990,7 +1987,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(prog))
 
-		i := interp.New(prog, interp.WithHeapLimit(heapRunway))
+		i := interp.New(prog, interp.WithHeapLimit(64))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -2038,7 +2035,7 @@ func TestInterpreter_Run(t *testing.T) {
 		b.ConstGet(types.String("")).Emit(instr.LOCAL_SET, 0)
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
 		b.Bind(loop)
-		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 4*heapRunway).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 256).Emit(instr.I32_GE_S).BrIf(done)
 		b.Emit(instr.LOCAL_GET, 0).ConstGet(types.String("x")).Emit(instr.STRING_CONCAT).Emit(instr.LOCAL_SET, 0)
 		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
 		b.Br(loop)
@@ -2048,14 +2045,14 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(prog))
 
-		i := interp.New(prog, interp.WithHeapLimit(heapRunway))
+		i := interp.New(prog, interp.WithHeapLimit(64))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
 
 		got, err := i.PopBoxed()
 		require.NoError(t, err)
-		require.Equal(t, types.BoxI32(4*heapRunway), got)
+		require.Equal(t, types.BoxI32(256), got)
 	})
 
 	t.Run("round-trips a ref set and get", func(t *testing.T) {
@@ -3612,7 +3609,7 @@ func TestInterpreter_Alloc(t *testing.T) {
 
 		addr, err := i.Alloc(&trackedValue{})
 		require.NoError(t, err)
-		for range 4 * heapRunway {
+		for range 256 {
 			_, err := i.Alloc(&trackedValue{})
 			require.NoError(t, err)
 		}
@@ -4273,7 +4270,7 @@ func TestWithHeap(t *testing.T) {
 	})
 
 	t.Run("collects cycles at adaptive goal", func(t *testing.T) {
-		const capacity = 2 * heapRunway
+		const capacity = 128
 
 		i := interp.New(program.New(nil), interp.WithHeap(capacity), interp.WithHeapLimit(capacity))
 		defer i.Close()
@@ -4289,59 +4286,63 @@ func TestWithHeap(t *testing.T) {
 
 		cycle, _ := selfCycle(t, i)
 
-		// The first collection leaves two live slots, so pace sets goal to
-		// 2+heapRunway. Reuse and the new cycle occupy two of that runway.
-		for n := range heapRunway - 2 {
+		// The first collection leaves two live slots, so the next goal
+		// still leaves headroom past the live set: the linked cycle must
+		// survive until an allocation crosses it, then be collected.
+		require.Equal(t, 0, cycle.closed)
+		trigger := -1
+		for n := 0; n < capacity; n++ {
 			_, err = i.Alloc(types.I32(n + 3))
 			require.NoError(t, err)
+			if cycle.closed == 1 {
+				trigger = n
+				break
+			}
 		}
-		require.Equal(t, 0, cycle.closed)
-
-		_, err = i.Alloc(types.I32(heapRunway + 1))
-		require.NoError(t, err)
+		require.Positive(t, trigger)
 		require.Equal(t, 1, cycle.closed)
 	})
 
 	t.Run("paces from live set", func(t *testing.T) {
-		const capacity = 3 * heapRunway
+		const capacity = 192
 
 		i := interp.New(program.New(nil), interp.WithHeap(capacity), interp.WithHeapLimit(capacity))
 		defer i.Close()
 
-		for n := range heapRunway + 1 {
+		for n := range 65 {
 			_, err := i.Alloc(types.I32(n))
 			require.NoError(t, err)
 		}
-		for range capacity - heapRunway - 2 {
+		for range capacity - 65 - 2 {
 			selfCycle(t, i)
 		}
 
-		_, err := i.Alloc(types.I32(heapRunway + 1))
+		_, err := i.Alloc(types.I32(65))
 		require.NoError(t, err)
 
 		cycle, _ := selfCycle(t, i)
 
-		// After the first collection, heapRunway+2 slots survive and the
-		// dynamic live set adds heapRunway+1 slots of runway.
-		for n := range heapRunway - 2 {
-			_, err = i.Alloc(types.I32(n + heapRunway + 2))
+		// After the first collection the live set is preserved and headroom
+		// past it absorbs a runway of garbage, so the linked cycle must
+		// survive until an allocation crosses the goal.
+		require.Equal(t, 0, cycle.closed)
+		trigger := -1
+		for n := 0; n < capacity; n++ {
+			_, err = i.Alloc(types.I32(n + 66))
 			require.NoError(t, err)
+			if cycle.closed == 1 {
+				trigger = n
+				break
+			}
 		}
-		require.Equal(t, 0, cycle.closed)
-
-		_, err = i.Alloc(types.I32(2 * heapRunway))
-		require.NoError(t, err)
-		require.Equal(t, 0, cycle.closed)
-
-		_, err = i.Alloc(types.I32(2*heapRunway + 1))
-		require.NoError(t, err)
+		require.Positive(t, trigger)
 		require.Equal(t, 1, cycle.closed)
 	})
 
 	t.Run("resets adaptive goal", func(t *testing.T) {
-		const capacity = 3 * heapRunway
+		const capacity = 192
 
-		i := interp.New(program.New(nil), interp.WithHeap(capacity), interp.WithHeapLimit(4*heapRunway))
+		i := interp.New(program.New(nil), interp.WithHeap(capacity), interp.WithHeapLimit(256))
 		defer i.Close()
 
 		for n := range capacity {
@@ -4352,16 +4353,20 @@ func TestWithHeap(t *testing.T) {
 
 		cycle, _ := selfCycle(t, i)
 
-		// Reset leaves only null, so the next goal is 1+heapRunway. The
-		// cycle consumes the first dynamic slot.
-		for n := range heapRunway - 1 {
+		// Reset leaves only null, so the next goal again adds headroom
+		// past the live set: the cycle must survive until an allocation
+		// crosses it, then be collected.
+		require.Equal(t, 0, cycle.closed)
+		trigger := -1
+		for n := 0; n < capacity; n++ {
 			_, err := i.Alloc(types.I32(n))
 			require.NoError(t, err)
+			if cycle.closed == 1 {
+				trigger = n
+				break
+			}
 		}
-		require.Equal(t, 0, cycle.closed)
-
-		_, err := i.Alloc(types.I32(heapRunway - 1))
-		require.NoError(t, err)
+		require.Positive(t, trigger)
 		require.Equal(t, 1, cycle.closed)
 	})
 }

@@ -174,7 +174,7 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 // cancellation there. Native code reads a word per capture without a
 // bounds check, so a frame without its captures declines too.
 func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner func(*Interpreter)) bool {
-	if s.entry && len(s.headers) == 0 && cancelled(i) || len(i.fr.upvals) < len(s.fn.Captures) || n.depth >= uint64(len(n.ctx.Records)) {
+	if (s.entry && len(s.headers) == 0 && cancelled(i)) || len(i.fr.upvals) < len(s.fn.Captures) || n.depth >= uint64(len(n.ctx.Records)) {
 		return false
 	}
 	if s.count++; s.count%s.cadence == 0 {
