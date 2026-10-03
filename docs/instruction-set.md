@@ -253,7 +253,7 @@ One opcode per row, in opcode-value order.
 | Floating point | `F64_TO_F32` | `f64.to_f32` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_REINTERPRET_I64` | `f64.reinterpret_i64` | ✅ | 🔲 | lowered on ARM64 |
 | Strings | `STRING_NEW_UTF32` | `string.new_utf32` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
-| Strings | `STRING_LEN` | `string.len` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Strings | `STRING_LEN` | `string.len` | ✅ | 🔲 | lowered on ARM64; a non-string deoptimizes as the operation's own trap |
 | Strings | `STRING_CONCAT` | `string.concat` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Strings | `STRING_EQ` | `string.eq` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Strings | `STRING_NE` | `string.ne` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |

@@ -1203,6 +1203,26 @@ func TestMachine_Lower(t *testing.T) {
 			op:   ssa.Operation{Op: ssa.OpBound, Args: []ssa.Value{3, 1}, Results: []ssa.Value{6}},
 		},
 		{
+			name: "string.len loads a string's length after checking its representation",
+			regs: regs{1: ssa.TypeRef, 2: i32},
+			op:   ssa.Operation{Op: ssa.OpExec, Code: instr.STRING_LEN, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{
+					target.SBFX(vr(1), reg(ssa.TypeRef, 1), 0, 32), target.LSLI(vr(1), vr(1), 4),
+					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.ADD(vr(1), target.X16, vr(1)),
+					target.LDR(target.X16, vr(1), 0),
+				}
+				rows = append(rows, target.LDI(target.X17, uint64(jit.Itab(types.String(""))))...)
+				return append(rows,
+					target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, exit),
+					target.LDR(vr(2), vr(1), int16(jit.OffsetData)),
+					target.LDR(reg(i32, 2), vr(2), int16(jit.OffsetStringLen)),
+				)
+			}(),
+			lower: true,
+		},
+		{
 			name: "guard.bounds deopts unless its limit is at most the length, signed",
 			regs: regs{1: i32, 2: i32},
 			op:   ssa.Operation{Op: ssa.OpGuardBounds, Args: []ssa.Value{1, 2}},

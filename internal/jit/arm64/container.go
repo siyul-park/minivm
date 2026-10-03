@@ -163,6 +163,22 @@ func (m *Machine) arrayLen(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 	return true
 }
 
+// stringLen loads a string's length, as threaded STRING_LEN does: a slot
+// holding anything else, null included, is the operation's own type
+// mismatch, a trap. The W load of the length word is int32(len).
+func (m *Machine) stringLen(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	if !has(op, 1, 1) {
+		return false
+	}
+	addr := m.heap(a, s.Reg(op.Args[0]))
+	a.Emit(target.LDR(target.X16, addr, 0))
+	expect(a, uint64(jit.Itab(types.String(""))), s.Trap())
+	data := m.vreg()
+	a.Emit(target.LDR(data, addr, int16(jit.OffsetData)))
+	a.Emit(target.LDR(s.Reg(op.Results[0]), data, int16(jit.OffsetStringLen)))
+	return true
+}
+
 // arrayGet loads the element at a bounds-checked index off a guarded array.
 // A ref element is retained, matching interp.(*Interpreter).arrayGet.
 func (m *Machine) arrayGet(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {

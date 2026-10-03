@@ -561,9 +561,9 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("reads a sliced array across bridge and safepoint resumes that relocate Context.Heap", func(t *testing.T) {
-		// sum(a[i] + len(s)) over i < len(a): the bridged string.len keeps
-		// the loop quiet, so the hoist pass slices a.
-		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32), types.TypeString}, []types.Type{types.TypeI32, types.TypeI32}, func(b *instr.Builder) {
+		// sum(a[i] + len(m)) over i < len(a): the bridged map.len keeps the
+		// loop quiet, so the hoist pass slices a.
+		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32), types.NewMapType(types.TypeI32, types.TypeI32)}, []types.Type{types.TypeI32, types.TypeI32}, func(b *instr.Builder) {
 			header, done := b.Label(), b.Label()
 			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
 			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
@@ -574,7 +574,7 @@ func TestNew(t *testing.T) {
 			b.Emit(instr.LOCAL_GET, 3)
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 2).Emit(instr.ARRAY_GET)
 			b.Emit(instr.I32_ADD)
-			b.Emit(instr.LOCAL_GET, 1).Emit(instr.STRING_LEN)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_LEN)
 			b.Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
 			b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
 			b.Br(header)
@@ -587,7 +587,7 @@ func TestNew(t *testing.T) {
 		}
 		require.Contains(t, ssa.Format(f), "slice")
 
-		heap := []types.Value{nil, types.TypedArray[int32]{10, 20, 30, 40, 50, 60, 70}, types.String("abc")}
+		heap := []types.Value{nil, types.TypedArray[int32]{10, 20, 30, 40, 50, 60, 70}, types.NewMap(types.NewMapType(types.TypeI32, types.TypeI32))}
 		stack := []types.Boxed{types.BoxRef(1), types.BoxRef(2), 0, 0}
 		// RETURN releases both reference params; counts above one keep
 		// those releases from reaching the last reference.
@@ -603,7 +603,7 @@ func TestNew(t *testing.T) {
 			require.Equal(t, jit.TrapBridge, trap)
 			switch exit := exits[ctx.Exit()]; exit.Kind {
 			case jit.ExitBridge:
-				require.Equal(t, instr.STRING_LEN, exit.Code)
+				require.Equal(t, instr.MAP_LEN, exit.Code)
 				ctx.Results[0] = 3
 				bridges++
 			case jit.ExitSafepoint:
@@ -620,6 +620,51 @@ func TestNew(t *testing.T) {
 		require.Equal(t, types.BoxI32(280+7*3), stack[0])
 		require.Equal(t, 7, bridges)
 		require.Positive(t, safepoints)
+	})
+
+	t.Run("sums a string's length in a loop with no exit", func(t *testing.T) {
+		// n × len(s) over a string parameter s and a count n.
+		fn := function(t, []types.Type{types.TypeString, types.TypeI32}, []types.Type{types.TypeI32, types.TypeI32}, func(b *instr.Builder) {
+			header, done := b.Label(), b.Label()
+			b.Bind(header)
+			b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 0).Emit(instr.STRING_LEN).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+			b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+			b.Br(header)
+			b.Bind(done).Emit(instr.LOCAL_GET, 3).Emit(instr.RETURN)
+		})
+		heap := []types.Value{nil, types.String("héllo")}
+		stack := []types.Boxed{types.BoxRef(1), types.BoxI32(5), 0, 0}
+		// Each LOCAL_GET retains s and its string.len releases it; RETURN
+		// releases the parameter once. A count of 2 keeps every release
+		// short of the last reference.
+		rc := []int{0, 2}
+		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
+		ctx := enter(t, stack)
+		ctx.Heap = address(t, heap)
+		ctx.RC = address(t, rc)
+
+		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
+		require.Equal(t, types.BoxI32(5*6), stack[0])
+		require.Equal(t, 1, rc[1])
+	})
+
+	t.Run("deopts string.len of a non-string as the operation's own trap", func(t *testing.T) {
+		fn := function(t, []types.Type{types.TypeString}, nil, func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.STRING_LEN).Emit(instr.RETURN)
+		})
+		heap := []types.Value{nil, types.TypedArray[int32]{1}}
+		stack := []types.Boxed{types.BoxRef(1)}
+		rc := []int{0, 2}
+		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
+		ctx := enter(t, stack)
+		ctx.Heap = address(t, heap)
+		ctx.RC = address(t, rc)
+
+		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
+		exit := exits[ctx.Exit()]
+		require.Equal(t, jit.ExitDeopt, exit.Kind)
+		require.True(t, exit.Trap)
 	})
 
 	t.Run("retains a ref element a guarded array.get reads, through Context.RC", func(t *testing.T) {

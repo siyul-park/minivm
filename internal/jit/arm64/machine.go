@@ -755,6 +755,8 @@ func (m *Machine) exec(a *asm.Assembler, op ssa.Operation, s compile.Site) bool 
 		return m.arraySet(a, op, s)
 	case instr.ARRAY_LEN:
 		return m.arrayLen(a, op, s)
+	case instr.STRING_LEN:
+		return m.stringLen(a, op, s)
 	case instr.STRUCT_GET:
 		return m.structGet(a, op, s)
 	case instr.STRUCT_SET:

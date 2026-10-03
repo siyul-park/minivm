@@ -24,6 +24,9 @@ const (
 	// (a TypedArray[T]'s data word points at one) or inline (Array.Elems,
 	// Struct.Data).
 	OffsetSliceLen = unsafe.Sizeof(uintptr(0))
+	// OffsetStringLen is a Go string header's length word: a types.String
+	// slot's data word points at a heap-boxed header.
+	OffsetStringLen = unsafe.Sizeof(uintptr(0))
 
 	OffsetArrayElems       = unsafe.Offsetof(types.Array{}.Elems)
 	OffsetStructTyp        = unsafe.Offsetof(types.Struct{}.Typ)

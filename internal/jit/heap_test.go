@@ -49,4 +49,6 @@ func TestHeap_Layout(t *testing.T) {
 	require.Equal(t, unsafe.Offsetof(types.Struct{}.Data), jit.OffsetStructData)
 	require.Equal(t, unsafe.Offsetof(types.StructType{}.Fields), jit.OffsetStructTypeFields)
 	require.Equal(t, unsafe.Sizeof(struct{ a, b uintptr }{}), jit.SizeofValue)
+	text := "hello"
+	require.Equal(t, len(text), *(*int)(unsafe.Add(unsafe.Pointer(&text), jit.OffsetStringLen)))
 }
