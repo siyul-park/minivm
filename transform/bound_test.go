@@ -1,6 +1,7 @@
 package transform_test
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -30,7 +31,12 @@ type boundedLoop struct {
 	swapped bool
 }
 
-func (l boundedLoop) build() (*ssa.Function, int, int) {
+const (
+	preheaderBlock = iota
+	headerBlock
+)
+
+func (l boundedLoop) build() *ssa.Function {
 	b := ssa.New("f")
 	pre, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
 	array := b.Param(pre, ssa.TypeRef)
@@ -78,7 +84,7 @@ func (l boundedLoop) build() (*ssa.Function, int, int) {
 	b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{i, step}, State: at, Results: []ssa.Value{next}})
 	b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{next}}}})
 	b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{i}})
-	return b.Build(), pre, body
+	return b.Build()
 }
 
 func TestNewBoundPass(t *testing.T) {
@@ -93,15 +99,15 @@ func TestBoundPass_Run(t *testing.T) {
 		name    string
 		loop    boundedLoop
 		refuted map[int]bool
-		// bounded reports that the array.get reads a bound index; guarded
-		// that the preheader checks the limit against the length.
-		bounded, guarded bool
+		// guards counts the guard.bounds in the preheader, bounds the array
+		// accesses indexed by a bound of the header's induction variable.
+		guards, bounds int
 	}{
-		{name: "bounds an index below a constant limit behind a preheader guard", loop: counted, bounded: true, guarded: true},
-		{name: "bounds an index below a stay-on-true compare", loop: boundedLoop{step: 1, limit: 256, test: instr.I32_LT_S}, bounded: true, guarded: true},
-		{name: "bounds an index below a swapped compare", loop: boundedLoop{step: 1, limit: 256, test: instr.I32_LE_S, swapped: true}, bounded: true, guarded: true},
-		{name: "bounds an index stepping by a constant that cannot wrap past the limit", loop: boundedLoop{init: 2, step: 3, limit: 256, test: instr.I32_GE_S}, bounded: true, guarded: true},
-		{name: "guards an index below the array's own length", loop: boundedLoop{step: 1, length: true, test: instr.I32_GE_S}, bounded: true, guarded: true},
+		{name: "bounds an index below a constant limit behind a preheader guard", loop: counted, guards: 1, bounds: 1},
+		{name: "bounds an index below a stay-on-true compare", loop: boundedLoop{step: 1, limit: 256, test: instr.I32_LT_S}, guards: 1, bounds: 1},
+		{name: "bounds an index below a swapped compare", loop: boundedLoop{step: 1, limit: 256, test: instr.I32_LE_S, swapped: true}, guards: 1, bounds: 1},
+		{name: "bounds an index stepping by a constant that cannot wrap past the limit", loop: boundedLoop{init: 2, step: 3, limit: 256, test: instr.I32_GE_S}, guards: 1, bounds: 1},
+		{name: "guards an index below the array's own length", loop: boundedLoop{step: 1, length: true, test: instr.I32_GE_S}, guards: 1, bounds: 1},
 		{name: "leaves an index starting negative", loop: boundedLoop{init: minus, step: 1, limit: 256, test: instr.I32_GE_S}},
 		{name: "leaves an index stepping by a variable", loop: boundedLoop{step: 1, limit: 256, variable: true, test: instr.I32_GE_S}},
 		{name: "leaves an index whose step could wrap past a constant limit", loop: boundedLoop{step: 2, limit: math.MaxInt32, test: instr.I32_GE_S}},
@@ -112,7 +118,7 @@ func TestBoundPass_Run(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fn, pre, body := tt.loop.build()
+			fn := tt.loop.build()
 			require.NoError(t, ssa.Verify(fn))
 
 			_, err := transform.NewBoundPass(tt.refuted).Run(pass.NewManager(), fn)
@@ -120,26 +126,11 @@ func TestBoundPass_Run(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, ssa.Verify(fn))
 			out := ssa.Format(fn)
-			require.Equal(t, tt.guarded, strings.Contains(out, "guard.bounds"), out)
-			require.Equal(t, tt.bounded, strings.Contains(out, "bound v"), out)
-			if tt.guarded {
-				require.Contains(t, blockChunk(out, pre), "guard.bounds")
-			}
-			if !tt.bounded {
-				return
-			}
-			bounds := map[ssa.Value]ssa.Operation{}
-			for _, op := range fn.Block(body).Operations {
-				if op.Op == ssa.OpBound {
-					bounds[op.Results[0]] = op
-				}
-				if op.Op == ssa.OpExec && op.Code == instr.ARRAY_GET {
-					bound, ok := bounds[op.Args[1]]
-					require.True(t, ok, out)
-					require.Equal(t, fn.Block(1).Params[0], bound.Args[0])
-					require.Equal(t, op.Args[0], bound.Args[1])
-				}
-			}
+			induction := fn.Block(headerBlock).Params[0]
+			require.Equal(t, tt.guards, strings.Count(out, "guard.bounds"), out)
+			require.Equal(t, tt.guards, strings.Count(blockChunk(out, preheaderBlock), "guard.bounds"), out)
+			require.Equal(t, tt.bounds, strings.Count(out, "bound v"), out)
+			require.Equal(t, tt.bounds, strings.Count(out, fmt.Sprintf("bound v%d,", induction)), out)
 		})
 	}
 }

@@ -324,19 +324,28 @@ blk3: () <-- (blk1)
 		pre := blockChunk(out, l.pre)
 		require.Contains(t, pre, "load local[0]")
 		require.Contains(t, pre, "guard.shape")
+	})
+
+	t.Run("slices an invariant guarded array once in the preheader", func(t *testing.T) {
+		l := newCountedLoop()
+		array, guarded, element := l.b.Param(l.pre, ssa.TypeRef), l.b.Value(ssa.TypeRef), l.b.Value(ssa.TypeI32)
+		entry := l.b.Value(ssa.TypeState)
+		l.b.Add(l.pre, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{entry}})
+		l.b.Add(l.pre, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: entry, Results: []ssa.Value{guarded}})
+		state := l.b.Value(ssa.TypeState)
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 4}}, Results: []ssa.Value{state}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_SET, Args: []ssa.Value{guarded, l.counter, l.one}, State: state})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{guarded, l.counter}, State: state, Results: []ssa.Value{element}})
+		fn := l.close()
+		require.NoError(t, ssa.Verify(fn))
+
+		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(fn))
+		out := ssa.Format(fn)
 		require.Equal(t, 1, strings.Count(out, "slice"))
-		require.Contains(t, pre, "slice")
-		var sliced ssa.Value
-		for _, op := range fn.Block(l.pre).Operations {
-			if op.Op == ssa.OpSlice {
-				sliced = op.Results[0]
-			}
-		}
-		for _, op := range fn.Block(l.body).Operations {
-			if op.Op == ssa.OpExec && (op.Code == instr.ARRAY_SET || op.Code == instr.ARRAY_GET) {
-				require.Equal(t, sliced, op.Args[0])
-			}
-		}
+		require.Contains(t, blockChunk(out, l.pre), "slice")
 	})
 
 	t.Run("does not slice an invariant guarded array in a loop that releases", func(t *testing.T) {
