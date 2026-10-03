@@ -85,7 +85,7 @@ type native struct {
 	// borrows caches transform.Borrows by address for entries above depth
 	// 0, whose activation's return keeps its borrowed parameters (it
 	// releases them only at depth 1).
-	borrows [][]bool
+	borrows    [][]bool
 	reclaimErr error
 
 	// compile is captured once so deoptimization does not add a static
