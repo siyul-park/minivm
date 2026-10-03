@@ -6,9 +6,7 @@ import (
 	"reflect"
 )
 
-// Manager lazily runs registered analyses and caches each result per IR unit,
-// keyed by result type and unit identity, the same shape as LLVM's
-// AnalysisManager.
+// Manager owns analysis registration and cache state.
 type Manager struct {
 	analyses map[reflect.Type]func(*Manager, any) (any, error)
 	cache    map[cacheKey]any

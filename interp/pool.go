@@ -168,10 +168,6 @@ func (p *Pool) share(i *Interpreter) {
 		p.shared = i.native.shared.retain()
 		return
 	}
-	// transform.Module is rebuilt per interpreter (newModule) rather than
-	// canonically shared, so cheap pointer equality cannot tell whether two
-	// runtimes serve the same program: DeepEqual on the module content is
-	// the only check that can.
 	if !reflect.DeepEqual(i.native.shared.module, p.shared.module) {
 		return
 	}

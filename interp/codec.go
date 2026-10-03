@@ -45,10 +45,6 @@ type registry struct {
 // conversion is the compiled adapter for one Go type. It receives a live pointer
 // for the call duration; value/box/set convert values and slots, while view
 // preserves shared Go storage for pointer-backed values.
-//
-// value and box differ by position: value produces a standalone VM value, while
-// box produces a slot of vm, allocating a heap ref when the slot needs one; set
-// is the reverse of both, because a slot resolves to a value before written back.
 type conversion struct {
 	typ  reflect.Type
 	kind reflect.Kind
@@ -68,7 +64,7 @@ type field struct {
 	conversion *conversion
 }
 
-// Errors reports the failure modes the built-in codec surfaces.
+// Errors the built-in codec reports.
 var (
 	ErrMarshalCycle           = errors.New("marshal cycle")
 	ErrUnsupportedMarshalType = errors.New("unsupported marshal type")
