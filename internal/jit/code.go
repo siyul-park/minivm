@@ -1,6 +1,7 @@
 package jit
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"sync/atomic"
@@ -68,8 +69,7 @@ func NewCode(address, ip int, osr bool, tier Tier, results int, registers, argum
 	}
 	native, err := asm.Link(buffer, code)
 	if err != nil {
-		_ = buffer.Free()
-		return nil, err
+		return nil, errors.Join(err, buffer.Free())
 	}
 	return &Code{
 		Address: address, IP: ip, OSR: osr, Tier: tier, Results: results,

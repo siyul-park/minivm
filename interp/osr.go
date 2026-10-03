@@ -80,6 +80,7 @@ const interval = 256
 func (n *native) observe(i *Interpreter, addr int, fn *types.Function) {
 	headers, err := analysis.Headers(fn)
 	if err != nil {
+		metric(i, metricCompiles, prof.Label{Key: "tier", Value: jit.Optimized.String()}, prof.Label{Key: "outcome", Value: "failed"})
 		return
 	}
 	code := i.code[addr]
@@ -131,6 +132,11 @@ func (n *native) resolved(addr int, ips []int) bool {
 	return true
 }
 
+func (s *site) tick() bool {
+	s.count++
+	return s.count%s.cadence == 0
+}
+
 // observer wraps inner, the threaded handler at s's own header. Once
 // resolved (s.code set), its steady cost is one field read and a call
 // either into native code or straight through to inner; a site that enters
@@ -142,7 +148,7 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 		if s.code != nil && n.enter(i, s, code, inner) {
 			return
 		}
-		s.count++
+		due := s.tick()
 		switch {
 		case !s.submitted:
 			if s.total == nil {
@@ -157,7 +163,7 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 				u := compile.Unit{Address: s.address, Function: s.fn, Module: n.feedback(s.address), Tier: jit.Optimized, IP: s.ip, OSR: true}
 				s.submitted = n.queue.Submit(u)
 			}
-		case s.count%s.cadence == 0:
+		case due:
 			n.drain(i)
 			s.code = n.store.CodeAt(s.address, s.ip)
 		}
@@ -177,7 +183,7 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	if (s.entry && len(s.headers) == 0 && cancelled(i)) || len(i.fr.upvals) < len(s.fn.Captures) || n.depth >= uint64(len(n.ctx.Records)) {
 		return false
 	}
-	if s.count++; s.count%s.cadence == 0 {
+	if s.tick() {
 		n.drain(i)
 		if n.depth == 0 {
 			n.quiesce()
@@ -197,9 +203,7 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	ctx.Upvals = base(i.fr.upvals)
 	mark := ctx.Budget
 
-	if i.profiler != nil {
-		metric(i, metricEntries, prof.Label{Key: "tier", Value: c.Tier.String()})
-	}
+	n.metricEntry(i, c)
 
 	ok, retire := true, false
 	var fault any

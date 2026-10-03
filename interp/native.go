@@ -86,6 +86,7 @@ type native struct {
 	// 0, whose activation's return keeps its borrowed parameters (it
 	// releases them only at depth 1).
 	borrows [][]bool
+	reclaimErr error
 
 	// compile is captured once so deoptimization does not add a static
 	// dependency from generated threaded handlers back to their compiler.
@@ -458,7 +459,7 @@ func (n *native) close() error {
 		return nil
 	}
 	n.reader.Detach()
-	return n.shared.release()
+	return errors.Join(n.reclaimErr, n.shared.release())
 }
 
 // join moves n onto r, a Pool's runtime, releasing its own; n has never
@@ -477,7 +478,7 @@ func (n *native) quiesce() {
 		return
 	}
 	n.reader.Quiesce()
-	_ = n.store.Reclaim()
+	n.reclaimErr = errors.Join(n.reclaimErr, n.store.Reclaim())
 }
 
 // call is the CALL handler's hook for a *types.Function target at addr,
@@ -897,9 +898,7 @@ func (n *native) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	ctx := n.ctx
 	mark := ctx.Budget
 
-	if i.profiler != nil {
-		metric(i, metricEntries, prof.Label{Key: "tier", Value: code.Tier.String()})
-	}
+	n.metricEntry(i, code)
 
 	// Threaded code pushed every argument owned, but a return above depth 1
 	// releases no borrowed parameter: Go releases each once it returns.
@@ -1399,6 +1398,10 @@ func metric(i *Interpreter, name string, labels ...prof.Label) {
 		return
 	}
 	i.samples.AddMetric(name, 1, labels...)
+}
+
+func (n *native) metricEntry(i *Interpreter, c *jit.Code) {
+	metric(i, metricEntries, prof.Label{Key: "tier", Value: c.Tier.String()})
 }
 
 // cancelled reports whether i's active Run context is done, without
