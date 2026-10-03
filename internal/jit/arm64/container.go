@@ -125,6 +125,30 @@ func (m *Machine) slice(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 	return true
 }
 
+// bound records op's index as proven within the slice op names, for the
+// array ops indexed by op's result: it emits no rows, and nothing else reads
+// the result's register.
+func (m *Machine) bound(op ssa.Operation, s compile.Site) bool {
+	if !has(op, 2, 1) {
+		return false
+	}
+	if _, ok := m.slices[op.Args[1]]; !ok {
+		return false
+	}
+	m.bounds[op.Results[0]] = bound{slice: op.Args[1], index: s.Reg(op.Args[0])}
+	return true
+}
+
+// limit lowers guard.bounds: it deopts unless the limit is at most the
+// length, signed.
+func limit(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	if !has(op, 2, 0) {
+		return false
+	}
+	a.Emit(target.CMP(s.Reg(op.Args[0]), s.Reg(op.Args[1])), target.BCondLabel(target.OpBGT, s.Deopt()))
+	return true
+}
+
 // arrayLen loads the element count of a guarded array.
 func (m *Machine) arrayLen(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	if !has(op, 1, 1) {
@@ -153,16 +177,16 @@ func (m *Machine) arrayGet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 	dst := s.Reg(op.Results[0])
 	switch width(shape.Kind) {
 	case 1:
-		at := m.element(a, s, op.Args[1], ptr, ln, 0)
+		at := m.element(a, s, op, ptr, ln, 0)
 		if shape.Kind == types.KindI8 {
 			a.Emit(at.row(target.LDRSB, target.LDRSBR, dst))
 		} else {
 			a.Emit(at.row(target.LDRB, target.LDRBR, dst))
 		}
 	case 4:
-		a.Emit(m.element(a, s, op.Args[1], ptr, ln, 2).row(target.LDR, target.LDRR, dst))
+		a.Emit(m.element(a, s, op, ptr, ln, 2).row(target.LDR, target.LDRR, dst))
 	default:
-		a.Emit(m.element(a, s, op.Args[1], ptr, ln, 3).row(target.LDR, target.LDRR, dst))
+		a.Emit(m.element(a, s, op, ptr, ln, 3).row(target.LDR, target.LDRR, dst))
 		if shape.Kind == types.KindRef {
 			m.retain(a, dst)
 		}
@@ -185,7 +209,7 @@ func (m *Machine) arraySet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 	val := s.Reg(op.Args[2])
 	switch width(shape.Kind) {
 	case 1:
-		at := m.element(a, s, op.Args[1], ptr, ln, 0)
+		at := m.element(a, s, op, ptr, ln, 0)
 		if shape.Kind == types.KindI1 && s.Type(op.Args[2]).Kind() != types.KindI1 {
 			// A bool byte is 0 or 1: store val != 0, as threaded does.
 			bit := m.vreg()
@@ -196,14 +220,14 @@ func (m *Machine) arraySet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 	case 4:
 		// int32 elements use STRW: array stride is 4 bytes, while generic
 		// integer STR writes 8 bytes. Float32 STR is already width-correct.
-		at := m.element(a, s, op.Args[1], ptr, ln, 2)
+		at := m.element(a, s, op, ptr, ln, 2)
 		if shape.Kind == types.KindI32 {
 			a.Emit(at.row(target.STRW, target.STRWR, val))
 		} else {
 			a.Emit(at.row(target.STR, target.STRR, val))
 		}
 	default:
-		at := m.element(a, s, op.Args[1], ptr, ln, 3)
+		at := m.element(a, s, op, ptr, ln, 3)
 		if shape.Kind == types.KindRef {
 			// A []any element is a Boxed word; box is a no-op for a ref.
 			m.replace(a, s, at, box(a, s, op.Args[2]))
@@ -355,11 +379,17 @@ func (p address) row(imm func(r, base asm.Reg, offset int16) asm.Instruction, re
 	return reg(r, p.base, p.index)
 }
 
-// element deopts unless array index v is within [0, ln) and addresses its
-// element of 1<<shift bytes off ptr: at an immediate offset for a constant
-// index the 12-bit compare and scaled load fields both hold, else through
-// the index register the access scales.
-func (m *Machine) element(a *asm.Assembler, s compile.Site, v ssa.Value, ptr, ln asm.Reg, shift uint8) address {
+// element deopts unless op's array index is within [0, ln) and addresses
+// its element of 1<<shift bytes off ptr: through the index's own 32-bit
+// register, sign-extended, with no check for an index a bound proves within
+// op's slice; at an immediate offset for a constant index the 12-bit compare
+// and scaled load fields both hold; else through the checked index register
+// the access scales.
+func (m *Machine) element(a *asm.Assembler, s compile.Site, op ssa.Operation, ptr, ln asm.Reg, shift uint8) address {
+	v := op.Args[1]
+	if b, ok := m.bounds[v]; ok && b.slice == op.Args[0] {
+		return address{base: ptr, index: b.index}
+	}
 	if c, ok := s.Const(v); ok && int32(c) >= 0 && int32(c) <= imm12 {
 		a.Emit(target.CMPI(ln, uint16(c)), target.BCondLabel(target.OpBLS, s.Trap()))
 		return address{base: ptr, offset: int16(c << shift)}

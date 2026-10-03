@@ -559,7 +559,8 @@ func STRW(src, base asm.Reg, offset int16) asm.Instruction {
 	return newMemReg(OpSTRW, src, base, int64(offset))
 }
 
-// Register-offset variants: [Xbase, Xindex, LSL #log2(size)]
+// Register-offset variants: [Xbase, Xindex, LSL #log2(size)], or
+// [Xbase, Windex, SXTW #log2(size)] for a 32-bit index.
 
 // LDRR loads dst from base plus index scaled by the access size, chosen by
 // dst as LDR chooses it: W and S load 4 bytes, X and D 8.

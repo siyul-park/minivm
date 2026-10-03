@@ -485,14 +485,14 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		st := storeOpcodes[op]
 		return encodeStore(st.base, st.scale, inst)
 
-	// Load / Store  register-offset  [Xbase, Xindex, LSL #log2(size)]
+	// Load / Store  register-offset  [Xbase, Xindex, LSL or Windex, SXTW #log2(size)]
 
 	case OpLDRR, OpLDRBR, OpLDRSBR:
 		d, base, m, err := decodeReg3(inst)
 		if err != nil {
 			return nil, err
 		}
-		return enc(indexedLoad(op, d) | reg(m)<<16 | reg(base)<<5 | reg(d)), nil
+		return enc(extend(indexedLoad(op, d), m) | reg(m)<<16 | reg(base)<<5 | reg(d)), nil
 
 	case OpSTRR, OpSTRBR, OpSTRWR:
 		// Dst=base, Src1=src, Src2=index.
@@ -500,7 +500,7 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		return enc(indexedStore(op, src) | reg(m)<<16 | reg(base)<<5 | reg(src)), nil
+		return enc(extend(indexedStore(op, src), m) | reg(m)<<16 | reg(base)<<5 | reg(src)), nil
 
 	// Load / Store pair
 
@@ -994,6 +994,15 @@ func indexedStore(op Op, src asm.PReg) uint32 {
 		return 0xF8207800
 	}
 	return indexedWord(0xB8207800, src)
+}
+
+// extend switches word's index extend from LSL to SXTW for a 32-bit index:
+// option bits 15:13 go from 011 to 110.
+func extend(word uint32, index asm.PReg) uint32 {
+	if index.Width() == asm.Width32 {
+		word = word&^(7<<13) | 6<<13
+	}
+	return word
 }
 
 // indexedWord sets word, a 4-byte integer access, to r's size and bank: bit

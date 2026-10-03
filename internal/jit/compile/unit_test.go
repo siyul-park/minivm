@@ -2,6 +2,7 @@ package compile_test
 
 import (
 	"runtime"
+	"slices"
 	"testing"
 	"unsafe"
 
@@ -68,6 +69,53 @@ func sum(t *testing.T) *types.Function {
 		Locals: []types.Type{types.TypeI32, types.TypeI32},
 		Code:   instr.Marshal(code),
 	}
+}
+
+// totalTest is total's offset of its loop test, where its header's entry
+// state resumes.
+var totalTest = 2*(instr.New(instr.I32_CONST, 0).Width()+instr.New(instr.LOCAL_SET, 1).Width()) +
+	instr.New(instr.LOCAL_GET, 1).Width() + instr.New(instr.I32_CONST, 4).Width()
+
+// total sums the first four elements of its i32 array parameter.
+func total(t *testing.T) *types.Function {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.RETURN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return &types.Function{
+		Typ:    &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}, Returns: []types.Type{types.TypeI32}},
+		Locals: []types.Type{types.TypeI32, types.TypeI32},
+		Code:   instr.Marshal(code),
+	}
+}
+
+// context is a Context for one Go entry whose frame is stack, over heap;
+// every heap reference counts 2, so a return's release never drops the last.
+func context(t *testing.T, stack []types.Boxed, heap []types.Value) *jit.Context {
+	t.Helper()
+	ctx, err := jit.NewContext(4096)
+	require.NoError(t, err)
+	rc := make([]int, len(heap))
+	for i := range rc {
+		rc[i] = 2
+	}
+	ctx.FB = address(t, stack)
+	ctx.Top = ctx.FB + uintptr(len(stack))*unsafe.Sizeof(stack[0])
+	ctx.Limit = uint64(len(ctx.Records))
+	ctx.Budget = 1 << 20
+	ctx.Heap = address(t, heap)
+	ctx.RC = address(t, rc)
+	ctx.Entries = address(t, make([]int64, 2))
+	return ctx
 }
 
 // run compiles u and every callee with m, publishes them in a Store of
@@ -188,6 +236,42 @@ func TestCompile(t *testing.T) {
 			require.Equal(t, types.BoxI32(45), stack[0])
 			require.Zero(t, ctx.Depth)
 		}
+	})
+
+	t.Run("bounds a counted array loop behind a guard that deopts at its header for a shorter array", func(t *testing.T) {
+		native(t)
+		code, err := compile.Compile(compile.Unit{Address: 1, Function: total(t), Tier: jit.Optimized}, arm64.New())
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, code.Free()) })
+		require.False(t, slices.ContainsFunc(code.Exits, func(e jit.Exit) bool { return e.Trap }))
+
+		for _, tt := range []struct {
+			array types.TypedArray[int32]
+			trap  jit.Trap
+		}{
+			{types.TypedArray[int32]{1, 2, 3, 4, 5}, jit.TrapReturn},
+			{types.TypedArray[int32]{1, 2, 3}, jit.TrapDeopt},
+		} {
+			stack := []types.Boxed{types.BoxRef(1), 0, 0}
+			ctx := context(t, stack, []types.Value{nil, tt.array})
+			require.Equal(t, tt.trap, jit.Enter(code.Entry(), ctx))
+			if tt.trap == jit.TrapReturn {
+				require.Equal(t, types.BoxI32(10), stack[0])
+				continue
+			}
+			exit := code.Exits[ctx.Exit()]
+			require.Equal(t, jit.ExitDeopt, exit.Kind)
+			require.False(t, exit.Trap)
+			require.Equal(t, totalTest, exit.Frame.IP)
+		}
+	})
+
+	t.Run("keeps the bounds checks of a loop whose header entry a guard refuted", func(t *testing.T) {
+		u := compile.Unit{Address: 1, Function: total(t), Tier: jit.Optimized, Module: transform.Module{Refuted: map[int]bool{totalTest: true}}}
+		code, err := compile.Compile(u, arm64.New())
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, code.Free()) })
+		require.True(t, slices.ContainsFunc(code.Exits, func(e jit.Exit) bool { return e.Trap }))
 	})
 
 	t.Run("compiles and runs an OSR unit at every tier", func(t *testing.T) {

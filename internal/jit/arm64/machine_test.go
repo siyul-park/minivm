@@ -348,8 +348,8 @@ func TestMachine_Lower(t *testing.T) {
 		// guard, when set, lowers a shape guard first, unmeasured, so op's
 		// own rows can assume it already ran.
 		guard *ssa.Operation
-		// slice, when set, lowers after guard, unmeasured.
-		slice *ssa.Operation
+		// slice, then bound, when set, lower after guard, unmeasured.
+		slice, bound *ssa.Operation
 		// consts are the values an OpConst defines, by word.
 		consts map[ssa.Value]uint64
 		op     ssa.Operation
@@ -1169,6 +1169,49 @@ func TestMachine_Lower(t *testing.T) {
 			lower: true,
 		},
 		{
+			name:  "bound marks an index within a slice and emits no rows",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 5: ssa.TypeRef, 6: i32},
+			guard: &i32array,
+			slice: &ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{2}, Results: []ssa.Value{5}},
+			op:    ssa.Operation{Op: ssa.OpBound, Args: []ssa.Value{3, 5}, Results: []ssa.Value{6}},
+			rows:  []asm.Instruction{},
+			lower: true,
+		},
+		{
+			name:  "array.get at a bound index loads through its sign-extended register with no bounds check",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: i32, 5: ssa.TypeRef, 6: i32},
+			guard: &i32array,
+			slice: &ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{2}, Results: []ssa.Value{5}},
+			bound: &ssa.Operation{Op: ssa.OpBound, Args: []ssa.Value{3, 5}, Results: []ssa.Value{6}},
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{5, 6}, Results: []ssa.Value{4}},
+			rows:  []asm.Instruction{target.LDRR(reg(i32, 4), vr(4), reg(i32, 3))},
+			lower: true,
+		},
+		{
+			name:  "array.set at a bound index stores through its sign-extended register with no bounds check",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: ssa.TypeI8, 5: ssa.TypeRef, 6: i32},
+			guard: &i8array,
+			slice: &ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{2}, Results: []ssa.Value{5}},
+			bound: &ssa.Operation{Op: ssa.OpBound, Args: []ssa.Value{3, 5}, Results: []ssa.Value{6}},
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_SET, Args: []ssa.Value{5, 6, 4}},
+			rows:  []asm.Instruction{target.STRBR(reg(ssa.TypeI8, 4), vr(4), reg(i32, 3))},
+			lower: true,
+		},
+		{
+			name: "declines a bound within a container no slice names",
+			regs: regs{1: ssa.TypeRef, 3: i32, 6: i32},
+			op:   ssa.Operation{Op: ssa.OpBound, Args: []ssa.Value{3, 1}, Results: []ssa.Value{6}},
+		},
+		{
+			name: "guard.bounds deopts unless its limit is at most the length, signed",
+			regs: regs{1: i32, 2: i32},
+			op:   ssa.Operation{Op: ssa.OpGuardBounds, Args: []ssa.Value{1, 2}},
+			rows: []asm.Instruction{
+				target.CMP(reg(i32, 1), reg(i32, 2)), target.BCondLabel(target.OpBGT, exit),
+			},
+			lower: true,
+		},
+		{
 			name:   "array.get at a constant index checks the length against it and loads at an immediate offset",
 			regs:   regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: i32},
 			consts: map[ssa.Value]uint64{3: 4095},
@@ -1475,6 +1518,9 @@ func TestMachine_Lower(t *testing.T) {
 			}
 			if tt.slice != nil {
 				require.True(t, m.Lower(a, *tt.slice, tt.regs))
+			}
+			if tt.bound != nil {
+				require.True(t, m.Lower(a, *tt.bound, tt.regs))
 			}
 			var s compile.Site = tt.regs
 			if tt.fuse {

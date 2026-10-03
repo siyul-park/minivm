@@ -551,7 +551,7 @@ func (l *lowering) operation(op ssa.Operation) error {
 		if i, ok := l.argument(op.Slot); ok {
 			l.args[i] = asm.VReg{}
 		}
-	case ssa.OpRetain, ssa.OpRelease, ssa.OpGuardShape, ssa.OpGuardValue, ssa.OpSlice:
+	case ssa.OpRetain, ssa.OpRelease, ssa.OpGuardShape, ssa.OpGuardValue, ssa.OpGuardBounds, ssa.OpSlice, ssa.OpBound:
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupported, op.Op)
 	}

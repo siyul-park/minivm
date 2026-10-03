@@ -25,6 +25,7 @@ func TestOp_String(t *testing.T) {
 		{"release", ssa.OpRelease, "release"},
 		{"state", ssa.OpState, "state"},
 		{"slice", ssa.OpSlice, "slice"},
+		{"bound", ssa.OpBound, "bound"},
 		{"jump", ssa.OpJump, "jump"},
 		{"branch", ssa.OpBranch, "br"},
 		{"table", ssa.OpTable, "table"},

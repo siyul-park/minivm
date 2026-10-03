@@ -156,6 +156,12 @@ func TestEncoder_Encode(t *testing.T) {
 		{"STR D3,[X4,X5,LSL #3]", arm64.STRR(arm64.D3, arm64.X4, arm64.X5), 0xFC257883},
 		{"STR W3,[X4,X5,LSL #2]", arm64.STRWR(arm64.W3, arm64.X4, arm64.X5), 0xB8257883},
 		{"STRB W3,[X4,X5]", arm64.STRBR(arm64.W3, arm64.X4, arm64.X5), 0x38257883},
+		{"LDR W3,[X4,W5,SXTW #2]", arm64.LDRR(arm64.W3, arm64.X4, arm64.W5), 0xB865D883},
+		{"LDR D3,[X4,W5,SXTW #3]", arm64.LDRR(arm64.D3, arm64.X4, arm64.W5), 0xFC65D883},
+		{"LDRSB W3,[X4,W5,SXTW]", arm64.LDRSBR(arm64.W3, arm64.X4, arm64.W5), 0x38E5D883},
+		{"STR X3,[X4,W5,SXTW #3]", arm64.STRR(arm64.X3, arm64.X4, arm64.W5), 0xF825D883},
+		{"STR W3,[X4,W5,SXTW #2]", arm64.STRWR(arm64.W3, arm64.X4, arm64.W5), 0xB825D883},
+		{"STRB W3,[X4,W5,SXTW]", arm64.STRBR(arm64.W3, arm64.X4, arm64.W5), 0x3825D883},
 		{name: "USE", inst: arm64.USE(arm64.X3), want: []byte(nil)},
 		{
 			name: "unsupported opcode",

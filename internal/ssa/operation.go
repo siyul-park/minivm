@@ -133,6 +133,8 @@ const (
 	OpStore
 	OpGuardKind
 	OpGuardShape
+	// OpGuardBounds deopts unless its first argument is at most its second,
+	// signed: the bound a loop keeps its indexes below fits an array length.
 	OpGuardBounds
 	OpGuardValue
 	OpRetain
@@ -142,6 +144,10 @@ const (
 	// length array ops naming the result read as of the slice: nothing
 	// between them may resize or replace the array.
 	OpSlice
+	// OpBound is its first argument, an index proven within [0, length) of
+	// the slice its second argument names; array ops indexed by the result
+	// check no bounds.
+	OpBound
 
 	OpJump
 	OpBranch
@@ -195,6 +201,8 @@ func (o Op) String() string {
 		return "state"
 	case OpSlice:
 		return "slice"
+	case OpBound:
+		return "bound"
 	case OpJump:
 		return "jump"
 	case OpBranch:

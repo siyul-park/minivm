@@ -27,6 +27,8 @@ Each pass owns one policy. Current passes include folding, simplification, promo
 
 LICM moves pure operations, and in a loop that calls, allocates, and releases nothing (`quiet` in `transform/hoist.go`), slot loads the loop never stores and shape guards on invariant refs in blocks every iteration runs. A hoisted guard takes the loop header's entry state, so its failure deopts at loop entry. In such a loop, the array ops on an invariant array guard read the array through one `slice` (`ssa.OpSlice`) placed in the preheader of the outermost such loop; the bytecode emitter drops it.
 
+Bounds-check elimination (`BoundPass`, JIT only: it reads `Module.Refuted`) drops the check of an array op on a slice indexed by a loop's induction variable `i`: the header tests `i <s n` with `n` invariant, `i` enters at a constant ≥ 0 and every latch adds a constant ≥ 1 that cannot wrap past `n` (any step for a constant `n`, else 1). The index becomes a `bound` (`ssa.OpBound`). `n ≤ length` is checked once, even when `n` is the array's own `array.len`, by a `guard.bounds n, length` in the preheader at the header's entry state; a loop whose header entry offset is refuted keeps its checks.
+
 SSA transforms are target-independent and `MUST` accept any valid `ssa.Function`.
 
 ## Bytecode

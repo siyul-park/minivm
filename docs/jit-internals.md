@@ -77,7 +77,7 @@ One wake (analysis, the first compiles, their garbage) costs ~0.3–0.6 ms of in
 |---|---|
 | Translate | bytecode → SSA; attach interpreter state to each `OpExec`, return, and completion; block 0 has no predecessors |
 | Baseline | fold → DCE |
-| Optimized | fold → forward → CSE → guard → DCE → promote → hoist → DCE |
+| Optimized | fold → forward → CSE → guard → DCE → promote → hoist → bound → DCE |
 | Lower | assign registers by SSA type, including register-passed parameters the machine prologue fills, order blocks in reverse postorder with an edge to the next block falling through, resolve block parameters with edge moves, fuse a compare into the branch right after it when nothing else uses it |
 | Build | assemble, allocate, encode, publish through `jit.Code` |
 
@@ -241,6 +241,7 @@ Entry reuses the current frame (`FB = bp`, `Depth = 0`); exits rewrite it in pla
 - A catch block never runs natively: the interpreter runs it after the deopt.
 - Host functions are not speculated at dynamic CALL sites; owned callees are not candidates.
 - A hoisted `guard.shape` deopts at its loop header's state, an offset no op guards: its refutation falls back to the `tolerance` count instead of a generic site.
+- A `guard.bounds` (bounds-check elimination, `pass-system.md`) deopts at its loop header's state as a guard; that offset in `Refuted` makes the recompile keep the loop's bounds checks.
 
 ## Metrics
 

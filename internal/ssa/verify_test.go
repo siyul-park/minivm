@@ -205,6 +205,54 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
 	})
 
+	t.Run("accepts an array read at an index bounded within a slice a bounds guard covers", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		state := b.Value(ssa.TypeState)
+		array, checked, sliced := b.Value(ssa.TypeRef), b.Value(ssa.TypeRef), b.Value(ssa.TypeRef)
+		limit, length, index, bounded, element := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{array}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{checked}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{checked}, Results: []ssa.Value{sliced}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 4, Results: []ssa.Value{limit}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{sliced}, State: state, Results: []ssa.Value{length}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardBounds, Args: []ssa.Value{limit, length}, State: state})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{index}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpBound, Args: []ssa.Value{index, sliced}, Results: []ssa.Value{bounded}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{sliced, bounded}, State: state, Results: []ssa.Value{element}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		require.NoError(t, ssa.Verify(b.Build()))
+	})
+
+	t.Run("rejects a bound whose index is no i32 or whose container is no reference", func(t *testing.T) {
+		for _, typs := range [][2]ssa.Type{{ssa.TypeI64, ssa.TypeRef}, {ssa.TypeI32, ssa.TypeI32}} {
+			b := ssa.New("f")
+			entry := b.Block()
+			state := b.Value(ssa.TypeState)
+			index, container, bounded := b.Value(typs[0]), b.Value(typs[1]), b.Value(ssa.TypeI32)
+			b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
+			b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{index}})
+			b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 1}, Results: []ssa.Value{container}})
+			b.Add(entry, ssa.Operation{Op: ssa.OpBound, Args: []ssa.Value{index, container}, Results: []ssa.Value{bounded}})
+			b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+			require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
+		}
+	})
+
+	t.Run("rejects a bounds guard over a reference", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		state := b.Value(ssa.TypeState)
+		limit, array := b.Value(ssa.TypeI32), b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 4, Results: []ssa.Value{limit}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{array}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardBounds, Args: []ssa.Value{limit, array}, State: state})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
+	})
+
 	t.Run("rejects a guard with no interpreter state", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()

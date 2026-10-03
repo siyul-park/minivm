@@ -169,6 +169,10 @@ func operation(function *Function, sites []position, o Operation) error {
 		if args != 1 || results != 1 {
 			return counted(o.name(), args, results)
 		}
+	case OpBound:
+		if args != 2 || results != 1 {
+			return counted(o.name(), args, results)
+		}
 	case OpRetain, OpRelease:
 		if args != 1 || results != 0 {
 			return counted(o.name(), args, results)
@@ -269,6 +273,14 @@ func typed(function *Function, o Operation) error {
 	case OpSlice:
 		if function.Type(o.Args[0]) != TypeRef || function.Type(o.Results[0]) != TypeRef {
 			return fmt.Errorf("%w: %s of %s", ErrType, o.name(), function.Type(o.Args[0]))
+		}
+	case OpBound:
+		if function.Type(o.Args[0]) != TypeI32 || function.Type(o.Args[1]) != TypeRef || function.Type(o.Results[0]) != TypeI32 {
+			return fmt.Errorf("%w: %s of %s within %s", ErrType, o.name(), function.Type(o.Args[0]), function.Type(o.Args[1]))
+		}
+	case OpGuardBounds:
+		if function.Type(o.Args[0]) != TypeI32 || function.Type(o.Args[1]) != TypeI32 {
+			return fmt.Errorf("%w: %s of %s and %s", ErrType, o.name(), function.Type(o.Args[0]), function.Type(o.Args[1]))
 		}
 	case OpRetain, OpRelease:
 		if function.Type(o.Args[0]) != TypeRef {

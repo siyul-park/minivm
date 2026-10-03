@@ -39,7 +39,7 @@ func Compile(u Unit, m Machine) (*jit.Code, error) {
 		return nil, fmt.Errorf("compile: verify: %w", err)
 	}
 
-	stages := passes(u.Tier)
+	stages := passes(u.Tier, u.Module.Refuted)
 	if stages == nil {
 		return nil, fmt.Errorf("%w: tier %d", ErrUnsupported, u.Tier)
 	}
@@ -84,8 +84,10 @@ func completion(f *ssa.Function) int {
 	return 0
 }
 
-// passes is the tier's pipeline: Baseline folds and eliminates dead code.
-func passes(tier jit.Tier) []pass.Pass[*ssa.Function] {
+// passes is the tier's pipeline: Baseline folds and eliminates dead code;
+// Optimized drops the bounds checks no refuted guard keeps (refuted is
+// Module.Refuted).
+func passes(tier jit.Tier, refuted map[int]bool) []pass.Pass[*ssa.Function] {
 	switch tier {
 	case jit.Baseline:
 		return []pass.Pass[*ssa.Function]{transform.NewFoldPass(), transform.NewDCEPass()}
@@ -93,7 +95,7 @@ func passes(tier jit.Tier) []pass.Pass[*ssa.Function] {
 		return []pass.Pass[*ssa.Function]{
 			transform.NewFoldPass(), transform.NewForwardPass(), transform.NewCSEPass(),
 			transform.NewGuardPass(), transform.NewDCEPass(), transform.NewPromotePass(),
-			transform.NewHoistPass(), transform.NewDCEPass(),
+			transform.NewHoistPass(), transform.NewBoundPass(refuted), transform.NewDCEPass(),
 		}
 	default:
 		return nil

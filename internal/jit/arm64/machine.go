@@ -32,6 +32,8 @@ type Machine struct {
 	// slices is the element pointer and length each OpSlice result's array
 	// had where the slice ran; array ops naming the result read these.
 	slices map[ssa.Value][2]asm.VReg
+	// bounds is the index register and slice each OpBound result names.
+	bounds map[ssa.Value]bound
 	// registers is this function's register-convention results (see compile's
 	// registers), empty when OpReturn boxes to the VM frame instead.
 	registers []types.Kind
@@ -47,6 +49,12 @@ type Machine struct {
 	// under cond, for the OpBranch right after it.
 	flag ssa.Value
 	cond uint8
+}
+
+// bound is an index register proven within the slice an OpBound names.
+type bound struct {
+	slice ssa.Value
+	index asm.VReg
 }
 
 // imm12 is the largest immediate the lowerings place in one 12-bit field.
@@ -91,7 +99,7 @@ func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.
 	// upvals, flag, and cond restart zero, which is unreadable: the upval
 	// read guards on a nonzero VReg, and ssa.NoValue names no branch
 	// argument, so nothing observes them before this function writes them.
-	*m = Machine{kinds: l.Kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}, slices: map[ssa.Value][2]asm.VReg{}, registers: l.Registers, borrows: l.Borrows}
+	*m = Machine{kinds: l.Kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}, slices: map[ssa.Value][2]asm.VReg{}, bounds: map[ssa.Value]bound{}, registers: l.Registers, borrows: l.Borrows}
 	a.Bind(m.entry)
 	a.Emit(
 		target.SUBI(target.SP, target.SP, 16),
@@ -229,6 +237,10 @@ func (m *Machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 		return m.value(a, op, s)
 	case ssa.OpSlice:
 		return m.slice(a, op, s)
+	case ssa.OpBound:
+		return m.bound(op, s)
+	case ssa.OpGuardBounds:
+		return limit(a, op, s)
 	case ssa.OpRetain:
 		m.retain(a, s.Reg(op.Args[0]))
 		return true
