@@ -19,16 +19,12 @@ Claude-specific additions to the shared contract. `AGENTS.md` owns repository wo
 - `make benchmark-compare` — tagged external comparisons only.
 - Do not substitute benchmark results for correctness tests.
 
-## RepoWise
+## CodeGraph
 
-Use RepoWise as indexed evidence, never as the source of truth. `AGENTS.md`, owner docs, and the live tree govern.
+`AGENTS.md` owns the code-navigation rule. Claude-specific use:
 
-- `get_overview()` — once when entering an unfamiliar repository.
-- `get_context(...)` — triage files, modules, symbols, callers, or history before editing.
-- `get_answer(...)` / `get_why(...)` — repository questions and design rationale.
-- `get_risk(...)` / `get_change_risk(...)` — impact and diff review.
-- `get_health(...)` — post-change structural/code-health check.
-- `repowise update` — refresh stale index evidence.
-- Use `repowise distill <cmd>` for noisy commands; omitted output is recoverable with `repowise expand`.
-
-Raw `Read` of every file to be edited remains required even when RepoWise has already indexed it.
+- Structural questions (definition, callers, callees, impact, flow) go to `codegraph_*` tools before `Grep`/`Read` sweeps.
+- `codegraph_context` first for task or area orientation; one `codegraph_explore` for the source it surfaces.
+- `codegraph_trace` for "how does X reach Y"; `codegraph_impact` before changing a shared symbol.
+- A response that starts with the staleness banner names files to `Read` directly; other files stay authoritative.
+- Raw `Read` of every file to be edited remains required.

@@ -42,6 +42,4 @@ dist/
 docs/plans/
 docs/superpowers/
 
-# RepoWise local state
-.repowise/
 .mcp.json

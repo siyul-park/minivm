@@ -64,6 +64,13 @@ The agent `MUST` perform the following steps in order and `MUST NOT` report comp
 7. Run focused checks, then repository gates.
 8. Re-read every changed file against repository rules.
 
+## Code Navigation
+
+- The agent `MUST` use `codegraph_*` tools first for structural questions: definition, signature, callers, callees, flow, and change impact.
+- The agent `SHOULD` start orientation with `codegraph_context`, then one `codegraph_explore` for the source it surfaces; for flow questions it `SHOULD` use `codegraph_trace`; before changing a shared symbol it `SHOULD` use `codegraph_impact`.
+- The agent `MAY` use `grep` or `Read` for literal text (strings, comments, log messages), for files a staleness banner names, and for any file it will edit.
+- The agent `MUST` treat CodeGraph results as evidence; the live tree and owner docs govern. If `.codegraph/` is missing, the agent `SHOULD` ask the user to run `codegraph init -i`.
+
 ## Task Router
 
 For each task type, the agent `MUST` read the listed owners before implementing and `MUST` run the listed focused check. Additional checks `MAY` be added when the change touches further packages.
