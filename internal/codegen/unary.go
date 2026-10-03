@@ -14,46 +14,6 @@ type pipe func(jen.Code) jen.Code
 
 // unary lowers a one-operand opcode: it binds operand to v and overwrites the
 // top of the stack with store.
-func unary(operand, store jen.Code) jen.Code {
-	return handler(underflow(1),
-		jen.Id("v").Op(":=").Add(operand),
-		top(1).Op("=").Add(store),
-		next(),
-	)
-}
-
-// narrow reads the top operand through the types.Boxed accessor read.
-func narrow(read string) jen.Code {
-	return top(1).Dot(read).Call()
-}
-
-// wide reads the top operand as an i64, consuming a heap-boxed one.
-func wide() jen.Code {
-	return jen.Id("i").Dot("unboxI64").Call(top(1))
-}
-
-// boxed is x as the stack word of kind: an i64 may need the heap.
-func boxed(kind string, x jen.Code) jen.Code {
-	if kind == "I64" {
-		return jen.Id("i").Dot("boxI64").Call(x)
-	}
-	return jen.Qual(typesPkg, "Box"+kind).Call(x)
-}
-
-// as converts to the Go type typ.
-func as(typ string) pipe {
-	return func(x jen.Code) jen.Code { return jen.Id(typ).Call(x) }
-}
-
-// via calls fn of package pkg.
-func via(pkg, fn string) pipe {
-	return func(x jen.Code) jen.Code { return jen.Qual(pkg, fn).Call(x) }
-}
-
-// neg negates.
-func neg(x jen.Code) jen.Code {
-	return jen.Op("-").Add(x)
-}
 
 // convert lowers a unary opcode that runs operand through stages in order and
 // boxes the result as dst.
@@ -126,4 +86,45 @@ func saturate(src, dst string) jen.Code {
 		top(1).Op("=").Add(boxed(kind, result)),
 		next(),
 	)
+}
+
+func unary(operand, store jen.Code) jen.Code {
+	return handler(underflow(1),
+		jen.Id("v").Op(":=").Add(operand),
+		top(1).Op("=").Add(store),
+		next(),
+	)
+}
+
+// narrow reads the top operand through the types.Boxed accessor read.
+func narrow(read string) jen.Code {
+	return top(1).Dot(read).Call()
+}
+
+// wide reads the top operand as an i64, consuming a heap-boxed one.
+func wide() jen.Code {
+	return jen.Id("i").Dot("unboxI64").Call(top(1))
+}
+
+// boxed is x as the stack word of kind: an i64 may need the heap.
+func boxed(kind string, x jen.Code) jen.Code {
+	if kind == "I64" {
+		return jen.Id("i").Dot("boxI64").Call(x)
+	}
+	return jen.Qual(typesPkg, "Box"+kind).Call(x)
+}
+
+// as converts to the Go type typ.
+func as(typ string) pipe {
+	return func(x jen.Code) jen.Code { return jen.Id(typ).Call(x) }
+}
+
+// via calls fn of package pkg.
+func via(pkg, fn string) pipe {
+	return func(x jen.Code) jen.Code { return jen.Qual(pkg, fn).Call(x) }
+}
+
+// neg negates.
+func neg(x jen.Code) jen.Code {
+	return jen.Op("-").Add(x)
 }

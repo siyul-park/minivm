@@ -59,14 +59,71 @@ var (
 	}
 )
 
-// store lowers the opcode that writes the top of the stack to s. tee keeps the
-// value on the stack; otherwise it pops. A slot declared as a scalar kind
-// holds no reference, so the compile step picks a handler that skips the
-// reference counts.
+func slotRead(state *state, current step) (value, error) {
+	if state.standalone {
+		switch current.op {
+		case instr.I32_CONST:
+			current.kind = instr.KindI32
+		case instr.I64_CONST:
+			current.kind = instr.KindI64
+		case instr.F32_CONST:
+			current.kind = instr.KindF32
+		case instr.F64_CONST:
+			current.kind = instr.KindF64
+		}
+	}
+	result, err := load(current, len(state.stack), state.offset, state.label, state.standalone)
+	if err != nil {
+		return value{}, err
+	}
+	if state.standalone {
+		if current.op == instr.CONST_GET {
+			result.handler = constStandalone(current, result)
+		} else if field, _, ok := slotInfo(current.op); ok {
+			result.handler = slotStandalone(current, result, field)
+		} else {
+			result.handler = standalone(current.op, result.compile, result.push)
+		}
+		return result, nil
+	}
+	state.stack = append(state.stack, result)
+	return result, nil
+}
+
+func load(current step, slot, offset int, label string, standalone bool) (value, error) {
+	l := newLoader(current.op, slot, offset, label, standalone)
+	result := value{op: current.op, head: current.op, boxed: jen.Id(l.boxed)}
+	// A source only needs stack room when it pushes on its own. Fused into a
+	// consumer it stays in a temporary, and the consumer checks the room its
+	// own net push needs.
+	result.room = true
+
+	_, _, ok := slotInfo(current.op)
+	l.decode(&result, current.op)
+	if standalone && (ok || current.op == instr.CONST_GET) {
+		result.compile = append(result.compile, jen.Id("c").Dot("ip").Op("+=").Lit(l.width))
+	}
+
+	var err error
+	switch current.op {
+	case instr.LOCAL_GET, instr.GLOBAL_GET, instr.UPVAL_GET:
+		err = l.read(&result, current)
+	case instr.CONST_GET:
+		err = l.constant(&result, current)
+	case instr.I32_CONST, instr.I64_CONST, instr.F32_CONST, instr.F64_CONST:
+		err = l.literal(&result, current)
+	default:
+		err = fmt.Errorf("unsupported source opcode %s", instr.TypeOf(current.op).Mnemonic)
+	}
+	if err != nil {
+		return value{}, err
+	}
+	return l.finish(result, current, ok)
+}
 
 func newLoader(op instr.Opcode, slot, offset int, label string, standalone bool) loader {
 	name := temp(slot)
-	at := add(jen.Id("start"), offset)
+	at := adjust(jen.Id("start"), offset)
 	if standalone {
 		at = jen.Id("c").Dot("ip")
 	}
@@ -103,7 +160,7 @@ func (l loader) read(result *value, current step) error {
 		return fmt.Errorf("unsupported slot opcode %s", instr.TypeOf(current.op).Mnemonic)
 	}
 	if current.op == instr.LOCAL_GET || !l.standalone {
-		guard, err := l.bounds(current, field)
+		guard, err := l.slotBounds(current, field)
 		if err != nil {
 			return err
 		}
@@ -111,8 +168,8 @@ func (l loader) read(result *value, current step) error {
 	}
 	// l.read is called only for LOCAL_GET, GLOBAL_GET, and UPVAL_GET (see
 	// load's switch), so current.typ != nil alone identifies a container
-	// guard; typedContainer/structContainer are the only pattern builders
-	// that set it for these three opcodes.
+	// guard; typedContainer is the only pattern builder that sets it for
+	// these three opcodes.
 	if current.typ != nil {
 		if current.typ == reflect.TypeFor[types.Struct]() {
 			if err := l.structGuard(result, current); err != nil {
@@ -150,7 +207,7 @@ func (l loader) read(result *value, current step) error {
 	return nil
 }
 
-func (l loader) bounds(current step, field string) ([]jen.Code, error) {
+func (l loader) slotBounds(current step, field string) ([]jen.Code, error) {
 	if !l.standalone {
 		return l.slotGuard(current)
 	}
@@ -335,106 +392,6 @@ func (l loader) finish(result value, current step, ok bool) (value, error) {
 	return result, nil
 }
 
-func load(current step, slot, offset int, label string, standalone bool) (value, error) {
-	l := newLoader(current.op, slot, offset, label, standalone)
-	result := value{op: current.op, head: current.op, boxed: jen.Id(l.boxed)}
-	// A source only needs stack room when it pushes on its own. Fused into a
-	// consumer it stays in a temporary, and the consumer checks the room its
-	// own net push needs.
-	result.room = true
-
-	_, _, ok := slotInfo(current.op)
-	l.decode(&result, current.op)
-	if standalone && (ok || current.op == instr.CONST_GET) {
-		result.compile = append(result.compile, jen.Id("c").Dot("ip").Op("+=").Lit(l.width))
-	}
-
-	var err error
-	switch current.op {
-	case instr.LOCAL_GET, instr.GLOBAL_GET, instr.UPVAL_GET:
-		err = l.read(&result, current)
-	case instr.CONST_GET:
-		err = l.constant(&result, current)
-	case instr.I32_CONST, instr.I64_CONST, instr.F32_CONST, instr.F64_CONST:
-		err = l.literal(&result, current)
-	default:
-		err = fmt.Errorf("unsupported source opcode %s", instr.TypeOf(current.op).Mnemonic)
-	}
-	if err != nil {
-		return value{}, err
-	}
-	return l.finish(result, current, ok)
-}
-
-func slotInfo(op instr.Opcode) (field, method string, ok bool) {
-	switch op {
-	case instr.LOCAL_GET:
-		return "locals", "local", true
-	case instr.GLOBAL_GET:
-		return "globals", "global", true
-	case instr.UPVAL_GET:
-		return "captures", "upval", true
-	default:
-		return "", "", false
-	}
-}
-
-// isContainerSource reports whether op is a slot-read opcode (LOCAL_GET,
-// GLOBAL_GET, UPVAL_GET) that array.get/struct.get container fusion can
-// prove a declared element or field type from.
-func isContainerSource(op instr.Opcode) bool {
-	_, _, ok := slotInfo(op)
-	return ok
-}
-
-// declaredTypesField names the threader field holding op's declared
-// types.Type per slot, indexed the same way slotInfo's Kind-only field is:
-// LOCAL_GET by localTypes, GLOBAL_GET by globalTypes, UPVAL_GET by
-// captureTypes.
-func declaredTypesField(op instr.Opcode) (string, bool) {
-	switch op {
-	case instr.LOCAL_GET:
-		return "localTypes", true
-	case instr.GLOBAL_GET:
-		return "globalTypes", true
-	case instr.UPVAL_GET:
-		return "captureTypes", true
-	default:
-		return "", false
-	}
-}
-
-func slotRead(state *state, current step) (value, error) {
-	if state.standalone {
-		switch current.op {
-		case instr.I32_CONST:
-			current.kind = instr.KindI32
-		case instr.I64_CONST:
-			current.kind = instr.KindI64
-		case instr.F32_CONST:
-			current.kind = instr.KindF32
-		case instr.F64_CONST:
-			current.kind = instr.KindF64
-		}
-	}
-	result, err := load(current, len(state.stack), state.offset, state.label, state.standalone)
-	if err != nil {
-		return value{}, err
-	}
-	if state.standalone {
-		if current.op == instr.CONST_GET {
-			result.handler = constStandalone(current, result)
-		} else if field, _, ok := slotInfo(current.op); ok {
-			result.handler = slotStandalone(current, result, field)
-		} else {
-			result.handler = standalone(current.op, result.compile, result.push)
-		}
-		return result, nil
-	}
-	state.stack = append(state.stack, result)
-	return result, nil
-}
-
 func slotStandalone(current step, input value, field string) jen.Code {
 	compile := append([]jen.Code(nil), input.compile...)
 	scalar := materialize(input, false, width(current.op))
@@ -498,6 +455,129 @@ func materialize(input value, retain bool, advance int) []jen.Code {
 	)
 }
 
+func localStore(state *state, current step) (value, error) {
+	if state.standalone {
+		return value{op: current.op, head: current.op, handler: slotStore(localSlot, false)}, nil
+	}
+	if len(state.stack) == 0 {
+		return value{}, fmt.Errorf("%s needs one pending value", instr.TypeOf(current.op).Mnemonic)
+	}
+	consumer := state.stack[len(state.stack)-1]
+	if _, ok := numericKind(consumer.op); !ok {
+		return value{}, fmt.Errorf("%s cannot store %s", instr.TypeOf(current.op).Mnemonic, instr.TypeOf(consumer.op).Mnemonic)
+	}
+	result := instr.TypeOf(consumer.op).Push[0].Repr()
+	compile := []jen.Code{
+		jen.List(jen.Id("dst"), jen.Id("dstOK")).Op(":=").Id("c").Dot("local").Call(
+			adjust(jen.Id("start"), state.offset+1),
+			jen.Qual(typesPkg, "Kind"+mustKindName(result)),
+		),
+		jen.If(jen.Op("!").Id("dstOK")).Block(reject(state.label)),
+	}
+	body, err := numeric(consumer.op, state.stack[:len(state.stack)-1], state.width, state.label, false, jen.Id("dst"))
+	if err != nil {
+		return value{}, err
+	}
+	state.stack = nil
+	return value{op: current.op, head: consumer.head, compile: append(compile, body...)}, nil
+}
+
+// slotStore lowers the opcode that writes the top of the stack to dst. tee
+// keeps the value on the stack; otherwise it pops. A slot declared as a
+// scalar kind holds no reference, so the compile step picks a handler that
+// skips the reference counts.
+func slotStore(dst slot, tee bool) jen.Code {
+	advance, operand := 2, u8("idx", jen.Id("c").Dot("ip"))
+	if dst.wide {
+		advance, operand = 3, u16("idx", jen.Id("c").Dot("ip"))
+	}
+	pop := func() []jen.Code {
+		if tee {
+			return nil
+		}
+		return []jen.Code{jen.Id("i").Dot("sp").Op("--")}
+	}
+	scalar := append([]jen.Code{underflow(1)}, dst.check()...)
+	scalar = append(scalar, dst.target().Op("=").Add(top(1)))
+	scalar = append(scalar, pop()...)
+	scalar = append(scalar, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
+
+	owned := append([]jen.Code{underflow(1)}, dst.check()...)
+	owned = append(owned,
+		jen.Id("val").Op(":=").Add(top(1)),
+		jen.Id("old").Op(":=").Add(dst.target()),
+	)
+	if tee {
+		owned = append(owned,
+			jen.If(jen.Id("old").Op("!=").Id("val")).Block(
+				jen.Id("i").Dot("retainBox").Call(jen.Id("val")),
+				jen.Id("i").Dot("releaseBox").Call(jen.Id("old")),
+			),
+			dst.target().Op("=").Id("val"),
+		)
+	} else {
+		owned = append(owned,
+			dst.target().Op("=").Id("val"),
+			jen.Id("i").Dot("releaseBox").Call(jen.Id("old")),
+		)
+	}
+	owned = append(owned, pop()...)
+	owned = append(owned, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
+
+	return threaderFunc(
+		operand,
+		jen.Id("c").Dot("ip").Op("+=").Lit(advance),
+		jen.If(jen.Id("idx").Op("<").Id("len").Call(jen.Id("c").Dot(dst.kinds))).Block(scalarSwitch(dst.kinds, "idx", jen.Return(closure(scalar...)))),
+		jen.Return(closure(owned...)),
+	)
+}
+
+// scalarSwitch runs body when the declared kind at c.<kinds>[idx] is a
+// scalar that never holds a reference.
+func scalarSwitch(kinds, idx string, body jen.Code) jen.Code {
+	return jen.Switch(jen.Id("c").Dot(kinds).Index(jen.Id(idx)).Dot("Repr").Call()).Block(
+		jen.Case(jen.Qual(typesPkg, "KindI32"), jen.Qual(typesPkg, "KindF32"), jen.Qual(typesPkg, "KindF64")).Block(body),
+	)
+}
+
+func slotInfo(op instr.Opcode) (field, method string, ok bool) {
+	switch op {
+	case instr.LOCAL_GET:
+		return "locals", "local", true
+	case instr.GLOBAL_GET:
+		return "globals", "global", true
+	case instr.UPVAL_GET:
+		return "captures", "upval", true
+	default:
+		return "", "", false
+	}
+}
+
+// isContainerSource reports whether op is a slot-read opcode (LOCAL_GET,
+// GLOBAL_GET, UPVAL_GET) that array.get/struct.get container fusion can
+// prove a declared element or field type from.
+func isContainerSource(op instr.Opcode) bool {
+	_, _, ok := slotInfo(op)
+	return ok
+}
+
+// declaredTypesField names the threader field holding op's declared
+// types.Type per slot, indexed the same way slotInfo's Kind-only field is:
+// LOCAL_GET by localTypes, GLOBAL_GET by globalTypes, UPVAL_GET by
+// captureTypes.
+func declaredTypesField(op instr.Opcode) (string, bool) {
+	switch op {
+	case instr.LOCAL_GET:
+		return "localTypes", true
+	case instr.GLOBAL_GET:
+		return "globalTypes", true
+	case instr.UPVAL_GET:
+		return "captureTypes", true
+	default:
+		return "", false
+	}
+}
+
 func immediate(kind instr.Kind, at jen.Code) jen.Code {
 	operand := jen.Qual(instrPkg, "Instruction").Call(jen.Id("c").Dot("code").Index(jen.Add(at).Op(":"))).Dot("Operand").Call(jen.Lit(0))
 	switch kind.Repr() {
@@ -512,87 +592,6 @@ func immediate(kind instr.Kind, at jen.Code) jen.Code {
 	default:
 		panic(fmt.Sprintf("unsupported immediate kind %s", kind))
 	}
-}
-
-func localStore(state *state, current step) (value, error) {
-	if state.standalone {
-		return value{op: current.op, head: current.op, handler: store(localSlot, false)}, nil
-	}
-	if len(state.stack) == 0 {
-		return value{}, fmt.Errorf("%s needs one pending value", instr.TypeOf(current.op).Mnemonic)
-	}
-	consumer := state.stack[len(state.stack)-1]
-	if _, ok := numericKind(consumer.op); !ok {
-		return value{}, fmt.Errorf("%s cannot store %s", instr.TypeOf(current.op).Mnemonic, instr.TypeOf(consumer.op).Mnemonic)
-	}
-	result := instr.TypeOf(consumer.op).Push[0].Repr()
-	compile := []jen.Code{
-		jen.List(jen.Id("dst"), jen.Id("dstOK")).Op(":=").Id("c").Dot("local").Call(
-			add(jen.Id("start"), state.offset+1),
-			jen.Qual(typesPkg, "Kind"+mustKindName(result)),
-		),
-		jen.If(jen.Op("!").Id("dstOK")).Block(reject(state.label)),
-	}
-	body, err := numeric(consumer.op, state.stack[:len(state.stack)-1], state.width, state.label, false, jen.Id("dst"))
-	if err != nil {
-		return value{}, err
-	}
-	state.stack = nil
-	return value{op: current.op, head: consumer.head, compile: append(compile, body...)}, nil
-}
-
-func store(s slot, tee bool) jen.Code {
-	advance, operand := 2, u8("idx", jen.Id("c").Dot("ip"))
-	if s.wide {
-		advance, operand = 3, u16("idx", jen.Id("c").Dot("ip"))
-	}
-	pop := func() []jen.Code {
-		if tee {
-			return nil
-		}
-		return []jen.Code{jen.Id("i").Dot("sp").Op("--")}
-	}
-	scalar := append([]jen.Code{underflow(1)}, s.check()...)
-	scalar = append(scalar, s.target().Op("=").Add(top(1)))
-	scalar = append(scalar, pop()...)
-	scalar = append(scalar, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
-
-	owned := append([]jen.Code{underflow(1)}, s.check()...)
-	owned = append(owned,
-		jen.Id("val").Op(":=").Add(top(1)),
-		jen.Id("old").Op(":=").Add(s.target()),
-	)
-	if tee {
-		owned = append(owned,
-			jen.If(jen.Id("old").Op("!=").Id("val")).Block(
-				jen.Id("i").Dot("retainBox").Call(jen.Id("val")),
-				jen.Id("i").Dot("releaseBox").Call(jen.Id("old")),
-			),
-			s.target().Op("=").Id("val"),
-		)
-	} else {
-		owned = append(owned,
-			s.target().Op("=").Id("val"),
-			jen.Id("i").Dot("releaseBox").Call(jen.Id("old")),
-		)
-	}
-	owned = append(owned, pop()...)
-	owned = append(owned, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
-
-	return threaderFunc(
-		operand,
-		jen.Id("c").Dot("ip").Op("+=").Lit(advance),
-		jen.If(jen.Id("idx").Op("<").Id("len").Call(jen.Id("c").Dot(s.kinds))).Block(scalarSwitch(s.kinds, "idx", jen.Return(closure(scalar...)))),
-		jen.Return(closure(owned...)),
-	)
-}
-
-// scalarSwitch runs body when the declared kind at c.<kinds>[idx] is a
-// scalar that never holds a reference.
-func scalarSwitch(kinds, idx string, body jen.Code) jen.Code {
-	return jen.Switch(jen.Id("c").Dot(kinds).Index(jen.Id(idx)).Dot("Repr").Call()).Block(
-		jen.Case(jen.Qual(typesPkg, "KindI32"), jen.Qual(typesPkg, "KindF32"), jen.Qual(typesPkg, "KindF64")).Block(body),
-	)
 }
 
 func mustKindName(kind instr.Kind) string {

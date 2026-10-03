@@ -220,7 +220,11 @@ func scalars() []pattern {
 	}
 	structContainers := make([]pattern, 0, len(slotSources))
 	for _, source := range slotSources {
-		structContainers = append(structContainers, structContainer(source))
+		// One Go type covers every struct shape, so unlike typed arrays the
+		// fused struct.get consumer resolves the declared *types.StructType
+		// (and each accessed field's Kind) at threading time instead of
+		// selecting it here.
+		structContainers = append(structContainers, typedContainer[types.Struct](source))
 	}
 	patterns = append(patterns, cross(structContainers, structFields...)...)
 	return append(patterns,
@@ -285,17 +289,8 @@ func constant[T types.Value]() pattern {
 // declared slot type is the concrete array type T, letting a fused consumer
 // prove the container's element kind at threading time instead of
 // re-deriving it from the runtime heap value.
-func typedContainer[T types.Value](source instr.Opcode) pattern {
+func typedContainer[T any](source instr.Opcode) pattern {
 	return pattern{{op: source, typ: reflect.TypeFor[T]()}}
-}
-
-// structContainer matches source (LOCAL_GET, GLOBAL_GET, or UPVAL_GET)
-// whose declared slot type is a struct. Unlike typedContainer, one Go type
-// covers every struct shape, so the fused struct.get consumer resolves the
-// specific declared *types.StructType (and each accessed field's Kind) at
-// threading time instead of selecting it here.
-func structContainer(source instr.Opcode) pattern {
-	return pattern{{op: source, typ: reflect.TypeFor[types.Struct]()}}
 }
 
 func except[T types.Value]() pattern {

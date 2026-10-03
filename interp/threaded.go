@@ -3098,8 +3098,9 @@ var (
 				if i.sp == 0 {
 					panic(ErrStackUnderflow)
 				}
-				val := unboxRef[types.TypedArray[int32]](i, i.stack[i.sp-1])
-				i.stack[i.sp-1] = types.BoxRef(i.alloc(types.String(string(val))))
+				val := i.text(i.stack[i.sp-1])
+				i.release(i.stack[i.sp-1].Ref())
+				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
 				i.fr.ip++
 			}
 		},
@@ -3121,25 +3122,9 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				right, left := i.stack[i.sp-1], i.stack[i.sp-2]
-				if left.Kind() != types.KindRef || right.Kind() != types.KindRef {
-					panic(ErrTypeMismatch)
-				}
-				leftAddr, rightAddr := left.Ref(), right.Ref()
-				leftText, leftOK := i.heap[leftAddr].(types.String)
-				if !leftOK {
-					panic(ErrTypeMismatch)
-				}
-				rightText, rightOK := i.heap[rightAddr].(types.String)
-				if !rightOK {
-					panic(ErrTypeMismatch)
-				}
-				if len(i.tail) != len(leftText) || unsafe.SliceData(i.tail) != unsafe.StringData(string(leftText)) {
-					i.tail = append(make([]byte, 0, len(leftText)+len(rightText)), leftText...)
-				}
-				i.tail = append(i.tail, rightText...)
-				text := types.String(unsafe.String(unsafe.SliceData(i.tail), len(i.tail)))
-				i.release(rightAddr)
-				i.release(leftAddr)
+				text := i.concat(left, right)
+				i.release(right.Ref())
+				i.release(left.Ref())
 				i.sp--
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(text))
 				i.fr.ip++
@@ -3229,8 +3214,9 @@ var (
 				if i.sp == 0 {
 					panic(ErrStackUnderflow)
 				}
-				val := unboxRef[types.String](i, i.stack[i.sp-1])
-				i.stack[i.sp-1] = types.BoxRef(i.alloc(types.TypedArray[int32](val)))
+				val := i.runes(i.stack[i.sp-1])
+				i.release(i.stack[i.sp-1].Ref())
+				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
 				i.fr.ip++
 			}
 		},
@@ -3382,102 +3368,13 @@ var (
 					panic(ErrTypeMismatch)
 				}
 			}
-			switch typ.ElemKind {
-			case types.KindI1:
-				return func(i *Interpreter) {
-					if i.sp == 0 {
-						panic(ErrStackUnderflow)
-					}
-					size := i.stack[i.sp-1].I32()
-					if size < 0 {
-						panic(ErrSegmentationFault)
-					}
-					val := make(types.TypedArray[bool], size)
-					i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
-					i.fr.ip += 3
+			return func(i *Interpreter) {
+				if i.sp == 0 {
+					panic(ErrStackUnderflow)
 				}
-			case types.KindI8:
-				return func(i *Interpreter) {
-					if i.sp == 0 {
-						panic(ErrStackUnderflow)
-					}
-					size := i.stack[i.sp-1].I32()
-					if size < 0 {
-						panic(ErrSegmentationFault)
-					}
-					val := make(types.TypedArray[int8], size)
-					i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
-					i.fr.ip += 3
-				}
-			case types.KindI32:
-				return func(i *Interpreter) {
-					if i.sp == 0 {
-						panic(ErrStackUnderflow)
-					}
-					size := i.stack[i.sp-1].I32()
-					if size < 0 {
-						panic(ErrSegmentationFault)
-					}
-					val := make(types.TypedArray[int32], size)
-					i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
-					i.fr.ip += 3
-				}
-			case types.KindI64:
-				return func(i *Interpreter) {
-					if i.sp == 0 {
-						panic(ErrStackUnderflow)
-					}
-					size := i.stack[i.sp-1].I32()
-					if size < 0 {
-						panic(ErrSegmentationFault)
-					}
-					val := make(types.TypedArray[int64], size)
-					i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
-					i.fr.ip += 3
-				}
-			case types.KindF32:
-				return func(i *Interpreter) {
-					if i.sp == 0 {
-						panic(ErrStackUnderflow)
-					}
-					size := i.stack[i.sp-1].I32()
-					if size < 0 {
-						panic(ErrSegmentationFault)
-					}
-					val := make(types.TypedArray[float32], size)
-					i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
-					i.fr.ip += 3
-				}
-			case types.KindF64:
-				return func(i *Interpreter) {
-					if i.sp == 0 {
-						panic(ErrStackUnderflow)
-					}
-					size := i.stack[i.sp-1].I32()
-					if size < 0 {
-						panic(ErrSegmentationFault)
-					}
-					val := make(types.TypedArray[float64], size)
-					i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
-					i.fr.ip += 3
-				}
-			default:
-				return func(i *Interpreter) {
-					if i.sp == 0 {
-						panic(ErrStackUnderflow)
-					}
-					size := i.stack[i.sp-1].I32()
-					if size < 0 {
-						panic(ErrSegmentationFault)
-					}
-					val := i.newArraySized(typ, int(size))
-					for j := range val.Elems {
-						val.Elems[j] = types.BoxedNull
-					}
-					i.retains(0, int(size))
-					i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
-					i.fr.ip += 3
-				}
+				val := i.newArrayDefault(typ, i.stack[i.sp-1])
+				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
+				i.fr.ip += 3
 			}
 		},
 		instr.ARRAY_LEN: func(c *threader) func(i *Interpreter) {
@@ -4118,9 +4015,9 @@ var (
 					if start < 0 || end > len(arr.Elems) || start > end {
 						panic(ErrIndexOutOfRange)
 					}
-					elems := make([]types.Boxed, end-start)
-					copy(elems, arr.Elems[start:end])
-					out = i.newArray(arr.Typ, elems)
+					dst := i.newArraySized(arr.Typ, end-start)
+					copy(dst.Elems, arr.Elems[start:end])
+					out = dst
 				default:
 					panic(ErrTypeMismatch)
 				}
@@ -4212,7 +4109,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				addr := ref.Ref()
-				result := i.structField(addr, index)
+				result := i.structGet(addr, index)
 				i.release(addr)
 				i.sp--
 				i.stack[i.sp] = result
@@ -4869,7 +4766,8 @@ var (
 				default:
 					panic(ErrTypeMismatch)
 				}
-				arr := i.newArray(types.NewArrayType(keyType), elems)
+				arr := i.newArraySized(types.NewArrayType(keyType), len(elems))
+				copy(arr.Elems, elems)
 				out := types.BoxRef(i.alloc(arr))
 				i.release(addr)
 				i.stack[i.sp-1] = out
@@ -4966,7 +4864,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				payload := i.stack[i.sp-2]
-				addr := i.alloc(types.NewError(types.ErrorCode(code.I32()), i.message(payload), payload))
+				addr := i.alloc(types.NewError(types.ErrorCode(code.I32()), i.errorMessage(payload), payload))
 				i.sp--
 				i.stack[i.sp-1] = types.BoxRef(addr)
 				i.fr.ip++
@@ -33860,7 +33758,7 @@ var (
 							i.fr.ip += 7
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 7
 						return
@@ -33892,7 +33790,7 @@ var (
 							i.fr.ip += 7
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 7
 						return
@@ -33924,7 +33822,7 @@ var (
 							i.fr.ip += 7
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 7
 						return
@@ -33956,7 +33854,7 @@ var (
 							i.fr.ip += 7
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 7
 						return
@@ -33988,7 +33886,7 @@ var (
 							i.fr.ip += 7
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 7
 						return
@@ -34020,7 +33918,7 @@ var (
 							i.fr.ip += 7
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 7
 						return
@@ -34053,7 +33951,7 @@ var (
 							i.fr.ip += 7
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 7
 						return
@@ -34108,7 +34006,7 @@ var (
 							i.fr.ip += 9
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 9
 						return
@@ -34140,7 +34038,7 @@ var (
 							i.fr.ip += 9
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 9
 						return
@@ -34172,7 +34070,7 @@ var (
 							i.fr.ip += 9
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 9
 						return
@@ -34204,7 +34102,7 @@ var (
 							i.fr.ip += 9
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 9
 						return
@@ -34236,7 +34134,7 @@ var (
 							i.fr.ip += 9
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 9
 						return
@@ -34268,7 +34166,7 @@ var (
 							i.fr.ip += 9
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 9
 						return
@@ -34301,7 +34199,7 @@ var (
 							i.fr.ip += 9
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 9
 						return
@@ -59854,7 +59752,7 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 6
 						return
@@ -59887,7 +59785,7 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 6
 						return
@@ -59920,7 +59818,7 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 6
 						return
@@ -59953,7 +59851,7 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 6
 						return
@@ -59986,7 +59884,7 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 6
 						return
@@ -60019,7 +59917,7 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 6
 						return
@@ -60053,7 +59951,7 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 6
 						return
@@ -60109,7 +60007,7 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 8
 						return
@@ -60142,7 +60040,7 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 8
 						return
@@ -60175,7 +60073,7 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 8
 						return
@@ -60208,7 +60106,7 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 8
 						return
@@ -60241,7 +60139,7 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 8
 						return
@@ -60274,7 +60172,7 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 8
 						return
@@ -60308,7 +60206,7 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 8
 						return
@@ -75380,7 +75278,7 @@ var (
 						panic(ErrTypeMismatch)
 					}
 					addr := ref.Ref()
-					result := i.structField(addr, int(v0))
+					result := i.structGet(addr, int(v0))
 					i.release(addr)
 					i.sp--
 					i.stack[i.sp] = result
@@ -105271,7 +105169,7 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 6
 						return
@@ -105303,7 +105201,7 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 6
 						return
@@ -105335,7 +105233,7 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 6
 						return
@@ -105367,7 +105265,7 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 6
 						return
@@ -105399,7 +105297,7 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 6
 						return
@@ -105431,7 +105329,7 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 6
 						return
@@ -105464,7 +105362,7 @@ var (
 							i.fr.ip += 6
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 6
 						return
@@ -105519,7 +105417,7 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 8
 						return
@@ -105551,7 +105449,7 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 8
 						return
@@ -105583,7 +105481,7 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 8
 						return
@@ -105615,7 +105513,7 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 8
 						return
@@ -105647,7 +105545,7 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 8
 						return
@@ -105679,7 +105577,7 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 8
 						return
@@ -105712,7 +105610,7 @@ var (
 							i.fr.ip += 8
 							return
 						}
-						i.stack[i.sp] = i.structField(v0, at)
+						i.stack[i.sp] = i.structGet(v0, at)
 						i.sp++
 						i.fr.ip += 8
 						return
@@ -109856,7 +109754,7 @@ var (
 						panic(ErrTypeMismatch)
 					}
 					addr := ref.Ref()
-					result := i.structField(addr, int(v0))
+					result := i.structGet(addr, int(v0))
 					i.release(addr)
 					i.sp--
 					i.stack[i.sp] = result

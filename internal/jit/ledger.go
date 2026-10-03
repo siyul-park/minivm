@@ -19,6 +19,9 @@ const (
 	ClassRelease
 	// ClassCall is an ExitCall the interpreter serves.
 	ClassCall
+	// ClassCallout is an ExitBridge of an allocating operation the
+	// interpreter serves from its operand words, with no scratch frame.
+	ClassCallout
 	// ClassGuard is a deopt that refutes a speculation: the interpreter
 	// judges it by feedback, not by cost.
 	ClassGuard
@@ -41,6 +44,7 @@ var prices = [...]int64{
 	ClassBridge:  19, // 53 ns / 22 ns ≈ 2.4 units
 	ClassRelease: 6,  // 17 ns / 22 ns ≈ 0.75 units
 	ClassCall:    28, // 76 ns / 22 ns ≈ 3.5 units
+	ClassCallout: 14, // 0.75 of a bridge measured side by side (33 vs 44 ns over threaded) ≈ 1.75 units
 }
 
 // Spend credits work units of native work.

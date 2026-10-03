@@ -151,6 +151,7 @@ A deopt stub sits out of line after the next terminator that does not fall throu
 
 | Exit | Resume rule |
 |---|---|
+| Callout | A bridge of `STRING_CONCAT`, `STRING_NEW_UTF32`, `STRING_ENCODE_UTF32`, `ARRAY_NEW_DEFAULT`, or `STRUCT_NEW_DEFAULT` is served by `native.callout`: the op's own `Interpreter` helper (the one its threaded handler calls) computes the object from the operand words, Go allocates it and hands native code its one reference through `Context.Results`; no scratch frame, operand retain, or handler run. The helper writes no operand count, so a panic (heap exhaustion, the op's own fault) deopts as a trap with every count unchanged and threaded code reports it. |
 | Bridge | `native.bridge` runs the op's threaded handler once in Go, then native resumes, for every op `bridgeable` admits. It denies a control transfer (the op writes `Branch`), `ARRAY_NEW` (its declared two-operand arity does not cover the `1+count` it pops), and `MAP_KEYS` (it allocates every key before the result array); their bridges deopt. An op with a host-view operand deopts before its handler runs: a view runs `Registry` conversions, which are host code. |
 | Release | `Exit.Word` identifies the last ref; interpreter owns reclamation, then native resumes. |
 | Box | `Exit.Word` carries the wide i64; interpreter allocates a boxed value, then native resumes. |
@@ -165,6 +166,7 @@ A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every ad
 | Outcome | Class | Cost |
 |---|---|---|
 | served bridge or box | bridge | `jit.Ledger` price |
+| served callout | callout | `jit.Ledger` price |
 | release | release | `jit.Ledger` price |
 | served `ExitCall` | call | `jit.Ledger` price; nothing while the callee has no code but may still compile (`pending`) |
 | `ExitDeopt` with `Exit.Trap`; a bridge or box whose handler panicked; a denied control-transfer bridge (`THROW`, `UNREACHABLE`); a cancelled safepoint; a safepoint whose tick runs threaded; an `ExitCall` under a hook; a trap, throw, or cancellation in a served call's callee | trap | none |
@@ -172,8 +174,8 @@ A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every ad
 
 | Rule | Contract |
 |---|---|
-| Ledger | Per Go-entered address (`native.ledgers`) and per OSR site, in work units (`Budget`'s back edges, calls, returns), credited on every exit and return. `Charge` adds the class price (bridge 2.4, release 0.75, call 3.5 units; guard and trap 0) and reports whether debt ≤ 64 units; credit is floored at −64 units. A bridge, box, or call is charged before it is served; a refusal deopts (replaying a call) and retires the run's code. A release cannot deopt: its charge takes effect at the next bridge or call. |
-| Prices | Time one served exit adds over threaded code (bridge ~53 ns, release ~17 ns, call ~76 ns on the reference arm64 machine) divided by native time saved per work unit (~22 ns in exiting kernels). |
+| Ledger | Per Go-entered address (`native.ledgers`) and per OSR site, in work units (`Budget`'s back edges, calls, returns), credited on every exit and return. `Charge` adds the class price (bridge 2.4, callout 1.75, release 0.75, call 3.5 units; guard and trap 0) and reports whether debt ≤ 64 units; credit is floored at −64 units. A bridge, callout, box, or call is charged before it is served; a refusal deopts (replaying a call) and retires the run's code. A release cannot deopt: its charge takes effect at the next bridge or call. |
+| Prices | Time one served exit adds over threaded code (bridge ~53 ns, release ~17 ns, call ~76 ns on the reference arm64 machine; a callout 0.75 of a bridge measured side by side) divided by native time saved per work unit (~22 ns in exiting kernels). |
 | Guard | Deopts. An `ExitDeopt` guard records its site (`native.refuted`, snapshot as `transform.Module.Refuted`). It is judged against the code that took it: the run's own code, or a native callee's still-published code, retired in place. That code retires at once when its feedback moved since it was built, else on the `tolerance` (8)th refutation. |
 | Generic site | The translator emits no container `guard.shape` at a refuted offset: the op bridges. Call sites become generic through `Callees` (replay records the new callee). |
 | Oscillation | Feedback per address is monotone and finite (call sites unset → callee → mixed; refuted sites only added); a retire either consumes a feedback step or fails the tier. An OSR site whose feedback moved re-arms (resubmits) instead of disabling, and each re-arm counts toward `tolerance`. |

@@ -6,7 +6,7 @@ import (
 	"github.com/siyul-park/minivm/instr"
 )
 
-func validate(patterns []pattern) error {
+func validateCatalog(patterns []pattern) error {
 	seen := make(map[string]pattern, len(patterns))
 	for _, pattern := range patterns {
 		if len(pattern) == 0 {

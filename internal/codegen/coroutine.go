@@ -4,34 +4,32 @@ import (
 	"github.com/dave/jennifer/jen"
 )
 
-func coroDone() jen.Code {
+func yield() jen.Code {
 	return handler(underflow(1),
-		jen.Id("ref").Op(":=").Add(top(1)),
-		reference(jen.Id("ref")),
-		jen.Id("done").Op(":=").Id("int32").Call(jen.Lit(0)),
-		jen.Switch(jen.Id("co").Op(":=").Id("i").Dot("heap").Index(jen.Id("ref").Dot("Ref").Call()).Assert(jen.Type())).Block(jen.Case(jen.Op("*").Id("coroutine")).Block(jen.If(jen.Id("co").Dot("done")).Block(jen.Id("done").Op("=").Lit(1))),
-			jen.Case(jen.Qual(typesPkg, "Iterator")).Block(jen.If(jen.Id("co").Dot("Done").Call()).Block(jen.Id("done").Op("=").Lit(1))),
-			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch")))),
-		top(1).Op("=").Qual(typesPkg, "BoxI1").Call(jen.Id("done").Op("!=").Lit(0)),
-		next())
-}
-
-func coroValue() jen.Code {
-	return handler(underflow(1),
-		jen.Id("box").Op(":=").Add(top(1)),
-		reference(jen.Id("box")),
-		jen.Var().Id("val").Qual(typesPkg, "Boxed"),
-		jen.Switch(jen.Id("co").Op(":=").Id("i").Dot("heap").Index(jen.Id("box").Dot("Ref").Call()).Assert(jen.Type())).Block(jen.Case(jen.Op("*").Id("coroutine")).Block(jen.Id("val").Op("=").Id("co").Dot("value"),
-			jen.Id("i").Dot("retainBox").Call(jen.Id("val"))),
-			jen.Case(jen.Qual(typesPkg, "Iterator")).Block(jen.Id("current").Op(":=").Id("co").Dot("Current").Call(),
-				jen.If(jen.Id("current").Op("==").Add(jen.Nil())).Block(jen.Id("i").Dot("retain").Call(jen.Lit(0)),
-					jen.Id("val").Op("=").Qual(typesPkg, "BoxedNull")).Else().Block(jen.Id("val").Op("=").Id("i").Dot("box").Call(jen.Id("current")),
-					jen.Switch(jen.Id("current").Op(":=").Id("current").Assert(jen.Type())).Block(jen.Case(jen.Qual(typesPkg, "Boxed")).Block(jen.Id("i").Dot("retainBox").Call(jen.Id("current"))),
-						jen.Case(jen.Qual(typesPkg, "Ref")).Block(jen.Id("i").Dot("retain").Call(jen.Id("int").Call(jen.Id("current"))))))),
-			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch")))),
-		jen.Id("i").Dot("releaseBox").Call(jen.Id("box")),
-		top(1).Op("=").Id("val"),
-		next())
+		next(),
+		jen.If(jen.Id("i").Dot("fp").Op("==").Lit(1)).Block(jen.Panic(jen.Id("errYield"))),
+		jen.Block(jen.Id("f").Op(":=").Id("i").Dot("fr"),
+			jen.Id("coAddr").Op(":=").Id("f").Dot("coro"),
+			jen.List(jen.Id("co"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(jen.Id("coAddr")).Assert(jen.Op("*").Id("coroutine")),
+			jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+			jen.Id("i").Dot("sp").Op("--"),
+			jen.Id("co").Dot("value").Op("=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")),
+			jen.Id("co").Dot("addr").Op("=").Id("f").Dot("addr"),
+			jen.Id("co").Dot("ref").Op("=").Id("f").Dot("ref"),
+			jen.Id("co").Dot("returns").Op("=").Id("f").Dot("returns"),
+			jen.Id("co").Dot("release").Op("=").Id("f").Dot("release"),
+			jen.Id("co").Dot("ip").Op("=").Id("f").Dot("ip"),
+			jen.Id("co").Dot("upvals").Op("=").Id("f").Dot("upvals"),
+			jen.Id("co").Dot("image").Op("=").Id("append").Call(jen.Id("co").Dot("image").Index(jen.Empty().Op(":").Lit(0)), jen.Id("i").Dot("stack").Index(jen.Id("f").Dot("bp").Op(":").Id("i").Dot("sp")).Op("...")),
+			jen.Id("bp").Op(":=").Id("f").Dot("bp"),
+			jen.Id("clear").Call(jen.Id("i").Dot("stack").Index(jen.Id("bp").Op(":").Id("i").Dot("sp"))),
+			jen.Id("f").Dot("code").Op("=").Add(jen.Nil()),
+			jen.Id("f").Dot("upvals").Op("=").Add(jen.Nil()),
+			jen.Id("f").Dot("coro").Op("=").Lit(0),
+			jen.Id("i").Dot("fp").Op("--"),
+			jen.Id("i").Dot("fr").Op("=").Op("&").Id("i").Dot("frames").Index(jen.Id("i").Dot("fp").Op("-").Add(jen.Lit(1))),
+			jen.Id("i").Dot("stack").Index(jen.Id("bp")).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("coAddr")),
+			jen.Id("i").Dot("sp").Op("=").Id("bp").Op("+").Lit(1)))
 }
 
 func resume() jen.Code {
@@ -94,30 +92,32 @@ func resume() jen.Code {
 			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))))))
 }
 
-func yield() jen.Code {
+func coroDone() jen.Code {
 	return handler(underflow(1),
-		next(),
-		jen.If(jen.Id("i").Dot("fp").Op("==").Lit(1)).Block(jen.Panic(jen.Id("errYield"))),
-		jen.Block(jen.Id("f").Op(":=").Id("i").Dot("fr"),
-			jen.Id("coAddr").Op(":=").Id("f").Dot("coro"),
-			jen.List(jen.Id("co"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(jen.Id("coAddr")).Assert(jen.Op("*").Id("coroutine")),
-			jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-			jen.Id("i").Dot("sp").Op("--"),
-			jen.Id("co").Dot("value").Op("=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")),
-			jen.Id("co").Dot("addr").Op("=").Id("f").Dot("addr"),
-			jen.Id("co").Dot("ref").Op("=").Id("f").Dot("ref"),
-			jen.Id("co").Dot("returns").Op("=").Id("f").Dot("returns"),
-			jen.Id("co").Dot("release").Op("=").Id("f").Dot("release"),
-			jen.Id("co").Dot("ip").Op("=").Id("f").Dot("ip"),
-			jen.Id("co").Dot("upvals").Op("=").Id("f").Dot("upvals"),
-			jen.Id("co").Dot("image").Op("=").Id("append").Call(jen.Id("co").Dot("image").Index(jen.Empty().Op(":").Lit(0)), jen.Id("i").Dot("stack").Index(jen.Id("f").Dot("bp").Op(":").Id("i").Dot("sp")).Op("...")),
-			jen.Id("bp").Op(":=").Id("f").Dot("bp"),
-			jen.Id("clear").Call(jen.Id("i").Dot("stack").Index(jen.Id("bp").Op(":").Id("i").Dot("sp"))),
-			jen.Id("f").Dot("code").Op("=").Add(jen.Nil()),
-			jen.Id("f").Dot("upvals").Op("=").Add(jen.Nil()),
-			jen.Id("f").Dot("coro").Op("=").Lit(0),
-			jen.Id("i").Dot("fp").Op("--"),
-			jen.Id("i").Dot("fr").Op("=").Op("&").Id("i").Dot("frames").Index(jen.Id("i").Dot("fp").Op("-").Add(jen.Lit(1))),
-			jen.Id("i").Dot("stack").Index(jen.Id("bp")).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("coAddr")),
-			jen.Id("i").Dot("sp").Op("=").Id("bp").Op("+").Lit(1)))
+		jen.Id("ref").Op(":=").Add(top(1)),
+		reference(jen.Id("ref")),
+		jen.Id("done").Op(":=").Id("int32").Call(jen.Lit(0)),
+		jen.Switch(jen.Id("co").Op(":=").Id("i").Dot("heap").Index(jen.Id("ref").Dot("Ref").Call()).Assert(jen.Type())).Block(jen.Case(jen.Op("*").Id("coroutine")).Block(jen.If(jen.Id("co").Dot("done")).Block(jen.Id("done").Op("=").Lit(1))),
+			jen.Case(jen.Qual(typesPkg, "Iterator")).Block(jen.If(jen.Id("co").Dot("Done").Call()).Block(jen.Id("done").Op("=").Lit(1))),
+			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch")))),
+		top(1).Op("=").Qual(typesPkg, "BoxI1").Call(jen.Id("done").Op("!=").Lit(0)),
+		next())
+}
+
+func coroValue() jen.Code {
+	return handler(underflow(1),
+		jen.Id("box").Op(":=").Add(top(1)),
+		reference(jen.Id("box")),
+		jen.Var().Id("val").Qual(typesPkg, "Boxed"),
+		jen.Switch(jen.Id("co").Op(":=").Id("i").Dot("heap").Index(jen.Id("box").Dot("Ref").Call()).Assert(jen.Type())).Block(jen.Case(jen.Op("*").Id("coroutine")).Block(jen.Id("val").Op("=").Id("co").Dot("value"),
+			jen.Id("i").Dot("retainBox").Call(jen.Id("val"))),
+			jen.Case(jen.Qual(typesPkg, "Iterator")).Block(jen.Id("current").Op(":=").Id("co").Dot("Current").Call(),
+				jen.If(jen.Id("current").Op("==").Add(jen.Nil())).Block(jen.Id("i").Dot("retain").Call(jen.Lit(0)),
+					jen.Id("val").Op("=").Qual(typesPkg, "BoxedNull")).Else().Block(jen.Id("val").Op("=").Id("i").Dot("box").Call(jen.Id("current")),
+					jen.Switch(jen.Id("current").Op(":=").Id("current").Assert(jen.Type())).Block(jen.Case(jen.Qual(typesPkg, "Boxed")).Block(jen.Id("i").Dot("retainBox").Call(jen.Id("current"))),
+						jen.Case(jen.Qual(typesPkg, "Ref")).Block(jen.Id("i").Dot("retain").Call(jen.Id("int").Call(jen.Id("current"))))))),
+			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch")))),
+		jen.Id("i").Dot("releaseBox").Call(jen.Id("box")),
+		top(1).Op("=").Id("val"),
+		next())
 }

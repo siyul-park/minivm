@@ -129,43 +129,6 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 	return compile, nil
 }
 
-func branchTail(condition jen.Code, consume, advance int, body []jen.Code) []jen.Code {
-	code := append([]jen.Code(nil), body...)
-	if consume > 0 {
-		code = append(code, jen.Id("i").Dot("sp").Op("-=").Lit(consume))
-	}
-	// tail is the handler body; a back edge's also spends heat (cool).
-	tail := func(back bool) []jen.Code {
-		path := []jen.Code{
-			jen.Id("f").Op(":=").Id("i").Dot("fr"),
-			jen.Id("f").Dot("ip").Op("+=").Id("offset").Op("+").Lit(advance),
-		}
-		if back {
-			path = append(path, cool(nil))
-		}
-		path = append(path, jen.Return())
-		out := append([]jen.Code(nil), code...)
-		out = append(out, jen.If(condition).Block(path...))
-		return append(out, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
-	}
-	return []jen.Code{
-		jen.If(jen.Id("offset").Op("+").Lit(advance).Op("<=").Lit(0)).Block(jen.Return(closure(tail(true)...))),
-		jen.Return(closure(tail(false)...)),
-	}
-}
-
-func arity(op instr.Opcode) (int, bool) {
-	if op == instr.I32_EQZ || op == instr.I64_EQZ {
-		return 1, true
-	}
-	for _, family := range families {
-		if slices.Contains(family.binary, op) || slices.Contains(family.compare, op) {
-			return 2, true
-		}
-	}
-	return 0, false
-}
-
 func trapping(consumer instr.Opcode, inputs []value, kind instr.Kind) ([]jen.Code, error) {
 	var compile, body []jen.Code
 	for _, source := range inputs {
@@ -191,6 +154,38 @@ func trapping(consumer instr.Opcode, inputs []value, kind instr.Kind) ([]jen.Cod
 		jen.Return(closure(body...)),
 	)
 	return compile, nil
+}
+
+func branchTail(condition jen.Code, pops, advance int, body []jen.Code) []jen.Code {
+	code := append([]jen.Code(nil), body...)
+	if pops > 0 {
+		code = append(code, jen.Id("i").Dot("sp").Op("-=").Lit(pops))
+	}
+	path := []jen.Code{
+		jen.Id("f").Op(":=").Id("i").Dot("fr"),
+		jen.Id("f").Dot("ip").Op("+=").Id("offset").Op("+").Lit(advance),
+	}
+	return []jen.Code{
+		jen.If(jen.Id("offset").Op("+").Lit(advance).Op("<=").Lit(0)).Block(jen.Return(closure(branch(code, condition, advance, slices.Concat(path, []jen.Code{spend(nil)}))...))),
+		jen.Return(closure(branch(code, condition, advance, path)...)),
+	}
+}
+
+func branch(code []jen.Code, condition jen.Code, advance int, path []jen.Code) []jen.Code {
+	taken := jen.If(condition).Block(append(slices.Clone(path), jen.Return())...)
+	return append(slices.Clone(code), taken, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
+}
+
+func arity(op instr.Opcode) (int, bool) {
+	if op == instr.I32_EQZ || op == instr.I64_EQZ {
+		return 1, true
+	}
+	for _, family := range families {
+		if slices.Contains(family.binary, op) || slices.Contains(family.compare, op) {
+			return 2, true
+		}
+	}
+	return 0, false
 }
 
 func compute(op instr.Opcode, operands ...jen.Code) jen.Code {

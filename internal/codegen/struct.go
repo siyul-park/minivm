@@ -51,7 +51,7 @@ func structGet(state *state, current step) (value, error) {
 		structBody := []jen.Code{
 			jen.If(jen.Id("at").Op(">=").Len(jen.Id("value").Dot("Typ").Dot("Fields"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
 			jen.If(jen.Id("value").Dot("Typ").Dot("Fields").Index(jen.Id("at")).Dot("Kind").Op("!=").Qual(typesPkg, "Kind"+name)).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-			jen.Id("result").Op(":=").Add(structFieldBox(kind, jen.Id("value").Dot("Data").Index(jen.Id("at")))),
+			jen.Id("result").Op(":=").Add(boxField(kind, jen.Id("value").Dot("Data").Index(jen.Id("at")))),
 		}
 		if kind == instr.KindRef {
 			structBody = append(structBody, jen.Id("i").Dot("retainBox").Call(jen.Id("result")))
@@ -60,14 +60,14 @@ func structGet(state *state, current step) (value, error) {
 		// The declared *types.StructType only proves what to specialize for,
 		// never the runtime value's concrete representation, so a miss on the
 		// specialized *types.Struct assertion falls back to
-		// (*Interpreter).structField, the same generic reader the unfused
+		// (*Interpreter).structGet, the same generic reader the unfused
 		// handler calls unconditionally, instead of trapping a case it
 		// accepts.
 		body = append(body, jen.If(
 			jen.List(jen.Id("value"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.raw).Assert(jen.Op("*").Qual(typesPkg, "Struct")),
 			jen.Id("ok"),
 		).Block(structBody...))
-		body = append(body, tail(jen.Id("i").Dot("structField").Call(container.raw, jen.Id("at")))...)
+		body = append(body, tail(jen.Id("i").Dot("structGet").Call(container.raw, jen.Id("at")))...)
 		cases = append(cases, jen.Case(jen.Qual(typesPkg, "Kind"+name)).Block(
 			jen.Id("c").Dot("ip").Op("+=").Lit(width(container.head)),
 			jen.Return(closure(body...)),
@@ -82,10 +82,10 @@ func structGet(state *state, current step) (value, error) {
 	return value{op: current.op, head: container.head, compile: compile}, nil
 }
 
-// structFieldBox returns the boxed expression for a struct field's raw
+// boxField returns the boxed expression for a struct field's raw
 // 64-bit data slot once kind is known, mirroring (*types.Struct).Field's
 // per-kind decoding without its runtime switch over the field's Kind.
-func structFieldBox(kind instr.Kind, data jen.Code) jen.Code {
+func boxField(kind instr.Kind, data jen.Code) jen.Code {
 	switch kind {
 	case instr.KindI1:
 		return jen.Qual(typesPkg, "BoxI1").Call(jen.Add(data).Op("!=").Lit(0))
@@ -107,7 +107,7 @@ func structFieldBox(kind instr.Kind, data jen.Code) jen.Code {
 }
 
 func structNew() jen.Code {
-	return typed("StructType",
+	return assertType("StructType",
 		jen.Id("size").Op(":=").Id("len").Call(jen.Id("typ").Dot("Fields")),
 		jen.Return(closure(jen.If(jen.Id("i").Dot("sp").Op("<").Id("size")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 			jen.Id("s").Op(":=").Id("i").Dot("newStruct").Call(jen.Id("typ")),
@@ -121,7 +121,7 @@ func structNew() jen.Code {
 }
 
 func structNewDefault() jen.Code {
-	return typed("StructType",
+	return assertType("StructType",
 		jen.Return(closure(jen.If(jen.Id("i").Dot("sp").Op("==").Id("len").Call(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
 			jen.Id("s").Op(":=").Id("i").Dot("newStruct").Call(jen.Id("typ")),
 			jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("s"))),
@@ -147,7 +147,7 @@ func structSet() jen.Code {
 					jen.Id("i").Dot("releaseBox").Call(jen.Id("old")),
 					jen.Id("s").Dot("Data").Index(jen.Id("idx")).Op("=").Id("uint64").Call(jen.Id("val"))),
 				jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))))),
-			jen.Case(jen.Op("*").Id("HostStruct")).Block(failure(jen.Id("s").Dot("SetField").Call(jen.Id("i"), jen.Id("idx"), jen.Id("val")))),
+			jen.Case(jen.Op("*").Id("HostStruct")).Block(check(jen.Id("s").Dot("SetField").Call(jen.Id("i"), jen.Id("idx"), jen.Id("val")))),
 			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch")))),
 		jen.Id("i").Dot("release").Call(jen.Id("addr")),
 		jen.Id("i").Dot("sp").Op("-=").Lit(3),

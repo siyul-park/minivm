@@ -127,27 +127,11 @@ func consume(state *state, current step) (value, error) {
 	return value{op: current.op, head: input.head, compile: compile}, nil
 }
 
-func refCast() jen.Code {
-	return typeAt(
-		jen.Id("typ").Op(":=").Id("c").Dot("types").Index(jen.Id("idx")),
-		jen.Return(closure(underflow(1),
-			jen.Id("val").Op(":=").Add(top(1)),
-			jen.Switch(jen.Id("kind").Op(":=").Id("val").Dot("Kind").Call(), jen.Id("kind")).Block(jen.Case(jen.Qual(typesPkg, "KindRef")).Block(jen.Id("ref").Op(":=").Id("i").Dot("heap").Index(jen.Id("val").Dot("Ref").Call()),
-				jen.If(jen.Op("!").Id("typ").Dot("Cast").Call(jen.Id("ref").Dot("Type").Call())).Block(jen.Panic(jen.Id("ErrTypeMismatch")))),
-				jen.Default().Block(jen.If(jen.Op("!").Id("typ").Dot("Cast").Call(jen.Id("val").Dot("Type").Call())).Block(jen.Panic(jen.Id("ErrTypeMismatch"))))),
-			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(3))))
-}
-
-// refCompare lowers the identity comparison op of two references, which it
-// releases.
-func refCompare(op string) jen.Code {
-	return handler(underflow(2),
-		jen.Id("v1").Op(":=").Add(top(1)),
-		jen.Id("v2").Op(":=").Add(top(2)),
-		jen.Id("i").Dot("sp").Op("--"),
-		top(1).Op("=").Qual(typesPkg, "BoxI1").Call(jen.Id("v2").Op(op).Id("v1")),
-		jen.Id("i").Dot("releaseBox").Call(jen.Id("v1")),
-		jen.Id("i").Dot("releaseBox").Call(jen.Id("v2")),
+func refNew() jen.Code {
+	return handler(underflow(1),
+		jen.Id("v").Op(":=").Add(top(1)),
+		jen.If(jen.Id("v").Dot("Kind").Call().Op("==").Qual(typesPkg, "KindRef")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+		top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Qual(typesPkg, "Unbox").Call(jen.Id("v")))),
 		next())
 }
 
@@ -167,14 +151,6 @@ func refGet() jen.Code {
 			jen.Id("val").Op("=").Id("result")),
 		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Id("val"),
 		jen.Id("i").Dot("sp").Op("++"),
-		next())
-}
-
-func refNew() jen.Code {
-	return handler(underflow(1),
-		jen.Id("v").Op(":=").Add(top(1)),
-		jen.If(jen.Id("v").Dot("Kind").Call().Op("==").Qual(typesPkg, "KindRef")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-		top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Qual(typesPkg, "Unbox").Call(jen.Id("v")))),
 		next())
 }
 
@@ -213,15 +189,38 @@ func refTest() jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(3))))
 }
 
-func errorCode() jen.Code {
-	return handler(underflow(1),
-		jen.Id("box").Op(":=").Add(top(1)),
-		reference(jen.Id("box")),
-		jen.List(jen.Id("e"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(jen.Id("box").Dot("Ref").Call()).Assert(jen.Op("*").Qual(typesPkg, "Error")),
-		jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-		jen.Id("code").Op(":=").Id("e").Dot("Code").Call(),
-		jen.Id("i").Dot("releaseBox").Call(jen.Id("box")),
-		top(1).Op("=").Qual(typesPkg, "BoxI32").Call(jen.Id("int32").Call(jen.Id("code"))),
+func refCast() jen.Code {
+	return typeAt(
+		jen.Id("typ").Op(":=").Id("c").Dot("types").Index(jen.Id("idx")),
+		jen.Return(closure(underflow(1),
+			jen.Id("val").Op(":=").Add(top(1)),
+			jen.Switch(jen.Id("kind").Op(":=").Id("val").Dot("Kind").Call(), jen.Id("kind")).Block(jen.Case(jen.Qual(typesPkg, "KindRef")).Block(jen.Id("ref").Op(":=").Id("i").Dot("heap").Index(jen.Id("val").Dot("Ref").Call()),
+				jen.If(jen.Op("!").Id("typ").Dot("Cast").Call(jen.Id("ref").Dot("Type").Call())).Block(jen.Panic(jen.Id("ErrTypeMismatch")))),
+				jen.Default().Block(jen.If(jen.Op("!").Id("typ").Dot("Cast").Call(jen.Id("val").Dot("Type").Call())).Block(jen.Panic(jen.Id("ErrTypeMismatch"))))),
+			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(3))))
+}
+
+// refCompare lowers the identity comparison rel of two references, which it
+// releases.
+func refCompare(rel string) jen.Code {
+	return handler(underflow(2),
+		jen.Id("v1").Op(":=").Add(top(1)),
+		jen.Id("v2").Op(":=").Add(top(2)),
+		jen.Id("i").Dot("sp").Op("--"),
+		top(1).Op("=").Qual(typesPkg, "BoxI1").Call(jen.Id("v2").Op(rel).Id("v1")),
+		jen.Id("i").Dot("releaseBox").Call(jen.Id("v1")),
+		jen.Id("i").Dot("releaseBox").Call(jen.Id("v2")),
+		next())
+}
+
+func errorNew() jen.Code {
+	return handler(underflow(2),
+		jen.Id("code").Op(":=").Add(top(1)),
+		jen.If(jen.Id("code").Dot("Kind").Call().Op("!=").Qual(typesPkg, "KindI32")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+		jen.Id("payload").Op(":=").Add(top(2)),
+		jen.Id("addr").Op(":=").Id("i").Dot("alloc").Call(jen.Qual(typesPkg, "NewError").Call(jen.Qual(typesPkg, "ErrorCode").Call(jen.Id("code").Dot("I32").Call()), jen.Id("i").Dot("errorMessage").Call(jen.Id("payload")), jen.Id("payload"))),
+		jen.Id("i").Dot("sp").Op("--"),
+		top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("addr")),
 		next())
 }
 
@@ -238,13 +237,14 @@ func errorGet() jen.Code {
 		next())
 }
 
-func errorNew() jen.Code {
-	return handler(underflow(2),
-		jen.Id("code").Op(":=").Add(top(1)),
-		jen.If(jen.Id("code").Dot("Kind").Call().Op("!=").Qual(typesPkg, "KindI32")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-		jen.Id("payload").Op(":=").Add(top(2)),
-		jen.Id("addr").Op(":=").Id("i").Dot("alloc").Call(jen.Qual(typesPkg, "NewError").Call(jen.Qual(typesPkg, "ErrorCode").Call(jen.Id("code").Dot("I32").Call()), jen.Id("i").Dot("message").Call(jen.Id("payload")), jen.Id("payload"))),
-		jen.Id("i").Dot("sp").Op("--"),
-		top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("addr")),
+func errorCode() jen.Code {
+	return handler(underflow(1),
+		jen.Id("box").Op(":=").Add(top(1)),
+		reference(jen.Id("box")),
+		jen.List(jen.Id("e"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(jen.Id("box").Dot("Ref").Call()).Assert(jen.Op("*").Qual(typesPkg, "Error")),
+		jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+		jen.Id("code").Op(":=").Id("e").Dot("Code").Call(),
+		jen.Id("i").Dot("releaseBox").Call(jen.Id("box")),
+		top(1).Op("=").Qual(typesPkg, "BoxI32").Call(jen.Id("int32").Call(jen.Id("code"))),
 		next())
 }

@@ -69,7 +69,7 @@ var lowerers = [256]lowerer{
 	instr.ARRAY_SET:           arrayStore,
 	instr.ARRAY_SLICE:         emit(arraySlice()),
 	instr.BR:                  emit(br()),
-	instr.BR_IF:               branch,
+	instr.BR_IF:               brIf,
 	instr.BR_TABLE:            emit(brTable()),
 	instr.CALL:                call,
 	instr.CLOSURE_NEW:         call,
@@ -140,8 +140,8 @@ var lowerers = [256]lowerer{
 	instr.F64_TO_I64_U:        emit(saturate("F64", "uint64")),
 	instr.F64_TRUNC:           emit(float64Math("Trunc")),
 	instr.GLOBAL_GET:          slotRead,
-	instr.GLOBAL_SET:          emit(store(globalSlot, false)),
-	instr.GLOBAL_TEE:          emit(store(globalSlot, true)),
+	instr.GLOBAL_SET:          emit(slotStore(globalSlot, false)),
+	instr.GLOBAL_TEE:          emit(slotStore(globalSlot, true)),
 	instr.I32_ADD:             arithmetic,
 	instr.I32_AND:             arithmetic,
 	instr.I32_CLZ:             emit(convert(narrow("I32"), "I32", as("uint32"), via("math/bits", "LeadingZeros32"), as("int32"))),
@@ -222,7 +222,7 @@ var lowerers = [256]lowerer{
 	instr.I64_XOR:             arithmetic,
 	instr.LOCAL_GET:           slotRead,
 	instr.LOCAL_SET:           localStore,
-	instr.LOCAL_TEE:           emit(store(localSlot, true)),
+	instr.LOCAL_TEE:           emit(slotStore(localSlot, true)),
 	instr.MAP_CLEAR:           emit(mapClear()),
 	instr.MAP_DELETE:          emit(mapDelete()),
 	instr.MAP_GET:             emit(mapGet()),
@@ -248,7 +248,7 @@ var lowerers = [256]lowerer{
 	instr.RETURN_CALL:         call,
 	instr.SELECT:              emit(selectOp()),
 	instr.STRING_CONCAT:       emit(stringConcat()),
-	instr.STRING_ENCODE_UTF32: emit(stringEncodeUtf32()),
+	instr.STRING_ENCODE_UTF32: emit(stringEncodeUTF32()),
 	instr.STRING_EQ:           emit(stringCompare("==")),
 	instr.STRING_GE:           emit(stringCompare(">=")),
 	instr.STRING_GT:           emit(stringCompare(">")),
@@ -257,7 +257,7 @@ var lowerers = [256]lowerer{
 	instr.STRING_LEN:          emit(stringLen()),
 	instr.STRING_LT:           emit(stringCompare("<")),
 	instr.STRING_NE:           emit(stringCompare("!=")),
-	instr.STRING_NEW_UTF32:    emit(stringNewUtf32()),
+	instr.STRING_NEW_UTF32:    emit(stringNewUTF32()),
 	instr.STRUCT_GET:          containerGet,
 	instr.STRUCT_NEW:          emit(structNew()),
 	instr.STRUCT_NEW_DEFAULT:  emit(structNewDefault()),
@@ -266,16 +266,11 @@ var lowerers = [256]lowerer{
 	instr.THROW:               emit(throw()),
 	instr.UNREACHABLE:         emit(unreachable()),
 	instr.UPVAL_GET:           slotRead,
-	instr.UPVAL_SET:           emit(store(upvalSlot, false)),
+	instr.UPVAL_SET:           emit(slotStore(upvalSlot, false)),
 	instr.YIELD:               emit(yield()),
 }
 
 // emit lowers an opcode that has one handler and no fusion form.
-func emit(code jen.Code) lowerer {
-	return func(_ *state, current step) (value, error) {
-		return value{op: current.op, head: current.op, handler: code}, nil
-	}
-}
 
 func lower(op instr.Opcode) jen.Code {
 	context := state{width: width(op), standalone: true}
@@ -292,142 +287,10 @@ func lower(op instr.Opcode) jen.Code {
 	return threaderFunc(result.compile...)
 }
 
-func standalone(op instr.Opcode, compile, body []jen.Code) jen.Code {
-	code := append([]jen.Code(nil), compile...)
-	code = append(code,
-		jen.Id("c").Dot("ip").Op("+=").Lit(width(op)),
-		jen.Return(closure(body...)),
-	)
-	return threaderFunc(code...)
-}
-
-// handler wraps body as the one-byte opcode shape: the compile step skips the
-// opcode and body runs per execution.
-func handler(body ...jen.Code) jen.Code {
-	return threaderFunc(
-		jen.Id("c").Dot("ip").Op("++"),
-		jen.Return(closure(body...)),
-	)
-}
-
-// u8 and u16 bind name to the one- and two-byte operand that follows the
-// opcode at code position pos.
-func u8(name string, pos jen.Code) jen.Code {
-	return jen.Id(name).Op(":=").Id("int").Call(jen.Id("c").Dot("code").Index(jen.Add(pos).Op("+").Lit(1)))
-}
-
-func u16(name string, pos jen.Code) jen.Code {
-	return jen.Id(name).Op(":=").Id("int").Call(jen.Op("*").Parens(jen.Op("*").Id("uint16")).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Id("c").Dot("code").Index(jen.Add(pos).Op("+").Lit(1)))))
-}
-
-// typeAt wraps body as the handler of a three-byte opcode whose operand
-// indexes c.types. An index out of range traps at run time.
-func typeAt(body ...jen.Code) jen.Code {
-	return threaderFunc(append([]jen.Code{
-		u16("idx", jen.Id("c").Dot("ip")),
-		jen.Id("c").Dot("ip").Op("+=").Lit(3),
-		jen.If(jen.Id("idx").Op(">=").Id("len").Call(jen.Id("c").Dot("types"))).Block(jen.Return(closure(jen.Panic(jen.Id("ErrSegmentationFault"))))),
-	}, body...)...)
-}
-
-// typed is typeAt for an operand that must name a *types.<typ>, bound as typ
-// for body; any other type traps at run time.
-func typed(typ string, body ...jen.Code) jen.Code {
-	return typeAt(append([]jen.Code{
-		jen.List(jen.Id("typ"), jen.Id("ok")).Op(":=").Id("c").Dot("types").Index(jen.Id("idx")).Assert(jen.Op("*").Qual(typesPkg, typ)),
-		jen.If(jen.Op("!").Id("ok")).Block(jen.Return(closure(jen.Panic(jen.Id("ErrTypeMismatch"))))),
-	}, body...)...)
-}
-
-// next moves the running frame past the current instruction.
-func next() jen.Code {
-	return jen.Id("i").Dot("fr").Dot("ip").Op("++")
-}
-
-// top is the operand-stack slot k from the top; top(1) is the top.
-func top(k int) *jen.Statement {
-	return jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(k))
-}
-
-// underflow traps when fewer than n operands are on the stack.
-func underflow(n int) jen.Code {
-	cond := jen.Id("i").Dot("sp").Op("<").Lit(n)
-	if n == 1 {
-		cond = jen.Id("i").Dot("sp").Op("==").Lit(0)
+func emit(code jen.Code) lowerer {
+	return func(_ *state, current step) (value, error) {
+		return value{op: current.op, head: current.op, handler: code}, nil
 	}
-	return jen.If(cond).Block(jen.Panic(jen.Id("ErrStackUnderflow")))
-}
-
-// cool spends one unit of a dormant JIT's heat (Interpreter.heat) when cond
-// holds; a nil cond always holds. Frame entries and taken back edges end
-// with it. The unit that runs heat out parks the current frame at ip park
-// (Interpreter.parked keeps its ip) so dispatch leaves its loop and wakes the
-// JIT: the handler writes no pointer and makes no call, either of which
-// would cost every handler a stack frame.
-func cool(cond jen.Code) jen.Code {
-	check := jen.Id("i").Dot("heat").Op(">").Lit(0)
-	if cond != nil {
-		check = jen.Add(cond).Op("&&").Add(check)
-	}
-	return jen.If(check).Block(
-		jen.Id("i").Dot("heat").Op("--"),
-		jen.If(jen.Id("i").Dot("heat").Op("==").Lit(0)).Block(
-			jen.List(jen.Id("i").Dot("parked"), jen.Id("i").Dot("fr").Dot("ip")).Op("=").List(jen.Id("i").Dot("fr").Dot("ip"), jen.Id("park")),
-		),
-	)
-}
-
-// closure is the runtime handler a compile step returns.
-func closure(body ...jen.Code) jen.Code {
-	return jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)
-}
-
-// reference traps unless slot holds a heap reference.
-func reference(slot jen.Code) jen.Code {
-	return jen.If(jen.Add(slot).Dot("Kind").Call().Op("!=").Qual(typesPkg, "KindRef")).Block(jen.Panic(jen.Id("ErrTypeMismatch")))
-}
-
-// container binds the reference at stack slot k to ref and its heap address to
-// addr, trapping when the slot holds no reference.
-func container(k int) jen.Code {
-	return jen.Id("ref").Op(":=").Add(top(k)).Line().
-		Add(reference(jen.Id("ref"))).Line().
-		Id("addr").Op(":=").Id("ref").Dot("Ref").Call()
-}
-
-// failure traps with the error call returns.
-func failure(call jen.Code) jen.Code {
-	return jen.If(jen.Id("err").Op(":=").Add(call), jen.Id("err").Op("!=").Nil()).Block(jen.Panic(jen.Id("err")))
-}
-
-// view replaces the host view in source with the VM value method of the view
-// returns, a copy of the Go value it addresses.
-func view(host, method string) jen.Code {
-	return jen.If(jen.List(jen.Id("view"), jen.Id("ok")).Op(":=").Id("source").Assert(jen.Op("*").Id(host)), jen.Id("ok")).Block(
-		jen.List(jen.Id("value"), jen.Id("err")).Op(":=").Id("view").Dot(method).Call(jen.Id("i")),
-		jen.If(jen.Id("err").Op("!=").Nil()).Block(jen.Panic(jen.Id("err"))),
-		jen.Id("source").Op("=").Id("value"),
-	)
-}
-
-// typeSwitch dispatches on the dynamic type behind subject: one case per
-// element of table, then rest, then a trap for any other type.
-func typeSwitch[T any](subject jen.Code, table []T, instance func(T) jen.Code, body func(T) []jen.Code, rest ...jen.Code) jen.Code {
-	cases := make([]jen.Code, 0, len(table)+len(rest)+1)
-	for _, entry := range table {
-		cases = append(cases, jen.Case(instance(entry)).Block(body(entry)...))
-	}
-	cases = append(cases, rest...)
-	cases = append(cases, jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))))
-	return jen.Switch(subject).Block(cases...)
-}
-
-// threaderFunc wraps body as the `func(c *threader) func(*Interpreter)`
-// shape shared by every lowering entry point.
-func threaderFunc(body ...jen.Code) jen.Code {
-	return jen.Func().Params(jen.Id("c").Op("*").Id("threader")).Params(
-		jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")),
-	).Block(body...)
 }
 
 func compose(pattern pattern, size int, label string) ([]jen.Code, error) {
@@ -473,8 +336,8 @@ func resolve(pattern pattern) ([]step, error) {
 	if stored {
 		consumerAt--
 	}
-	branch := steps[consumerAt].op == instr.BR_IF
-	if branch {
+	isBranch := steps[consumerAt].op == instr.BR_IF
+	if isBranch {
 		consumerAt--
 	}
 	if consumerAt < 0 {
@@ -488,7 +351,7 @@ func resolve(pattern pattern) ([]step, error) {
 			}
 			return steps, nil
 		}
-		if !branch {
+		if !isBranch {
 			return nil, fmt.Errorf("fusion pattern has no source")
 		}
 		push := instr.TypeOf(consumer).Push
@@ -560,23 +423,154 @@ func operands(op instr.Opcode) (instr.Kind, int, bool) {
 	return pop[0], len(pop), true
 }
 
+func standalone(op instr.Opcode, compile, body []jen.Code) jen.Code {
+	code := append([]jen.Code(nil), compile...)
+	code = append(code,
+		jen.Id("c").Dot("ip").Op("+=").Lit(width(op)),
+		jen.Return(closure(body...)),
+	)
+	return threaderFunc(code...)
+}
+
+// handler wraps body as the one-byte opcode shape: the compile step skips the
+// opcode and body runs per execution.
+func handler(body ...jen.Code) jen.Code {
+	return threaderFunc(
+		jen.Id("c").Dot("ip").Op("++"),
+		jen.Return(closure(body...)),
+	)
+}
+
+// threaderFunc wraps body as the `func(c *threader) func(*Interpreter)`
+// shape shared by every lowering entry point.
+func threaderFunc(body ...jen.Code) jen.Code {
+	return jen.Func().Params(jen.Id("c").Op("*").Id("threader")).Params(
+		jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")),
+	).Block(body...)
+}
+
+// closure is the runtime handler a compile step returns.
+func closure(body ...jen.Code) jen.Code {
+	return jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)
+}
+
+// typeAt wraps body as the handler of a three-byte opcode whose operand
+// indexes c.types. An index out of range traps at run time.
+func typeAt(body ...jen.Code) jen.Code {
+	return threaderFunc(append([]jen.Code{
+		u16("idx", jen.Id("c").Dot("ip")),
+		jen.Id("c").Dot("ip").Op("+=").Lit(3),
+		jen.If(jen.Id("idx").Op(">=").Id("len").Call(jen.Id("c").Dot("types"))).Block(jen.Return(closure(jen.Panic(jen.Id("ErrSegmentationFault"))))),
+	}, body...)...)
+}
+
+// assertType is typeAt for an operand that must name a *types.<typ>, bound as typ
+// for body; any other type traps at run time.
+func assertType(typ string, body ...jen.Code) jen.Code {
+	return typeAt(append([]jen.Code{
+		jen.List(jen.Id("typ"), jen.Id("ok")).Op(":=").Id("c").Dot("types").Index(jen.Id("idx")).Assert(jen.Op("*").Qual(typesPkg, typ)),
+		jen.If(jen.Op("!").Id("ok")).Block(jen.Return(closure(jen.Panic(jen.Id("ErrTypeMismatch"))))),
+	}, body...)...)
+}
+
+// u8 and u16 bind name to the one- and two-byte operand that follows the
+// opcode at code position pos.
+func u8(name string, pos jen.Code) jen.Code {
+	return jen.Id(name).Op(":=").Id("int").Call(jen.Id("c").Dot("code").Index(jen.Add(pos).Op("+").Lit(1)))
+}
+
+func u16(name string, pos jen.Code) jen.Code {
+	return jen.Id(name).Op(":=").Id("int").Call(jen.Op("*").Parens(jen.Op("*").Id("uint16")).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Id("c").Dot("code").Index(jen.Add(pos).Op("+").Lit(1)))))
+}
+
+// top is the operand-stack slot k from the top; top(1) is the top.
+func top(k int) *jen.Statement {
+	return jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(k))
+}
+
+// next moves the running frame past the current instruction.
+func next() jen.Code {
+	return jen.Id("i").Dot("fr").Dot("ip").Op("++")
+}
+
+// underflow traps when fewer than n operands are on the stack.
+func underflow(n int) jen.Code {
+	cond := jen.Id("i").Dot("sp").Op("<").Lit(n)
+	if n == 1 {
+		cond = jen.Id("i").Dot("sp").Op("==").Lit(0)
+	}
+	return jen.If(cond).Block(jen.Panic(jen.Id("ErrStackUnderflow")))
+}
+
+func overflow() jen.Code {
+	return jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow")))
+}
+
+// spend spends one unit of a dormant JIT's heat (Interpreter.heat) when cond
+// holds; a nil cond always holds. Frame entries and taken back edges end
+// with it. The unit that runs heat out parks the current frame at ip park
+// (Interpreter.parked keeps its ip) so dispatch leaves its loop and wakes the
+// JIT: the handler writes no pointer and makes no call, either of which
+// would cost every handler a stack frame.
+func spend(cond jen.Code) jen.Code {
+	check := jen.Id("i").Dot("heat").Op(">").Lit(0)
+	if cond != nil {
+		check = jen.Add(cond).Op("&&").Add(check)
+	}
+	return jen.If(check).Block(
+		jen.Id("i").Dot("heat").Op("--"),
+		jen.If(jen.Id("i").Dot("heat").Op("==").Lit(0)).Block(
+			jen.List(jen.Id("i").Dot("parked"), jen.Id("i").Dot("fr").Dot("ip")).Op("=").List(jen.Id("i").Dot("fr").Dot("ip"), jen.Id("park")),
+		),
+	)
+}
+
+// reference traps unless slot holds a heap reference.
+func reference(slot jen.Code) jen.Code {
+	return jen.If(jen.Add(slot).Dot("Kind").Call().Op("!=").Qual(typesPkg, "KindRef")).Block(jen.Panic(jen.Id("ErrTypeMismatch")))
+}
+
+// container binds the reference at stack slot k to ref and its heap address to
+// addr, trapping when the slot holds no reference.
+func container(k int) jen.Code {
+	return jen.Id("ref").Op(":=").Add(top(k)).Line().
+		Add(reference(jen.Id("ref"))).Line().
+		Id("addr").Op(":=").Id("ref").Dot("Ref").Call()
+}
+
+// check traps with the error call returns.
+func check(call jen.Code) jen.Code {
+	return jen.If(jen.Id("err").Op(":=").Add(call), jen.Id("err").Op("!=").Nil()).Block(jen.Panic(jen.Id("err")))
+}
+
+// view replaces the host view in source with the VM value method of the view
+// returns, a copy of the Go value it addresses.
+func view(host, method string) jen.Code {
+	return jen.If(jen.List(jen.Id("view"), jen.Id("ok")).Op(":=").Id("source").Assert(jen.Op("*").Id(host)), jen.Id("ok")).Block(
+		jen.List(jen.Id("value"), jen.Id("err")).Op(":=").Id("view").Dot(method).Call(jen.Id("i")),
+		jen.If(jen.Id("err").Op("!=").Nil()).Block(jen.Panic(jen.Id("err"))),
+		jen.Id("source").Op("=").Id("value"),
+	)
+}
+
+// typeSwitch dispatches on the dynamic type behind subject: one case per
+// element of table, then rest, then a trap for any other type.
+func typeSwitch[T any](subject jen.Code, table []T, instance func(T) jen.Code, body func(T) []jen.Code, rest ...jen.Code) jen.Code {
+	cases := make([]jen.Code, 0, len(table)+len(rest)+1)
+	for _, entry := range table {
+		cases = append(cases, jen.Case(instance(entry)).Block(body(entry)...))
+	}
+	cases = append(cases, rest...)
+	cases = append(cases, jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))))
+	return jen.Switch(subject).Block(cases...)
+}
+
 func width(op instr.Opcode) int {
 	width := 1
 	for _, operand := range instr.TypeOf(op).Widths {
 		width += operand
 	}
 	return width
-}
-
-func add(expr jen.Code, offset int) *jen.Statement {
-	if offset == 0 {
-		return jen.Add(expr)
-	}
-	return jen.Add(expr).Op("+").Lit(offset)
-}
-
-func overflow() jen.Code {
-	return jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow")))
 }
 
 func reject(label string) jen.Code {

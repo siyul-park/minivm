@@ -136,24 +136,22 @@ func TestPool_Get(t *testing.T) {
 		b, err := p.Get(context.Background())
 		require.NoError(t, err)
 
-		run := func(vm *interp.Interpreter, selector int32, want int32, round int) {
-			require.NoError(t, vm.SetGlobal(1, types.BoxI32(selector)), "round %d", round)
-			require.NoError(t, vm.Run(context.Background()), "round %d", round)
-			got, err := vm.Pop()
-			require.NoError(t, err, "round %d", round)
-			require.Equal(t, types.I32(want), got, "round %d", round)
-			vm.Flush()
-		}
-
 		deopts := func() float64 {
 			v, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 			return v
 		}
+		var errs []error
+		var values []types.Value
 		round := 0
 		step := func() bool {
 			round++
-			run(a, 0, wantInc, round)
-			run(b, 1, wantDec, round)
+			for selector, vm := range []*interp.Interpreter{a, b} {
+				errs = append(errs, vm.SetGlobal(1, types.BoxI32(int32(selector))), vm.Run(context.Background()))
+				v, err := vm.Pop()
+				errs = append(errs, err)
+				values = append(values, v)
+				vm.Flush()
+			}
 			a.Reset()
 			b.Reset()
 			return deopts() > 0
@@ -165,6 +163,14 @@ func TestPool_Get(t *testing.T) {
 		poll(t, step)
 		p.Put(a)
 		p.Put(b)
+
+		for _, err := range errs {
+			require.NoError(t, err)
+		}
+		for r := range round {
+			require.Equal(t, types.I32(wantInc), values[2*r], "round %d", r+1)
+			require.Equal(t, types.I32(wantDec), values[2*r+1], "round %d", r+1)
+		}
 
 		// Retired sites stop deopting long before every round does.
 		require.Less(t, deopts(), float64(2*round))

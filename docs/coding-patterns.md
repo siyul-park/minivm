@@ -149,7 +149,13 @@ Within a Go file, declarations `MUST` appear in this order:
 10. clone/conversion and interface hooks
 11. private functions/methods
 
-Struct fields `MUST` read from ownership/policy toward runtime state; synchronization fields `MUST` be last.
+Within each declaration group:
+
+- A cohesive implementation `MUST` begin with its core operations and follow call direction from higher-level behavior to shared machinery.
+- Callers `MUST` precede exclusive helpers; symmetric counterparts `SHOULD` be adjacent; shared leaves `MUST` come after the code that uses them.
+- Within one type, constructors `MUST` precede operators and other behavior.
+- Opcode cores `MUST` follow the declaration order in `instr/opcode.go`. Exclusive helpers `MUST` remain adjacent to the opcode core they serve, so each generated handler and its implementation form one readable unit.
+- These ordering rules `MUST NOT` justify artificial file splits, wrappers, or duplicated helpers.
 
 ## Comments
 

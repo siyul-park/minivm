@@ -624,6 +624,60 @@ func nativeEntries(profiler *prof.Profiler) float64 {
 }
 
 func TestWithThreshold(t *testing.T) {
+	t.Run("reports threaded's heap exhaustion from a callout with threaded's counts", func(t *testing.T) {
+		native(t)
+		// Each fresh one-element []any holds the previous one, so every array
+		// stays live until the heap limit; an inner count to 8 gives each
+		// callout enough native work to pay for it.
+		b := instr.NewBuilder()
+		loop, inner, next := b.Label(), b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.DUP)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_SET)
+		b.Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(inner)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 8).Emit(instr.I32_GE_S).BrIf(next)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(inner)
+		b.Bind(next)
+		b.Br(loop)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeAny, types.TypeI32), program.WithTypes(types.NewArrayType(types.TypeAny)))
+
+		threaded := interp.New(prog, interp.WithThreshold(-1), interp.WithHeapLimit(300))
+		defer threaded.Close()
+		wantErr := threaded.Run(context.Background())
+		require.ErrorIs(t, wantErr, interp.ErrHeapExhausted)
+		// Address 0 is null, whose count is no reference count: threaded
+		// retainBox counts it up, releaseBox never down, native code neither.
+		wantCounts := make([]int, threaded.HeapLen()-1)
+		for j := range wantCounts {
+			wantCounts[j], _ = threaded.RefCount(j + 1)
+		}
+
+		var runErr error
+		var bridges float64
+		var counts []int
+		profiler := prof.New()
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHeapLimit(300))
+		defer vm.Close()
+		poll(t, func() bool {
+			runErr = vm.Run(context.Background())
+			counts = make([]int, vm.HeapLen()-1)
+			for j := range counts {
+				counts[j], _ = vm.RefCount(j + 1)
+			}
+			vm.Reset()
+			vm.Flush()
+			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+			return bridges > 0
+		})
+		require.Equal(t, wantErr, runErr)
+		require.Equal(t, wantCounts, counts)
+	})
+
 	t.Run("enters a hot recursive function's native code", func(t *testing.T) {
 		native(t)
 		prog := fibCallsProgram(t, 20)

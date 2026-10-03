@@ -16,7 +16,7 @@ type File struct {
 // Generate validates the fusion catalog and renders every generated file.
 func Generate() ([]File, error) {
 	patterns := catalog()
-	if err := validate(patterns); err != nil {
+	if err := validateCatalog(patterns); err != nil {
 		return nil, err
 	}
 	threaded, err := render(patterns)

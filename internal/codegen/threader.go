@@ -70,7 +70,7 @@ func matchGuard(pattern pattern) jen.Code {
 	condition := jen.Id("start").Op("+").Lit(size).Op("<=").Len(jen.Id("c").Dot("code"))
 	offset := width(pattern[0].op)
 	for _, current := range pattern[1:] {
-		condition = condition.Op("&&").Qual(instrPkg, "Opcode").Call(jen.Id("c").Dot("code").Index(add(jen.Id("start"), offset))).Op("==").Qual(instrPkg, symbol(current.op))
+		condition = condition.Op("&&").Qual(instrPkg, "Opcode").Call(jen.Id("c").Dot("code").Index(adjust(jen.Id("start"), offset))).Op("==").Qual(instrPkg, symbol(current.op))
 		offset += width(current.op)
 	}
 	return condition

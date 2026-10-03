@@ -129,6 +129,12 @@ type shared struct {
 	refs atomic.Int64
 }
 
+// callout computes an allocating operation's new object from its operands,
+// args holding the deepest first, from code, the operation's bytecode. It is
+// the interpreter's own helper for the operation, which writes no reference
+// count of an operand (native code owns and releases each).
+type callout func(i *Interpreter, code []byte, args [2]types.Boxed) types.Value
+
 // nativeStack is the native stack size per interpreter.
 const nativeStack = 1 << 20
 
@@ -189,6 +195,26 @@ var bridgeable = func() (out [256]bool) {
 	}
 	return out
 }()
+
+// callouts serve the bridges of allocating operations without a scratch
+// frame, operand retains, or a handler run.
+var callouts = [256]callout{
+	instr.STRING_CONCAT: func(i *Interpreter, _ []byte, args [2]types.Boxed) types.Value {
+		return i.concat(args[0], args[1])
+	},
+	instr.STRING_NEW_UTF32: func(i *Interpreter, _ []byte, args [2]types.Boxed) types.Value {
+		return i.text(args[0])
+	},
+	instr.STRING_ENCODE_UTF32: func(i *Interpreter, _ []byte, args [2]types.Boxed) types.Value {
+		return i.runes(args[0])
+	},
+	instr.ARRAY_NEW_DEFAULT: func(i *Interpreter, code []byte, args [2]types.Boxed) types.Value {
+		return i.newArrayDefault(i.types[index(code)].(*types.ArrayType), args[0])
+	},
+	instr.STRUCT_NEW_DEFAULT: func(i *Interpreter, code []byte, _ [2]types.Boxed) types.Value {
+		return i.newStruct(i.types[index(code)].(*types.StructType))
+	},
+}
 
 // total returns r's pool-wide entry counter for the OSR/entry site k,
 // creating it for the first native that observes k.
@@ -767,18 +793,27 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 		case jit.ExitBridge, jit.ExitBox:
 			// Charged before serving: a deopt after a bridge would run the op
 			// twice.
-			if !ledger.Charge(jit.ClassBridge) {
+			var serve callout
+			class := jit.ClassBridge
+			if exit.Kind == jit.ExitBridge && callouts[exit.Code] != nil {
+				serve, class = callouts[exit.Code], jit.ClassCallout
+			}
+			if !ledger.Charge(class) {
 				deopt(exit)
 				return false, true, nil
 			}
-			class := jit.ClassTrap
-			if exit.Kind == jit.ExitBridge {
+			switch {
+			case serve != nil:
+				if !n.callout(i, exit, serve) {
+					class = jit.ClassTrap
+				}
+			case exit.Kind == jit.ExitBridge:
 				class = n.bridge(i, exit)
-			} else if n.widen(i, exit) {
-				class = jit.ClassBridge
+			case !n.widen(i, exit):
+				class = jit.ClassTrap
 			}
 			switch class {
-			case jit.ClassBridge:
+			case jit.ClassBridge, jit.ClassCallout:
 				n.sync(i)
 				trap = jit.Resume(ctx)
 				continue
@@ -1023,6 +1058,36 @@ func (n *native) bridge(i *Interpreter, exit jit.Exit) jit.Class {
 		return jit.ClassTrap
 	}
 	return jit.ClassBridge
+}
+
+// callout serves exit, a bridge of an operation callouts serve with serve,
+// and reports whether it completed: it allocates serve's object and hands
+// native code its one reference through Context.Results. A panic (heap
+// exhaustion, or the operation's own fault) happens before anything is
+// published and leaves every operand's reference count as it was; threaded code runs
+// the operation again and reports it.
+func (n *native) callout(i *Interpreter, exit jit.Exit, serve callout) (ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	ctx := n.ctx
+	k := int(ctx.Depth) - 1
+	m := exit.Frame
+	var args [2]types.Boxed
+	for j, o := range m.Stack[len(m.Stack)-exit.Pops:] {
+		args[j] = fromWord(i, o.Value.Kind, ctx.Read(k, o.Value))
+	}
+	v := serve(i, i.function(m.Address).Code[m.IP:], args)
+	ctx.Results[0] = toWord(i, exit.Results[0], types.BoxRef(i.alloc(v)))
+	return true
+}
+
+// index is the two-byte type index the operation at code[0] carries, read
+// as the threader reads it.
+func index(code []byte) int {
+	return int(*(*uint16)(unsafe.Pointer(&code[1])))
 }
 
 // rollback releases each held operand back down to its saved count.
