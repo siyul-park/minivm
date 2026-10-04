@@ -94,7 +94,7 @@ func warningFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/warning\n\ngo 1.26\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "warning.go"), []byte("package warning\n\nfunc caller() { helper() }\n\nfunc helper() {}\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "warning.go"), []byte("package warning\n\nfunc caller() { helper() }\n\nfunc helper() { implementation() }\n\nfunc implementation() {}\n"), 0o644))
 	return dir
 }
 

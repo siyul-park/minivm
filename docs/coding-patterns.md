@@ -1,6 +1,6 @@
 # Coding Patterns
 
-Normative code-design rules for `minivm`.
+Normative code-design rules for `minivm`. This document is normative; analysis and lint tooling MAY enforce these rules but MUST NOT define additional coding requirements.
 
 `AGENTS.md` owns workflow; `testing.md` owns test contracts and structure; `refactoring.md` owns structural review; topic docs own architecture facts.
 
@@ -44,17 +44,16 @@ Files and declaration order `MUST` make ownership, responsibility, and relations
 
 4. **Reuse before extension.** Existing symbols and composition `SHOULD` be preferred before adding layers, extension points, policy knobs, or parallel mechanisms.
 
-### Automated Structural Signals
+### Structural Signals
 
-The checker `SHOULD` report high-confidence structural signals rather than assert single responsibility from syntax alone.
+Structural metrics `SHOULD` be used as review signals, never as proof of a design violation.
 
-- Cyclomatic complexity `SHOULD` be used as a review signal together with statement count and nesting depth.
-- Function coupling `SHOULD` use direct fan-in, fan-out, and dependency level to identify extreme hubs and high fan-out coordinators.
-- These metrics `MUST` remain warnings unless a concrete contract can be established; thresholds `SHOULD` be deliberately high to preserve precision.
-- A metric `MUST NOT` be treated as proof of a design violation by itself.
-- Near-clone diagnostics `SHOULD` use normalized token or AST-shape similarity with a minimum body size and a semantic/name-family relation; syntax similarity alone `MUST NOT` require abstraction.
-- Similar or symmetric siblings `SHOULD` be physically adjacent when they share an owner, signature, and implementation shape. The checker `SHOULD` report separated high-similarity siblings rather than reorder them automatically.
-- Declaration-order diagnostics `SHOULD` use dependency level together with fan-in/fan-out only as a high-threshold advisory. They `MUST NOT` infer a universal total order from metrics or automatically reorder declarations.
+- Cyclomatic complexity `SHOULD` be considered with statement count and nesting depth.
+- Coupling `SHOULD` be considered with direct fan-in, fan-out, and dependency depth.
+- Near-clone analysis `SHOULD` use normalized token or AST shape with a minimum body size and a semantic or naming relation; syntax similarity alone `MUST NOT` require abstraction.
+- Similar or symmetric siblings `SHOULD` be physically adjacent when they share an owner, signature, and implementation shape.
+- Metrics `MUST NOT` define a universal declaration order, justify automatic reordering, or prove single responsibility.
+- High-confidence mechanical checks `SHOULD` be preferred where a rule is directly expressible; heuristic signals `SHOULD` remain advisory and use deliberately high thresholds.
 
 ## Functions
 

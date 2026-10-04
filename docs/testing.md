@@ -1,6 +1,6 @@
 # Testing
 
-Owns test contracts, structure, methodology, reachability, completeness, and validation.
+Owns test contracts, structure, methodology, reachability, completeness, and validation. This document is normative; analysis and lint tooling MAY enforce these rules but MUST NOT define additional test requirements.
 
 `coding-patterns.md` owns general code design and style; topic docs own behavior; `AGENTS.md` owns repository gates.
 
@@ -29,7 +29,7 @@ Tests `MUST NOT` hide the behavior behind abstractions (wrappers, builders, or h
 | Similar cases | `MUST` be merged into one case or one table. |
 | Style | A test function uses either a table or scenario cases, never both, and never mixes abstraction levels. |
 
-The checker `TP006` `SHOULD` report tests that mix direct assertions with `t.Run` cases. This is a style diagnostic, not a proof that the test is invalid.
+A test `SHOULD` use one case style at each level. Direct assertions before or after `t.Run` cases `SHOULD` be avoided when they assert case behavior; setup, preconditions, and test-wide invariants MAY remain outside cases.
 
 Readiness polling `MUST` run on the test goroutine through the package's `poll` helper, which fails after a hang-guard deadline; `require.Eventually` `MUST NOT` be used where its condition touches a resource the case closes, because it runs the condition on another goroutine that can outlive teardown. Polling conditions `MUST` contain no assertions: they `MUST` capture results and errors, return only readiness, and assert the captured state after polling.
 
