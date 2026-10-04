@@ -17,7 +17,7 @@ Run dynamic logic inside Go with explicit resource limits, typed host calls, and
 
 ```bash
 go get github.com/siyul-park/minivm
-```bash
+```
 
 > Requires Go 1.26.2+. The VM core uses only the Go standard library.
 

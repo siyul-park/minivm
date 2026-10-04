@@ -17,7 +17,7 @@ Go 안에서 자원 제한, 타입이 지정된 호스트 호출, 스레디드 �
 
 ```bash
 go get github.com/siyul-park/minivm
-```bash
+```
 
 > Go 1.26.2 이상이 필요합니다. VM 코어는 Go 표준 라이브러리만 사용합니다.
 
