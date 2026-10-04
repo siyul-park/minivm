@@ -213,15 +213,28 @@ func checkOwnerTests(pkgs []*packages.Package, results *[]result) {
 						name = "Test" + named.Obj().Name() + "_" + obj.Name()
 					}
 				}
-				reportOwnerTest(pkg, ident.Pos(), name, tests[name], results)
+				count := ownerTestCount(tests, name)
+				reportOwnerTest(pkg, ident.Pos(), name, count, results)
 			case *types.TypeName:
 				if obj.Exported() {
 					name := "Test" + obj.Name()
-					reportOwnerTest(pkg, ident.Pos(), name, tests[name], results)
+					count := ownerTestCount(tests, name)
+					reportOwnerTest(pkg, ident.Pos(), name, count, results)
 				}
 			}
 		}
 	}
+}
+
+func ownerTestCount(tests map[string]int, owner string) int {
+	count := tests[owner]
+	prefix := owner + "_"
+	for name, value := range tests {
+		if strings.HasPrefix(name, prefix) {
+			count += value
+		}
+	}
+	return count
 }
 
 func findTestPackage(pkgs []*packages.Package, path string) *packages.Package {
@@ -250,11 +263,17 @@ func reportOwnerTest(pkg *packages.Package, pos token.Pos, name string, count in
 	if count == 1 {
 		return
 	}
-	message := fmt.Sprintf("[TP005] public symbol requires exactly one top-level test function %s", name)
+	severity := "warning"
+	message := fmt.Sprintf("[TP005] public symbol has no top-level owner test %s", name)
 	if count > 1 {
-		message = fmt.Sprintf("[TP005] public symbol requires exactly one top-level test function %s; found %d", name, count)
+		severity = "error"
+		message = fmt.Sprintf("[TP005] public symbol is split across %d top-level tests; use one owner test %s", count, name)
 	}
-	*results = append(*results, result{pkg: pkg, diagnostic: analysis.Diagnostic{Pos: pos, Message: message}})
+	*results = append(*results, result{pkg: pkg, diagnostic: analysis.Diagnostic{
+		Pos:      pos,
+		Category: severity,
+		Message:  message,
+	}})
 }
 
 func applyFixes(results []result) error {
@@ -381,7 +400,7 @@ func listRulesOutput() {
 		"TP004 tests do not reference private target symbols",
 		"CP006 dependents are declared before their dependencies",
 		"CP007 private helpers have at least two callers [warning]",
-		"TP005 each public symbol has exactly one top-level owner test",
+		"TP005 one top-level owner test per public symbol [warning if missing, error if split]",
 	} {
 		fmt.Fprintln(os.Stdout, rule)
 	}

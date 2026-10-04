@@ -63,6 +63,16 @@ func TestCommand(t *testing.T) {
 		require.Contains(t, string(output), "warning: [CP007]")
 	})
 
+	t.Run("split owner tests fail", func(t *testing.T) {
+		dir := splitOwnerFixture(t)
+		command := exec.CommandContext(t.Context(), binary, "./...")
+		command.Dir = dir
+		output, err := command.CombinedOutput()
+		require.Error(t, err)
+		require.Contains(t, string(output), "error: [TP005] public symbol is split across 2 top-level tests")
+		require.Contains(t, string(output), "warning: [TP005] public symbol has no top-level owner test TestOther")
+	})
+
 	t.Run("strict treats warnings as errors", func(t *testing.T) {
 		dir := warningFixture(t)
 		command := exec.CommandContext(t.Context(), binary, "-strict", "./...")
@@ -85,5 +95,14 @@ func warningFixture(t *testing.T) string {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/warning\n\ngo 1.26\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "warning.go"), []byte("package warning\n\nfunc caller() { helper() }\n\nfunc helper() {}\n"), 0o644))
+	return dir
+}
+
+func splitOwnerFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/split\n\ngo 1.26\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "thing.go"), []byte("package split\n\n// Thing is the fixture symbol.\nfunc Thing() {}\n\n// Other is intentionally untested.\nfunc Other() {}\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "thing_test.go"), []byte("package split_test\n\nimport \"testing\"\n\nfunc TestThing(t *testing.T) {}\n\nfunc TestThing_Error(t *testing.T) {}\n"), 0o644))
 	return dir
 }
