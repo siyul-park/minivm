@@ -180,7 +180,7 @@ benchmark-compare:
 		done; \
 	done
 
-lint: fmt vet
+lint: vet
 	@go run ./internal/cmd/check ./...
 
 fmt:
