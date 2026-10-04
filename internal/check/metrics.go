@@ -19,7 +19,9 @@ type functionMetric struct {
 }
 
 func checkMetrics(pass *analysis.Pass) {
-	for _, metric := range collectMetrics(pass) {
+	metrics := collectMetrics(pass)
+	checkAbstractionOrder(pass, metrics)
+	for _, metric := range metrics {
 		if metric.cyclomatic >= 15 && metric.statements >= 30 {
 			report(pass, "CP008", metric.fn.Name.Pos(),
 				"function %s has high complexity: cyclomatic=%d statements=%d nesting=%d",
@@ -42,6 +44,45 @@ func checkMetrics(pass *analysis.Pass) {
 			report(pass, "CP009", metric.fn.Name.Pos(),
 				"function %s is a high fan-out coordinator: fan-in=%d fan-out=%d level=%d",
 				metric.fn.Name.Name, metric.fanIn, metric.fanOut, metric.level)
+		}
+	}
+}
+
+func checkAbstractionOrder(pass *analysis.Pass, metrics []*functionMetric) {
+	byFunction := make(map[*ast.FuncDecl]*functionMetric, len(metrics))
+	for _, metric := range metrics {
+		byFunction[metric.fn] = metric
+	}
+
+	for _, file := range pass.Files {
+		var previous *functionMetric
+		group := -1
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || isTestFunction(fn.Name.Name) {
+				continue
+			}
+			metric := byFunction[fn]
+			if metric == nil {
+				continue
+			}
+			currentGroup := declarationGroup(fn)
+			if currentGroup != group {
+				previous = metric
+				group = currentGroup
+				continue
+			}
+			if previous != nil && previous.level >= 0 && metric.level >= 0 {
+				roleInverted := previous.fanOut <= 1 &&
+					metric.fanOut >= 4 &&
+					metric.level-previous.level >= 2
+				if roleInverted {
+					report(pass, "CP012", metric.fn.Name.Pos(),
+						"declaration order may invert abstraction level: %s level=%d precedes %s level=%d",
+						previous.fn.Name.Name, previous.level, metric.fn.Name.Name, metric.level)
+				}
+			}
+			previous = metric
 		}
 	}
 }

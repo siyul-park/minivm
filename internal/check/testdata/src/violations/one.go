@@ -178,3 +178,25 @@ func siblingBeta(x int) int {
 	}
 	return x
 }
+
+func orderLow() {}
+
+func orderHigh() { // want "CP012"
+	orderHelp1()
+	orderHelp2()
+	orderHelp3()
+	orderHelp4()
+}
+
+func orderOther() {
+	orderHelp1()
+	orderHelp2()
+	orderHelp3()
+	orderHelp4()
+}
+
+func orderHelp1() { orderLeaf() }
+func orderHelp2() { orderLeaf() }
+func orderHelp3() { orderLeaf() }
+func orderHelp4() { orderLeaf() }
+func orderLeaf()  {}

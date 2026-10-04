@@ -592,7 +592,7 @@ func report(pass *analysis.Pass, rule string, pos token.Pos, format string, args
 
 func ruleSeverity(rule string) severity {
 	switch rule {
-	case "CP001", "CP007", "CP008", "CP009", "CP010", "CP011", "TP006":
+	case "CP001", "CP007", "CP008", "CP009", "CP010", "CP011", "CP012", "TP006":
 		return warningSeverity
 	default:
 		return errorSeverity

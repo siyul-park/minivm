@@ -114,7 +114,7 @@ func filterDiff(results []result, pkgs []*packages.Package) ([]result, error) {
 
 func diffFileRule(rule string) bool {
 	switch rule {
-	case "CP008", "CP009", "CP010", "CP011", "TP006":
+	case "CP008", "CP009", "CP010", "CP011", "CP012", "TP006":
 		return true
 	default:
 		return false

@@ -54,6 +54,7 @@ The checker `SHOULD` report high-confidence structural signals rather than asser
 - A metric `MUST NOT` be treated as proof of a design violation by itself.
 - Near-clone diagnostics `SHOULD` use normalized token or AST-shape similarity with a minimum body size and a semantic/name-family relation; syntax similarity alone `MUST NOT` require abstraction.
 - Similar or symmetric siblings `SHOULD` be physically adjacent when they share an owner, signature, and implementation shape. The checker `SHOULD` report separated high-similarity siblings rather than reorder them automatically.
+- Declaration-order diagnostics `SHOULD` use dependency level together with fan-in/fan-out only as a high-threshold advisory. They `MUST NOT` infer a universal total order from metrics or automatically reorder declarations.
 
 ## Functions
 
