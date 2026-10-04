@@ -14,7 +14,7 @@ import (
 func TestCommand(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", "..", ".."))
 	binary := filepath.Join(t.TempDir(), "check")
-	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, "./internal/cmd/check")
+	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, "./internal/cmd/vigil")
 	build.Dir = root
 	output, err := build.CombinedOutput()
 	require.NoError(t, err, string(output))
@@ -51,6 +51,10 @@ func TestCommand(t *testing.T) {
 		require.Contains(t, string(output), "CP001")
 		require.Contains(t, string(output), "CP006")
 		require.Contains(t, string(output), "CP007")
+		require.Contains(t, string(output), "CP012")
+		require.Contains(t, string(output), "CP013")
+		require.Contains(t, string(output), "TP005")
+		require.Contains(t, string(output), "TP007")
 		require.Contains(t, string(output), "warning")
 	})
 
@@ -63,14 +67,33 @@ func TestCommand(t *testing.T) {
 		require.Contains(t, string(output), "warning: [CP007]")
 	})
 
+	t.Run("missing test package warns", func(t *testing.T) {
+		dir := missingTestFixture(t)
+		command := exec.CommandContext(t.Context(), binary, "./...")
+		command.Dir = dir
+		output, err := command.CombinedOutput()
+		require.NoError(t, err)
+		require.Contains(t, string(output), "warning: [TP005] public symbol Thing has no semantic owner test")
+	})
+
 	t.Run("split owner tests fail", func(t *testing.T) {
 		dir := splitOwnerFixture(t)
 		command := exec.CommandContext(t.Context(), binary, "./...")
 		command.Dir = dir
 		output, err := command.CombinedOutput()
 		require.Error(t, err)
-		require.Contains(t, string(output), "error: [TP005] public symbol is split across 2 top-level tests")
-		require.Contains(t, string(output), "warning: [TP005] public symbol has no top-level owner test TestOther")
+		require.Contains(t, string(output), "error: [TP005] public symbol Thing is exercised by multiple top-level tests")
+		require.Contains(t, string(output), "warning: [TP005] public symbol Other has no semantic owner test")
+	})
+
+	t.Run("rules select diagnostics", func(t *testing.T) {
+		dir := warningFixture(t)
+		command := exec.CommandContext(t.Context(), binary, "-rules", "CP007", "./...")
+		command.Dir = dir
+		output, err := command.CombinedOutput()
+		require.NoError(t, err, string(output))
+		require.Contains(t, string(output), "[CP007]")
+		require.NotContains(t, string(output), "[CP006]")
 	})
 
 	t.Run("strict treats warnings as errors", func(t *testing.T) {
@@ -98,11 +121,19 @@ func warningFixture(t *testing.T) string {
 	return dir
 }
 
+func missingTestFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/missing\n\ngo 1.26\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "thing.go"), []byte("package missing\n\n// Thing is the fixture symbol.\nfunc Thing() {}\n"), 0o644))
+	return dir
+}
+
 func splitOwnerFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/split\n\ngo 1.26\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "thing.go"), []byte("package split\n\n// Thing is the fixture symbol.\nfunc Thing() {}\n\n// Other is intentionally untested.\nfunc Other() {}\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "thing_test.go"), []byte("package split_test\n\nimport \"testing\"\n\nfunc TestThing(t *testing.T) {}\n\nfunc TestThing_Error(t *testing.T) {}\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "thing_test.go"), []byte("package split_test\n\nimport (\n    \"testing\"\n    \"example.com/split\"\n)\n\nfunc TestThing(t *testing.T) { split.Thing() }\n\nfunc TestThing_Error(t *testing.T) { split.Thing() }\n"), 0o644))
 	return dir
 }

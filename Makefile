@@ -10,7 +10,7 @@ GOIMPORTS ?= goimports
 
 PROJECT = $(shell basename -s .git $(shell git config --get remote.origin.url))
 
-.PHONY: init install-tools install-modules generate build clean tidy update clean-sum clean-cache sync check check-generated check-tidy check-fmt check-arm64 check-inline test coverage coverage-check benchmark benchmark-pr benchmark-core benchmark-nightly benchmark-compare lint fmt vet doc fuzz
+.PHONY: init install-tools install-modules generate build clean tidy update clean-sum clean-cache sync check check-generated check-tidy check-fmt check-arm64 check-inline test coverage coverage-check benchmark benchmark-pr benchmark-core benchmark-nightly benchmark-compare vigil lint fmt vet doc fuzz
 all: lint test build
 
 init:
@@ -180,13 +180,15 @@ benchmark-compare:
 		done; \
 	done
 
-lint: vet
-	@go run ./internal/cmd/check -diff ./...
+vigil:
+	@go run ./internal/cmd/vigil -diff ./...
+
+lint: vet vigil
 
 fmt:
 	@command -v $(GOIMPORTS) >/dev/null
 	@$(GOIMPORTS) -w .
-	@status=0; go run ./internal/cmd/check -fix ./... || status=$$?; test $$status -le 1
+	@status=0; go run ./internal/cmd/vigil -fix ./... || status=$$?; test $$status -le 1
 
 vet:
 	@go vet ./...

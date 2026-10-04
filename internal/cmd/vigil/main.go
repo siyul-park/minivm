@@ -14,7 +14,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/siyul-park/minivm/internal/check"
+	"github.com/siyul-park/minivm/internal/vigil"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/packages"
 )
@@ -32,19 +32,37 @@ type position struct {
 
 type changedLines map[string]map[int]bool
 
+type packageRule struct {
+	id          string
+	description string
+	severity    string
+	run         func([]*packages.Package, *[]result)
+}
+
 var diffHunk = regexp.MustCompile(`@@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,([0-9]+))? @@`)
+
+var packageRules = []packageRule{
+	{id: "TP001", description: "feature tests use an external test package", severity: "error", run: checkExternalTestPackages},
+	{id: "TP005", description: "one semantic owner test per public symbol", severity: "mixed", run: checkOwnerTests},
+}
 
 func main() {
 	fix := flag.Bool("fix", false, "apply suggested fixes and recheck")
 	diffOnly := flag.Bool("diff", false, "report diagnostics in changes from main")
 	jsonOutput := flag.Bool("json", false, "write one diagnostic object per line")
 	listRules := flag.Bool("list-rules", false, "list rule IDs and exit")
+	ruleList := flag.String("rules", "", "comma-separated rule IDs to report")
 	strict := flag.Bool("strict", false, "treat warnings as errors")
 	flag.Parse()
 
 	if *listRules {
 		listRulesOutput()
 		return
+	}
+
+	rules, err := parseRules(*ruleList)
+	if err != nil {
+		fail(err)
 	}
 
 	pkgs, err := load(flag.Args())
@@ -54,11 +72,12 @@ func main() {
 
 	results := analyze(pkgs)
 	if *diffOnly {
-		results, err = filterDiff(results, pkgs)
+		results, err = filterDiff(results)
 		if err != nil {
 			fail(err)
 		}
 	}
+	results = filterRules(results, rules)
 	if *fix {
 		if err := applyFixes(results); err != nil {
 			fail(err)
@@ -69,11 +88,12 @@ func main() {
 		}
 		results = analyze(pkgs)
 		if *diffOnly {
-			results, err = filterDiff(results, pkgs)
+			results, err = filterDiff(results)
 			if err != nil {
 				fail(err)
 			}
 		}
+		results = filterRules(results, rules)
 	}
 
 	if err := writeDiagnostics(results, *jsonOutput); err != nil {
@@ -90,16 +110,54 @@ func fail(err error) {
 	os.Exit(2)
 }
 
-func filterDiff(results []result, pkgs []*packages.Package) ([]result, error) {
+func parseRules(value string) (map[string]bool, error) {
+	if value == "" {
+		return nil, nil
+	}
+	known := make(map[string]bool)
+	for _, text := range vigil.Rules() {
+		known[strings.Fields(text)[0]] = true
+	}
+	for _, rule := range packageRules {
+		known[rule.id] = true
+	}
+	selected := make(map[string]bool)
+	for _, id := range strings.Split(value, ",") {
+		id = strings.TrimSpace(id)
+		if id == "" || !known[id] {
+			return nil, fmt.Errorf("unknown rule %q", id)
+		}
+		selected[id] = true
+	}
+	return selected, nil
+}
+
+func filterRules(results []result, selected map[string]bool) []result {
+	if len(selected) == 0 {
+		return results
+	}
+	out := results[:0]
+	for _, result := range results {
+		if selected[ruleOf(result.diagnostic.Message)] {
+			out = append(out, result)
+		}
+	}
+	return out
+}
+
+func filterDiff(results []result) ([]result, error) {
 	lines, files, err := changedFiles()
 	if err != nil {
 		return nil, err
 	}
-	_ = pkgs
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("get working directory: %w", err)
+	}
 	filtered := results[:0]
 	for _, result := range results {
 		pos := result.position()
-		rel, err := filepath.Rel(mustGetwd(), filepath.Clean(pos.file))
+		rel, err := filepath.Rel(wd, filepath.Clean(pos.file))
 		if err != nil {
 			continue
 		}
@@ -114,7 +172,7 @@ func filterDiff(results []result, pkgs []*packages.Package) ([]result, error) {
 
 func diffFileRule(rule string) bool {
 	switch rule {
-	case "CP008", "CP009", "CP010", "CP011", "TP006":
+	case "CP008", "CP009", "CP010", "CP011":
 		return true
 	default:
 		return false
@@ -172,14 +230,6 @@ func atoi(s string) int {
 	return value
 }
 
-func mustGetwd() string {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	return wd
-}
-
 func load(patterns []string) ([]*packages.Package, error) {
 	if len(patterns) == 0 {
 		patterns = []string{"./..."}
@@ -210,7 +260,7 @@ func analyze(pkgs []*packages.Package) []result {
 	var results []result
 	for _, pkg := range pkgs {
 		pass := &analysis.Pass{
-			Analyzer:   check.Analyzer,
+			Analyzer:   vigil.Analyzer,
 			Fset:       pkg.Fset,
 			Files:      pkg.Syntax,
 			Pkg:        pkg.Types,
@@ -220,7 +270,7 @@ func analyze(pkgs []*packages.Package) []result {
 				results = append(results, result{pkg: pkg, diagnostic: d})
 			},
 		}
-		if _, err := check.Analyzer.Run(pass); err != nil {
+		if _, err := vigil.Analyzer.Run(pass); err != nil {
 			results = append(results, result{
 				pkg: pkg,
 				diagnostic: analysis.Diagnostic{
@@ -230,8 +280,7 @@ func analyze(pkgs []*packages.Package) []result {
 			})
 		}
 	}
-	checkExternalTestPackages(pkgs, &results)
-	checkOwnerTests(pkgs, &results)
+	runPackageRules(pkgs, &results)
 	sort.Slice(results, func(i, j int) bool {
 		a := results[i].position()
 		b := results[j].position()
@@ -262,6 +311,20 @@ func analyze(pkgs []*packages.Package) []result {
 	return unique
 }
 
+func runPackageRules(pkgs []*packages.Package, results *[]result) {
+	for _, rule := range packageRules {
+		start := len(*results)
+		rule.run(pkgs, results)
+		for i := start; i < len(*results); i++ {
+			diagnostic := &(*results)[i].diagnostic
+			diagnostic.Message = "[" + rule.id + "] " + diagnostic.Message
+			if diagnostic.Category == "" {
+				diagnostic.Category = rule.severity
+			}
+		}
+	}
+}
+
 func checkExternalTestPackages(pkgs []*packages.Package, results *[]result) {
 	paths := make(map[string]bool)
 	for _, pkg := range pkgs {
@@ -282,7 +345,7 @@ func checkExternalTestPackages(pkgs []*packages.Package, results *[]result) {
 				pkg: pkg,
 				diagnostic: analysis.Diagnostic{
 					Pos:     file.Name.Pos(),
-					Message: fmt.Sprintf("[TP001] feature tests must use an external package named %s_test", pkg.Name),
+					Message: fmt.Sprintf("feature tests must use an external package named %s_test", pkg.Name),
 				},
 			})
 		}
@@ -295,88 +358,98 @@ func checkOwnerTests(pkgs []*packages.Package, results *[]result) {
 			continue
 		}
 		testPkg := findTestPackage(pkgs, pkg.PkgPath)
-		if testPkg == nil {
-			continue
-		}
-		tests := make(map[string]int)
-		for _, file := range testPkg.Syntax {
-			name := testPkg.Fset.File(file.Pos()).Name()
-			if !strings.HasSuffix(name, "_test.go") {
-				continue
-			}
-			for _, decl := range file.Decls {
-				fn, ok := decl.(*ast.FuncDecl)
-				if ok && fn.Recv == nil && strings.HasPrefix(fn.Name.Name, "Test") {
-					tests[fn.Name.Name]++
-				}
-			}
-		}
 		for ident, obj := range pkg.TypesInfo.Defs {
 			switch obj := obj.(type) {
 			case *types.Func:
-				if !obj.Exported() {
-					continue
+				if obj.Exported() {
+					reportOwnerTest(pkg, ident.Pos(), obj, semanticOwnerTests(testPkg, obj), results)
 				}
-				name := "Test" + obj.Name()
-				if recv := obj.Type().(*types.Signature).Recv(); recv != nil {
-					named, ok := derefNamed(recv.Type())
-					if !ok || !named.Obj().Exported() {
-						continue
-					}
-					if _, ok := named.Underlying().(*types.Interface); ok {
-						continue
-					}
-					name = "Test" + named.Obj().Name() + "_" + obj.Name()
-				}
-				exact, extra := ownerTests(tests, name)
-				reportOwnerTest(pkg, ident.Pos(), name, exact, extra, results)
 			case *types.TypeName:
 				if _, ok := obj.Type().(*types.TypeParam); ok {
 					continue
 				}
 				if obj.Exported() {
-					name := "Test" + obj.Name()
-					exact, extra := ownerTests(tests, name, methodNames(obj.Type())...)
-					reportOwnerTest(pkg, ident.Pos(), name, exact, extra, results)
+					reportOwnerTest(pkg, ident.Pos(), obj, semanticOwnerTests(testPkg, obj), results)
 				}
 			}
 		}
 	}
 }
 
-func ownerTests(tests map[string]int, owner string, methods ...string) (exact, extra int) {
-	exact = tests[owner]
-	allowed := make(map[string]bool, len(methods))
-	for _, method := range methods {
-		allowed[owner+"_"+method] = true
-	}
-	prefix := owner + "_"
-	for name, value := range tests {
-		if strings.HasPrefix(name, prefix) && !allowed[name] {
-			extra += value
-		}
-	}
-	return exact, extra
-}
-
-func methodNames(typ types.Type) []string {
-	named, ok := typ.(*types.Named)
-	if !ok {
+func semanticOwnerTests(testPkg *packages.Package, target types.Object) []string {
+	if testPkg == nil {
 		return nil
 	}
-	seen := make(map[string]bool)
-	var names []string
-	for _, setType := range []types.Type{named, types.NewPointer(named)} {
-		for i := 0; i < types.NewMethodSet(setType).Len(); i++ {
-			name := types.NewMethodSet(setType).At(i).Obj().Name()
-			if !types.NewMethodSet(setType).At(i).Obj().Exported() || seen[name] {
+	expected := ownerTestName(target)
+	if expected == "" {
+		return nil
+	}
+	prefix := expected + "_"
+	allowPrefix := false
+	if fn, ok := target.(*types.Func); ok {
+		sig, ok := fn.Type().(*types.Signature)
+		allowPrefix = ok && sig.Recv() == nil
+	}
+	var owners []string
+	for _, file := range testPkg.Syntax {
+		if !strings.HasSuffix(testPkg.Fset.File(file.Pos()).Name(), "_test.go") {
+			continue
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil || fn.Body == nil {
 				continue
 			}
-			seen[name] = true
-			names = append(names, name)
+			if fn.Name.Name != expected && (!allowPrefix || !strings.HasPrefix(fn.Name.Name, prefix)) {
+				continue
+			}
+			found := false
+			ast.Inspect(fn.Body, func(node ast.Node) bool {
+				if found {
+					return false
+				}
+				if ident, ok := node.(*ast.Ident); ok && testPkg.TypesInfo.Uses[ident] == target {
+					found = true
+					return false
+				}
+				sel, ok := node.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				if selection := testPkg.TypesInfo.Selections[sel]; selection != nil && selection.Obj() == target {
+					found = true
+				}
+				return !found
+			})
+			if found {
+				owners = append(owners, fn.Name.Name)
+			}
 		}
 	}
-	return names
+	sort.Strings(owners)
+	return owners
+}
+
+func ownerTestName(obj types.Object) string {
+	switch obj := obj.(type) {
+	case *types.Func:
+		sig, ok := obj.Type().(*types.Signature)
+		if !ok {
+			return ""
+		}
+		if recv := sig.Recv(); recv != nil {
+			named, ok := derefNamed(recv.Type())
+			if !ok || !named.Obj().Exported() {
+				return ""
+			}
+			return "Test" + named.Obj().Name() + "_" + obj.Name()
+		}
+		return "Test" + obj.Name()
+	case *types.TypeName, *types.Const, *types.Var:
+		return "Test" + obj.Name()
+	default:
+		return ""
+	}
 }
 
 func findTestPackage(pkgs []*packages.Package, path string) *packages.Package {
@@ -401,20 +474,19 @@ func derefNamed(typ types.Type) (*types.Named, bool) {
 	return named, ok && named.Obj() != nil
 }
 
-func reportOwnerTest(pkg *packages.Package, pos token.Pos, name string, exact, extra int, results *[]result) {
-	if exact == 1 && extra == 0 {
+func reportOwnerTest(pkg *packages.Package, pos token.Pos, obj types.Object, owners []string, results *[]result) {
+	if len(owners) == 1 {
 		return
 	}
-	severity := "warning"
-	message := fmt.Sprintf("[TP005] public symbol has no top-level owner test %s", name)
-	if exact > 0 && extra > 0 {
-		severity = "error"
-		count := exact + extra
-		message = fmt.Sprintf("[TP005] public symbol is split across %d top-level tests; use one owner test %s", count, name)
+	category := "warning"
+	message := fmt.Sprintf("public symbol %s has no semantic owner test", obj.Name())
+	if len(owners) > 1 {
+		category = "error"
+		message = fmt.Sprintf("public symbol %s is exercised by multiple top-level tests: %s", obj.Name(), strings.Join(owners, ", "))
 	}
 	*results = append(*results, result{pkg: pkg, diagnostic: analysis.Diagnostic{
 		Pos:      pos,
-		Category: severity,
+		Category: category,
 		Message:  message,
 	}})
 }
@@ -531,25 +603,21 @@ func ruleOf(message string) string {
 }
 
 func listRulesOutput() {
-	for _, rule := range []string{
-		"CP001 exported symbols have doc comments",
-		"CP002 declarations follow file-order ownership groups",
-		"CP003 context.Context is the first parameter",
-		"CP004 constructors return concrete types",
-		"CP005 receiver-owned methods stay in one file",
-		"TP001 feature tests use an external test package",
-		"TP002 t.Run nesting is at most one case level",
-		"TP003 use the package poll helper instead of Eventually",
-		"TP004 tests do not reference private target symbols",
-		"CP006 dependents are declared before their dependencies",
-		"CP007 private helpers have at least two callers [warning]",
-		"CP008 high complexity is a review signal [warning]",
-		"CP009 extreme fan-in/fan-out is a review signal [warning]",
-		"CP010 near-clone symbols are a review signal [warning]",
-		"CP011 separated similar siblings are a review signal [warning]",
-		"TP005 one top-level owner test per public symbol [warning if missing, error if split]",
-		"TP006 tests do not mix direct assertions with t.Run cases [warning]",
-	} {
-		fmt.Fprintln(os.Stdout, rule)
+	for _, text := range vigil.Rules() {
+		fmt.Fprintln(os.Stdout, text)
 	}
+	for _, rule := range packageRules {
+		fmt.Fprintln(os.Stdout, formatRule(rule))
+	}
+}
+
+func formatRule(rule packageRule) string {
+	suffix := ""
+	switch rule.severity {
+	case "warning":
+		suffix = " [warning]"
+	case "mixed":
+		suffix = " [warning if missing, error if split]"
+	}
+	return rule.id + " " + rule.description + suffix
 }

@@ -29,13 +29,13 @@ Tests `MUST NOT` hide the behavior behind abstractions (wrappers, builders, or h
 | Similar cases | `MUST` be merged into one case or one table. |
 | Style | A test function uses either a table or scenario cases, never both, and never mixes abstraction levels. |
 
-A test `SHOULD` use one case style at each level. Direct assertions before or after `t.Run` cases `SHOULD` be avoided when they assert case behavior; setup, preconditions, and test-wide invariants MAY remain outside cases.
+A test `SHOULD` use one case style per level. Assertions around `t.Run` `SHOULD` describe setup, preconditions, or test-wide invariants, not case behavior.
 
-Readiness polling `MUST` run on the test goroutine through the package's `poll` helper, which fails after a hang-guard deadline; `require.Eventually` `MUST NOT` be used where its condition touches a resource the case closes, because it runs the condition on another goroutine that can outlive teardown. Polling conditions `MUST` contain no assertions: they `MUST` capture results and errors, return only readiness, and assert the captured state after polling.
+Readiness polling `MUST` use the package `poll` helper on the test goroutine; its hang guard bounds teardown. `require.Eventually` `MUST NOT` poll resources the case closes, because its condition may outlive teardown. Poll conditions `MUST` only capture results/errors and return readiness; assertions belong after polling.
 
-Table data and generation code `MUST` stay simple enough to read as specification.
+Table data and generation code `MUST` remain simple enough to read as specification.
 
-Tests `MUST` use only the code under test's public interface. Direct private-symbol reference indicates a design problem and `MUST` be resolved by changing the design so the behavior is specified through its proper boundary.
+Tests `MUST` use only the code under test's public interface. A private-symbol reference `MUST` be resolved at the public boundary, not by exposing internals solely for testing.
 
 ### F.I.R.S.T.
 

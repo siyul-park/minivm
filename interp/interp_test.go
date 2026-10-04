@@ -1518,6 +1518,18 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 42),
+			instr.New(instr.REF_NEW),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.MAP_NEW, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeI32, types.TypeAny))),
+		values: []types.Value{types.I32(42)},
+	},
+	{
+		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_LOOKUP),
 		}, program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32))),

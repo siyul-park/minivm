@@ -1,14 +1,37 @@
 package violations
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 type Thing struct{} // want "CP001"
 
+// PublicState owns its private state for boundary tests.
+type PublicState struct {
+	value int
+}
+
 type privateThing struct{}
+
+type privateState struct{}
 
 func Use(value int, ctx context.Context) {} // want "CP001" "CP003"
 
 func NewThing() interface{} { return Thing{} } // want "CP001" "CP004"
+
+func NewFactory(useOther bool) interface{} { // want "CP001"
+	if useOther {
+		return privateThing{}
+	}
+	return Thing{}
+}
+
+func NewClosure() interface{} { // want "CP001" "CP004"
+	closure := func() interface{} { return privateThing{} }
+	_ = closure
+	return Thing{}
+}
 
 type laterThing struct{} // want "CP002"
 
@@ -24,6 +47,30 @@ func (Thing) Second() {} // want "CP001" "receiver Thing has methods in multiple
 
 // helperValue is shared by two higher-level functions.
 func helperValue() {}
+
+func boundaryRead(state PublicState) int {
+	return state.value // want "CP012"
+}
+
+func boundaryConstruct() PublicState {
+	return PublicState{value: 1} // want "CP012"
+}
+
+func (privateState) read(state PublicState) int {
+	return state.value
+}
+
+func (state PublicState) read() int {
+	return state.value
+}
+
+func wrapError(err error) error {
+	return fmt.Errorf("wrap: %v", err) // want "CP013"
+}
+
+func wrapErrorPreserve(err error) error {
+	return fmt.Errorf("wrap: %w", err)
+}
 
 func metricComplexity(n int) int { // want "CP008"
 	if n%2 == 0 {
@@ -174,6 +221,76 @@ func siblingBeta(x int) int {
 		x++
 	}
 	if x%11 == 0 {
+		x++
+	}
+	return x
+}
+
+func decodeFirst(x int) int {
+	if x > 0 {
+		x++
+	}
+	if x%2 == 0 {
+		x++
+	}
+	if x%3 == 0 {
+		x++
+	}
+	if x%5 == 0 {
+		x++
+	}
+	if x%7 == 0 {
+		x++
+	}
+	if x%11 == 0 {
+		x++
+	}
+	if x%13 == 0 {
+		x++
+	}
+	if x%17 == 0 {
+		x++
+	}
+	if x%19 == 0 {
+		x++
+	}
+	if x%23 == 0 {
+		x++
+	}
+	return x
+}
+
+func gap() {}
+
+func decodeSecond(x int) int {
+	if x > 0 {
+		x++
+	}
+	if x%2 == 0 {
+		x++
+	}
+	if x%3 == 0 {
+		x++
+	}
+	if x%5 == 0 {
+		x++
+	}
+	if x%7 == 0 {
+		x++
+	}
+	if x%11 == 0 {
+		x++
+	}
+	if x%13 == 0 {
+		x++
+	}
+	if x%17 == 0 {
+		x++
+	}
+	if x%19 == 0 {
+		x++
+	}
+	if x%23 == 0 {
 		x++
 	}
 	return x

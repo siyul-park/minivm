@@ -4339,54 +4339,41 @@ var (
 				v2 := v1.Ref()
 				var v3 types.Boxed
 				var v4 bool
+				var v5 bool
 				switch v1 := i.heap[v2].(type) {
 				case *types.TypedMap[int8]:
-					v2, v4 := v1.Get(v0.I8())
-					if v4 {
-						v3 = v2
-					} else {
+					v3, v4 = v1.Get(v0.I8())
+					if !v4 {
 						v3 = v1.Zero
 					}
 				case *types.TypedMap[bool]:
-					v2, v4 := v1.Get(v0.Bool())
-					if v4 {
-						v3 = v2
-					} else {
+					v3, v4 = v1.Get(v0.Bool())
+					if !v4 {
 						v3 = v1.Zero
 					}
 				case *types.TypedMap[int32]:
-					v2, v4 := v1.Get(v0.I32())
-					if v4 {
-						v3 = v2
-					} else {
+					v3, v4 = v1.Get(v0.I32())
+					if !v4 {
 						v3 = v1.Zero
 					}
 				case *types.TypedMap[int64]:
-					v2, v4 := v1.Get(i.unboxI64(v0))
-					if v4 {
-						v3 = v2
-					} else {
+					v3, v4 = v1.Get(i.unboxI64(v0))
+					if !v4 {
 						v3 = v1.Zero
 					}
 				case *types.TypedMap[float32]:
-					v2, v4 := v1.Get(v0.F32())
-					if v4 {
-						v3 = v2
-					} else {
+					v3, v4 = v1.Get(v0.F32())
+					if !v4 {
 						v3 = v1.Zero
 					}
 				case *types.TypedMap[float64]:
-					v2, v4 := v1.Get(v0.F64())
-					if v4 {
-						v3 = v2
-					} else {
+					v3, v4 = v1.Get(v0.F64())
+					if !v4 {
 						v3 = v1.Zero
 					}
 				case *types.TypedMap[string]:
-					v2, v4 := v1.Get(string(unboxRef[types.String](i, v0)))
-					if v4 {
-						v3 = v2
-					} else {
+					v3, v4 = v1.Get(string(unboxRef[types.String](i, v0)))
+					if !v4 {
 						v3 = v1.Zero
 					}
 				case *types.Map:
@@ -4399,16 +4386,16 @@ var (
 						v3 = v1.Zero
 					}
 				case *HostMap:
-					v2, v5, v6 := v1.Get(i, v0)
+					v2, v4, v6 := v1.Get(i, v0)
 					if v6 != nil {
 						panic(v6)
 					}
-					v3, v4 = v2, true
-					_ = v5
+					v3, v5 = v2, true
+					_ = v4
 				default:
 					panic(ErrTypeMismatch)
 				}
-				if !v4 {
+				if !v5 {
 					i.retainBox(v3)
 				}
 				i.release(v2)
@@ -4435,39 +4422,18 @@ var (
 				switch v1 := i.heap[v2].(type) {
 				case *types.TypedMap[int8]:
 					v3, v5 = v1.Get(v0.I8())
-					if !v5 {
-						v3 = v1.Zero
-					}
 				case *types.TypedMap[bool]:
 					v3, v5 = v1.Get(v0.Bool())
-					if !v5 {
-						v3 = v1.Zero
-					}
 				case *types.TypedMap[int32]:
 					v3, v5 = v1.Get(v0.I32())
-					if !v5 {
-						v3 = v1.Zero
-					}
 				case *types.TypedMap[int64]:
 					v3, v5 = v1.Get(i.unboxI64(v0))
-					if !v5 {
-						v3 = v1.Zero
-					}
 				case *types.TypedMap[float32]:
 					v3, v5 = v1.Get(v0.F32())
-					if !v5 {
-						v3 = v1.Zero
-					}
 				case *types.TypedMap[float64]:
 					v3, v5 = v1.Get(v0.F64())
-					if !v5 {
-						v3 = v1.Zero
-					}
 				case *types.TypedMap[string]:
 					v3, v5 = v1.Get(string(unboxRef[types.String](i, v0)))
-					if !v5 {
-						v3 = v1.Zero
-					}
 				case *types.Map:
 					v2, v4 := i.mapKey(v0)
 					v6, v7 := v1.Get(v2)

@@ -757,12 +757,12 @@ func CBNZ(reg asm.Reg, offset int32) asm.Instruction {
 
 // CBZLabel is CBZ to id; Build resolves the displacement.
 func CBZLabel(reg asm.Reg, id asm.Label) asm.Instruction {
-	return asm.Instruction{Op: uint16(OpCBZ), Src1: regOperand(reg), Src2: asm.LabelOperand{ID: id}}
+	return branchLabel(OpCBZ, reg, id)
 }
 
 // CBNZLabel is CBNZ to id; Build resolves the displacement.
 func CBNZLabel(reg asm.Reg, id asm.Label) asm.Instruction {
-	return asm.Instruction{Op: uint16(OpCBNZ), Src1: regOperand(reg), Src2: asm.LabelOperand{ID: id}}
+	return branchLabel(OpCBNZ, reg, id)
 }
 
 // TBZ reg, #bit, offset — branch if bit N is zero
@@ -858,6 +858,10 @@ func DSB() asm.Instruction { return newInst(OpDSB, nil) }
 
 // DMB returns an ARM64 instruction.
 func DMB() asm.Instruction { return newInst(OpDMB, nil) }
+
+func branchLabel(op Op, reg asm.Reg, id asm.Label) asm.Instruction {
+	return asm.Instruction{Op: uint16(op), Src1: regOperand(reg), Src2: asm.LabelOperand{ID: id}}
+}
 
 func newReg3(op Op, dst, src1, src2 asm.Reg) asm.Instruction {
 	return newInst(op, regOperand(dst), regOperand(src1), regOperand(src2))

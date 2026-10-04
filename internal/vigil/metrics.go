@@ -1,4 +1,4 @@
-package check
+package vigil
 
 import (
 	"go/ast"
@@ -18,32 +18,38 @@ type functionMetric struct {
 	nesting    int
 }
 
-func checkMetrics(pass *analysis.Pass) {
-	metrics := collectMetrics(pass)
-	for _, metric := range metrics {
+func checkComplexity(pass *analysis.Pass) {
+	for _, metric := range collectMetrics(pass) {
 		if isDispatcher(metric.fn.Body) {
 			continue
 		}
 		if metric.cyclomatic >= 15 && metric.statements >= 30 {
-			report(pass, "CP008", metric.fn.Name.Pos(),
+			report(pass, metric.fn.Name.Pos(),
 				"function %s has high complexity: cyclomatic=%d statements=%d nesting=%d",
 				metric.fn.Name.Name, metric.cyclomatic, metric.statements, metric.nesting)
 			continue
 		}
 		if metric.cyclomatic >= 10 && metric.statements >= 25 && metric.nesting >= 6 {
-			report(pass, "CP008", metric.fn.Name.Pos(),
+			report(pass, metric.fn.Name.Pos(),
 				"function %s has high structural complexity: cyclomatic=%d statements=%d nesting=%d",
 				metric.fn.Name.Name, metric.cyclomatic, metric.statements, metric.nesting)
 		}
+	}
+}
 
+func checkFanout(pass *analysis.Pass) {
+	for _, metric := range collectMetrics(pass) {
+		if isDispatcher(metric.fn.Body) {
+			continue
+		}
 		if metric.fanIn >= 8 && metric.fanOut >= 6 && metric.statements >= 20 {
-			report(pass, "CP009", metric.fn.Name.Pos(),
+			report(pass, metric.fn.Name.Pos(),
 				"function %s is a dependency hub: fan-in=%d fan-out=%d level=%d",
 				metric.fn.Name.Name, metric.fanIn, metric.fanOut, metric.level)
 			continue
 		}
 		if metric.fanOut >= 12 && metric.fanIn <= 1 && metric.statements >= 15 {
-			report(pass, "CP009", metric.fn.Name.Pos(),
+			report(pass, metric.fn.Name.Pos(),
 				"function %s is a high fan-out coordinator: fan-in=%d fan-out=%d level=%d",
 				metric.fn.Name.Name, metric.fanIn, metric.fanOut, metric.level)
 		}

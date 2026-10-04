@@ -83,8 +83,13 @@ func mapGet() jen.Code {
 		jen.Id("key").Op(":=").Add(top(1)),
 		container(2),
 		jen.Var().Id("result").Qual(typesPkg, "Boxed"),
+		jen.Var().Id("found").Id("bool"),
 		jen.Var().Id("owned").Id("bool"),
-		mapHeap(getTyped,
+		mapHeap(func(k typedKey) []jen.Code {
+			return append(lookupTyped(k),
+				jen.If(jen.Op("!").Id("found")).Block(jen.Id("result").Op("=").Id("m").Dot("Zero")),
+			)
+		},
 			genericMapCase(
 				jen.List(jen.Id("k"), jen.Id("entryKey")).Op(":=").Id("i").Dot("mapKey").Call(jen.Id("key")),
 				jen.List(jen.Id("entry"), jen.Id("ok")).Op(":=").Id("m").Dot("Get").Call(jen.Id("k")),
@@ -293,20 +298,11 @@ func setTyped(k typedKey) []jen.Code {
 	}
 }
 
-// getTyped reads the value under the typed key of k into result, or the map's
-// zero when the key is absent.
-func getTyped(k typedKey) []jen.Code {
-	return []jen.Code{
-		jen.List(jen.Id("value"), jen.Id("ok")).Op(":=").Id("m").Dot("Get").Call(k.read()),
-		jen.If(jen.Id("ok")).Block(jen.Id("result").Op("=").Id("value")).Else().Block(jen.Id("result").Op("=").Id("m").Dot("Zero")),
-	}
-}
-
-// lookupTyped is getTyped reporting presence in found.
+// lookupTyped reads the value under the typed key and reports whether it
+// exists. Callers decide how an absent value is represented.
 func lookupTyped(k typedKey) []jen.Code {
 	return []jen.Code{
 		jen.List(jen.Id("result"), jen.Id("found")).Op("=").Id("m").Dot("Get").Call(k.read()),
-		jen.If(jen.Op("!").Id("found")).Block(jen.Id("result").Op("=").Id("m").Dot("Zero")),
 	}
 }
 
