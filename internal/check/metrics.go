@@ -20,8 +20,10 @@ type functionMetric struct {
 
 func checkMetrics(pass *analysis.Pass) {
 	metrics := collectMetrics(pass)
-	checkAbstractionOrder(pass, metrics)
 	for _, metric := range metrics {
+		if isDispatcher(metric.fn.Body) {
+			continue
+		}
 		if metric.cyclomatic >= 15 && metric.statements >= 30 {
 			report(pass, "CP008", metric.fn.Name.Pos(),
 				"function %s has high complexity: cyclomatic=%d statements=%d nesting=%d",
@@ -48,43 +50,24 @@ func checkMetrics(pass *analysis.Pass) {
 	}
 }
 
-func checkAbstractionOrder(pass *analysis.Pass, metrics []*functionMetric) {
-	byFunction := make(map[*ast.FuncDecl]*functionMetric, len(metrics))
-	for _, metric := range metrics {
-		byFunction[metric.fn] = metric
+func isDispatcher(body *ast.BlockStmt) bool {
+	if body == nil || len(body.List) != 1 {
+		return false
 	}
-
-	for _, file := range pass.Files {
-		var previous *functionMetric
-		group := -1
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || isTestFunction(fn.Name.Name) {
-				continue
-			}
-			metric := byFunction[fn]
-			if metric == nil {
-				continue
-			}
-			currentGroup := declarationGroup(fn)
-			if currentGroup != group {
-				previous = metric
-				group = currentGroup
-				continue
-			}
-			if previous != nil && previous.level >= 0 && metric.level >= 0 {
-				roleInverted := previous.fanOut <= 1 &&
-					metric.fanOut >= 4 &&
-					metric.level-previous.level >= 2
-				if roleInverted {
-					report(pass, "CP012", metric.fn.Name.Pos(),
-						"declaration order may invert abstraction level: %s level=%d precedes %s level=%d",
-						previous.fn.Name.Name, previous.level, metric.fn.Name.Name, metric.level)
-				}
-			}
-			previous = metric
+	switchStmt, ok := body.List[0].(*ast.SwitchStmt)
+	if !ok || switchStmt.Body == nil || len(switchStmt.Body.List) == 0 {
+		return false
+	}
+	for _, stmt := range switchStmt.Body.List {
+		clause, ok := stmt.(*ast.CaseClause)
+		if !ok || len(clause.Body) != 1 {
+			return false
+		}
+		if _, ok := clause.Body[0].(*ast.ReturnStmt); !ok {
+			return false
 		}
 	}
+	return true
 }
 
 func collectMetrics(pass *analysis.Pass) []*functionMetric {
@@ -200,12 +183,12 @@ func measureComplexity(body *ast.BlockStmt) (cyclomatic, statements, nesting int
 			walkBlock(node.Body, depth+1)
 		case *ast.SwitchStmt:
 			nesting = max(nesting, depth+1)
-			walkBlock(node.Body, depth+1)
 			for _, stmt := range node.Body.List {
 				clause, ok := stmt.(*ast.CaseClause)
 				if !ok {
 					continue
 				}
+				statements++
 				if len(clause.List) != 0 {
 					cyclomatic++
 				}
@@ -216,12 +199,12 @@ func measureComplexity(body *ast.BlockStmt) (cyclomatic, statements, nesting int
 			}
 		case *ast.TypeSwitchStmt:
 			nesting = max(nesting, depth+1)
-			walkBlock(node.Body, depth+1)
 			for _, stmt := range node.Body.List {
 				clause, ok := stmt.(*ast.CaseClause)
 				if !ok {
 					continue
 				}
+				statements++
 				if len(clause.List) != 0 {
 					cyclomatic++
 				}
@@ -232,12 +215,12 @@ func measureComplexity(body *ast.BlockStmt) (cyclomatic, statements, nesting int
 			}
 		case *ast.SelectStmt:
 			nesting = max(nesting, depth+1)
-			walkBlock(node.Body, depth+1)
 			for _, stmt := range node.Body.List {
 				clause, ok := stmt.(*ast.CommClause)
 				if !ok {
 					continue
 				}
+				statements++
 				cyclomatic++
 				for _, nested := range clause.Body {
 					statements++

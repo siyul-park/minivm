@@ -114,7 +114,7 @@ func filterDiff(results []result, pkgs []*packages.Package) ([]result, error) {
 
 func diffFileRule(rule string) bool {
 	switch rule {
-	case "CP008", "CP009", "CP010", "CP011", "CP012", "TP006":
+	case "CP008", "CP009", "CP010", "CP011", "TP006":
 		return true
 	default:
 		return false
@@ -547,7 +547,6 @@ func listRulesOutput() {
 		"CP009 extreme fan-in/fan-out is a review signal [warning]",
 		"CP010 near-clone symbols are a review signal [warning]",
 		"CP011 separated similar siblings are a review signal [warning]",
-		"CP012 declaration order may invert abstraction level [warning]",
 		"TP005 one top-level owner test per public symbol [warning if missing, error if split]",
 		"TP006 tests do not mix direct assertions with t.Run cases [warning]",
 	} {

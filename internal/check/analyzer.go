@@ -525,21 +525,39 @@ func nestedRun(root *ast.CallExpr) bool {
 }
 
 func checkTestStyle(pass *analysis.Pass, fn *ast.FuncDecl) {
-	hasRun, hasDirectAssertion := false, false
+	var firstRun token.Pos
 	ast.Inspect(fn.Body, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		if isTestRun(call) {
-			hasRun = true
+		if call, ok := node.(*ast.CallExpr); ok && isTestRun(call) {
+			if !firstRun.IsValid() || call.Pos() < firstRun {
+				firstRun = call.Pos()
+			}
 			return false
 		}
-		if isTestAssertion(call) {
-			hasDirectAssertion = true
+		if _, ok := node.(*ast.FuncLit); ok {
+			return false
 		}
 		return true
 	})
+
+	hasRun, hasDirectAssertion := firstRun.IsValid(), false
+	if hasRun {
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			if _, ok := node.(*ast.FuncLit); ok {
+				return false
+			}
+			call, ok := node.(*ast.CallExpr)
+			if !ok || call.Pos() <= firstRun {
+				return true
+			}
+			if isTestRun(call) {
+				return false
+			}
+			if isTestAssertion(call) {
+				hasDirectAssertion = true
+			}
+			return true
+		})
+	}
 	if hasRun && hasDirectAssertion {
 		report(pass, "TP006", fn.Name.Pos(),
 			"test %s mixes direct assertions with t.Run cases; keep cases at one consistent level",
@@ -603,7 +621,7 @@ func report(pass *analysis.Pass, rule string, pos token.Pos, format string, args
 
 func ruleSeverity(rule string) severity {
 	switch rule {
-	case "CP001", "CP007", "CP008", "CP009", "CP010", "CP011", "CP012", "TP006":
+	case "CP001", "CP007", "CP008", "CP009", "CP010", "CP011", "TP006":
 		return warningSeverity
 	default:
 		return errorSeverity

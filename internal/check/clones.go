@@ -46,6 +46,7 @@ func checkClones(pass *analysis.Pass) {
 			})
 		}
 
+		genericPrefixes := genericPrefixes(funcs)
 		reportedClone := make(map[[2]int]bool)
 		reportedPair := make(map[[2]int]bool)
 		for i := 0; i < len(funcs); i++ {
@@ -62,7 +63,7 @@ func checkClones(pass *analysis.Pass) {
 				gap := right.index - left.index - 1
 				key := [2]int{left.index, right.index}
 
-				symmetric := symmetricNames(left.fn.Name.Name, right.fn.Name.Name)
+				symmetric := symmetricNames(left.fn.Name.Name, right.fn.Name.Name, genericPrefixes)
 				if gap >= 4 && similarity >= 0.72 && symmetric && !reportedPair[key] {
 					report(pass, "CP011", left.fn.Name.Pos(),
 						"similar sibling symbols %s and %s are separated: similarity=%.2f distance=%d",
@@ -70,7 +71,12 @@ func checkClones(pass *analysis.Pass) {
 					reportedPair[key] = true
 					continue
 				}
-				if similarity >= 0.90 && (left.owner != "" || symmetric) && !reportedClone[key] {
+				leftPrefix := nameParts(left.fn.Name.Name)
+				rightPrefix := nameParts(right.fn.Name.Name)
+				sharedGeneric := len(leftPrefix) > 0 && len(rightPrefix) > 0 &&
+					strings.EqualFold(leftPrefix[0], rightPrefix[0]) &&
+					genericPrefixes[strings.ToLower(leftPrefix[0])]
+				if gap > 0 && similarity >= 0.90 && !symmetric && !sharedGeneric && !reportedClone[key] {
 					report(pass, "CP010", left.fn.Name.Pos(),
 						"symbols %s and %s are near-clones: similarity=%.2f distance=%d",
 						left.fn.Name.Name, right.fn.Name.Name, similarity, gap)
@@ -142,13 +148,39 @@ func shingles(tokens []string) map[string]bool {
 	return out
 }
 
-func symmetricNames(left, right string) bool {
+func genericPrefixes(funcs []*cloneMetric) map[string]bool {
+	counts := make(map[string]int)
+	signatures := make(map[string]map[string]bool)
+	for _, fn := range funcs {
+		parts := nameParts(fn.fn.Name.Name)
+		if len(parts) <= 1 {
+			continue
+		}
+		prefix := strings.ToLower(parts[0])
+		counts[prefix]++
+		if signatures[prefix] == nil {
+			signatures[prefix] = make(map[string]bool)
+		}
+		signatures[prefix][fn.signature] = true
+	}
+	out := make(map[string]bool)
+	for prefix, count := range counts {
+		if count >= 4 && len(signatures[prefix]) >= 3 {
+			out[prefix] = true
+		}
+	}
+	return out
+}
+
+func symmetricNames(left, right string, genericPrefixes map[string]bool) bool {
 	leftParts := nameParts(left)
 	rightParts := nameParts(right)
 	if namePrefix(leftParts, rightParts) || namePrefix(rightParts, leftParts) {
 		return true
 	}
-	if len(leftParts) >= 2 && len(rightParts) >= 2 && strings.EqualFold(leftParts[0], rightParts[0]) {
+	if len(leftParts) >= 2 && len(rightParts) >= 2 &&
+		strings.EqualFold(leftParts[0], rightParts[0]) &&
+		!genericPrefixes[strings.ToLower(leftParts[0])] {
 		return true
 	}
 	families := map[string]bool{
