@@ -41,6 +41,7 @@ func run(pass *analysis.Pass) (any, error) {
 	checkCohesion(pass)
 	checkConstructors(pass)
 	checkHelpers(pass)
+	checkMetrics(pass)
 	return nil, nil
 }
 
@@ -450,6 +451,13 @@ func receiverName(field *ast.FieldList) string {
 }
 
 func checkTestFile(pass *analysis.Pass, file *ast.File) {
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || !isTestFunction(fn.Name.Name) {
+			continue
+		}
+		checkTestStyle(pass, fn)
+	}
 	ast.Inspect(file, func(node ast.Node) bool {
 		switch n := node.(type) {
 		case *ast.CallExpr:
@@ -504,6 +512,52 @@ func nestedRun(root *ast.CallExpr) bool {
 	return found
 }
 
+func checkTestStyle(pass *analysis.Pass, fn *ast.FuncDecl) {
+	hasRun, hasDirectAssertion := false, false
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if isTestRun(call) {
+			hasRun = true
+			return false
+		}
+		if isTestAssertion(call) {
+			hasDirectAssertion = true
+		}
+		return true
+	})
+	if hasRun && hasDirectAssertion {
+		report(pass, "TP006", fn.Name.Pos(),
+			"test %s mixes direct assertions with t.Run cases; keep cases at one consistent level",
+			fn.Name.Name)
+	}
+}
+
+func isTestAssertion(call *ast.CallExpr) bool {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	id, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	if id.Name == "assert" || id.Name == "require" {
+		return true
+	}
+	if id.Name != "t" {
+		return false
+	}
+	switch sel.Sel.Name {
+	case "Error", "Errorf", "Fail", "FailNow", "Fatal", "Fatalf":
+		return true
+	default:
+		return false
+	}
+}
+
 func isEventually(call *ast.CallExpr) bool {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok || sel.Sel.Name != "Eventually" {
@@ -537,7 +591,7 @@ func report(pass *analysis.Pass, rule string, pos token.Pos, format string, args
 
 func ruleSeverity(rule string) severity {
 	switch rule {
-	case "CP001", "CP007":
+	case "CP001", "CP007", "CP008", "CP009", "TP006":
 		return warningSeverity
 	default:
 		return errorSeverity

@@ -91,7 +91,7 @@ func fail(err error) {
 }
 
 func filterDiff(results []result, pkgs []*packages.Package) ([]result, error) {
-	lines, err := changedFiles()
+	lines, files, err := changedFiles()
 	if err != nil {
 		return nil, err
 	}
@@ -104,29 +104,41 @@ func filterDiff(results []result, pkgs []*packages.Package) ([]result, error) {
 			continue
 		}
 		rel = filepath.ToSlash(rel)
-		if lines[rel][pos.line] {
+		rule := ruleOf(result.diagnostic.Message)
+		if files[rel] && diffFileRule(rule) || lines[rel][pos.line] {
 			filtered = append(filtered, result)
 		}
 	}
 	return filtered, nil
 }
 
-func changedFiles() (changedLines, error) {
+func diffFileRule(rule string) bool {
+	switch rule {
+	case "CP008", "CP009", "CP010", "CP011", "TP006":
+		return true
+	default:
+		return false
+	}
+}
+
+func changedFiles() (changedLines, map[string]bool, error) {
 	cmd := exec.Command("git", "diff", "--unified=0", "main", "--", "*.go")
 	out, err := cmd.Output()
 	if err != nil {
 		if exit, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("git diff: %s", exit.Stderr)
+			return nil, nil, fmt.Errorf("git diff: %s", exit.Stderr)
 		}
-		return nil, fmt.Errorf("git diff: %w", err)
+		return nil, nil, fmt.Errorf("git diff: %w", err)
 	}
 	lines := make(changedLines)
+	files := make(map[string]bool)
 	var file string
 	var start, count int
 	for _, raw := range strings.Split(string(out), "\n") {
 		switch {
 		case strings.HasPrefix(raw, "+++ b/"):
 			file = filepath.ToSlash(strings.TrimPrefix(raw, "+++ b/"))
+			files[file] = true
 		case strings.HasPrefix(raw, "@@ "):
 			match := diffHunk.FindStringSubmatch(raw)
 			if match == nil {
@@ -149,7 +161,7 @@ func changedFiles() (changedLines, error) {
 			file = ""
 		}
 	}
-	return lines, nil
+	return lines, files, nil
 }
 
 func atoi(s string) int {

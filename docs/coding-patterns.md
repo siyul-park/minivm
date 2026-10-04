@@ -44,6 +44,15 @@ Files and declaration order `MUST` make ownership, responsibility, and relations
 
 4. **Reuse before extension.** Existing symbols and composition `SHOULD` be preferred before adding layers, extension points, policy knobs, or parallel mechanisms.
 
+### Automated Structural Signals
+
+The checker `SHOULD` report high-confidence structural signals rather than assert single responsibility from syntax alone.
+
+- Cyclomatic complexity `SHOULD` be used as a review signal together with statement count and nesting depth.
+- Function coupling `SHOULD` use direct fan-in, fan-out, and dependency level to identify extreme hubs and high fan-out coordinators.
+- These metrics `MUST` remain warnings unless a concrete contract can be established; thresholds `SHOULD` be deliberately high to preserve precision.
+- A metric `MUST NOT` be treated as proof of a design violation by itself.
+
 ## Functions
 
 A helper `MUST` be extracted only when it removes semantic duplication, names reusable behavior or policy, isolates an abstraction level, or is required as a function value.

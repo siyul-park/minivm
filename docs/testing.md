@@ -29,6 +29,8 @@ Tests `MUST NOT` hide the behavior behind abstractions (wrappers, builders, or h
 | Similar cases | `MUST` be merged into one case or one table. |
 | Style | A test function uses either a table or scenario cases, never both, and never mixes abstraction levels. |
 
+The checker `TP006` `SHOULD` report tests that mix direct assertions with `t.Run` cases. This is a style diagnostic, not a proof that the test is invalid.
+
 Readiness polling `MUST` run on the test goroutine through the package's `poll` helper, which fails after a hang-guard deadline; `require.Eventually` `MUST NOT` be used where its condition touches a resource the case closes, because it runs the condition on another goroutine that can outlive teardown. Polling conditions `MUST` contain no assertions: they `MUST` capture results and errors, return only readiness, and assert the captured state after polling.
 
 Table data and generation code `MUST` stay simple enough to read as specification.
