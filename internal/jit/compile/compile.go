@@ -629,47 +629,81 @@ func (l *lowering) jump(label asm.Label) {
 // through its closure: called directly, it has no upvals to read.
 func (l *lowering) call(op ssa.Operation) error {
 	callee := op.Args[len(op.Args)-1]
-	generic := op.Shape.Function == 0 && op.Shape.Type != 0
-	ref, closure := op.Shape.Function, op.Shape.Function != 0
-	var target *types.Function
-	if !generic {
-		if !closure {
-			c, ok := l.consts[callee]
-			if !ok || l.f.Type(callee) != ssa.TypeRef {
-				return fmt.Errorf("%w: call of v%d", ErrUnsupported, callee)
-			}
-			ref = types.Boxed(c).Ref()
-		}
-		target = l.objects[ref].Function
-		if target == nil || target.Typ == nil || len(target.Captures) > 0 && !closure {
-			return fmt.Errorf("%w: call of %d", ErrUnsupported, ref)
-		}
+	ref, target, generic, closure, err := l.resolveCall(op, callee)
+	if err != nil {
+		return err
 	}
 	regs := registers(target)
-	if regs == nil {
-		for _, v := range op.Results {
-			if l.f.Type(v) == ssa.TypeI64 {
-				return fmt.Errorf("%w: i64 call result v%d", ErrUnsupported, v)
-			}
+	if err := l.validateCallResults(op, regs); err != nil {
+		return err
+	}
+	frame, below, owned, err := l.callFrame(op)
+	if err != nil {
+		return err
+	}
+
+	id := l.exit(jit.ExitCall)
+	l.configureCallExit(id, op, callee, ref, target, generic, frame, below, owned, regs)
+	bridge, join := l.stub(id)
+	site := l.callSite(op, callee, ref, target, generic, closure, below, owned, regs, id, bridge, join)
+	if !l.m.Call(l.a, site, l) {
+		return fmt.Errorf("%w: call of %d", ErrUnsupported, ref)
+	}
+	return l.err
+}
+
+func (l *lowering) resolveCall(op ssa.Operation, callee ssa.Value) (int, *types.Function, bool, bool, error) {
+	generic := op.Shape.Function == 0 && op.Shape.Type != 0
+	closure := op.Shape.Function != 0
+	ref := op.Shape.Function
+	if generic {
+		return 0, nil, true, false, nil
+	}
+	if !closure {
+		c, ok := l.consts[callee]
+		if !ok || l.f.Type(callee) != ssa.TypeRef {
+			return 0, nil, false, false, fmt.Errorf("%w: call of v%d", ErrUnsupported, callee)
+		}
+		ref = types.Boxed(c).Ref()
+	}
+	target := l.objects[ref].Function
+	if target == nil || target.Typ == nil || len(target.Captures) > 0 && !closure {
+		return 0, nil, false, false, fmt.Errorf("%w: call of %d", ErrUnsupported, ref)
+	}
+	return ref, target, false, closure, nil
+}
+
+func (l *lowering) validateCallResults(op ssa.Operation, regs []types.Kind) error {
+	if regs != nil {
+		return nil
+	}
+	for _, v := range op.Results {
+		if l.f.Type(v) == ssa.TypeI64 {
+			return fmt.Errorf("%w: i64 call result v%d", ErrUnsupported, v)
 		}
 	}
+	return nil
+}
+
+func (l *lowering) callFrame(op ssa.Operation) (ssa.Frame, int, bool, error) {
 	state, ok := l.states[op.State]
 	if !ok || len(state.Frames) == 0 {
-		return fmt.Errorf("%w: call without a state", ErrUnsupported)
+		return ssa.Frame{}, 0, false, fmt.Errorf("%w: call without a state", ErrUnsupported)
 	}
 	frame := state.Frames[len(state.Frames)-1]
 	below := len(frame.Stack) - len(op.Args)
 	if below < 0 {
-		return fmt.Errorf("%w: call state without its operands", ErrUnsupported)
+		return ssa.Frame{}, 0, false, fmt.Errorf("%w: call state without its operands", ErrUnsupported)
 	}
+	return frame, below, frame.Stack[len(frame.Stack)-1].Owned, nil
+}
 
-	owned := frame.Stack[len(frame.Stack)-1].Owned
-	id := l.exit(jit.ExitCall)
+func (l *lowering) configureCallExit(id int, op ssa.Operation, callee ssa.Value, ref int, target *types.Function, generic bool, frame ssa.Frame, below int, owned bool, regs []types.Kind) {
 	out := &l.outlets[id]
 	out.exit.Callee = ref
 	out.exit.Args = len(op.Args) - 1
 	out.exit.Owned = owned
-	if closure || generic {
+	if generic || op.Shape.Function != 0 {
 		out.exit.Target = &jit.Value{}
 		l.place(id, out.exit.Target, callee)
 	}
@@ -678,12 +712,13 @@ func (l *lowering) call(op ssa.Operation) error {
 			out.exit.Returns = append(out.exit.Returns, l.f.Type(v).Kind())
 		}
 	}
-	for j, b := range transform.Borrows(target) {
-		switch {
-		case !b:
-		case frame.Stack[below+j].Owned:
+	for j, borrowed := range transform.Borrows(target) {
+		if !borrowed {
+			continue
+		}
+		if frame.Stack[below+j].Owned {
 			out.exit.Kept = append(out.exit.Kept, j)
-		default:
+		} else {
 			out.exit.Lent = append(out.exit.Lent, j)
 		}
 	}
@@ -693,20 +728,13 @@ func (l *lowering) call(op ssa.Operation) error {
 			out.results = append(out.results, l.Reg(v))
 		}
 	}
-	bridge, join := l.stub(id)
+}
+
+func (l *lowering) callSite(op ssa.Operation, callee ssa.Value, ref int, target *types.Function, generic, closure bool, below int, owned bool, regs []types.Kind, id int, bridge, join asm.Label) Call {
 	site := Call{
-		Callee:    ref,
-		Target:    callee,
-		Args:      op.Args[:len(op.Args)-1],
-		Results:   op.Results,
-		Base:      len(l.fn.Slots()) + below,
-		Exit:      id,
-		Stub:      bridge,
-		Join:      join,
-		Owned:     owned,
-		Registers: regs,
-		Arguments: arguments(target),
-		Generic:   generic,
+		Callee: ref, Target: callee, Args: op.Args[:len(op.Args)-1], Results: op.Results,
+		Base: len(l.fn.Slots()) + below, Exit: id, Stub: bridge, Join: join,
+		Owned: owned, Registers: regs, Arguments: arguments(target), Generic: generic,
 	}
 	if generic {
 		site.Size = max(len(op.Args)-1, len(op.Results))
@@ -718,10 +746,7 @@ func (l *lowering) call(op ssa.Operation) error {
 		site.Upvals = closure && len(target.Captures) > 0
 	}
 	site.Live = l.live(id)
-	if !l.m.Call(l.a, site, l) {
-		return fmt.Errorf("%w: call of %d", ErrUnsupported, ref)
-	}
-	return l.err
+	return site
 }
 
 // registers reports fn's register-convention results: at most two, of any

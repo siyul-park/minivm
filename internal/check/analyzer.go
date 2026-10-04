@@ -276,6 +276,7 @@ func reaches(graph map[types.Object][]types.Object, start, target types.Object) 
 
 func checkHelpers(pass *analysis.Pass) {
 	callers := make(map[types.Object]map[types.Object]bool)
+	calls := make(map[types.Object]int)
 	documented := make(map[types.Object]bool)
 	functions := make(map[types.Object]*ast.FuncDecl)
 	var current types.Object
@@ -304,6 +305,7 @@ func checkHelpers(pass *analysis.Pass) {
 				if target == nil || target.Exported() || target == current {
 					return true
 				}
+				calls[target]++
 				if callers[target] == nil {
 					callers[target] = make(map[types.Object]bool)
 				}
@@ -320,18 +322,45 @@ func checkHelpers(pass *analysis.Pass) {
 		if documented[obj] {
 			continue
 		}
-		if len(callers[obj]) == 1 {
+		if calls[obj] == 1 {
 			fn := functions[obj]
-			if fn == nil {
+			if fn == nil || len(callers[obj]) != 1 {
 				continue
 			}
-			cyclomatic, statements, _ := measureComplexity(fn.Body)
-			if cyclomatic <= 2 && statements <= 5 {
+			if inlineableWrapper(pass, callers, fn.Body) {
 				report(pass, "CP007", ident.Pos(),
-					"private helper %s is a simple one-use helper; inline it unless it names a real policy or mechanic",
+					"private helper %s is a single-use forwarding wrapper; inline it",
 					ident.Name)
 			}
 		}
+	}
+}
+
+func inlineableWrapper(pass *analysis.Pass, callers map[types.Object]map[types.Object]bool, body *ast.BlockStmt) bool {
+	call := wrapperCall(body)
+	if call == nil {
+		return false
+	}
+	target := calledObject(pass, call)
+	return target != nil && !target.Exported() && len(callers[target]) == 1
+}
+
+func wrapperCall(body *ast.BlockStmt) *ast.CallExpr {
+	if body == nil || len(body.List) != 1 {
+		return nil
+	}
+	switch stmt := body.List[0].(type) {
+	case *ast.ExprStmt:
+		call, _ := stmt.X.(*ast.CallExpr)
+		return call
+	case *ast.ReturnStmt:
+		if len(stmt.Results) != 1 {
+			return nil
+		}
+		call, _ := stmt.Results[0].(*ast.CallExpr)
+		return call
+	default:
+		return nil
 	}
 }
 
