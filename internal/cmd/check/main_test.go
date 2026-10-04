@@ -26,7 +26,7 @@ func TestCommand(t *testing.T) {
 
 		output, err := command.CombinedOutput()
 		require.Error(t, err)
-		require.Contains(t, string(output), "thing.go:3:6: error: [CP001]")
+		require.Contains(t, string(output), "thing.go:3:6: warning: [CP001]")
 	})
 
 	t.Run("json emits one object per diagnostic", func(t *testing.T) {

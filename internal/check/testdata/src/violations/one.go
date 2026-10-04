@@ -74,7 +74,7 @@ func metricComplexity(n int) int { // want "CP008"
 	return n
 }
 
-func metricFanout() { // want "CP009"
+func metricFanout() { // want "CP009" "CP010"
 	metricFan1()
 	metricFan2()
 	metricFan3()
@@ -129,3 +129,52 @@ func metricFan13() {}
 func metricFan14() {}
 func metricFan15() {}
 func metricFan16() {}
+
+func siblingAlpha(x int) int { // want "CP011"
+	if x > 0 {
+		x++
+	}
+	if x%2 == 0 {
+		x++
+	}
+	if x%3 == 0 {
+		x++
+	}
+	if x%5 == 0 {
+		x++
+	}
+	if x%7 == 0 {
+		x++
+	}
+	if x%11 == 0 {
+		x++
+	}
+	return x
+}
+
+func siblingGap1() {}
+func siblingGap2() {}
+func siblingGap3() {}
+func siblingGap4() {}
+
+func siblingBeta(x int) int {
+	if x > 0 {
+		x++
+	}
+	if x%2 == 0 {
+		x++
+	}
+	if x%3 == 0 {
+		x++
+	}
+	if x%5 == 0 {
+		x++
+	}
+	if x%7 == 0 {
+		x++
+	}
+	if x%11 == 0 {
+		x++
+	}
+	return x
+}

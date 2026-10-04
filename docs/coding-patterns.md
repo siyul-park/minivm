@@ -52,6 +52,8 @@ The checker `SHOULD` report high-confidence structural signals rather than asser
 - Function coupling `SHOULD` use direct fan-in, fan-out, and dependency level to identify extreme hubs and high fan-out coordinators.
 - These metrics `MUST` remain warnings unless a concrete contract can be established; thresholds `SHOULD` be deliberately high to preserve precision.
 - A metric `MUST NOT` be treated as proof of a design violation by itself.
+- Near-clone diagnostics `SHOULD` use normalized token or AST-shape similarity with a minimum body size and a semantic/name-family relation; syntax similarity alone `MUST NOT` require abstraction.
+- Similar or symmetric siblings `SHOULD` be physically adjacent when they share an owner, signature, and implementation shape. The checker `SHOULD` report separated high-similarity siblings rather than reorder them automatically.
 
 ## Functions
 

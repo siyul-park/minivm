@@ -42,6 +42,7 @@ func run(pass *analysis.Pass) (any, error) {
 	checkConstructors(pass)
 	checkHelpers(pass)
 	checkMetrics(pass)
+	checkClones(pass)
 	return nil, nil
 }
 
@@ -591,7 +592,7 @@ func report(pass *analysis.Pass, rule string, pos token.Pos, format string, args
 
 func ruleSeverity(rule string) severity {
 	switch rule {
-	case "CP001", "CP007", "CP008", "CP009", "TP006":
+	case "CP001", "CP007", "CP008", "CP009", "CP010", "CP011", "TP006":
 		return warningSeverity
 	default:
 		return errorSeverity
