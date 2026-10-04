@@ -1,10 +1,8 @@
 # Documentation Index
 
-Each topic has one canonical owner. This document owns the topic-to-document map.
+Owns the topic-to-document map for contributors and agents looking for the owner of a fact.
 
-## Terminology
-
-Every doc in this directory `MUST` use RFC 2119 keywords (`MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, `MAY`) for agent requirements and `MUST NOT` use bare imperatives (`keep`, `do not`, `prefer`, `skip`) where a keyword applies. Sentences without a keyword are informative and `MUST NOT` be treated as requirements.
+## Ownership
 
 | Topic | Document |
 |---|---|
@@ -27,35 +25,15 @@ Every doc in this directory `MUST` use RFC 2119 keywords (`MUST`, `MUST NOT`, `S
 | roadmap | `roadmap.md` |
 | Go code design | `coding-patterns.md` |
 | applied naming vocabulary | `symbol-naming-audit.md` |
+| document writing | `writing.md` |
 
 ## Guides
 
-Guides define procedures over topic contracts:
-
-- `guides/add-opcode.md`
-- `guides/add-architecture.md`
-- `guides/repl.md`
-
-A guide `MUST` describe change order and validation only. The contract it operates on `MUST` stay in its owner topic doc; a guide `MUST NOT` duplicate that contract and `MUST` link to the owner instead.
-
-## Style
-
-Every topic and guide document `MUST`:
-
-- use H1 for the document subject and unnumbered H2 headings;
-- place one scope sentence directly below H1;
-- use an `Ownership` section for canonical owner maps where ownership applies;
-- end with a `Related` section;
-- label every fenced code block with its language;
-- keep one blank line between prose, lists, tables, and code blocks.
-
-## Document Roles
-
-- A canonical topic doc `MUST` describe supported/current behavior. It `MUST NOT` describe removed behavior as current and `MUST NOT` duplicate a contract owned elsewhere.
-- `roadmap.md` `MUST` own priorities only; it `MUST NOT` override topic contracts.
-- `plans/` and `superpowers/` contain dated plans, audits, and design records. They `MAY` preserve history and future work, but they `MUST NOT` own current behavior.
-- `AGENTS.md` owns repository workflow. Topic docs own current behavior and contracts; roadmap owns priorities.
+- `guides/add-opcode.md` — opcode change procedure
+- `guides/add-architecture.md` — target-backend procedure
+- `guides/repl.md` — REPL usage
 
 ## Related
 
-- `AGENTS.md` — terminology, precedence, workflow
+- `writing.md` — purpose, ownership, terminology, form, and format of every document
+- `AGENTS.md` — precedence, workflow

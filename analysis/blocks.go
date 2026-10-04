@@ -10,8 +10,10 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// BlocksAnalysis computes the control-flow blocks of a function.
 type BlocksAnalysis struct{}
 
+// BasicBlock is one control-flow region and its predecessor/successor ids.
 type BasicBlock struct {
 	Start int
 	End   int
@@ -19,31 +21,32 @@ type BasicBlock struct {
 	Preds []int
 }
 
+// ErrInvalidJump reports a jump target that is not a valid instruction boundary.
 var ErrInvalidJump = errors.New("invalid jump")
 
 var _ pass.Analysis[*types.Function, []*BasicBlock] = (*BlocksAnalysis)(nil)
 
-// Blocks builds the control-flow blocks for fn.
-func Blocks(fn *types.Function) ([]*BasicBlock, error) {
+// Blocks builds the control-flow blocks for function.
+func Blocks(function *types.Function) ([]*BasicBlock, error) {
 	offsets := []int{0}
-	for ip := 0; ip < len(fn.Code); {
-		inst := instr.Instruction(fn.Code[ip:])
+	for ip := 0; ip < len(function.Code); {
+		inst := instr.Instruction(function.Code[ip:])
 		next := ip + inst.Width()
 		switch inst.Opcode() {
 		case instr.UNREACHABLE, instr.RETURN, instr.RETURN_CALL, instr.THROW:
-			if next < len(fn.Code) {
+			if next < len(function.Code) {
 				offsets = append(offsets, next)
 			}
 		case instr.BR, instr.BR_IF, instr.BR_TABLE:
-			for _, offset := range instr.Targets(fn.Code, ip) {
-				if offset < 0 || offset > len(fn.Code) {
+			for _, offset := range instr.Targets(function.Code, ip) {
+				if offset < 0 || offset > len(function.Code) {
 					return nil, invalidJumpError(ip, offset)
 				}
-				if offset < len(fn.Code) {
+				if offset < len(function.Code) {
 					offsets = append(offsets, offset)
 				}
 			}
-			if inst.Opcode() != instr.BR_TABLE && next < len(fn.Code) {
+			if inst.Opcode() != instr.BR_TABLE && next < len(function.Code) {
 				offsets = append(offsets, next)
 			}
 		default:
@@ -54,9 +57,9 @@ func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 	// Protected-region and catch boundaries start their own blocks so the
 	// exception table aligns with the CFG. Throws/traps transfer out of band, so
 	// no explicit edges are added; the verifier seeds catch blocks directly.
-	for _, h := range fn.Handlers {
+	for _, h := range function.Handlers {
 		for _, off := range []int{h.Start, h.End, h.Catch} {
-			if off > 0 && off < len(fn.Code) {
+			if off > 0 && off < len(function.Code) {
 				offsets = append(offsets, off)
 			}
 		}
@@ -67,7 +70,7 @@ func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 
 	blocks := make([]*BasicBlock, len(offsets))
 	for j := range offsets {
-		end := len(fn.Code)
+		end := len(function.Code)
 		if j+1 < len(offsets) {
 			end = offsets[j+1]
 		}
@@ -85,21 +88,21 @@ func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 	for j, block := range blocks {
 		ip := block.Start
 		for ip < block.End {
-			inst := instr.Instruction(fn.Code[ip:])
+			inst := instr.Instruction(function.Code[ip:])
 			if ip+inst.Width() >= block.End {
 				break
 			}
 			ip += inst.Width()
 		}
-		if ip >= len(fn.Code) {
+		if ip >= len(function.Code) {
 			continue
 		}
 
-		inst := instr.Instruction(fn.Code[ip:])
+		inst := instr.Instruction(function.Code[ip:])
 		switch inst.Opcode() {
 		case instr.UNREACHABLE, instr.RETURN, instr.RETURN_CALL, instr.THROW:
 		case instr.BR, instr.BR_IF, instr.BR_TABLE:
-			for _, offset := range instr.Targets(fn.Code, ip) {
+			for _, offset := range instr.Targets(function.Code, ip) {
 				if !link(blocks, indexByStart, j, offset) {
 					return nil, invalidJumpError(ip, offset)
 				}
@@ -122,12 +125,14 @@ func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 	return blocks, nil
 }
 
+// NewBlocksAnalysis returns a blocks analysis.
 func NewBlocksAnalysis() *BlocksAnalysis {
 	return &BlocksAnalysis{}
 }
 
-func (p *BlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*BasicBlock, error) {
-	return Blocks(fn)
+// Run computes the control-flow blocks of function.
+func (p *BlocksAnalysis) Run(_ *pass.Manager, function *types.Function) ([]*BasicBlock, error) {
+	return Blocks(function)
 }
 
 func link(blocks []*BasicBlock, indexByStart map[int]int, src, dst int) bool {

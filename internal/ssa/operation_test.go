@@ -8,49 +8,51 @@ import (
 )
 
 func TestOp_String(t *testing.T) {
-	t.Run("names every operation", func(t *testing.T) {
-		names := map[ssa.Op]string{
-			ssa.OpConst:       "const",
-			ssa.OpExec:        "exec",
-			ssa.OpLoad:        "load",
-			ssa.OpStore:       "store",
-			ssa.OpGuardKind:   "guard.kind",
-			ssa.OpGuardShape:  "guard.shape",
-			ssa.OpGuardBounds: "guard.bounds",
-			ssa.OpGuardValue:  "guard.value",
-			ssa.OpRetain:      "retain",
-			ssa.OpRelease:     "release",
-			ssa.OpBridge:      "bridge",
-			ssa.OpState:       "state",
-			ssa.OpJump:        "jump",
-			ssa.OpBranch:      "br",
-			ssa.OpTable:       "table",
-			ssa.OpReturn:      "return",
-			ssa.OpComplete:    "complete",
-			ssa.OpExit:        "exit",
-			ssa.OpSuspend:     "suspend",
-		}
-		seen := make(map[string]bool, len(names))
-		for op, name := range names {
-			require.Equal(t, name, op.String())
-			require.False(t, seen[name])
-			seen[name] = true
-		}
-	})
-
-	t.Run("names an unknown operation invalid", func(t *testing.T) {
-		require.Equal(t, "invalid", (ssa.OpSuspend + 1).String())
-	})
+	for _, tt := range []struct {
+		name string
+		op   ssa.Op
+		want string
+	}{
+		{"const", ssa.OpConst, "const"},
+		{"exec", ssa.OpExec, "exec"},
+		{"load", ssa.OpLoad, "load"},
+		{"store", ssa.OpStore, "store"},
+		{"guard kind", ssa.OpGuardKind, "guard.kind"},
+		{"guard shape", ssa.OpGuardShape, "guard.shape"},
+		{"guard bounds", ssa.OpGuardBounds, "guard.bounds"},
+		{"guard value", ssa.OpGuardValue, "guard.value"},
+		{"retain", ssa.OpRetain, "retain"},
+		{"release", ssa.OpRelease, "release"},
+		{"state", ssa.OpState, "state"},
+		{"slice", ssa.OpSlice, "slice"},
+		{"bound", ssa.OpBound, "bound"},
+		{"jump", ssa.OpJump, "jump"},
+		{"branch", ssa.OpBranch, "br"},
+		{"table", ssa.OpTable, "table"},
+		{"return", ssa.OpReturn, "return"},
+		{"complete", ssa.OpComplete, "complete"},
+		{"exit", ssa.OpExit, "exit"},
+		{"unknown operation", ssa.OpExit + 1, "invalid"},
+	} {
+		t.Run("names "+tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, tt.op.String())
+		})
+	}
 }
 
 func TestSpace_String(t *testing.T) {
-	t.Run("names every storage space", func(t *testing.T) {
-		require.Equal(t, "local", ssa.SpaceLocal.String())
-		require.Equal(t, "global", ssa.SpaceGlobal.String())
-		require.Equal(t, "upval", ssa.SpaceUpval.String())
-	})
-
-	t.Run("names an unknown space invalid", func(t *testing.T) {
-		require.Equal(t, "invalid", (ssa.SpaceUpval + 1).String())
-	})
+	for _, tt := range []struct {
+		name  string
+		space ssa.Space
+		want  string
+	}{
+		{"local", ssa.SpaceLocal, "local"},
+		{"global", ssa.SpaceGlobal, "global"},
+		{"upval", ssa.SpaceUpval, "upval"},
+		{"unknown space", ssa.SpaceUpval + 1, "invalid"},
+	} {
+		t.Run("names "+tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, tt.space.String())
+		})
+	}
 }

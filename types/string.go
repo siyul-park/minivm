@@ -20,31 +20,16 @@ type stringType struct{}
 var TypeString = stringType{}
 
 var _ Value = String("")
+
 var _ Traceable = (*StringIterator)(nil)
+
 var _ Iterator = (*StringIterator)(nil)
+
 var _ Type = stringType{}
 
 func NewStringIterator(ref Ref, val String) *StringIterator {
 	return &StringIterator{value: val, current: BoxedNull, ref: ref, done: true}
 }
-
-func (s String) Kind() Kind {
-	return KindRef
-}
-
-func (s String) Type() Type {
-	return TypeString
-}
-
-func (s String) String() string {
-	return fmt.Sprintf("%q", string(s))
-}
-
-func (it *StringIterator) Kind() Kind { return KindRef }
-
-func (it *StringIterator) Type() Type { return NewIteratorType(TypeI32) }
-
-func (it *StringIterator) String() string { return "string.iterator" }
 
 func (it *StringIterator) Next() bool {
 	if it.offset >= len(it.value) {
@@ -67,6 +52,30 @@ func (it *StringIterator) Next() bool {
 func (it *StringIterator) Current() Value { return it.current }
 
 func (it *StringIterator) Done() bool { return it.done }
+
+// Kind returns the value kind.
+func (s String) Kind() Kind {
+	return KindRef
+}
+
+// Type returns the value type.
+func (s String) Type() Type {
+	return TypeString
+}
+
+// String returns the textual representation.
+func (s String) String() string {
+	return fmt.Sprintf("%q", string(s))
+}
+
+// Kind returns the value kind.
+func (it *StringIterator) Kind() Kind { return KindRef }
+
+// Type returns the value type.
+func (it *StringIterator) Type() Type { return NewIteratorType(TypeI32) }
+
+// String returns the textual representation.
+func (it *StringIterator) String() string { return "string.iterator" }
 
 func (it *StringIterator) Refs(dst []Ref) []Ref { return append(dst, it.ref) }
 

@@ -25,6 +25,20 @@ func TestTypeOf(t *testing.T) {
 	})
 }
 
+func TestType_Kind(t *testing.T) {
+	t.Run("inverts TypeOf", func(t *testing.T) {
+		for _, kind := range []types.Kind{
+			types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64, types.KindRef,
+		} {
+			require.Equal(t, kind, ssa.TypeOf(kind).Kind())
+		}
+	})
+
+	t.Run("gives a type with no value kind any kind", func(t *testing.T) {
+		require.Equal(t, instr.KindAny, ssa.TypeState.Kind())
+	})
+}
+
 func TestType_String(t *testing.T) {
 	t.Run("names every type", func(t *testing.T) {
 		require.Equal(t, "i1", ssa.TypeI1.String())

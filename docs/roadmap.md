@@ -6,12 +6,12 @@ Topic docs own current contracts; this document `MUST NOT` override them.
 
 ## Direction
 
-- simple embedding
-- bounded execution
-- threaded semantic parity; native rebuild planned
-- measured performance
-- small public APIs
-- simple equivalent implementations
+- small embedding surface;
+- bounded execution;
+- threaded semantic parity;
+- measured native performance;
+- small public APIs;
+- simple equivalent implementations.
 
 ## Priorities
 
@@ -20,13 +20,13 @@ Topic docs own current contracts; this document `MUST NOT` override them.
 | P0 | Runtime boundaries | Keep verification, execution, ownership, and fallback contracts explicit. |
 | P1 | Host integration | Improve registration, conversion, errors, and examples. |
 | P1 | Benchmarks | Measure host calls, heap objects, maps, strings, coroutines, and mixed workloads. |
-| P1 | Native rebuild | Rebuild native execution only with correctness and benchmark evidence. |
+| P1 | Native execution | Improve native execution only with correctness and benchmark evidence. |
 | P2 | Execution policy | Keep cancellation, fuel, heap limits, and frame limits consistent. |
 | P2 | Other architectures | Add a backend only with target demand and evidence. |
 
-## Native Rebuild
+## Native Execution
 
-The native rebuild `MUST` preserve threaded semantics, explicit ownership, test-first evidence, and reproducible benchmark evidence before any native path is supported.
+Native execution `MUST` preserve threaded semantics, explicit ownership, test-first evidence, and reproducible benchmark evidence. Deferred native work belongs in tracked issues and does not change the current contract until implemented and verified.
 
 ## Docs
 

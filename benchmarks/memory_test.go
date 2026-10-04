@@ -16,7 +16,7 @@ func BenchmarkMemory_TypedArraySum(b *testing.B) {
 	prog := typedArraySum(size)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	benchmarkCompare(b, benchmarkComparison{
 		native: func() int32 {
 			var total int32
@@ -47,7 +47,7 @@ func BenchmarkMemory_AllocationGraph(b *testing.B) {
 	prog := allocationGraph(depth)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	benchmarkCompare(b, benchmarkComparison{
 		native: func() int32 {
 			type node struct{ next *node }
@@ -73,6 +73,15 @@ type node struct { next *node }
 func Run() int32 { root := &node{}; for index := int32(1); index < %d; index++ { root = &node{next: root} }; if root == nil { return 0 }; return %d }`, depth, depth),
 		},
 	}, want)
+}
+
+func BenchmarkMemory_XorShiftI64(b *testing.B) {
+	const n int32 = 256
+	want := xorShiftI64Reference(n)
+	prog := xorShiftI64(n)
+	require.NoError(b, program.Verify(prog))
+
+	benchmarkVM(b, prog, types.I64(want))
 }
 
 func typedArraySum(size int32) *program.Program {
@@ -108,7 +117,7 @@ func BenchmarkMemory_PermutationFlips(b *testing.B) {
 	prog := permutationFlips(size, depth)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	benchmarkCompare(b, benchmarkComparison{
 		native: func() int32 {
 			var walk func(d int32) int32
@@ -209,7 +218,7 @@ func BenchmarkMemory_StructTreeWalk(b *testing.B) {
 	prog := structTreeWalk(depth)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	benchmarkCompare(b, benchmarkComparison{
 		native: func() int32 {
 			type node struct{ left, right *node }
@@ -307,7 +316,7 @@ func BenchmarkMemory_BinaryTrees(b *testing.B) {
 	prog := binaryTrees(minDepth, maxDepth)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	script := fmt.Sprintf(`class Node:
     def __init__(self, item, left, right):
         self.item = item
@@ -369,7 +378,7 @@ func BenchmarkMemory_SortStress(b *testing.B) {
 	prog := sortStress(n, rounds)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	// minivm has no sort opcode, so sortstress.py's xs.sort() is written out
 	// as an insertion sort in bytecode; the kernel therefore measures VM
 	// dispatch over an insertion sort rather than over a builtin sort. Every
@@ -433,7 +442,7 @@ func BenchmarkMemory_StringBuild(b *testing.B) {
 	prog := stringBuild(n)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	script := fmt.Sprintf(`def digits(n):
     if n == 0:
         return "0"
@@ -508,15 +517,15 @@ func allocationGraph(depth int32) *program.Program {
 
 // permutationFlipsListing builds a self-recursive walk (constant 0; params:
 // 0=depth; locals: 1=arr, 2=i, 3=lo, 4=hi, 5=t) that reverses a fresh
-// size-length []any array each call and adds arr[size-1] to the recursive
+// size-length []i32 array each call and adds arr[size-1] to the recursive
 // result. %[1]d substitutes size, %[2]d substitutes size-1, %[3]d substitutes
 // depth.
 const permutationFlipsListing = `
 .types
-[]any
+[]i32
 .constants
 func(i32) i32
-	any
+	[]i32
 	i32
 	i32
 	i32
@@ -676,17 +685,8 @@ func structTreeWalk(depth int32) *program.Program {
 	return mustParseProgram(fmt.Sprintf(structTreeWalkListing, depth))
 }
 
-// binaryTreesListing builds the benchmarks-game binary-trees kernel over a
-// named struct type (type 0=Node{item, left, right}; constant 0=
-// bottom_up_tree, 1=item_check; each is self-recursive, calling back through
-// its own const.get index). bottom_up_tree params: 0=item,1=depth; its
-// result and local 2=n are Node. item_check param 0=t is Node, and may be
-// the null ref at a leaf. STRUCT_NEW_DEFAULT zero-initializes ref fields to
-// the null heap ref, so the depth<=0 base case can leave left/right unset
-// instead of writing a null ref. Main locals: 0=stretchTree (Node),
-// 1=checksum,2=longLivedTree (Node),3=depth,4=iterations,5=shift,
-// 6=acc,7=i,8=t1 (Node),9=t2 (Node). %[1]d substitutes min_depth, %[2]d max_depth, %[3]d
-// max_depth+1.
+// binaryTreesListing uses the Node struct with self-recursive bottom_up_tree/item_check.
+// STRUCT_NEW_DEFAULT supplies null ref fields, so the base case need not write them.
 const binaryTreesListing = `
 .locals
 struct {item: i32; left: any; right: any}
@@ -879,17 +879,8 @@ func binaryTrees(minDepth, maxDepth int32) *program.Program {
 	return mustParseProgram(fmt.Sprintf(binaryTreesListing, minDepth, maxDepth, maxDepth+1))
 }
 
-// sortStressListing builds the sortstress kernel. minivm has no sort opcode,
-// so the sort is written directly in bytecode as an insertion sort over the
-// i32 array: it is a simple, obviously-correct in-place algorithm and the
-// least code among the options, keeping the kernel a measure of VM
-// dispatch rather than of an algorithm choice. The LCG state overflows i32
-// (s*1103515245 can reach ~2.4e18), so make_list (constant 0; params: 0=n,
-// 1=seed; result and local 2=xs are []i32; locals 3=s(i64),4=i) keeps s in
-// i64; the sorted values (s % 1000000) fit i32, so the array itself stays
-// i32. insertion_sort (constant 1; params: 0=arr ([]i32),1=n; locals:
-// 2=i,3=key,4=j) sorts in place. Main locals: 0=xs ([]i32),1=checksum,2=r,
-// 3=i. %[1]d substitutes n, %[2]d rounds.
+// sortStressListing measures VM dispatch with an in-place i32 insertion sort.
+// LCG state stays i64 because its multiply overflows i32.
 const sortStressListing = `
 .locals
 []i32
@@ -1057,14 +1048,8 @@ func sortStress(n, rounds int32) *program.Program {
 	return mustParseProgram(fmt.Sprintf(sortStressListing, n, rounds))
 }
 
-// stringBuildListing builds the strbuild kernel: digits(n) token generation
-// (constant 0; params: 0=n; locals: 1=count,2=v,3=arr ([]i32),4=idx,5=d), a
-// per-character checksum read back through string.encode_utf32, and
-// "big = big + tok + ' '" through string.concat (the allocating operation
-// this kernel exists to measure). Type 0 is the []i32 code-point array used
-// to build each token. Constant 1 is the " " separator, constant 2 the ""
-// used to seed big. Main locals: 0=big,1=tokenChecksum,2=i,3=tok,
-// 4=codePoints ([]i32),5=tokLen,6=j. %d substitutes n.
+// stringBuildListing measures token generation, UTF-32 reads, and repeated string.concat.
+// Type 0 is the []i32 code-point array; %d substitutes n.
 const stringBuildListing = `
 .locals
 any
@@ -1231,6 +1216,109 @@ outerDone:
 
 func stringBuild(n int32) *program.Program {
 	return mustParseProgram(fmt.Sprintf(stringBuildListing, n))
+}
+
+// xorShiftI64Listing fills a []i64 of length n with a xorshift64 (13/7/17)
+// sequence from a narrow seed, then computes a wrapping i64 sum; no wide
+// literal is needed (the seed and shift amounts all fit inline). Locals:
+// 0=values ([]i64), 1=x, 2=i, 3=sum, 4=j. Type 0 is []i64.
+const xorShiftI64Listing = `
+.locals
+[]i64
+i64
+i32
+i64
+i32
+.types
+[]i64
+.code
+	i64.const 2463534242
+	local.set 1
+	i32.const %[1]d
+	array.new_default 0
+	local.set 0
+	i32.const 0
+	local.set 2
+fillLoop:
+	local.get 2
+	i32.const %[1]d
+	i32.ge_s
+	br_if fillDone
+	local.get 1
+	local.get 1
+	i64.const 13
+	i64.shl
+	i64.xor
+	local.set 1
+	local.get 1
+	local.get 1
+	i64.const 7
+	i64.shr_u
+	i64.xor
+	local.set 1
+	local.get 1
+	local.get 1
+	i64.const 17
+	i64.shl
+	i64.xor
+	local.set 1
+	local.get 0
+	local.get 2
+	local.get 1
+	array.set
+	local.get 2
+	i32.const 1
+	i32.add
+	local.set 2
+	br fillLoop
+fillDone:
+	i64.const 0
+	local.set 3
+	i32.const 0
+	local.set 4
+sumLoop:
+	local.get 4
+	i32.const %[1]d
+	i32.ge_s
+	br_if sumDone
+	local.get 3
+	local.get 0
+	local.get 4
+	array.get
+	i64.add
+	local.set 3
+	local.get 4
+	i32.const 1
+	i32.add
+	local.set 4
+	br sumLoop
+sumDone:
+	local.get 3
+`
+
+func xorShiftI64(n int32) *program.Program {
+	return mustParseProgram(fmt.Sprintf(xorShiftI64Listing, n))
+}
+
+// xorShiftI64Reference transcribes xorShiftI64's fill/sum loops
+// operation-for-operation so its result is bit-identical to the bytecode
+// kernel; Go's >> is arithmetic, so the middle step goes through uint64 to
+// match i64.shr_u.
+func xorShiftI64Reference(n int32) int64 {
+	const seed int64 = 2463534242
+	values := make([]int64, n)
+	x := seed
+	for i := int32(0); i < n; i++ {
+		x ^= x << 13
+		x ^= int64(uint64(x) >> 7)
+		x ^= x << 17
+		values[i] = x
+	}
+	var sum int64
+	for _, v := range values {
+		sum += v
+	}
+	return sum
 }
 
 func typedArraySumReference(size int32) int32 {

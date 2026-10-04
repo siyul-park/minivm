@@ -68,71 +68,45 @@ func TestOptimizer_Optimize(t *testing.T) {
 		require.Equal(t, types.I32(5), value)
 	})
 
-	t.Run("O1", func(t *testing.T) {
-		o := optimize.New(optimize.O1)
-		prog := program.New(
-			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 20),
+	prog := program.New(
+		[]instr.Instruction{
+			instr.New(instr.I32_CONST, 20),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL)},
+		program.WithConstants(
+			types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI64},
+				Returns: []types.Type{types.TypeI64}}).Emit(
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_LT_S),
+				instr.New(instr.BR_IF, 26),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SUB),
 				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL)},
-			program.WithConstants(
-				types.NewFunctionBuilder(&types.FunctionType{
-					Params:  []types.Type{types.TypeI64},
-					Returns: []types.Type{types.TypeI64}}).Emit(
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.I32_LT_S),
-					instr.New(instr.BR_IF, 26),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.I32_SUB),
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CALL),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.I32_SUB),
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CALL),
-					instr.New(instr.I32_ADD),
-					instr.New(instr.RETURN),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.RETURN)).MustBuild()))
-		_, err := o.Optimize(prog)
-		require.NoError(t, err)
-	})
-
-	t.Run("O2", func(t *testing.T) {
-		o := optimize.New(optimize.O2)
-		prog := program.New(
-			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 20),
+				instr.New(instr.CALL),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_SUB),
 				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL)},
-			program.WithConstants(
-				types.NewFunctionBuilder(&types.FunctionType{
-					Params:  []types.Type{types.TypeI64},
-					Returns: []types.Type{types.TypeI64}}).Emit(
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.I32_LT_S),
-					instr.New(instr.BR_IF, 26),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.I32_SUB),
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CALL),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.I32_SUB),
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CALL),
-					instr.New(instr.I32_ADD),
-					instr.New(instr.RETURN),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.RETURN)).MustBuild()))
-		_, err := o.Optimize(prog)
-		require.NoError(t, err)
-	})
+				instr.New(instr.CALL),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.RETURN),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.RETURN)).MustBuild()))
+	for _, tc := range []struct {
+		name  string
+		level optimize.Level
+	}{
+		{"O1", optimize.O1},
+		{"O2", optimize.O2},
+	} {
+		t.Run(tc.name+" accepts a recursive function", func(t *testing.T) {
+			_, err := optimize.New(tc.level).Optimize(prog)
+			require.NoError(t, err)
+		})
+	}
 
 	t.Run("O3 preserves a top-level branch to the program end", func(t *testing.T) {
 		b := program.NewBuilder()
@@ -355,98 +329,65 @@ func TestOptimizer_Optimize(t *testing.T) {
 		require.Equal(t, beforeValue, optimizedValue)
 	})
 
-	t.Run("semantic parity/constant arithmetic", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
+	progs := []struct {
+		name string
+		prog *program.Program
+	}{
+		{"constant arithmetic", program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 20),
 			instr.New(instr.I32_CONST, 22),
-			instr.New(instr.I32_ADD)})
-		original := interp.New(prog)
-		defer original.Close()
-		require.NoError(t, original.Run(context.Background()))
-		var want []types.Value
-		for original.Len() > 0 {
-			value, err := original.Pop()
-			require.NoError(t, err)
-			want = append(want, value)
-		}
-
-		optimized, err := optimize.New(optimize.O3).Optimize(prog)
-		require.NoError(t, err)
-		got := interp.New(optimized)
-		defer got.Close()
-		require.NoError(t, got.Run(context.Background()))
-		var values []types.Value
-		for got.Len() > 0 {
-			value, err := got.Pop()
-			require.NoError(t, err)
-			values = append(values, value)
-		}
-		require.Equal(t, want, values)
-	})
-
-	t.Run("semantic parity/conditional branch", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_ADD)})},
+		{"conditional branch", program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.BR_IF, 5),
 			instr.New(instr.I32_CONST, 0),
-			instr.New(instr.I32_CONST, 7)})
-		original := interp.New(prog)
-		defer original.Close()
-		require.NoError(t, original.Run(context.Background()))
-		var want []types.Value
-		for original.Len() > 0 {
-			value, err := original.Pop()
-			require.NoError(t, err)
-			want = append(want, value)
-		}
-
-		optimized, err := optimize.New(optimize.O3).Optimize(prog)
-		require.NoError(t, err)
-		got := interp.New(optimized)
-		defer got.Close()
-		require.NoError(t, got.Run(context.Background()))
-		var values []types.Value
-		for got.Len() > 0 {
-			value, err := got.Pop()
-			require.NoError(t, err)
-			values = append(values, value)
-		}
-		require.Equal(t, want, values)
-	})
-
-	t.Run("semantic parity/array access", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7)})},
+		{"array access", program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.ARRAY_GET)}, program.WithConstants(types.TypedArray[int32]{10, 20, 30}))
-		original := interp.New(prog)
-		defer original.Close()
-		require.NoError(t, original.Run(context.Background()))
-		var want []types.Value
-		for original.Len() > 0 {
-			value, err := original.Pop()
-			require.NoError(t, err)
-			want = append(want, value)
-		}
+			instr.New(instr.ARRAY_GET)}, program.WithConstants(types.TypedArray[int32]{10, 20, 30}))},
+	}
+	for _, tc := range progs {
+		t.Run(tc.name, func(t *testing.T) {
+			original := interp.New(tc.prog)
+			defer original.Close()
+			require.NoError(t, original.Run(context.Background()))
+			var want []types.Value
+			for original.Len() > 0 {
+				value, err := original.Pop()
+				require.NoError(t, err)
+				want = append(want, value)
+			}
 
-		optimized, err := optimize.New(optimize.O3).Optimize(prog)
-		require.NoError(t, err)
-		got := interp.New(optimized)
-		defer got.Close()
-		require.NoError(t, got.Run(context.Background()))
-		var values []types.Value
-		for got.Len() > 0 {
-			value, err := got.Pop()
+			optimized, err := optimize.New(optimize.O3).Optimize(tc.prog)
 			require.NoError(t, err)
-			values = append(values, value)
-		}
-		require.Equal(t, want, values)
-	})
+			got := interp.New(optimized)
+			defer got.Close()
+			require.NoError(t, got.Run(context.Background()))
+			var values []types.Value
+			for got.Len() > 0 {
+				value, err := got.Pop()
+				require.NoError(t, err)
+				values = append(values, value)
+			}
+			require.Equal(t, want, values)
+		})
+	}
 }
 
 func TestOptimizer_Level(t *testing.T) {
-	for _, level := range []optimize.Level{optimize.O0, optimize.O1, optimize.O2, optimize.O3} {
-		require.Equal(t, level, optimize.New(level).Level())
+	for _, tc := range []struct {
+		name  string
+		level optimize.Level
+	}{
+		{"O0", optimize.O0},
+		{"O1", optimize.O1},
+		{"O2", optimize.O2},
+		{"O3", optimize.O3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.level, optimize.New(tc.level).Level())
+		})
 	}
 }
 

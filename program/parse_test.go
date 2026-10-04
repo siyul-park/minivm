@@ -205,6 +205,33 @@ func TestParse(t *testing.T) {
 		require.Equal(t, program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)}).String(), parsed.String())
 	})
 
+	t.Run("canonicalizes structurally equal struct types", func(t *testing.T) {
+		fnType := &types.FunctionType{
+			Params:  []types.Type{types.NewStructType(types.NewStructField(types.TypeI64))},
+			Returns: []types.Type{types.NewStructType(types.NewStructField(types.TypeI64))},
+		}
+		p0 := program.New(
+			nil,
+			program.WithTypes(
+				types.NewStructType(types.NewStructField(types.TypeI64)),
+				types.NewArrayType(types.NewStructType(types.NewStructField(types.TypeI64))),
+			),
+			program.WithConstants(
+				types.NewFunctionBuilder(fnType).Emit(instr.New(instr.NOP)).MustBuild(),
+			),
+		)
+		p1, err := program.Parse(strings.NewReader(p0.String()))
+		require.NoError(t, err)
+
+		structType := p1.Types[0].(*types.StructType)
+		arrType := p1.Types[1].(*types.ArrayType)
+		require.Same(t, structType, arrType.Elem)
+
+		fn := p1.Constants[0].(*types.Function)
+		require.Same(t, structType, fn.Typ.Params[0])
+		require.Same(t, structType, fn.Typ.Returns[0])
+	})
+
 	t.Run("oversized code line", func(t *testing.T) {
 		prefix, suffix := "i32.const ", "1"
 		line := prefix + strings.Repeat(" ", parseLineLimit+1-len(prefix)-len(suffix)) + suffix

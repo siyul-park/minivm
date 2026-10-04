@@ -10,33 +10,11 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// SSAPass rewrites every function a program holds through SSA: it translates
-// the function to SSA, runs the pipeline it was built with over the result,
-// and writes the outcome back out as bytecode. It is the route by which one
-// implementation of folding, dead-code elimination, and common-subexpression
-// elimination serves the ahead-of-time optimizer.
-//
-// A function it cannot take the whole way round comes back untouched. The
-// translation declines what bytecode alone cannot resolve, the emitter
-// declines what SSA cannot be written back as, and either answer leaves the
-// function exactly as it was, which is what docs/coding-patterns.md §7.1
-// requires of any pass that moves bytecode offsets: a rewrite that cannot
-// preserve every position-sensitive structure leaves the function alone.
+// SSAPass translates, optimizes, and re-emits expressible functions.
 type SSAPass struct {
 	pipeline *pass.Pipeline[*ssa.Function]
 }
 
-// pool is a program's constant pool as a compile resolves it: the value each
-// CONST_GET pushes, the facts about the cell a reference names, and the slot a
-// value has to be interned at when a fold produces one the program does not
-// already hold.
-//
-// A reference here names its own constant slot plus one, because zero is the
-// null reference. An ahead-of-time compile has no interpreter behind it and so
-// no heap address for a reference to carry, and it needs none: the translation
-// only ever hands the identity back to the table it came from. A constant the
-// interpreter would put on the heap is one of these - a string, a container, a
-// function, and an i64 too wide for its boxed payload alike.
 type pool struct {
 	prog    *program.Program
 	boxed   []types.Boxed
@@ -46,66 +24,58 @@ type pool struct {
 
 var _ pass.Pass[*program.Program] = (*SSAPass)(nil)
 
-// NewSSAPass returns a pass running pipeline over the SSA of every function a
-// program holds.
+// NewSSAPass returns an SSA round-trip pass.
 func NewSSAPass(pipeline *pass.Pipeline[*ssa.Function]) *SSAPass {
 	return &SSAPass{pipeline: pipeline}
 }
 
-func (p *SSAPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
-	consts := newPool(prog)
+// Run applies the SSA round trip.
+func (p *SSAPass) Run(_ *pass.Manager, prog *program.Program) (bool, error) {
+	constants := newPool(prog)
+
+	manager := pass.NewManager()
 
 	root := &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
-	changed, err := p.rewrite(m, consts, 0, root)
+	changed, err := p.roundtrip(manager, constants, 0, root)
 	if err != nil {
-		return pass.PreserveNone(), err
+		return false, err
 	}
 	if changed {
 		prog.Code, prog.Locals = root.Code, root.Locals
 	}
-	// Emitting a folded constant the program does not hold appends one, never
-	// a function, so the pool as it stands now is exactly the set of units.
 	for i, v := range prog.Constants {
-		fn, ok := v.(*types.Function)
+		function, ok := v.(*types.Function)
 		if !ok {
 			continue
 		}
-		// A reference names its own constant slot plus one, the identity pool
-		// resolves cells at.
-		done, err := p.rewrite(m, consts, i+1, fn)
+		done, err := p.roundtrip(manager, constants, i+1, function)
 		if err != nil {
-			return pass.PreserveNone(), err
+			return false, err
 		}
 		changed = changed || done
 	}
 
-	if !changed {
-		return pass.PreserveAll(), nil
-	}
-	return pass.PreserveNone(), nil
+	return !changed, nil
 }
 
-// rewrite takes one function round: to SSA, through the pipeline, and back to
-// bytecode. It reports whether fn changed, and leaves fn untouched when either
-// direction declines it or the round trip lands on the code it started from.
-func (p *SSAPass) rewrite(m *pass.Manager, consts *pool, addr int, fn *types.Function) (bool, error) {
-	if !expressible(fn.Code) {
+func (p *SSAPass) roundtrip(manager *pass.Manager, constants *pool, address int, function *types.Function) (bool, error) {
+	if !expressible(function) {
 		return false, nil
 	}
-	f, err := Translate(consts.module(), addr, fn)
+	f, err := Translate(constants.module(), address, function, 0)
 	if err != nil || f == nil {
 		return false, err
 	}
-	if _, err := p.pipeline.Run(m, f); err != nil {
+	if _, err := p.pipeline.Run(manager, f); err != nil {
 		return false, err
 	}
-	code, added, ok := emit(f, consts, addr == 0, len(fn.Declared()))
-	if !ok || (len(added) == 0 && slices.Equal(code, fn.Code)) {
+	code, locals, ok := emit(f, constants, address == 0, len(function.Declared()))
+	if !ok || (len(locals) == 0 && slices.Equal(code, function.Code)) {
 		return false, nil
 	}
-	fn.Code = code
-	if len(added) > 0 {
-		fn.Locals = append(slices.Clone(fn.Locals), added...)
+	function.Code = code
+	if len(locals) > 0 {
+		function.Locals = append(slices.Clone(function.Locals), locals...)
 	}
 	return true, nil
 }
@@ -131,22 +101,16 @@ func newPool(prog *program.Program) *pool {
 	return p
 }
 
-// module returns the evidence a translation resolves kinds, shapes, and call
-// targets against.
 func (p *pool) module() Module {
 	return Module{
 		Constants: p.boxed,
 		Globals:   types.Kinds(p.prog.Globals),
 		Objects:   p.objects,
-		Decl:      p.prog.Types,
+		Types:     p.prog.Types,
 	}
 }
 
-// index returns the constant slot CONST_GET reads c from, interning c when the
-// program holds no such value. A reference it does not already hold names a
-// cell only a running interpreter could allocate, so no slot can be made for
-// one.
-func (p *pool) index(c types.Boxed) (int, bool) {
+func (p *pool) intern(c types.Boxed) (int, bool) {
 	if at, ok := p.at[c]; ok {
 		return at, true
 	}
@@ -160,17 +124,17 @@ func (p *pool) index(c types.Boxed) (int, bool) {
 	return at, true
 }
 
-// expressible reports whether code holds only operations that survive the
-// round trip. UNREACHABLE traps where it stands and the IR gives it no
-// operation of its own, so a function holding one would come back without its
-// trap. YIELD and RESUME end native execution at their own opcode while the
-// threaded continuation runs past them, so Translate carries only the
-// prefix before them and a rewrite would come back without the continuation.
-func expressible(code []byte) bool {
-	for ip := 0; ip < len(code); {
-		inst := instr.Instruction(code[ip:])
+// expressible reports whether emit can rewrite function: its handler table
+// holds byte offsets that a rewrite would invalidate, and a RETURN_CALL ends
+// in a frame reuse that only native execution lowers.
+func expressible(function *types.Function) bool {
+	if len(function.Handlers) > 0 {
+		return false
+	}
+	for ip := 0; ip < len(function.Code); {
+		inst := instr.Instruction(function.Code[ip:])
 		switch inst.Opcode() {
-		case instr.UNREACHABLE, instr.YIELD, instr.RESUME:
+		case instr.UNREACHABLE, instr.YIELD, instr.RESUME, instr.RETURN_CALL:
 			return false
 		}
 		ip += inst.Width()
@@ -178,8 +142,6 @@ func expressible(code []byte) bool {
 	return true
 }
 
-// box returns the compile-time value a constant pushes, and false for one the
-// interpreter would allocate a heap cell for instead.
 func box(v types.Value) (types.Boxed, bool) {
 	switch v := v.(type) {
 	case types.Boxed:
@@ -201,15 +163,18 @@ func box(v types.Value) (types.Boxed, bool) {
 	}
 }
 
-// resolved reads off a constant the facts a translation asks of the cell it
-// names.
 func resolved(v types.Value) Object {
 	switch v := v.(type) {
 	case *types.Function:
-		return Object{Fn: v}
+		return Object{Function: v}
 	case *types.Struct:
-		return Object{Typ: v.Typ}
+		return Object{Struct: v.Typ}
+	case types.I64:
+		return Object{I64: &v}
 	default:
+		if at, ok := v.Type().(*types.ArrayType); ok {
+			return Object{Array: at}
+		}
 		return Object{}
 	}
 }

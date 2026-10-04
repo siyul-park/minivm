@@ -50,7 +50,7 @@ func TestDecoder_Interp(t *testing.T) {
 	require.Same(t, i, got)
 }
 
-func TestDecoder_Unmarshal(t *testing.T) {
+func TestDecoder_Decode(t *testing.T) {
 	// The injected decoder resolves dependencies through the registry that
 	// started the conversion, so a registration on the dependency applies to
 	// the delegating unmarshaler too.

@@ -17,7 +17,7 @@ func BenchmarkNumeric_BranchTree(b *testing.B) {
 	prog, want := branchTree(input, nodes)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	benchmarkCompare(b, benchmarkComparison{
 		native: func() int32 {
 			var total int32
@@ -56,7 +56,7 @@ func BenchmarkNumeric_NBody(b *testing.B) {
 	prog := nbody(steps)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	script := fmt.Sprintf(`import math
 
 
@@ -158,7 +158,7 @@ func BenchmarkNumeric_SpectralNorm(b *testing.B) {
 	prog := spectralnorm(n, rounds)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	script := fmt.Sprintf(`import math
 
 
@@ -230,7 +230,7 @@ func BenchmarkNumeric_Mandelbrot(b *testing.B) {
 	prog := mandelbrot(width, height, maxIter)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	script := fmt.Sprintf(`def escape_count(cr, ci, max_iter):
     zr = 0.0
     zi = 0.0
@@ -275,13 +275,22 @@ def run():
 	}, want)
 }
 
+func BenchmarkNumeric_FNV1a64(b *testing.B) {
+	const n int32 = 1024
+	want := fnv1a64Reference(n)
+	prog := fnv1a64(n)
+	require.NoError(b, program.Verify(prog))
+
+	benchmarkVM(b, prog, types.I64(want))
+}
+
 func BenchmarkNumeric_MatMul(b *testing.B) {
 	const n int32 = 16
 	want := matmulReference(n)
 	prog := matmul(n)
 	require.NoError(b, program.Verify(prog))
 
-	benchmarkVM(b, prog, types.BoxI32(want))
+	benchmarkVM(b, prog, types.I32(want))
 	script := fmt.Sprintf(`def matmul(n, a, b, out):
     i = 0
     while i < n:
@@ -356,20 +365,8 @@ func branchTree(input int32, nodes int) (*program.Program, int32) {
 	return mustParseProgram(sb.String()), want
 }
 
-// nbody builds the benchmarks-game N-body kernel: offset_momentum runs once,
-// advance runs steps times as a called function (it iterates in the source's
-// own loop), and energy's checksum is inlined since it has one call site.
-// nbodyListing builds the benchmarks-game N-body kernel: offset_momentum runs
-// once, advance (constant 0) runs steps times as a called function (it
-// iterates in the source's own loop), and energy's checksum is inlined since
-// it has one call site.
-//
-// advance params: 0=nb,1=x,2=y,3=z,4=vx,5=vy,6=vz,7=mass,8=dt; locals:
-// 9=i,10=j,11=dx,12=dy,13=dz,14=dist2,15=mag.
-//
-// Main locals: 0=x,1=y,2=z,3=vx,4=vy,5=vz,6=mass,7=pi,8=solarMass,
-// 9=daysPerYear,10=px,11=py,12=pz,13=i,14=steps,15=j,16=e,17=dx,18=dy,19=dz,
-// 20=dist. %[1]d substitutes steps.
+// nbody mirrors the benchmark kernel: offset_momentum runs once, advance is a real
+// called loop function, and energy\'s one call site is inlined.
 const nbodyListing = `
 .locals
 []f64
@@ -1031,13 +1028,7 @@ func nbody(steps int32) *program.Program {
 	return mustParseProgram(fmt.Sprintf(nbodyListing, steps))
 }
 
-// spectralnormListing builds the benchmarks-game spectral-norm kernel. eval_a
-// (constant 0), eval_a_times_u (constant 1), and eval_at_times_u (constant 2)
-// each have several call sites, so they stay real bytecode functions;
-// eval_ata_times_u has one call site (the round loop body) and is inlined
-// into it. eval_a_times_u and eval_at_times_u share every instruction except
-// the order of eval_a's two arguments (local.get 3/4 vs 4/3). Main locals:
-// 0=u,1=v,2=tmp,3=it,4=vbv,5=vv,6=i. %[1]d substitutes n, %[2]d rounds.
+// spectralnormListing keeps reused helpers as real functions and inlines the one-use helper.
 const spectralnormListing = `
 .locals
 []f64
@@ -1264,15 +1255,7 @@ func spectralnorm(n, rounds int32) *program.Program {
 	return mustParseProgram(fmt.Sprintf(spectralnormListing, n, rounds))
 }
 
-// mandelbrot builds the benchmarks-game Mandelbrot kernel. escape_count has
-// an early return inside its loop, so it stays a real bytecode function with
-// a genuine early RETURN rather than a flag variable.
-// mandelbrotListing's escape_count constant (params: 0=cr,1=ci,2=maxIter;
-// locals: 3=zr,4=zi,5=i,6=zr2,7=zi2,8=newZr,9=newZi) has an early return
-// inside its loop, so it stays a real bytecode function with a genuine early
-// RETURN rather than a flag variable. Main locals: 0=total,1=py,2=cy,3=px,
-// 4=cx. %[2]d and %[4]d substitute height-1/width-1 as f64.const literals
-// (the trailing ".0" keeps them float tokens, not integer ones).
+// mandelbrot keeps escape_count as a real function because its loop has an early RETURN.
 const mandelbrotListing = `
 .locals
 i32
@@ -1599,6 +1582,63 @@ sumDone:
 func matmul(n int32) *program.Program {
 	nn := uint64(uint32(n * n))
 	return mustParseProgram(fmt.Sprintf(matmulListing, nn, n))
+}
+
+// fnv1a64Listing computes FNV-1a 64 over n single-byte inputs (index & 0xff).
+// Locals: 0=n (param), 1=h, 2=i.
+const fnv1a64Listing = `
+.constants
+func(i32) i64
+	i64
+	i32
+	i64.const 0xcbf29ce484222325
+	local.set 1
+	i32.const 0
+	local.set 2
+	loop:
+	local.get 2
+	local.get 0
+	i32.ge_s
+	br_if done
+	local.get 1
+	local.get 2
+	i32.const 255
+	i32.and
+	i32.to_i64_s
+	i64.xor
+	i64.const 1099511628211
+	i64.mul
+	local.set 1
+	local.get 2
+	i32.const 1
+	i32.add
+	local.set 2
+	br loop
+	done:
+	local.get 1
+	return
+.code
+	i32.const %d
+	const.get 0
+	call
+`
+
+func fnv1a64(n int32) *program.Program {
+	return mustParseProgram(fmt.Sprintf(fnv1a64Listing, n))
+}
+
+// fnv1a64Reference transcribes fnv1a64's basis construction and hash loop
+// operation-for-operation so its result is bit-identical to the bytecode
+// kernel.
+func fnv1a64Reference(n int32) int64 {
+	hi, lo := int64(0xcbf29ce4), int64(0x84222325)
+	h := hi<<32 | lo
+	const prime int64 = 1099511628211
+	for i := int32(0); i < n; i++ {
+		h ^= int64(i & 0xff)
+		h *= prime
+	}
+	return h
 }
 
 // nbodyReference transcribes nbody's advance/energy loops operation-for-

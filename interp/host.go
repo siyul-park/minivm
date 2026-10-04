@@ -16,15 +16,8 @@ type HostFunction struct {
 	Fn  func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error)
 }
 
-// HostStruct is a live view of a Go struct. The codec produces one for a struct
-// a copy cannot reproduce - one carrying unexported state, or one a pointer
-// receiver mutates - so a field the guest writes and a method the host calls
-// address the same memory.
-//
-// The pointer is what the GC traces, so the Go struct stays alive for as long as
-// the VM holds the view, and the Go type is what identifies it on the way back
-// out. Both are fixed at construction: there is no layout to re-validate on the
-// way into a field.
+// HostStruct is a live Go-struct view. The traced pointer keeps the source alive,
+// and the Go type fixes the view's field layout for its lifetime.
 type HostStruct struct {
 	typ      *types.StructType
 	fields   []field
@@ -66,20 +59,10 @@ var (
 	_ types.Value = (*HostMap)(nil)
 )
 
+// NewHostFunction exposes fn to the VM as a function of type typ.
 func NewHostFunction(typ *types.FunctionType, fn func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error)) *HostFunction {
 	return &HostFunction{Typ: typ, Fn: fn}
 }
-
-func (f *HostFunction) Kind() types.Kind { return types.KindRef }
-func (f *HostFunction) Type() types.Type { return f.Typ }
-
-func (f *HostFunction) String() string {
-	return fmt.Sprintf("%s\n<native>", f.Typ)
-}
-
-func (h *HostStruct) Kind() types.Kind { return types.KindRef }
-func (h *HostStruct) Type() types.Type { return h.typ }
-func (h *HostStruct) String() string   { return fmt.Sprintf("%s\n<native>", h.typ) }
 
 // Field reads the field at at out of the Go struct, in the form a VM slot of
 // that field's type holds. A field that needs a heap reference publishes one on
@@ -109,14 +92,30 @@ func (h *HostStruct) SetField(i *Interpreter, at int, val types.Boxed) error {
 	return nil
 }
 
-func (h *HostArray) Kind() types.Kind { return types.KindRef }
-func (h *HostArray) Type() types.Type { return h.typ }
-func (h *HostArray) String() string   { return fmt.Sprintf("%s\n<native>", h.typ) }
-
 // Len reports the length the Go slice or array has now.
 func (h *HostArray) Len() int {
 	_, n := h.bounds(h.ptr)
 	return n
+}
+
+// Delete removes the element at at from the Go slice, reports it, and writes
+// the shortened slice back through the view.
+func (h *HostArray) Delete(i *Interpreter, at int) (types.Boxed, error) {
+	dst, ok := h.slice()
+	if !ok {
+		return 0, fmt.Errorf("%w: cannot delete from %s", ErrUnsupportedMarshalType, h.rtyp)
+	}
+	n := dst.Len()
+	if at < 0 || at >= n {
+		return 0, ErrIndexOutOfRange
+	}
+	removed, err := h.Element(i, at)
+	if err != nil {
+		return 0, err
+	}
+	reflect.Copy(dst.Slice(at, n-1), dst.Slice(at+1, n))
+	dst.Set(dst.Slice(0, n-1))
+	return removed, nil
 }
 
 // Element reads the element at at, in the form a VM slot of the element type
@@ -186,26 +185,6 @@ func (h *HostArray) Append(i *Interpreter, vals []types.Boxed) error {
 	return nil
 }
 
-// Delete removes the element at at from the Go slice, reports it, and writes
-// the shortened slice back through the view.
-func (h *HostArray) Delete(i *Interpreter, at int) (types.Boxed, error) {
-	dst, ok := h.slice()
-	if !ok {
-		return 0, fmt.Errorf("%w: cannot delete from %s", ErrUnsupportedMarshalType, h.rtyp)
-	}
-	n := dst.Len()
-	if at < 0 || at >= n {
-		return 0, ErrIndexOutOfRange
-	}
-	removed, err := h.Element(i, at)
-	if err != nil {
-		return 0, err
-	}
-	reflect.Copy(dst.Slice(at, n-1), dst.Slice(at+1, n))
-	dst.Set(dst.Slice(0, n-1))
-	return removed, nil
-}
-
 // Array rebuilds the view as the VM array a copy of the Go value would have
 // produced. An opcode that yields a new array rather than reshaping this one
 // works from that copy, so the result is VM-owned and the view keeps
@@ -213,10 +192,6 @@ func (h *HostArray) Delete(i *Interpreter, at int) (types.Boxed, error) {
 func (h *HostArray) Array(i *Interpreter) (types.Value, error) {
 	return convert(i, h.registry, h.copy, h.ptr)
 }
-
-func (h *HostMap) Kind() types.Kind { return types.KindRef }
-func (h *HostMap) Type() types.Type { return h.typ }
-func (h *HostMap) String() string   { return fmt.Sprintf("%s\n<native>", h.typ) }
 
 // Len reports the number of entries the Go map holds now.
 func (h *HostMap) Len() int { return h.value().Len() }
@@ -275,6 +250,7 @@ func (h *HostMap) Delete(i *Interpreter, key types.Boxed) error {
 	return nil
 }
 
+// Clear removes every entry of the Go map.
 func (h *HostMap) Clear() { h.value().Clear() }
 
 // Map rebuilds the view as the VM map a copy of the Go value would have
@@ -282,6 +258,44 @@ func (h *HostMap) Clear() { h.value().Clear() }
 func (h *HostMap) Map(i *Interpreter) (types.Value, error) {
 	return convert(i, h.registry, h.copy, h.ptr)
 }
+
+// Kind returns the value kind.
+func (f *HostFunction) Kind() types.Kind { return types.KindRef }
+
+// Type returns the value type.
+func (f *HostFunction) Type() types.Type { return f.Typ }
+
+// String returns the textual representation.
+func (f *HostFunction) String() string {
+	return fmt.Sprintf("%s\n<native>", f.Typ)
+}
+
+// Kind returns the value kind.
+func (h *HostStruct) Kind() types.Kind { return types.KindRef }
+
+// Type returns the value type.
+func (h *HostStruct) Type() types.Type { return h.typ }
+
+// String returns the textual representation.
+func (h *HostStruct) String() string { return fmt.Sprintf("%s\n<native>", h.typ) }
+
+// Kind returns the value kind.
+func (h *HostArray) Kind() types.Kind { return types.KindRef }
+
+// Type returns the value type.
+func (h *HostArray) Type() types.Type { return h.typ }
+
+// String returns the textual representation.
+func (h *HostArray) String() string { return fmt.Sprintf("%s\n<native>", h.typ) }
+
+// Kind returns the value kind.
+func (h *HostMap) Kind() types.Kind { return types.KindRef }
+
+// Type returns the value type.
+func (h *HostMap) Type() types.Type { return h.typ }
+
+// String returns the textual representation.
+func (h *HostMap) String() string { return fmt.Sprintf("%s\n<native>", h.typ) }
 
 // slice addresses the Go slice through the variable the view holds, so a slice
 // that append reallocated is the one the next access reaches. A Go array has no
@@ -317,15 +331,6 @@ func convert[T any](i *Interpreter, r *Registry, run func(*Encoder, unsafe.Point
 	return out, nil
 }
 
-// assign writes a VM value into the live Go value at p.
-func assign(i *Interpreter, r *Registry, set UnmarshalerFunc, val types.Boxed, p unsafe.Pointer) error {
-	value, err := i.deref(val)
-	if err != nil {
-		return err
-	}
-	return set(i.decoder(r), value, p)
-}
-
 // decode writes a VM value into a fresh Go value of type t, for a destination
 // the view has no address for: a Go map entry, or an element append has yet to
 // make room for.
@@ -335,6 +340,15 @@ func decode(i *Interpreter, r *Registry, set UnmarshalerFunc, t reflect.Type, va
 		return reflect.Value{}, err
 	}
 	return out.Elem(), nil
+}
+
+// assign writes a VM value into the live Go value at p.
+func assign(i *Interpreter, r *Registry, set UnmarshalerFunc, val types.Boxed, p unsafe.Pointer) error {
+	value, err := i.deref(val)
+	if err != nil {
+		return err
+	}
+	return set(i.decoder(r), value, p)
 }
 
 // hosting reports the Go value val stands for, when val is a host value over

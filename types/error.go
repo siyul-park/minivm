@@ -41,12 +41,6 @@ var (
 	_ error     = (*Error)(nil)
 )
 
-// NewError builds an exception with a numeric code, message, and payload. Pass
-// BoxedNull as value when there is no payload.
-func NewError(code ErrorCode, message string, value Boxed) *Error {
-	return &Error{code: code, message: message, value: value}
-}
-
 // WrapError adapts a Go error into an exception value with a numeric code. Its
 // message is err.Error() and the original is retained for Unwrap. It returns nil
 // for a nil error.
@@ -57,12 +51,10 @@ func WrapError(code ErrorCode, err error) *Error {
 	return &Error{cause: err, code: code, message: err.Error(), value: BoxedNull}
 }
 
-func (e *Error) Error() string {
-	return e.message
-}
-
-func (e *Error) Unwrap() error {
-	return e.cause
+// NewError builds an exception with a numeric code, message, and payload. Pass
+// BoxedNull as value when there is no payload.
+func NewError(code ErrorCode, message string, value Boxed) *Error {
+	return &Error{code: code, message: message, value: value}
 }
 
 func (e *Error) Value() Boxed {
@@ -71,6 +63,16 @@ func (e *Error) Value() Boxed {
 
 func (e *Error) Code() ErrorCode {
 	return e.code
+}
+
+// Error returns the underlying error.
+func (e *Error) Error() string {
+	return e.message
+}
+
+// Unwrap returns the wrapped error.
+func (e *Error) Unwrap() error {
+	return e.cause
 }
 
 func (e *Error) Kind() Kind {

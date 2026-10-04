@@ -1,6 +1,6 @@
 # Coding Patterns
 
-Normative code-design rules for `minivm`.
+Normative code-design rules for `minivm`. This document is normative; analysis and lint tooling MAY enforce these rules but MUST NOT define additional coding requirements.
 
 `AGENTS.md` owns workflow; `testing.md` owns test contracts and structure; `refactoring.md` owns structural review; topic docs own architecture facts.
 
@@ -28,7 +28,7 @@ When extracting shared functionality, code `MUST NOT` merely be moved into a low
 
 Logical cohesion `MUST` be reflected in physical layout.
 
-Symbols owned by the same owner and forming one cohesive responsibility `MUST` reside in the same file. Symbols sharing an ownership boundary `MUST NOT` be scattered across files without a real responsibility or abstraction boundary.
+Symbols with one owner and cohesive responsibility `MUST` share a file. Sharing an ownership boundary `MUST NOT` cause file splits without a real responsibility or abstraction boundary.
 
 Strongly related symbols `MUST` be placed physically close together. Symbols that directly compose one behavior or have a direct caller-callee relationship `SHOULD` be adjacent.
 
@@ -36,19 +36,30 @@ Files and declaration order `MUST` make ownership, responsibility, and relations
 
 ### Structural Rules
 
-1. **Abstract semantic duplication.*- When multiple sites implement the same behavior or rule, it `MUST` move into one owner. Similar syntax alone `MUST NOT` trigger abstraction.
+1. **Abstract semantic duplication.** When multiple sites implement the same behavior or rule, it `MUST` move into one owner. Similar syntax alone `MUST NOT` trigger abstraction.
 
-2. **Merge overlapping symbols.*- When symbols have substantially the same responsibility at the same abstraction level, they `MUST` be consolidated. One general symbol `SHOULD` be preferred over parallel variants, wrappers, aliases, or coordinators.
+2. **Merge overlapping symbols.** When symbols have substantially the same responsibility at the same abstraction level, they `MUST` be consolidated. One general symbol `SHOULD` be preferred over parallel variants, wrappers, aliases, or coordinators.
 
-3. **Split real boundaries.*- Symbols `MUST` be separated only when responsibility, invariant, ownership, lifecycle, or abstraction level differs. They `MUST NOT` be split to shorten code or create symmetry.
+3. **Split real boundaries.** Symbols `MUST` be separated only when responsibility, invariant, ownership, lifecycle, or abstraction level differs. They `MUST NOT` be split to shorten code or create symmetry.
 
-4. **Reuse before extension.*- Existing symbols and composition `SHOULD` be preferred before adding layers, extension points, policy knobs, or parallel mechanisms.
+4. **Reuse before extension.** Existing symbols and composition `SHOULD` be preferred before adding layers, extension points, policy knobs, or parallel mechanisms.
+
+### Structural Signals
+
+Structural metrics `SHOULD` be used as review signals, never as proof of a design violation.
+
+- Cyclomatic complexity `SHOULD` be considered with statement count and nesting depth.
+- Coupling `SHOULD` be considered with direct fan-in, fan-out, and dependency depth.
+- Near-clone analysis `SHOULD` use normalized token or AST shape with a minimum body size and a semantic or naming relation; syntax similarity alone `MUST NOT` require abstraction.
+- Similar or symmetric siblings `SHOULD` be physically adjacent when they share an owner, signature, and implementation shape.
+- Metrics `MUST NOT` define a universal declaration order, justify automatic reordering, or prove single responsibility.
+- High-confidence mechanical checks `SHOULD` be preferred where a rule is directly expressible; heuristic signals `SHOULD` remain advisory and use deliberately high thresholds.
 
 ## Functions
 
 A helper `MUST` be extracted only when it removes semantic duplication, names reusable behavior or policy, isolates an abstraction level, or is required as a function value.
 
-A private helper `SHOULD` have at least two callers. A single-use helper `MUST` be inlined unless its name expresses a real policy or mechanic.
+A private helper `SHOULD` have at least two callers. A simple single-use wrapper `SHOULD` be inlined unless its name expresses a real policy or mechanic; complex one-use mechanics require review rather than mechanical removal.
 
 Methods `SHOULD` be used for receiver-owned behavior and package functions for construction or behavior with no natural receiver.
 
@@ -87,6 +98,7 @@ Every exported symbol is a maintenance commitment.
 - Interfaces `MUST` be accepted only when callers supply behavior; they `MUST` be defined where behavior is consumed.
 - Constructors `MUST` return concrete types.
 - Exported structs `SHOULD` stay small; writable state `MUST` stay behind its owner.
+- Data-only values and native ABI bridge structs `MAY` expose contract fields; long-lived mutable runtime state `MUST` remain behind its owner.
 - Immutable values and defensive copies at ownership boundaries `SHOULD` be preferred.
 - Parameter-group structs named `Request`, `Response`, `Result`, `Data`, `Info`, or `Context` `MUST NOT` be added without a contract.
 - Speculative options, algorithms, extension points, or policy knobs `MUST NOT` be exposed.
@@ -100,21 +112,21 @@ Required dependencies and shape `MUST` be validated at construction, and complet
 
 Types `MUST` own invariants and transitions. Compile, publish, install, reset, retain, release, and close `MUST` be implemented as behavior, not as external field assignments.
 
-## Ownership and Concurrency
+## Ownership
 
-Ownership `MUST` be explicit.
+One symbol owns each mutable state and its transitions.
 
-Mutable storage `MUST` stay within its owner; borrowed values `MUST NOT` cross ownership boundaries.
+Private state belongs to its owner. An unexported implementation component `MAY` access its exported owner's private state when it is part of that owner's responsibility; unrelated same-package code `MUST` use the owner's contract.
 
-Retain/release transitions `MUST` belong to the owner of the transition.
+Borrowed values `MUST NOT` cross or outlive their ownership boundary. Retain/release and resource transitions `MUST` have one owner, and each resource `MUST` be released exactly once.
 
-Contexts `MUST` be first parameters for blocking, I/O, or process-boundary operations; request contexts `MUST NOT` be stored in long-lived objects.
+Constructors `MAY` initialize private state. Layout-only declarations such as `unsafe.Offsetof` `MAY` name private members but `MUST NOT` access runtime state.
 
-Shared mutable state `MUST` have one owner and one synchronization strategy.
+## Concurrency
 
-Long-lived goroutines `MUST` have explicit shutdown.
+Shared mutable state `MUST` have one owner and one synchronization strategy. Long-lived goroutines `MUST` have explicit shutdown.
 
-Resources `MUST` be released exactly once.
+Blocking, I/O, and process-boundary operations `MUST` take context first; request contexts `MUST NOT` be stored in long-lived objects.
 
 ## Errors
 
@@ -148,7 +160,13 @@ Within a Go file, declarations `MUST` appear in this order:
 10. clone/conversion and interface hooks
 11. private functions/methods
 
-Struct fields `MUST` read from ownership/policy toward runtime state; synchronization fields `MUST` be last.
+Within each declaration group:
+
+- A cohesive implementation `MUST` begin with its core operations and follow call direction from higher-level behavior to shared machinery.
+- Callers `MUST` precede exclusive helpers; symmetric counterparts `SHOULD` be adjacent; shared leaves `MUST` come after the code that uses them.
+- Within one type, constructors `MUST` precede operators and other behavior.
+- Opcode cores `MUST` follow the declaration order in `instr/opcode.go`. Exclusive helpers `MUST` remain adjacent to the opcode core they serve, so each generated handler and its implementation form one readable unit.
+- These ordering rules `MUST NOT` justify artificial file splits, wrappers, or duplicated helpers.
 
 ## Comments
 
@@ -161,11 +179,11 @@ Comments `MAY` be added only when they are clearly necessary to preserve:
 - rejected alternatives with evidence;
 - external contracts or specifications.
 
-Necessary comments `MUST` be dense and concise. Every word `MUST` justify its presence.
+Necessary comments `MUST` state the smallest sufficient fact, constraint, invariant, or consequence. Every sentence `MUST` earn its place.
 
-Comments `MUST NOT` be used to narrate code, restate names, label `arrange/act/assert`, or explain obvious control flow. Names, types, or structure `MUST` be improved instead.
+Comments `MUST NOT` narrate code, restate names, label `arrange/act/assert`, or explain obvious control flow. Prefer a better name, type, or structure.
 
-Exported symbols `MUST` have normal Go doc comments.
+Exported symbols `SHOULD` have normal Go doc comments. Public API changes `SHOULD` document user-visible behavior, constraints, ownership, or other facts the code cannot express.
 
 ## Generated and Platform Code
 

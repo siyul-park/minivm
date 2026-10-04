@@ -41,3 +41,5 @@ dist/
 # Local agent plans
 docs/plans/
 docs/superpowers/
+
+.mcp.json

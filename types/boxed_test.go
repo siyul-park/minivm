@@ -231,6 +231,29 @@ func TestBox(t *testing.T) {
 	}
 }
 
+func TestBoxWord(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		kind types.Kind
+		word uint64
+		want types.Boxed
+	}{
+		{"i1", types.KindI1, 1, types.BoxI1(true)},
+		{"i1 zero", types.KindI1, 0, types.BoxI1(false)},
+		{"i8", types.KindI8, 0xFFFFFFFE, types.BoxI8(-2)},
+		{"i32", types.KindI32, 0xFFFFFFF9, types.BoxI32(-7)},
+		{"i64", types.KindI64, 0xFFFFFFFFFFFFFFFD, types.BoxI64(-3)},
+		{"f32", types.KindF32, uint64(math.Float32bits(1.5)), types.BoxF32(1.5)},
+		{"f64", types.KindF64, math.Float64bits(2.5), types.BoxF64(2.5)},
+		{"ref", types.KindRef, uint64(types.BoxRef(9)), types.BoxRef(9)},
+		{"unknown kind", types.Kind(7), 5, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			require.Equal(t, c.want, types.BoxWord(c.kind, c.word))
+		})
+	}
+}
+
 func TestUnbox(t *testing.T) {
 	tests := []struct {
 		val   types.Boxed
@@ -389,4 +412,25 @@ func TestBoxed_Bool(t *testing.T) {
 }
 func TestBoxed_Ref(t *testing.T) {
 	require.Equal(t, 42, types.BoxRef(42).Ref())
+}
+
+func TestBoxed_Word(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		box  types.Boxed
+		want uint64
+	}{
+		{"i1", types.BoxI1(true), 1},
+		{"i1 zero", types.BoxI1(false), 0},
+		{"i8", types.BoxI8(-2), 0xFFFFFFFE},
+		{"i32", types.BoxI32(-7), 0xFFFFFFF9},
+		{"i64", types.BoxI64(-3), 0xFFFFFFFFFFFFFFFD},
+		{"f32", types.BoxF32(1.5), uint64(math.Float32bits(1.5))},
+		{"f64", types.BoxF64(2.5), math.Float64bits(2.5)},
+		{"ref", types.BoxRef(9), uint64(types.BoxRef(9))},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			require.Equal(t, c.want, c.box.Word())
+		})
+	}
 }

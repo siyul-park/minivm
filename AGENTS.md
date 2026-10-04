@@ -1,6 +1,6 @@
 # Agent Instructions
 
-`minivm` is a Go-native bytecode VM. Threaded execution is the semantic baseline; native compilation is a planned optimization rebuild.
+`minivm` is a Go-native bytecode VM. Threaded execution is the semantic baseline; ARM64 native compilation is an execution tier, on by default.
 
 ## Precedence
 
@@ -13,6 +13,7 @@
 | `docs/coding-patterns.md` | Go design, naming, API patterns |
 | `docs/testing.md` | test methodology and validation |
 | `docs/refactoring.md` | structural review and simplification |
+| `docs/writing.md` | document purpose, ownership, terminology, form |
 | topic docs | architecture facts |
 
 ## Rules
@@ -23,7 +24,7 @@
 4. Every changed symbol `MUST` have one clear owner, one boundary, one purpose, and one name that expresses its role or contract.
 5. One behavior `MUST` have one implementation. Native compilation policy, when present, `MUST` stay in its compiler owner; target mechanics `MUST` stay in target packages.
 6. Generated files `MUST NOT` be edited directly; the agent `MUST` change them only through their generator and `MUST` run `make generate` and `make check-generated`.
-7. The agent `MUST` keep one canonical owner per topic. Canonical topic docs `MUST` describe supported/current state; guides `MUST` describe procedures; plans and audits `MAY` preserve history or future work. The agent `MUST NOT` duplicate a contract owned elsewhere; it `MUST` link to the owner instead.
+7. Every document the agent writes (docs, guides, plans, briefs, reports) `MUST` follow `docs/writing.md`.
 8. A non-trivial structural change (package/type boundary, ownership, lifecycle, control flow, abstraction, public contract, or performance-sensitive structure) `MUST` apply `docs/refactoring.md` until the simplification fixed point is reached.
 
 ## Delegation
@@ -39,11 +40,16 @@ The agent `MUST NOT` delegate a vague objective. Parallel work `MUST` have disjo
 
 | Work | Model | Use |
 |---|---|---|
-| Exploration | Haiku / Sonnet | bounded search, tracing, evidence |
+| Exploration | Haiku | bounded search, tracing, evidence |
 | Implementation | Sonnet | TDD implementation, focused refactor |
+| Complex debugging | Opus | root-causing miscompiles, allocator/ABI/runtime faults, multi-component failures |
 | Design / escalation | Opus | ownership, representation, architecture, high-risk sequencing |
 
-If a problem exceeds the agent's current capability to resolve reliably, the agent `MUST` consult an adviser for help from a higher-capability model.
+Exploration `MUST` use Haiku.
+
+Before delegating, the agent `MUST` weigh the delegate's cost — context ramp-up, edit, verification, plus the handoff and the review of its report — against doing the work itself with its own context and more expensive tokens, and `MUST` take the cheaper path. It `SHOULD` do small, already-understood edits itself (comment or doc trims, golden fixes, merging duplicate tests, running gates or benchmarks). It `SHOULD` resume a delegate that already holds the context rather than spawn a new one. A delegate `MUST NOT` end its turn waiting on background work.
+
+When a task exceeds the agent's own capability to resolve reliably, the agent `MUST` delegate it to an adviser of higher capability (Sonnet above Haiku; Opus above Sonnet) instead of guessing, working around, or declaring it out of scope. The handoff `MUST` carry the evidence gathered so far and the smallest unresolved decision.
 
 ## Workflow
 
@@ -58,6 +64,13 @@ The agent `MUST` perform the following steps in order and `MUST NOT` report comp
 7. Run focused checks, then repository gates.
 8. Re-read every changed file against repository rules.
 
+## Code Navigation
+
+- The agent `MUST` use `codegraph_*` tools first for structural questions: definition, signature, callers, callees, flow, and change impact.
+- The agent `SHOULD` start orientation with `codegraph_context`, then one `codegraph_explore` for the source it surfaces; for flow questions it `SHOULD` use `codegraph_trace`; before changing a shared symbol it `SHOULD` use `codegraph_impact`.
+- The agent `MAY` use `grep` or `Read` for literal text (strings, comments, log messages), for files a staleness banner names, and for any file it will edit.
+- The agent `MUST` treat CodeGraph results as evidence; the live tree and owner docs govern. If `.codegraph/` is missing, the agent `SHOULD` ask the user to run `codegraph init -i`.
+
 ## Task Router
 
 For each task type, the agent `MUST` read the listed owners before implementing and `MUST` run the listed focused check. Additional checks `MAY` be added when the change touches further packages.
@@ -66,7 +79,7 @@ For each task type, the agent `MUST` read the listed owners before implementing 
 |---|---|---|---|
 | Opcode | `instruction-set.md`, `guides/add-opcode.md` | `instr/`, `internal/codegen/` | `go test ./instr ./internal/codegen ./interp` |
 | Runtime / memory | `architecture.md`, `memory-model.md` | `interp/`, `types/` | `go test ./interp ./types` |
-| Native / ARM64 | `jit-internals.md`, `jit-lessons.md`, `value-representation.md` | `internal/asm/`, `transform/` | `go test ./internal/... ./transform` |
+| Native / ARM64 | `jit-internals.md`, `jit-lessons.md`, `value-representation.md` | `internal/asm/`, `internal/jit/`, `transform/`, `interp/native.go` | `go test ./internal/... ./transform ./interp` |
 | Optimization | `pass-system.md` | `analysis/`, `transform/`, `optimize/`, `pass/` | package tests |
 | Verification | `verification.md` | `program/verify.go`, `instr/type.go` | `go test ./program ./interp` |
 | Debug / profile | `debugging.md`, `profile.md` | `debug/`, `interp/`, `prof/` | package tests |

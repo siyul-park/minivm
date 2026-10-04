@@ -78,16 +78,6 @@ var (
 	ErrHandlerTarget   = errors.New("invalid exception handler target")
 )
 
-func newChecker(prog *Program, slot int, fn *types.Function) *checker {
-	c := &checker{prog: prog, code: fn.Code, captures: fn.Captures, table: fn.Handlers, slot: slot}
-	if fn.Typ != nil {
-		c.locals = append(c.locals, fn.Typ.Params...)
-		c.returns = len(fn.Typ.Returns)
-	}
-	c.locals = append(c.locals, fn.Locals...)
-	return c
-}
-
 // Verify checks every function slot of prog and returns the first violation as
 // a *VerifyError, or nil when the program is well-formed.
 func Verify(prog *Program) error {
@@ -113,6 +103,16 @@ func (e *VerifyError) Error() string {
 
 func (e *VerifyError) Unwrap() error {
 	return e.Err
+}
+
+func newChecker(prog *Program, slot int, fn *types.Function) *checker {
+	c := &checker{prog: prog, code: fn.Code, captures: fn.Captures, table: fn.Handlers, slot: slot}
+	if fn.Typ != nil {
+		c.locals = append(c.locals, fn.Typ.Params...)
+		c.returns = len(fn.Typ.Returns)
+	}
+	c.locals = append(c.locals, fn.Locals...)
+	return c
 }
 
 // run verifies the slot in four passes: structural decode/bounds, control-flow
@@ -365,10 +365,6 @@ func (c *checker) flow(blocks []*block) error {
 	entries[0] = &stack{}
 	work := []int{0}
 
-	// Catch blocks are reached out of band, not via a CFG edge, so seed each as
-	// its own root: the operand stack restored to the protected region's entry
-	// depth (Handler.Depth is sp-bp, so subtract the fixed locals area) plus the
-	// delivered exception value on top.
 	for _, h := range c.table {
 		operands := h.Depth - len(c.locals)
 		if operands < 0 {
@@ -675,15 +671,6 @@ func (s *stack) merge(other *stack) (changed, balanced bool) {
 	return changed, true
 }
 
-// accepts reports whether an actual stack slot of kind got satisfies a required
-// operand kind want. anyKind on either side unifies: the verifier stays
-// permissive about unknowns and strict only about concrete disagreement.
-// Kinds are compared by representation (Repr), so a narrow integer (i1, i8)
-// satisfies an i32 operand — they share the i32 representation.
-func accepts(got, want types.Kind) bool {
-	return got == anyKind || want == anyKind || got.Repr() == want.Repr()
-}
-
 func acceptsType(got slot, want types.Type) bool {
 	if want == types.TypeAny {
 		return true
@@ -692,6 +679,15 @@ func acceptsType(got slot, want types.Type) bool {
 		return want.Cast(got.typ)
 	}
 	return accepts(got.kind, want.Kind())
+}
+
+// accepts reports whether an actual stack slot of kind got satisfies a required
+// operand kind want. anyKind on either side unifies: the verifier stays
+// permissive about unknowns and strict only about concrete disagreement.
+// Kinds are compared by representation (Repr), so a narrow integer (i1, i8)
+// satisfies an i32 operand — they share the i32 representation.
+func accepts(got, want types.Kind) bool {
+	return got == anyKind || want == anyKind || got.Repr() == want.Repr()
 }
 
 // unify folds two slot kinds at a control-flow join: equal kinds survive,

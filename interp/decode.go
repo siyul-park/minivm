@@ -35,10 +35,6 @@ type Decoder struct {
 	registry *Registry
 }
 
-func (f UnmarshalerFunc) Unmarshal(d *Decoder, val types.Value, p unsafe.Pointer) error {
-	return f(d, val, p)
-}
-
 // Interp returns the interpreter this conversion runs against.
 func (d *Decoder) Interp() *Interpreter { return d.interp }
 
@@ -56,6 +52,11 @@ func (d *Decoder) Decode(val types.Value, t reflect.Type, p unsafe.Pointer) erro
 		return err
 	}
 	return c.set(d, value, p)
+}
+
+// Unmarshal decodes an encoded value.
+func (f UnmarshalerFunc) Unmarshal(d *Decoder, val types.Value, p unsafe.Pointer) error {
+	return f(d, val, p)
 }
 
 // elements reports the length of a VM array and a reader for its elements. The
@@ -143,9 +144,7 @@ func unmarshalPointer(elem *conversion) UnmarshalerFunc {
 			if err != nil {
 				return err
 			}
-			// A pointer to a host value is the address it views, not a copy of
-			// it. This is what makes a method expression mutate the value the
-			// caller marshaled rather than a decoded duplicate.
+
 			if target, ok := hosting(value, elem.typ); ok {
 				*(*unsafe.Pointer)(p) = target
 				return nil
@@ -197,8 +196,7 @@ func unmarshalFunc(t reflect.Type, typ *types.FunctionType) UnmarshalerFunc {
 				}
 				boxed, err := enc.slot(arg, typ.Params[len(params)])
 				if err != nil {
-					// invoke never took these, so nothing else will release
-					// what the conversion already published.
+
 					enc.discard()
 					return fail(fmt.Errorf("function param %d: %w", len(params), err))
 				}
@@ -271,14 +269,8 @@ func fill(d *Decoder, elem *conversion, base unsafe.Pointer, stride uintptr, n i
 	return nil
 }
 
-// unmarshalKey decodes a VM key into the Go value a dynamic map is keyed by,
-// which is what lets a lookup reach the entry the other side stored. It mirrors
-// (*Interpreter).mapKey, the normalization every map opcode already agrees on:
-// i1, i8, and i32 share int32, a spilled i64 is still an int64, and a string
-// keys by content. So a Go map[any]V holds one Go type per VM key kind, exactly
-// as a VM map holds one entry per normalized key, and a key stored under any
-// other Go type is unreachable the same way Go's own dynamic keys are. Every
-// other reference keys by identity, as it does in the VM.
+// unmarshalKey reverses Interpreter.mapKey for dynamic host maps: numeric kinds
+// use their normalized Go type, strings use content, and other refs use identity.
 func unmarshalKey(d *Decoder, val types.Value, p unsafe.Pointer) error {
 	value, err := d.interp.deref(val)
 	if err != nil {

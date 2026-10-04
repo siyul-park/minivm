@@ -1,109 +1,167 @@
 package transform
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/internal/graph"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/types"
 )
 
-// Module is the read-only, module-wide evidence a bytecode translation
-// resolves value kinds, container shapes, and call targets against. It is
-// everything a translation reads outside the function being translated.
+// Module contains facts translation may assume beyond the bytecode.
 type Module struct {
-	// Constants is the module's constant pool, as the values CONST_GET
-	// pushes.
+	// Constants is the constant pool.
 	Constants []types.Boxed
-	// Globals is the declared kind of each global slot.
+	// Globals is the declared global-kind table.
 	Globals []types.Kind
+	// Objects resolves constant references to known cells.
 	Objects Objects
-	// Decl is the program's declared-type table, indexed by the type operand
-	// of STRUCT_NEW and REF_CAST.
-	Decl []types.Type
+	// Types is the declared-type table.
+	Types []types.Type
+	// Callees maps a dynamic CALL's offset in the translated function to what
+	// was observed there. A recorded snapshot, never live state; absent for a
+	// site never seen, the zero Callee for a site that saw callees of
+	// differing types.
+	Callees map[int]Callee
+	// Refuted holds the offsets whose guard native code has seen fail. A
+	// recorded snapshot: a container op there translates unguarded, so it
+	// bridges instead of speculating its shape again.
+	Refuted map[int]bool
 }
 
-// Objects resolves the reference a constant carries into the facts about the
-// cell it names. The identity a reference carries is the constant's own pool
-// slot, because a translation only ever hands it straight back to Objects.
+// Callee is what a dynamic CALL site observed.
+type Callee struct {
+	// Function is the called function's reference when the site saw one
+	// callee, zero when it saw several.
+	Function int
+	// Closure reports that the site calls Function through a closure.
+	Closure bool
+	// Type is the function type of the callee a site saw, or shared by the
+	// several it saw; nil when they differ.
+	Type *types.FunctionType
+}
+
+// Objects maps constant references to object facts.
 type Objects map[int]Object
 
-// Object is one constant cell's facts a translation resolves a reference
-// against. Every field is zero for a cell that carries no such fact.
+// Object contains facts known for one referenced cell.
 type Object struct {
-	// Fn is the function published at this address.
-	Fn *types.Function
-	// Typ is the type a struct cell carries.
-	Typ *types.StructType
+	// Function is the referenced function, when known.
+	Function *types.Function
+	// Struct is the referenced struct type, when known.
+	Struct *types.StructType
+	// Array is the referenced array's own type, when known.
+	Array *types.ArrayType
+	// I64 is the referenced i64 cell's value, when known.
+	I64 *types.I64
 }
 
-// Translate returns the SSA for the whole of fn, published at addr. Address
-// zero is module code, which ends by advancing past its last instruction
-// rather than by returning. It returns (nil, nil) when fn holds an operation
-// no translation from bytecode alone can resolve, or when fn suspends: a
-// suspension ends execution at its own opcode while the threaded
-// continuation runs past it, so a translation covering only the prefix up to
-// it is not the whole function this returns.
-func Translate(m Module, addr int, fn *types.Function) (*ssa.Function, error) {
-	if fn == nil {
-		return nil, nil
-	}
-	f, err := translate(m, addr, fn)
-	if err != nil || f == nil {
-		return nil, err
-	}
-	for id := 0; id < f.Len(); id++ {
-		if f.Block(id).Term.Op == ssa.OpSuspend {
-			return nil, nil
-		}
-	}
-	return f, nil
-}
+// ErrEntry reports an entry offset that does not start a basic block.
+var ErrEntry = errors.New("entry starts no block")
 
-// translate lays out fn's spans, resolves the operand facts every one of them
-// is entered with, and emits the blocks reachable from the entry. A span
-// nothing reaches is dead code and is simply left out, which is what a
-// caller optimizing a whole function wants.
-func translate(m Module, addr int, fn *types.Function) (*ssa.Function, error) {
-	if len(fn.Code) == 0 {
+// Translate converts one bytecode function from entry to SSA.
+// It returns ErrEntry for a non-block entry and nil when translation is unsupported.
+func Translate(module Module, address int, function *types.Function, entry int) (*ssa.Function, error) {
+	if function == nil || len(function.Code) == 0 {
 		return nil, nil
 	}
-	f := facts{
-		constants: m.Constants,
-		globals:   m.Globals,
-		objects:   m.Objects,
-		decl:      m.Decl,
-		declared:  !calls(fn.Code),
-	}
-	blocks, err := analysis.Blocks(fn)
+	blocks, err := analysis.Blocks(function)
 	if err != nil {
 		return nil, err
 	}
-	spans := split(fn.Code, blocks)
+	spans, at := split(function.Code, blocks)
+	root, ok := at[entry]
+	if !ok {
+		return nil, fmt.Errorf("%w: entry %d starts no block", ErrEntry, entry)
+	}
 	if spans[0].start != 0 {
 		return nil, nil
 	}
-	entry := frame{fn: fn, addr: addr, slots: fn.Declared()}
-	states, ok := f.resolve(entry, spans)
+	act := activation{function: function, address: address, slots: function.Declared()}
+	states, seen, ok := module.analyze(act, spans, 0, frame{closures: make([]int, len(act.slots))})
 	if !ok {
 		return nil, nil
 	}
-	return f.build(entry, spans, states), nil
-}
-
-// calls reports whether code enters another function.
-func calls(code []byte) bool {
-	for ip := 0; ip < len(code); {
-		inst := instr.Instruction(code[ip:])
-		if inst.Opcode().Writes(instr.Frame) {
-			return true
+	if root != 0 {
+		if !seen[root] {
+			return nil, nil
 		}
-		ip += inst.Width()
+		states, seen, ok = module.analyze(act, spans, root, states[root].owning())
+		if !ok {
+			return nil, nil
+		}
 	}
-	return false
+	built := module.build(act, spans, states, seen, root)
+	if built != nil && len(built.Pred(0)) > 0 {
+		built = rotate(built)
+	}
+	return built, nil
 }
 
-// function returns the function published at addr, or nil when addr names no
-// function.
-func (o Objects) function(addr int) *types.Function {
-	return o[addr].Fn
+// Borrows reports, per parameter, whether function borrows it: a reference
+// parameter function never writes, in a function with no RETURN_CALL, which
+// may replace every parameter. Its native caller keeps ownership for the
+// call; function neither retains nor releases it.
+func Borrows(function *types.Function) []bool {
+	if function == nil || function.Typ == nil {
+		return nil
+	}
+	written, tail := map[int]bool{}, false
+	for _, inst := range instr.Unmarshal(function.Code) {
+		if inst.Opcode().Writes(instr.Local) {
+			written[int(inst.Operand(0))] = true
+		}
+		tail = tail || inst.Opcode() == instr.RETURN_CALL
+	}
+	borrows := make([]bool, len(function.Typ.Params))
+	for i, param := range function.Typ.Params {
+		borrows[i] = param.Kind() == types.KindRef && !written[i] && !tail
+	}
+	return borrows
+}
+
+// Adopts returns the number of code's topmost popped operands whose
+// ownership it takes: every one when it enters a frame, the stored value
+// when it overwrites heap contents and yields nothing. The other operands
+// stay their owner's to release after code.
+func Adopts(code instr.Opcode, pops, results int) int {
+	switch {
+	case code.Writes(instr.Frame):
+		return pops
+	case code.Reads(instr.Heap) && code.Writes(instr.Heap) && results == 0:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// rotate prepends an empty block ahead of f's own block 0 when it has a
+// predecessor — root is a loop header, reached from both outside f and its
+// own back edge — so block 0 has none: every later pass and Lower assume
+// this. The new block carries block 0's own params, forwarded unchanged.
+func rotate(f *ssa.Function) *ssa.Function {
+	r := newRebuilder(f)
+	first := r.builder.Block()
+	origin := f.Block(0).Params
+	args := make([]ssa.Value, len(origin))
+	for i, p := range origin {
+		args[i] = r.builder.Param(first, f.Type(p))
+	}
+	for _, block := range graph.Order(f) {
+		id := r.open(block)
+		b := f.Block(block)
+		for _, operation := range b.Operations {
+			r.builder.Add(id, r.define(r.operation(operation)))
+		}
+		r.builder.Term(id, r.terminator(b.Terminator))
+	}
+	r.builder.Term(first, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: r.block(0), Args: args}}})
+	return r.builder.Build()
+}
+
+func (o Objects) function(reference int) *types.Function {
+	return o[reference].Function
 }

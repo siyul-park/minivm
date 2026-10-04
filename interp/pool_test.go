@@ -3,20 +3,18 @@ package interp_test
 import (
 	"context"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
 	interp "github.com/siyul-park/minivm/interp"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
-
-type poolTrackedValue struct {
-	closed int
-}
 
 func TestNewPool(t *testing.T) {
 	t.Run("normalizes non-positive size", func(t *testing.T) {
@@ -34,7 +32,6 @@ func TestNewPool(t *testing.T) {
 }
 
 func TestPool_Get(t *testing.T) {
-
 	t.Run("reuses an idle interpreter", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
 		p := interp.NewPool(prog, 1)
@@ -81,6 +78,274 @@ func TestPool_Get(t *testing.T) {
 		require.ErrorIs(t, err, interp.ErrPoolClosed)
 	})
 
+	t.Run("shares one native JIT runtime across pooled interpreters, compiling once", func(t *testing.T) {
+		native(t)
+		prog := fibFlatCallsProgram(t, 1000)
+		profiler := prof.New()
+		p := interp.NewPool(prog, 2, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer p.Close()
+
+		first, err := p.Get(context.Background())
+		require.NoError(t, err)
+		second, err := p.Get(context.Background())
+		require.NoError(t, err)
+
+		require.NoError(t, first.Run(context.Background()))
+		_, err = first.Pop()
+		require.NoError(t, err)
+		first.Flush()
+
+		var compiles float64
+		poll(t, func() bool {
+			first.Flush()
+			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
+			return compiles == 1
+		})
+
+		require.NoError(t, second.Run(context.Background()))
+		_, err = second.Pop()
+		require.NoError(t, err)
+		second.Flush()
+
+		compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
+		require.Equal(t, float64(1), compiles)
+
+		p.Put(first)
+		p.Put(second)
+	})
+
+	t.Run("pooled interpreters observing different callees match threaded with bounded deopts", func(t *testing.T) {
+		native(t)
+		const calls = 5
+		const rounds = 600
+		prog := applyGlobalProgram(t, calls)
+
+		var wantInc, wantDec int32
+		for i := int32(0); i < calls; i++ {
+			wantInc += i + 1
+			wantDec += i - 1
+		}
+
+		profiler := prof.New()
+		p := interp.NewPool(prog, 2, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer p.Close()
+
+		// a always calls inc and b always dec, through one dynamic CALL site.
+		a, err := p.Get(context.Background())
+		require.NoError(t, err)
+		b, err := p.Get(context.Background())
+		require.NoError(t, err)
+
+		deopts := func() float64 {
+			v, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			return v
+		}
+		var errs []error
+		var values []types.Value
+		round := 0
+		step := func() bool {
+			round++
+			for selector, vm := range []*interp.Interpreter{a, b} {
+				errs = append(errs, vm.SetGlobal(1, types.BoxI32(int32(selector))), vm.Run(context.Background()))
+				v, err := vm.Pop()
+				errs = append(errs, err)
+				values = append(values, v)
+				vm.Flush()
+			}
+			a.Reset()
+			b.Reset()
+			return deopts() > 0
+		}
+		for round < rounds {
+			step()
+		}
+		// Compiles are async: run on until native code has deopted.
+		poll(t, step)
+		p.Put(a)
+		p.Put(b)
+
+		for _, err := range errs {
+			require.NoError(t, err)
+		}
+		for r := range round {
+			require.Equal(t, types.I32(wantInc), values[2*r], "round %d", r+1)
+			require.Equal(t, types.I32(wantDec), values[2*r+1], "round %d", r+1)
+		}
+
+		// Retired sites stop deopting long before every round does.
+		require.Less(t, deopts(), float64(2*round))
+	})
+
+	t.Run("pooled interpreters entering and retiring shared code concurrently match threaded", func(t *testing.T) {
+		native(t)
+		const calls = 200
+		const rounds = 300
+		prog := applyGlobalProgram(t, calls)
+
+		var wantInc, wantDec int32
+		for i := int32(0); i < calls; i++ {
+			wantInc += i + 1
+			wantDec += i - 1
+		}
+
+		p := interp.NewPool(prog, 2, interp.WithThreshold(1))
+		defer p.Close()
+
+		// a always calls inc and b always dec, through one dynamic CALL site:
+		// each refutes and retires code the other may be running.
+		a, err := p.Get(context.Background())
+		require.NoError(t, err)
+		b, err := p.Get(context.Background())
+		require.NoError(t, err)
+
+		var got [2][]types.Value
+		var errs [2]error
+		var wg sync.WaitGroup
+		for k, vm := range []*interp.Interpreter{a, b} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for range rounds {
+					if errs[k] = vm.SetGlobal(1, types.BoxI32(int32(k))); errs[k] != nil {
+						return
+					}
+					if errs[k] = vm.Run(context.Background()); errs[k] != nil {
+						return
+					}
+					var v types.Value
+					if v, errs[k] = vm.Pop(); errs[k] != nil {
+						return
+					}
+					got[k] = append(got[k], v)
+					vm.Reset()
+				}
+			}()
+		}
+		wg.Wait()
+
+		require.NoError(t, errs[0])
+		require.NoError(t, errs[1])
+		for round := range rounds {
+			require.Equal(t, types.I32(wantInc), got[0][round], "round %d", round)
+			require.Equal(t, types.I32(wantDec), got[1][round], "round %d", round)
+		}
+
+		p.Put(a)
+		p.Put(b)
+	})
+
+	t.Run("a pooled interpreter promotes code another interpreter drained", func(t *testing.T) {
+		native(t)
+		b := instr.NewBuilder()
+		b.Emit(instr.I32_CONST, 1).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithConstants(sumFunction(t)))
+
+		profiler := prof.New()
+		p := interp.NewPool(prog, 2, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer p.Close()
+		compiles := func(tier string) float64 {
+			v, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: tier}, prof.Label{Key: "outcome", Value: "ok"})
+			return v
+		}
+		call := func(vm *interp.Interpreter) error {
+			defer vm.Reset()
+			if err := vm.Run(context.Background()); err != nil {
+				return err
+			}
+			_, err := vm.Pop()
+			vm.Flush()
+			return err
+		}
+
+		// first alone drains the Baseline compile, calling too rarely to promote it.
+		first, err := p.Get(context.Background())
+		require.NoError(t, err)
+		poll(t, func() bool {
+			err = call(first)
+			return err != nil || compiles("baseline") == 1
+		})
+		require.NoError(t, err)
+
+		// second never drains a Baseline job; its own calls must promote it.
+		second, err := p.Get(context.Background())
+		require.NoError(t, err)
+		poll(t, func() bool {
+			err = call(second)
+			return err != nil || compiles("optimized") >= 1
+		})
+		require.NoError(t, err)
+
+		p.Put(first)
+		p.Put(second)
+	})
+
+	t.Run("pooled interpreters alternating Runs publish code after about threshold total entries", func(t *testing.T) {
+		native(t)
+		// Loop-free module code: its only OSR site is ip 0, entry-site
+		// threshold max(n, 2), cadence 1 (Entries table).
+		b := instr.NewBuilder()
+		big, done := b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 7).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 5).Emit(instr.I32_GT_S).BrIf(big)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.I32_MUL).Br(done)
+		b.Bind(big).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 3).Emit(instr.I32_MUL)
+		b.Bind(done)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32))
+
+		const threshold = 8
+		profiler := prof.New()
+		p := interp.NewPool(prog, 2, interp.WithThreshold(threshold), interp.WithProfiler(profiler))
+		defer p.Close()
+
+		a, err := p.Get(context.Background())
+		require.NoError(t, err)
+		b2, err := p.Get(context.Background())
+		require.NoError(t, err)
+
+		run := func(vm *interp.Interpreter) error {
+			if err := vm.Run(context.Background()); err != nil {
+				return err
+			}
+			_, err := vm.Pop()
+			vm.Reset()
+			vm.Flush()
+			return err
+		}
+
+		var runs int
+		var runErr error
+		var entries float64
+		poll(t, func() bool {
+			vm := a
+			if runs%2 == 1 {
+				vm = b2
+			}
+			runErr = run(vm)
+			runs++
+			if runErr != nil {
+				return true
+			}
+			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+			return entries > 0
+		})
+		require.NoError(t, runErr)
+		require.Greater(t, entries, float64(0))
+		// A single, unshared interpreter would need threshold Runs of its
+		// own; two alternating interpreters would need about 2x threshold
+		// total without pool-wide aggregation. The small constant covers
+		// strict alternation's worst case: only the interpreter whose turn
+		// crosses the total submits, so the other's turns are wasted retries
+		// until submission's owner returns to drain the compile (one turn)
+		// and then enter it (one more).
+		require.LessOrEqual(t, runs, threshold+8)
+
+		p.Put(a)
+		p.Put(b2)
+	})
 }
 
 func TestPool_Put(t *testing.T) {
@@ -126,7 +391,7 @@ func TestPool_Close(t *testing.T) {
 		p := interp.NewPool(program.New(nil), 1)
 		vm, err := p.Get(context.Background())
 		require.NoError(t, err)
-		resource := &poolTrackedValue{}
+		resource := &trackedValue{}
 		_, err = vm.Alloc(resource)
 		require.NoError(t, err)
 
@@ -136,7 +401,6 @@ func TestPool_Close(t *testing.T) {
 		p.Put(vm)
 		require.Equal(t, 1, resource.closed)
 	})
-
 }
 
 func BenchmarkPool_Get(b *testing.B) {
@@ -233,11 +497,35 @@ func BenchmarkPool_Put(b *testing.B) {
 		pool.Put(vm)
 	})
 }
-func (*poolTrackedValue) Kind() types.Kind { return types.KindRef }
-func (*poolTrackedValue) Type() types.Type { return types.TypeAny }
-func (*poolTrackedValue) String() string   { return "tracked" }
 
-func (v *poolTrackedValue) Close() error {
-	v.closed++
-	return nil
+// applyGlobalProgram reads global 1 (the caller's selector: 0 for inc, 1 for
+// dec) once, stores the matching constant-pool address into global 0, then
+// calls apply(i, global 0) calls times through the same dynamic CALL site,
+// the callee read fresh from global 0 on every call. Constants are [apply,
+// inc, dec]. Module locals [0] the counter and [1] the running sum, left on
+// the stack. The constant-pool address survives Reset, unlike a heap Alloc,
+// so repeated rounds observe the same callee address for the same selector.
+func applyGlobalProgram(t *testing.T, calls int) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	useDec, selected := b.Label(), b.Label()
+	b.Emit(instr.GLOBAL_GET, 1).BrIf(useDec)
+	b.Emit(instr.CONST_GET, 1)
+	b.Br(selected)
+	b.Bind(useDec).Emit(instr.CONST_GET, 2)
+	b.Bind(selected).Emit(instr.GLOBAL_SET, 0)
+
+	loop, done := b.Label(), b.Label()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(calls)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.GLOBAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 1)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32), program.WithGlobals(types.TypeAny, types.TypeI32),
+		program.WithConstants(applyFunction(), incFunction(), decFunction()))
 }

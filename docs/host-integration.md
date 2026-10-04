@@ -19,17 +19,11 @@ Heap ownership is defined in `memory-model.md`; boxed layout in `value-represent
 func(vm *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error)
 ```
 
-`NewHostFunction` is the normal constructor; `Typ` and `Fn` remain public.
-
-Rules:
-
-- `params` is valid only during the call;
-- non-nil errors stop the current `Run`;
-- host functions `MUST NOT` call `vm.Run` recursively.
+`NewHostFunction` constructs it; `Typ` and `Fn` are public. `params` is call-scoped, a non-nil error stops the current `Run`, and host functions `MUST NOT` call `vm.Run` recursively.
 
 ## Boxed Values
 
-`types.Boxed` is the VM stack word. The agent `MUST` check `Kind()` before unboxing unless the bytecode contract proves the kind.
+`types.Boxed` is the VM stack word. Callers `MUST` check `Kind()` before unboxing unless the contract proves the kind.
 
 Wrong-kind unboxing is invalid.
 
@@ -57,14 +51,12 @@ err = vm.Release(addr)
 
 Additional rules:
 
-- Allocating an existing ref creates another ownership;
-- storing the same concrete pointer or destination ref is a no-op;
-- storing a different heap address returns `ErrTypeMismatch`; the agent `MUST` use `Alloc(ref)` to share;
-- concrete pointers passed to `Alloc`, `Store`, or `Push` transfer unique ownership and `MUST NOT` already be VM-owned;
-- owned refs `MUST` eventually transfer or release;
-- leaked host ownership keeps objects alive.
+- Allocating an existing ref adds ownership; storing the same pointer/address is a no-op.
+- Storing another heap address returns `ErrTypeMismatch`; share it with `Alloc(ref)`.
+- Concrete pointers passed to `Alloc`, `Store`, or `Push` transfer unique ownership and `MUST NOT` already be VM-owned.
+- Owned refs `MUST` transfer or release; leaked host ownership keeps objects alive.
 
-`Store`/`Alloc` dynamically track crossed pointers to reject double ownership. Dynamic functions stored in the heap receive callable dispatch slots and follow normal heap lifetime.
+`Store`/`Alloc` track crossed pointers to reject double ownership. Heap-stored dynamic functions receive callable dispatch slots and follow normal heap lifetime.
 
 External dynamic functions `MUST` be verified before storage.
 

@@ -6,8 +6,7 @@ import (
 	"reflect"
 )
 
-// Manager lazily runs analyses and caches their results per IR unit, keyed by
-// result type and unit identity. It mirrors LLVM's AnalysisManager.
+// Manager owns analysis registration and cache state.
 type Manager struct {
 	analyses map[reflect.Type]func(*Manager, any) (any, error)
 	cache    map[cacheKey]any
@@ -18,6 +17,7 @@ type cacheKey struct {
 	unit   any
 }
 
+// ErrUnregisteredAnalysis reports a result type with no registered analysis.
 var ErrUnregisteredAnalysis = errors.New("unregistered analysis")
 
 // Register adds an analysis, keyed by its result type R.
@@ -50,6 +50,7 @@ func GetResult[R any](m *Manager, unit any) (R, error) {
 	return res.(R), nil
 }
 
+// NewManager returns a pass manager.
 func NewManager() *Manager {
 	return &Manager{
 		analyses: make(map[reflect.Type]func(*Manager, any) (any, error)),
@@ -57,9 +58,9 @@ func NewManager() *Manager {
 	}
 }
 
-// Invalidate drops cached results unless the transform preserved everything.
-func (m *Manager) Invalidate(p Preserved) {
-	if !p.all {
+// Invalidate drops cached analyses when they may be stale.
+func (m *Manager) Invalidate(preserved bool) {
+	if !preserved {
 		clear(m.cache)
 	}
 }

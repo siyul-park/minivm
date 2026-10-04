@@ -1,11 +1,12 @@
 package pass
 
 // Pipeline runs an ordered sequence of transforms over an IR unit of type U,
-// invalidating stale analyses between passes. It mirrors LLVM's PassManager.
+// invalidating stale analyses between passes.
 type Pipeline[U any] struct {
 	passes []Pass[U]
 }
 
+// NewPipeline returns a pass pipeline.
 func NewPipeline[U any]() *Pipeline[U] {
 	return &Pipeline[U]{}
 }
@@ -20,6 +21,7 @@ func (p *Pipeline[U]) Run(m *Manager, unit U) (U, error) {
 	for _, pass := range p.passes {
 		preserved, err := pass.Run(m, unit)
 		if err != nil {
+			m.Invalidate(false)
 			return unit, err
 		}
 		m.Invalidate(preserved)

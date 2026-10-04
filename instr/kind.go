@@ -16,34 +16,13 @@ const (
 	KindI32             // 0b100
 	KindI8              // 0b101
 	KindI1              // 0b110
-	// 0b111 reserved — must stay outside the i32 representation group.
+
 )
 
 // KindAny is the verifier's top element over Kind: a required or produced
 // operand whose concrete kind is not statically fixed. It is not a real value
 // kind, so it sits outside the iota range and prints as "unknown".
 const KindAny Kind = 0xFF
-
-func (k Kind) String() string {
-	switch k {
-	case KindI32:
-		return "i32"
-	case KindI8:
-		return "i8"
-	case KindI1:
-		return "i1"
-	case KindI64:
-		return "i64"
-	case KindF32:
-		return "f32"
-	case KindF64:
-		return "f64"
-	case KindRef:
-		return "ref"
-	default:
-		return "unknown"
-	}
-}
 
 // IsNumeric reports whether k is one of the numeric kinds (i1, i8, i32, i64,
 // f32, f64).
@@ -77,5 +56,27 @@ func (k Kind) Size() int {
 		return 8
 	default:
 		return 0
+	}
+}
+
+// String returns the textual representation.
+func (k Kind) String() string {
+	switch k {
+	case KindI32:
+		return "i32"
+	case KindI8:
+		return "i8"
+	case KindI1:
+		return "i1"
+	case KindI64:
+		return "i64"
+	case KindF32:
+		return "f32"
+	case KindF64:
+		return "f64"
+	case KindRef:
+		return "ref"
+	default:
+		return "unknown"
 	}
 }

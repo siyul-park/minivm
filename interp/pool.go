@@ -3,6 +3,7 @@ package interp
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"sync/atomic"
 
@@ -20,10 +21,15 @@ type Pool struct {
 	idle chan *Interpreter
 	live atomic.Int64
 
-	mu     sync.RWMutex
-	closed bool
+	shared   *shared
+	sharedMu sync.Mutex
+
+	mu       sync.RWMutex
+	closed   bool
+	closeErr error
 }
 
+// ErrPoolClosed is returned by Get once the pool is closed.
 var ErrPoolClosed = errors.New("pool closed")
 
 // NewPool builds a pool that lends up to size Interpreters constructed from
@@ -65,7 +71,15 @@ func (p *Pool) Get(ctx context.Context) (*Interpreter, error) {
 	}
 	p.mu.RUnlock()
 
-	return p.wait(ctx)
+	select {
+	case i, ok := <-p.idle:
+		if !ok {
+			return nil, ErrPoolClosed
+		}
+		return i, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // Put returns i to the pool after resetting its runtime state. If the pool is
@@ -111,6 +125,15 @@ func (p *Pool) Close() error {
 		}
 		p.live.Add(-1)
 	}
+	p.sharedMu.Lock()
+	if p.shared != nil {
+		errs = append(errs, p.shared.release())
+		p.shared = nil
+	}
+	if p.closeErr != nil {
+		errs = append(errs, p.closeErr)
+	}
+	p.sharedMu.Unlock()
 	return errors.Join(errs...)
 }
 
@@ -123,24 +146,47 @@ func (p *Pool) grow() *Interpreter {
 			return nil
 		}
 		if p.live.CompareAndSwap(live, live+1) {
-			return New(p.prog, p.opts...)
+			i := New(p.prog, p.opts...)
+			p.share(i)
+			return i
 		}
 	}
 }
 
-func (p *Pool) wait(ctx context.Context) (*Interpreter, error) {
-	select {
-	case i, ok := <-p.idle:
-		if !ok {
-			return nil, ErrPoolClosed
-		}
-		return i, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
+// share adopts a matching interpreter JIT runtime into the pool. The pool owns
+// its reference; a mismatched runtime stays private. Interpreters without JIT
+// have no shared runtime.
+func (p *Pool) share(i *Interpreter) {
+
+	if i.attach() != nil {
+		i.spend(dormancy)
+	}
+	if i.native == nil {
+		return
+	}
+	p.sharedMu.Lock()
+	defer p.sharedMu.Unlock()
+
+	if p.shared == nil {
+		p.shared = i.native.shared.retain()
+		return
+	}
+	if !reflect.DeepEqual(i.native.shared.module, p.shared.module) {
+		return
+	}
+
+	if err := i.native.join(p.shared.retain()); err != nil && p.closeErr == nil {
+		p.closeErr = err
 	}
 }
 
 func (p *Pool) drop(i *Interpreter) {
-	_ = i.Close()
+
+	err := i.Close()
+	p.sharedMu.Lock()
+	if err != nil && p.closeErr == nil {
+		p.closeErr = err
+	}
+	p.sharedMu.Unlock()
 	p.live.Add(-1)
 }

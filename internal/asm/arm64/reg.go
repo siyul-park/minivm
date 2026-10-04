@@ -2,6 +2,7 @@ package arm64
 
 import "github.com/siyul-park/minivm/internal/asm"
 
+// ARM64 integer and floating-point register names.
 var (
 	X0  = asm.NewPReg(0, asm.RegTypeInt, asm.Width64)
 	X1  = asm.NewPReg(1, asm.RegTypeInt, asm.Width64)
@@ -35,8 +36,12 @@ var (
 	X29 = asm.NewPReg(29, asm.RegTypeInt, asm.Width64) // FP (Frame Pointer)
 	X30 = asm.NewPReg(30, asm.RegTypeInt, asm.Width64) // LR (Link Register)
 
-	FP  = X29
-	LR  = X30
+	FP = X29
+	LR = X30
+	// Ctx holds the *asm.State for as long as native code runs. The
+	// trampoline in internal/asm hands it over in this register and reads
+	// it back here on every exit, so native code never writes it.
+	Ctx = X26
 	XZR = asm.NewPReg(31, asm.RegTypeInt, asm.Width64)
 	// SP shares register id 31 with XZR. In data-processing instructions
 	// field 31 reads as the zero register; in add/subtract-immediate and
@@ -142,6 +147,4 @@ var (
 	S29 = asm.NewPReg(29, asm.RegTypeFloat, asm.Width32)
 	S30 = asm.NewPReg(30, asm.RegTypeFloat, asm.Width32)
 	S31 = asm.NewPReg(31, asm.RegTypeFloat, asm.Width32)
-
-	IntRets = []asm.PReg{X0, X1}
 )

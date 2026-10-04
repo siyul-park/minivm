@@ -21,13 +21,18 @@ func (i Instruction) String() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d", i.Op)
 	sep := " "
-	for _, op := range [4]Operand{i.Dst, i.Src1, i.Src2, i.Src3} {
-		if op == nil {
+	for _, op := range i.operands() {
+		if *op == nil {
 			continue
 		}
 		b.WriteString(sep)
-		b.WriteString(op.String())
+		b.WriteString((*op).String())
 		sep = ", "
 	}
 	return b.String()
+}
+
+// operands lists the operand slots in order Dst, Src1, Src2, Src3.
+func (i *Instruction) operands() [4]*Operand {
+	return [4]*Operand{&i.Dst, &i.Src1, &i.Src2, &i.Src3}
 }

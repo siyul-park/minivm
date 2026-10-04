@@ -92,15 +92,6 @@ func TestWithMarshaler(t *testing.T) {
 		require.Equal(t, types.I64(3000), types.Unbox(st.Field(st.Typ.FieldIndex("Delay"))))
 	})
 
-	t.Run("value marshaler applies without registration", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		r := interp.NewRegistry()
-		defer i.Close()
-
-		value, err := r.Marshal(i, marshalCustom(9))
-		require.NoError(t, err)
-		require.Equal(t, types.I32(9), value)
-	})
 }
 
 func TestWithUnmarshaler(t *testing.T) {
@@ -181,14 +172,29 @@ func TestNewRegistry(t *testing.T) {
 }
 
 func TestRegistry_Marshal(t *testing.T) {
-	t.Run("scalar value", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		r := interp.NewRegistry()
-		defer i.Close()
+	t.Run("converts Go values", func(t *testing.T) {
+		type count int32
+		n := count(7)
+		var nilCount *count
 
-		v, err := r.Marshal(i, int32(7))
-		require.NoError(t, err)
-		require.Equal(t, types.I32(7), v)
+		for _, tt := range []struct {
+			name  string
+			value any
+			want  types.Value
+		}{
+			{name: "scalar", value: int32(7), want: types.I32(7)},
+			{name: "pointer to a named scalar", value: &n, want: types.I32(7)},
+			{name: "nil pointer", value: nilCount, want: types.Ref(0)},
+			{name: "value marshaler", value: marshalCustom(9), want: types.I32(9)},
+		} {
+			i := interp.New(program.New(nil))
+			r := interp.NewRegistry()
+
+			value, err := r.Marshal(i, tt.value)
+			require.NoError(t, err, tt.name)
+			require.Equal(t, tt.want, value, tt.name)
+			require.NoError(t, i.Close())
+		}
 	})
 
 	t.Run("function receives active context", func(t *testing.T) {
@@ -293,22 +299,6 @@ func TestRegistry_Marshal(t *testing.T) {
 		require.Equal(t, types.I32(3), v1)
 		require.Equal(t, types.I32(30), v2)
 	})
-	t.Run("named scalar and pointers", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		r := interp.NewRegistry()
-		defer i.Close()
-
-		type count int32
-		n := count(7)
-		value, err := r.Marshal(i, &n)
-		require.NoError(t, err)
-		require.Equal(t, types.I32(7), value)
-
-		var nilCount *count
-		value, err = r.Marshal(i, nilCount)
-		require.NoError(t, err)
-		require.Equal(t, types.Ref(0), value)
-	})
 
 	t.Run("nested collections", func(t *testing.T) {
 		i := interp.New(program.New(nil))
@@ -337,49 +327,30 @@ func TestRegistry_Marshal(t *testing.T) {
 		require.Equal(t, src, dst)
 	})
 
-	t.Run("custom value marshaler", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		r := interp.NewRegistry()
-		defer i.Close()
-
-		value, err := r.Marshal(i, marshalCustom(9))
-		require.NoError(t, err)
-		require.Equal(t, types.I32(9), value)
-	})
-
-	t.Run("standard library default", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		r := interp.NewRegistry()
-		defer i.Close()
-		src := time.Unix(1, 2)
-
-		value, err := r.Marshal(i, src)
-		require.NoError(t, err)
-		require.Equal(t, types.I64(src.UnixNano()), value)
-	})
-
-	// The form a struct takes follows one rule: use the VM type system whenever
-	// a copy reproduces the whole value, and a live view only when it cannot.
-	for _, tt := range []struct {
-		name  string
-		value any
-		want  types.Value
-	}{
-		{name: "a value copies", value: codecShared{}, want: &types.Struct{}},
-		{name: "a value with methods still copies", value: codecCounted{}, want: &types.Struct{}},
-		{name: "a pointer is a view", value: &codecShared{}, want: &interp.HostStruct{}},
-		{name: "a pointer with methods is a view", value: &codecCounted{}, want: &interp.HostStruct{}},
-		{name: "an unexported field forces a view", value: marshalHostFields{}, want: &interp.HostStruct{}}} {
-		t.Run("struct form: "+tt.name, func(t *testing.T) {
+	t.Run("struct form", func(t *testing.T) {
+		// The form a struct takes follows one rule: use the VM type system
+		// whenever a copy reproduces the whole value, and a live view only
+		// when it cannot.
+		for _, tc := range []struct {
+			name  string
+			value any
+			want  types.Value
+		}{
+			{name: "a value copies", value: codecShared{}, want: &types.Struct{}},
+			{name: "a value with methods still copies", value: codecCounted{}, want: &types.Struct{}},
+			{name: "a pointer is a view", value: &codecShared{}, want: &interp.HostStruct{}},
+			{name: "a pointer with methods is a view", value: &codecCounted{}, want: &interp.HostStruct{}},
+			{name: "an unexported field forces a view", value: marshalHostFields{}, want: &interp.HostStruct{}},
+		} {
 			i := interp.New(program.New(nil))
 			r := interp.NewRegistry()
 			defer i.Close()
 
-			value, err := r.Marshal(i, tt.value)
-			require.NoError(t, err)
-			require.IsType(t, tt.want, value)
-		})
-	}
+			value, err := r.Marshal(i, tc.value)
+			require.NoError(t, err, tc.name)
+			require.IsType(t, tc.want, value, tc.name)
+		}
+	})
 
 	t.Run("a struct with unexported state becomes a live view", func(t *testing.T) {
 		i := interp.New(program.New(nil))
@@ -436,65 +407,69 @@ func TestRegistry_Marshal(t *testing.T) {
 		require.Zero(t, src.Count)
 	})
 
-	// A marshaled entry must be indexed the way MAP_GET indexes the same key,
-	// or guest code cannot reach it.
-	for _, tt := range []struct {
-		name  string
-		value any
-		key   instr.Instruction
-		want  types.Value
-	}{
-		{
-			name:  "concrete primitive key",
-			value: map[int32]int32{1: 7},
-			key:   instr.New(instr.I32_CONST, 1),
-			want:  types.I32(7)},
-		{
-			name:  "primitive key in a dynamic map",
-			value: map[any]int32{int32(1): 7},
-			key:   instr.New(instr.I32_CONST, 1),
-			want:  types.I32(7)},
-		{
-			name:  "string key",
-			value: map[string]int32{"a": 7},
-			key:   instr.New(instr.CONST_GET, 0),
-			want:  types.I32(7)},
-		{
-			name:  "string key in a dynamic map",
-			value: map[any]int32{"a": 7},
-			key:   instr.New(instr.CONST_GET, 0),
-			want:  types.I32(7)},
-		{
-			// The VM keys i1, i8, and i32 alike, so a dynamic map holds one Go
-			// type for the three of them and a key stored under another reads
-			// as the element zero, the way Go's own dynamic keys miss.
-			name:  "dynamic key outside the canonical Go type",
-			value: map[any]int32{true: 7},
-			key:   instr.New(instr.I32_CONST, 1),
-			want:  types.I32(0)},
-		{
-			name:  "i64 key past the boxed payload",
-			value: map[int64]int32{1 << 50: 7},
-			key:   instr.New(instr.I64_CONST, 1<<50),
-			want:  types.I32(7)}} {
-		t.Run("map key reachable from a guest lookup: "+tt.name, func(t *testing.T) {
+	t.Run("map key reachable from a guest lookup", func(t *testing.T) {
+		// A marshaled entry must be indexed the way MAP_GET indexes the same
+		// key, or guest code cannot reach it.
+		for _, tc := range []struct {
+			name  string
+			value any
+			key   instr.Instruction
+			want  types.Value
+		}{
+			{
+				name:  "concrete primitive key",
+				value: map[int32]int32{1: 7},
+				key:   instr.New(instr.I32_CONST, 1),
+				want:  types.I32(7),
+			},
+			{
+				name:  "primitive key in a dynamic map",
+				value: map[any]int32{int32(1): 7},
+				key:   instr.New(instr.I32_CONST, 1),
+				want:  types.I32(7),
+			},
+			{
+				name:  "string key",
+				value: map[string]int32{"a": 7},
+				key:   instr.New(instr.CONST_GET, 0),
+				want:  types.I32(7),
+			},
+			{
+				name:  "string key in a dynamic map",
+				value: map[any]int32{"a": 7},
+				key:   instr.New(instr.CONST_GET, 0),
+				want:  types.I32(7),
+			},
+			{
+				name:  "dynamic key outside the canonical Go type",
+				value: map[any]int32{true: 7},
+				key:   instr.New(instr.I32_CONST, 1),
+				want:  types.I32(0),
+			},
+			{
+				name:  "i64 key past the boxed payload",
+				value: map[int64]int32{1 << 50: 7},
+				key:   instr.New(instr.I64_CONST, 1<<50),
+				want:  types.I32(7),
+			},
+		} {
 			prog := program.New(
-				[]instr.Instruction{tt.key, instr.New(instr.MAP_GET)},
+				[]instr.Instruction{tc.key, instr.New(instr.MAP_GET)},
 				program.WithConstants(types.String("a")))
 			i := interp.New(prog)
 			r := interp.NewRegistry()
 			defer i.Close()
 
-			value, err := r.Marshal(i, tt.value)
-			require.NoError(t, err)
-			require.NoError(t, i.Push(value))
-			require.NoError(t, i.Run(context.Background()))
+			value, err := r.Marshal(i, tc.value)
+			require.NoError(t, err, tc.name)
+			require.NoError(t, i.Push(value), tc.name)
+			require.NoError(t, i.Run(context.Background()), tc.name)
 
 			got, err := i.Pop()
-			require.NoError(t, err)
-			require.Equal(t, tt.want, got)
-		})
-	}
+			require.NoError(t, err, tc.name)
+			require.Equal(t, tc.want, got, tc.name)
+		}
+	})
 
 	t.Run("a scalar key is stored without a heap reference", func(t *testing.T) {
 		// One heap slot is the permanent null, so this interpreter can allocate
@@ -514,6 +489,8 @@ func TestRegistry_Marshal(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
+		text, err := i.Alloc(types.String("a"))
+		require.NoError(t, err)
 
 		for _, tt := range []struct {
 			name  string
@@ -526,7 +503,7 @@ func TestRegistry_Marshal(t *testing.T) {
 			{name: "int64", value: map[int64]int32{-9: 7}, key: types.BoxI64(-9)},
 			{name: "float32", value: map[float32]int32{-1.5: 7}, key: types.BoxF32(-1.5)},
 			{name: "float64", value: map[float64]int32{-1.5: 7}, key: types.BoxF64(-1.5)},
-			{name: "string", value: map[string]int32{"a": 7}, key: stringKey(t, i, "a")}} {
+			{name: "string", value: map[string]int32{"a": 7}, key: types.BoxRef(text)}} {
 			value, err := r.Marshal(i, tt.value)
 			require.NoError(t, err)
 
@@ -758,14 +735,28 @@ func TestRegistry_Marshal(t *testing.T) {
 }
 
 func TestRegistry_Unmarshal(t *testing.T) {
-	t.Run("scalar", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		r := interp.NewRegistry()
-		defer i.Close()
+	t.Run("converts VM values to Go values", func(t *testing.T) {
+		var i32 int32
+		var custom marshalCustom
+		var stamp time.Time
 
-		var dst int32
-		require.NoError(t, r.Unmarshal(i, types.I32(7), &dst))
-		require.Equal(t, int32(7), dst)
+		for _, tt := range []struct {
+			name  string
+			value types.Value
+			dst   any
+			want  any
+		}{
+			{name: "scalar", value: types.I32(7), dst: &i32, want: int32(7)},
+			{name: "value unmarshaler", value: types.I32(11), dst: &custom, want: marshalCustom(11)},
+			{name: "standard library default", value: types.I64(123), dst: &stamp, want: time.Unix(0, 123)},
+		} {
+			i := interp.New(program.New(nil))
+			r := interp.NewRegistry()
+
+			require.NoError(t, r.Unmarshal(i, tt.value, tt.dst), tt.name)
+			require.Equal(t, tt.want, reflect.ValueOf(tt.dst).Elem().Interface(), tt.name)
+			require.NoError(t, i.Close())
+		}
 	})
 
 	t.Run("a boxed ref decodes as the value it names", func(t *testing.T) {
@@ -818,73 +809,71 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		got, err := add(2, 3)
 		require.NoError(t, err)
 		require.Equal(t, int32(5), got)
-	})
 
-	t.Run("VM function with context", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		r := interp.NewRegistry()
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild()
-
-		var add func(context.Context, int32, int32) (int32, error)
-		require.NoError(t, r.Unmarshal(i, fn, &add))
-		got, err := add(context.Background(), 2, 3)
+		var addWithContext func(context.Context, int32, int32) (int32, error)
+		require.NoError(t, r.Unmarshal(i, fn, &addWithContext))
+		got, err = addWithContext(context.Background(), 2, 3)
 		require.NoError(t, err)
 		require.Equal(t, int32(5), got)
 	})
 
-	// Each case builds an I32_CONST 7 function, unmarshals it to a Go func,
-	// calls it, and checks which context the call observed.
-	for _, tt := range []struct {
-		name   string
-		invoke func(t *testing.T, r *interp.Registry, i *interp.Interpreter, addr int) (value int32, wantCtx context.Context, err error)
-	}{
-		{
-			name: "VM function context identity",
-			invoke: func(t *testing.T, r *interp.Registry, i *interp.Interpreter, addr int) (int32, context.Context, error) {
-				var call func(context.Context) (int32, error)
-				require.NoError(t, r.Unmarshal(i, types.BoxRef(addr), &call))
-				ctx := context.WithValue(context.Background(), marshalContextKey(0), "value")
-				value, err := call(ctx)
-				return value, ctx, err
-			}},
-		{
-			name: "VM function nil context uses background",
-			invoke: func(t *testing.T, r *interp.Registry, i *interp.Interpreter, addr int) (int32, context.Context, error) {
-				var call func(context.Context) (int32, error)
-				require.NoError(t, r.Unmarshal(i, types.BoxRef(addr), &call))
-				value, err := call(nil)
-				return value, context.Background(), err
-			}},
-		{
-			name: "VM function without context uses background",
-			invoke: func(t *testing.T, r *interp.Registry, i *interp.Interpreter, addr int) (int32, context.Context, error) {
-				var call func() (int32, error)
-				require.NoError(t, r.Unmarshal(i, types.BoxRef(addr), &call))
-				value, err := call()
-				return value, context.Background(), err
-			}}} {
-		t.Run(tt.name, func(t *testing.T) {
-			var got context.Context
-			i := interp.New(program.New(nil), interp.WithTick(2), interp.WithHook(func(i *interp.Interpreter) error {
-				got = i.Context()
-				return nil
-			}))
-			defer i.Close()
-			r := interp.NewRegistry()
-			fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-				instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
-			addr, err := i.Alloc(fn)
-			require.NoError(t, err)
-			defer func() { require.NoError(t, i.Release(addr)) }()
+	t.Run("VM function context", func(t *testing.T) {
+		var got context.Context
+		i := interp.New(program.New(nil), interp.WithTick(2), interp.WithHook(func(i *interp.Interpreter) error {
+			got = i.Context()
+			return nil
+		}))
+		defer i.Close()
+		r := interp.NewRegistry()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
+		addr, err := i.Alloc(fn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, i.Release(addr)) }()
 
-			value, wantCtx, err := tt.invoke(t, r, i, addr)
-			require.NoError(t, err)
-			require.Equal(t, int32(7), value)
-			require.Equal(t, wantCtx, got)
-		})
-	}
+		var call func(context.Context) (int32, error)
+		require.NoError(t, r.Unmarshal(i, types.BoxRef(addr), &call))
+		ctx := context.WithValue(context.Background(), marshalContextKey(0), "value")
+		value, err := call(ctx)
+		require.NoError(t, err)
+		require.Equal(t, int32(7), value)
+		require.Equal(t, ctx, got)
+
+		got = nil
+		value, err = call(nil)
+		require.NoError(t, err)
+		require.Equal(t, int32(7), value)
+		require.Equal(t, context.Background(), got)
+
+		got = nil
+		var callWithout func() (int32, error)
+		require.NoError(t, r.Unmarshal(i, types.BoxRef(addr), &callWithout))
+		value, err = callWithout()
+		require.NoError(t, err)
+		require.Equal(t, int32(7), value)
+		require.Equal(t, context.Background(), got)
+	})
+
+	t.Run("VM function runs the hook once per instruction of the call under WithTick(1)", func(t *testing.T) {
+		calls := 0
+		i := interp.New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)}), interp.WithTick(1), interp.WithHook(func(*interp.Interpreter) error {
+			calls++
+			return nil
+		}))
+		defer i.Close()
+		r := interp.NewRegistry()
+		body := []instr.Instruction{instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)}
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(body...).MustBuild()
+
+		var call func() (int32, error)
+		require.NoError(t, r.Unmarshal(i, fn, &call))
+		value, err := call()
+		require.NoError(t, err)
+		require.Equal(t, int32(7), value)
+		// One tick for the CALL that enters the function.
+		require.Equal(t, 1+len(body), calls)
+		require.Zero(t, i.Len())
+	})
 
 	t.Run("VM function canceled context", func(t *testing.T) {
 		i := interp.New(program.New(nil), interp.WithTick(1))
@@ -979,26 +968,6 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		var call func() int64
 		require.ErrorIs(t, r.Unmarshal(i, fn, &call), interp.ErrTypeMismatch)
 	})
-	t.Run("custom value unmarshaler", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		r := interp.NewRegistry()
-		defer i.Close()
-		var dst marshalCustom
-
-		require.NoError(t, r.Unmarshal(i, types.I32(11), &dst))
-		require.Equal(t, marshalCustom(11), dst)
-	})
-
-	t.Run("standard library default", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		r := interp.NewRegistry()
-		defer i.Close()
-		var dst time.Time
-
-		require.NoError(t, r.Unmarshal(i, types.I64(123), &dst))
-		require.Equal(t, time.Unix(0, 123), dst)
-	})
-
 	t.Run("a host value round-trips unexported state", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
@@ -1014,35 +983,30 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		require.Equal(t, int32(3), dst.marked())
 	})
 
-	t.Run("invalid target", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		r := interp.NewRegistry()
-		defer i.Close()
+	t.Run("rejects invalid targets and values", func(t *testing.T) {
+		var i32 int32
+		var i8 int8
+		var nilPtr *int32
 
-		require.ErrorIs(t, r.Unmarshal(i, types.I32(1), nil), interp.ErrInvalidUnmarshalTarget)
-		require.ErrorIs(t, r.Unmarshal(i, types.I32(1), int32(0)), interp.ErrInvalidUnmarshalTarget)
-		var dst *int32
-		require.ErrorIs(t, r.Unmarshal(i, types.I32(1), dst), interp.ErrInvalidUnmarshalTarget)
+		for _, tt := range []struct {
+			name  string
+			value types.Value
+			dst   any
+			err   error
+		}{
+			{name: "nil target", value: types.I32(1), dst: nil, err: interp.ErrInvalidUnmarshalTarget},
+			{name: "non-pointer target", value: types.I32(1), dst: int32(0), err: interp.ErrInvalidUnmarshalTarget},
+			{name: "nil pointer target", value: types.I32(1), dst: nilPtr, err: interp.ErrInvalidUnmarshalTarget},
+			{name: "overflow", value: types.I64(256), dst: &i8, err: interp.ErrValueOverflow},
+			{name: "type mismatch", value: types.String("x"), dst: &i32, err: interp.ErrTypeMismatch},
+		} {
+			i := interp.New(program.New(nil))
+			r := interp.NewRegistry()
+
+			require.ErrorIs(t, r.Unmarshal(i, tt.value, tt.dst), tt.err, tt.name)
+			require.NoError(t, i.Close())
+		}
 	})
-
-	t.Run("overflow", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		r := interp.NewRegistry()
-		defer i.Close()
-		var dst int8
-
-		require.ErrorIs(t, r.Unmarshal(i, types.I64(256), &dst), interp.ErrValueOverflow)
-	})
-
-	t.Run("type mismatch", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		r := interp.NewRegistry()
-		defer i.Close()
-		var dst int32
-
-		require.ErrorIs(t, r.Unmarshal(i, types.String("x"), &dst), interp.ErrTypeMismatch)
-	})
-
 }
 func (v *marshalHostFields) Bump(n int32) int32 {
 	v.Count += n
@@ -1076,10 +1040,3 @@ func (c *codecCounted) Bump() int32 { c.Count++; return c.Count }
 func (v *marshalHostFields) mark(n int32) { v.hidden = n }
 
 func (v marshalHostFields) marked() int32 { return v.hidden }
-
-// stringKey publishes text as the heap reference a string key arrives as.
-func stringKey(t *testing.T, i *interp.Interpreter, text string) types.Boxed {
-	addr, err := i.Alloc(types.String(text))
-	require.NoError(t, err)
-	return types.BoxRef(addr)
-}

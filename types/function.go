@@ -29,6 +29,7 @@ type FunctionType struct {
 }
 
 var _ Value = (*Function)(nil)
+
 var _ Type = (*FunctionType)(nil)
 
 func NewFunctionBuilder(typ *FunctionType) *FunctionBuilder {
@@ -138,6 +139,33 @@ func (b *FunctionBuilder) Build() (*Function, error) {
 	}, nil
 }
 
+// Slots returns the kind of each stack slot addressable by LOCAL_*
+// opcodes: first the function's params (in order), then its declared
+// locals. The kinds are the slots' declared kinds (i1/i8 stay narrow); a
+// consumer that computes through a slot reduces it with Kind.Repr at the point
+// of use. Returns nil when the function has neither.
+func (f *Function) Slots() []Kind {
+	return Kinds(f.Declared())
+}
+
+// Declared returns the declared Type of each stack slot addressable by
+// LOCAL_* opcodes, in the same params-then-locals order as Slots. Callers
+// that need more than a slot's reduced Kind, such as proving a local is a
+// concrete typed array, index this by the same slot number. Returns nil when
+// the function has neither.
+func (f *Function) Declared() []Type {
+	if f.Typ == nil || len(f.Typ.Params) == 0 {
+		return f.Locals
+	}
+	if len(f.Locals) == 0 {
+		return f.Typ.Params
+	}
+	out := make([]Type, 0, len(f.Typ.Params)+len(f.Locals))
+	out = append(out, f.Typ.Params...)
+	out = append(out, f.Locals...)
+	return out
+}
+
 func (f *Function) Kind() Kind {
 	return KindRef
 }
@@ -165,33 +193,6 @@ func (f *Function) String() string {
 
 func (f *Function) Type() Type {
 	return f.Typ
-}
-
-// Slots returns the kind of each stack slot addressable by LOCAL_*
-// opcodes: first the function's params (in order), then its declared
-// locals. The kinds are the slots' declared kinds (i1/i8 stay narrow); a
-// consumer that computes through a slot reduces it with Kind.Repr at the point
-// of use. Returns nil when the function has neither.
-func (f *Function) Slots() []Kind {
-	return Kinds(f.Declared())
-}
-
-// Declared returns the declared Type of each stack slot addressable by
-// LOCAL_* opcodes, in the same params-then-locals order as Slots. Callers
-// that need more than a slot's reduced Kind, such as proving a local is a
-// concrete typed array, index this by the same slot number. Returns nil when
-// the function has neither.
-func (f *Function) Declared() []Type {
-	if f.Typ == nil || len(f.Typ.Params) == 0 {
-		return f.Locals
-	}
-	if len(f.Locals) == 0 {
-		return f.Typ.Params
-	}
-	out := make([]Type, 0, len(f.Typ.Params)+len(f.Locals))
-	out = append(out, f.Typ.Params...)
-	out = append(out, f.Locals...)
-	return out
 }
 
 func (t *FunctionType) Kind() Kind {

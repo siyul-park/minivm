@@ -42,18 +42,9 @@ type registry struct {
 	entries map[reflect.Type]*conversion
 }
 
-// conversion is what one Go type compiles to. Every function it holds takes an
-// unsafe.Pointer to a live Go value of that type, valid only for the duration
-// of the call.
-//
-// value and box differ by position: value produces a standalone VM value, the
-// form Marshal returns and an interface slot stores, while box produces a slot
-// of vm, allocating a heap ref when the slot needs one. set is the reverse of
-// both, because a slot resolves to a value before it is written back.
-//
-// view produces a live view of the Go value instead of a copy, and a struct,
-// array, slice, or map has one. host reports that value is that view, so the
-// conversion never copies however it is reached.
+// conversion is the compiled adapter for one Go type. It receives a live pointer
+// for the call duration; value/box/set convert values and slots, while view
+// preserves shared Go storage for pointer-backed values.
 type conversion struct {
 	typ  reflect.Type
 	kind reflect.Kind
@@ -73,6 +64,7 @@ type field struct {
 	conversion *conversion
 }
 
+// Errors the built-in codec reports.
 var (
 	ErrMarshalCycle           = errors.New("marshal cycle")
 	ErrUnsupportedMarshalType = errors.New("unsupported marshal type")
@@ -267,6 +259,7 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 	return &Registry{entries: r.entries}
 }
 
+// Marshal converts v to a VM value; a nil v marshals to null.
 func (r *Registry) Marshal(i *Interpreter, v any) (types.Value, error) {
 	rv := reflect.ValueOf(v)
 	if !rv.IsValid() {
@@ -404,7 +397,7 @@ func (p *conversion) converting() bool {
 	return true
 }
 
-// runtime resolves a Go type that already holds a VM value.
+// native resolves a Go type that already holds a VM value.
 func (p *conversion) native() bool {
 	vm, ok := runtimeTypes[p.typ]
 	if !ok {
@@ -609,6 +602,24 @@ func (p *conversion) complete() {
 	}
 }
 
+// complexOf reads the {Real, Imag} struct both complex registrations produce.
+func complexOf(d *Decoder, val types.Value) (complex128, error) {
+	value, err := d.interp.deref(val)
+	if err != nil {
+		return 0, err
+	}
+	st, ok := value.(*types.Struct)
+	if !ok {
+		return 0, fmt.Errorf("%w: source=%T", ErrTypeMismatch, value)
+	}
+	re, reOK := asFloat(st.FieldByName("Real"))
+	im, imOK := asFloat(st.FieldByName("Imag"))
+	if !reOK || !imOK {
+		return 0, fmt.Errorf("%w: source=%s", ErrTypeMismatch, st.Typ)
+	}
+	return complex(re, im), nil
+}
+
 // asInt, asUint, and asFloat read a scalar VM value as the Go number a
 // conversion writes. asUint keeps the raw bits an unsigned Go value was stored
 // as, which is what makes its round trip through a signed VM slot exact.
@@ -740,22 +751,4 @@ func defaults() []RegistryOption {
 				return nil
 			})),
 	}
-}
-
-// complexOf reads the {Real, Imag} struct both complex registrations produce.
-func complexOf(d *Decoder, val types.Value) (complex128, error) {
-	value, err := d.interp.deref(val)
-	if err != nil {
-		return 0, err
-	}
-	st, ok := value.(*types.Struct)
-	if !ok {
-		return 0, fmt.Errorf("%w: source=%T", ErrTypeMismatch, value)
-	}
-	re, reOK := asFloat(st.FieldByName("Real"))
-	im, imOK := asFloat(st.FieldByName("Imag"))
-	if !reOK || !imOK {
-		return 0, fmt.Errorf("%w: source=%s", ErrTypeMismatch, st.Typ)
-	}
-	return complex(re, im), nil
 }

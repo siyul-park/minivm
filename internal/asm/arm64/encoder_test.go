@@ -9,17 +9,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewEncoder(t *testing.T) {
-	require.NotNil(t, arm64.NewEncoder())
-}
-
 func TestEncoder_Encode(t *testing.T) {
-	encoder := arm64.NewEncoder()
+	encoder := arm64.Encoder{}
 
-	goldens := []struct {
+	// A non-constant expression so int16(...) truncates at runtime instead
+	// of failing to compile, matching what a caller could pass at runtime.
+	outOfRangeScaledOffset := 4096
+	outOfRangeOffset := int16(8 * outOfRangeScaledOffset)
+
+	tests := []struct {
 		name string
 		inst asm.Instruction
-		want uint32
+		want any
 	}{
 		{"ADD X1,X2,X3", arm64.ADD(arm64.X1, arm64.X2, arm64.X3), 0x8B030041},
 		{"ADD W1,W2,W3", arm64.ADD(arm64.W1, arm64.W2, arm64.W3), 0x0B030041},
@@ -55,6 +56,12 @@ func TestEncoder_Encode(t *testing.T) {
 		{"SUBSI X1,X2,#42", arm64.SUBSI(arm64.X1, arm64.X2, 42), 0xF100A841},
 		{"ANDI X1,X2,#0xFF", arm64.ANDI(arm64.X1, arm64.X2, 0xFF), 0x92401C41},
 		{"ANDI repeated 16-bit element", arm64.ANDI(arm64.X1, arm64.X2, 0x00FF00FF00FF00FF), 0x92409C41},
+		// A single high bit needs a nonzero rotation (immr): the pattern
+		// regression-tests rotateMask's ROR direction (DecodeBitMasks
+		// rotates the lsb-aligned ones run right, not left).
+		{"ANDI W1,W2,#0x80000000", arm64.ANDI(arm64.W1, arm64.W2, 0x80000000), 0x12010041},
+		{"ANDI X1,X2,#0x8000000000000000", arm64.ANDI(arm64.X1, arm64.X2, 0x8000000000000000), 0x92410041},
+		{"ANDI W1,W2,#0x7FFFFFFF", arm64.ANDI(arm64.W1, arm64.W2, 0x7FFFFFFF), 0x12007841},
 		{"ANDSI X1,X2,#0xFF", arm64.ANDSI(arm64.X1, arm64.X2, 0xFF), 0xF2401C41},
 		{"ORRI X1,X2,#0xFF", arm64.ORRI(arm64.X1, arm64.X2, 0xFF), 0xB2401C41},
 		{"EORI X1,X2,#0xFF", arm64.EORI(arm64.X1, arm64.X2, 0xFF), 0xD2401C41},
@@ -82,11 +89,18 @@ func TestEncoder_Encode(t *testing.T) {
 		{"CSNEG X1,X2,X3,EQ", arm64.CSNEG(arm64.X1, arm64.X2, arm64.X3, 0), 0xDA830441},
 		{"CSET X1,EQ", arm64.CSET(arm64.X1, 0), 0x9A9F17E1},
 		{"CSETM X1,EQ", arm64.CSETM(arm64.X1, 0), 0xDA9F13E1},
+		{"MOVW W1,X2", arm64.MOVW(arm64.W1, arm64.X2), 0x2A0203E1},
+		{"FCSEL D1,D2,D3,EQ", arm64.FCSEL(arm64.D1, arm64.D2, arm64.D3, 0), 0x1E630C41},
+		{"FCSEL S1,S2,S3,EQ", arm64.FCSEL(arm64.S1, arm64.S2, arm64.S3, 0), 0x1E230C41},
 		{"MOVZ X1,#0x1234,LSL16", arm64.MOVZ(arm64.X1, 0x1234, 16), 0xD2A24681},
 		{"MOVZ W1,#0x1234,LSL16", arm64.MOVZ(arm64.W1, 0x1234, 16), 0x52A24681},
 		{"MOVK X1,#0x1234,LSL16", arm64.MOVK(arm64.X1, 0x1234, 16), 0xF2A24681},
 		{"MOVN X1,#0x1234,LSL16", arm64.MOVN(arm64.X1, 0x1234, 16), 0x92A24681},
 		{"LDR X1,[X2,#8]", arm64.LDR(arm64.X1, arm64.X2, 8), 0xF9400441},
+		{"LDR D0,[X1,#8]", arm64.LDR(arm64.D0, arm64.X1, 8), 0xFD400420},
+		{"LDR S0,[X1,#4]", arm64.LDR(arm64.S0, arm64.X1, 4), 0xBD400420},
+		{"STR D0,[X1,#8]", arm64.STR(arm64.D0, arm64.X1, 8), 0xFD000420},
+		{"STR S0,[X1,#4]", arm64.STR(arm64.S0, arm64.X1, 4), 0xBD000420},
 		{"LDR W1,[X2,#8]", arm64.LDR(arm64.W1, arm64.X2, 8), 0xB9400841},
 		{"LDRB X1,[X2,#1]", arm64.LDRB(arm64.X1, arm64.X2, 1), 0x39400441},
 		{"LDRSB X1,[X2,#1]", arm64.LDRSB(arm64.X1, arm64.X2, 1), 0x39800441},
@@ -130,54 +144,72 @@ func TestEncoder_Encode(t *testing.T) {
 		{"FCVTZU W1,D2", arm64.FCVTZU(arm64.W1, arm64.D2), 0x1E790041},
 		{"FCVTZU X1,S2", arm64.FCVTZU(arm64.X1, arm64.S2), 0x9E390041},
 		{"FCVTZU X1,D2", arm64.FCVTZU(arm64.X1, arm64.D2), 0x9E790041},
+		{name: "register offset load", inst: arm64.LDRR(arm64.X3, arm64.X4, arm64.X5), want: []byte{0x83, 0x78, 0x65, 0xF8}},
+		{name: "register offset store", inst: arm64.STRR(arm64.X3, arm64.X4, arm64.X5), want: []byte{0x83, 0x78, 0x25, 0xF8}},
+		{"LDR W3,[X4,X5,LSL #2]", arm64.LDRR(arm64.W3, arm64.X4, arm64.X5), 0xB8657883},
+		{"LDR S3,[X4,X5,LSL #2]", arm64.LDRR(arm64.S3, arm64.X4, arm64.X5), 0xBC657883},
+		{"LDR D3,[X4,X5,LSL #3]", arm64.LDRR(arm64.D3, arm64.X4, arm64.X5), 0xFC657883},
+		{"LDRB W3,[X4,X5]", arm64.LDRBR(arm64.W3, arm64.X4, arm64.X5), 0x38657883},
+		{"LDRSB W3,[X4,X5]", arm64.LDRSBR(arm64.W3, arm64.X4, arm64.X5), 0x38E57883},
+		{"LDRSB X3,[X4,X5]", arm64.LDRSBR(arm64.X3, arm64.X4, arm64.X5), 0x38A57883},
+		{"STR S3,[X4,X5,LSL #2]", arm64.STRR(arm64.S3, arm64.X4, arm64.X5), 0xBC257883},
+		{"STR D3,[X4,X5,LSL #3]", arm64.STRR(arm64.D3, arm64.X4, arm64.X5), 0xFC257883},
+		{"STR W3,[X4,X5,LSL #2]", arm64.STRWR(arm64.W3, arm64.X4, arm64.X5), 0xB8257883},
+		{"STRB W3,[X4,X5]", arm64.STRBR(arm64.W3, arm64.X4, arm64.X5), 0x38257883},
+		{"LDR W3,[X4,W5,SXTW #2]", arm64.LDRR(arm64.W3, arm64.X4, arm64.W5), 0xB865D883},
+		{"LDR D3,[X4,W5,SXTW #3]", arm64.LDRR(arm64.D3, arm64.X4, arm64.W5), 0xFC65D883},
+		{"LDRSB W3,[X4,W5,SXTW]", arm64.LDRSBR(arm64.W3, arm64.X4, arm64.W5), 0x38E5D883},
+		{"STR X3,[X4,W5,SXTW #3]", arm64.STRR(arm64.X3, arm64.X4, arm64.W5), 0xF825D883},
+		{"STR W3,[X4,W5,SXTW #2]", arm64.STRWR(arm64.W3, arm64.X4, arm64.W5), 0xB825D883},
+		{"STRB W3,[X4,W5,SXTW]", arm64.STRBR(arm64.W3, arm64.X4, arm64.W5), 0x3825D883},
+		{name: "USE", inst: arm64.USE(arm64.X3), want: []byte(nil)},
+		{
+			name: "unsupported opcode",
+			inst: asm.Instruction{Op: 0xFFFF, Dst: asm.Physical(arm64.X1), Src1: asm.Physical(arm64.X2), Src2: asm.Physical(arm64.X3)},
+			want: arm64.ErrUnsupportedOpcode,
+		},
+		{name: "mixed widths", inst: arm64.ADD(arm64.X1, arm64.X2, arm64.W3), want: asm.ErrInvalidOperand},
+		{
+			name: "missing immediate",
+			inst: asm.Instruction{Op: uint16(arm64.OpADDI), Dst: asm.Physical(arm64.X1), Src1: asm.Physical(arm64.X2)},
+			want: arm64.ErrMissingImmediate,
+		},
+		{name: "unencodable logical immediate", inst: arm64.ANDI(arm64.X1, arm64.X2, 0), want: arm64.ErrMissingImmediate},
+		{name: "int destination for SCVTF", inst: arm64.SCVTF(arm64.X1, arm64.X2), want: asm.ErrInvalidOperand},
+		{name: "float source for CLZ", inst: arm64.CLZ(arm64.X1, arm64.D2), want: asm.ErrInvalidOperand},
+		{name: "ADDI imm12 out of range", inst: arm64.ADDI(arm64.X1, arm64.X2, 4096), want: asm.ErrInvalidOperand},
+		{name: "CMPI imm12 out of range", inst: arm64.CMPI(arm64.X0, 4096), want: asm.ErrInvalidOperand},
+		{name: "CMNI imm12 out of range", inst: arm64.CMNI(arm64.X0, 4096), want: asm.ErrInvalidOperand},
+		{name: "LDR offset out of range", inst: arm64.LDR(arm64.X17, arm64.X16, outOfRangeOffset), want: asm.ErrInvalidOperand},
+		{name: "LDR offset misaligned", inst: arm64.LDR(arm64.X1, arm64.X2, 3), want: asm.ErrInvalidOperand},
+		{name: "LDR negative offset", inst: arm64.LDR(arm64.X1, arm64.X2, -8), want: asm.ErrInvalidOperand},
+		{name: "STR offset out of range", inst: arm64.STR(arm64.X1, arm64.X2, outOfRangeOffset), want: asm.ErrInvalidOperand},
+		{name: "B offset unaligned", inst: arm64.B(2), want: asm.ErrBranchOutOfRange},
+		{name: "B offset exceeds imm26", inst: arm64.B(1 << 27), want: asm.ErrBranchOutOfRange},
+		{name: "BEQ offset exceeds imm19", inst: arm64.BEQ(1 << 21), want: asm.ErrBranchOutOfRange},
+		{name: "CBZ offset exceeds imm19", inst: arm64.CBZ(arm64.X1, 1<<21), want: asm.ErrBranchOutOfRange},
+		{name: "TBZ offset exceeds imm14", inst: arm64.TBZ(arm64.X1, 3, 1<<17), want: asm.ErrBranchOutOfRange},
 	}
-	for _, tt := range goldens {
+
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := encoder.Encode(tt.inst)
-			require.NoError(t, err)
-			require.Equal(t, tt.want, binary.LittleEndian.Uint32(got))
-		})
-	}
-
-	t.Run("register offset load store scales slot index", func(t *testing.T) {
-		got, err := encoder.Encode(arm64.LDRR(arm64.X3, arm64.X4, arm64.X5))
-		require.NoError(t, err)
-		require.Equal(t, []byte{0x83, 0x78, 0x65, 0xF8}, got)
-
-		got, err = encoder.Encode(arm64.STRR(arm64.X3, arm64.X4, arm64.X5))
-		require.NoError(t, err)
-		require.Equal(t, []byte{0x83, 0x78, 0x25, 0xF8}, got)
-	})
-
-	invalid := []struct {
-		name string
-		inst asm.Instruction
-		want error
-	}{
-		{
-			"unsupported opcode",
-			asm.Instruction{Op: 0xFFFF, Dst: asm.Physical(arm64.X1), Src1: asm.Physical(arm64.X2), Src2: asm.Physical(arm64.X3)},
-			arm64.ErrUnsupportedOpcode,
-		},
-		{"mixed widths", arm64.ADD(arm64.X1, arm64.X2, arm64.W3), asm.ErrInvalidOperand},
-		{
-			"missing immediate",
-			asm.Instruction{Op: uint16(arm64.OpADDI), Dst: asm.Physical(arm64.X1), Src1: asm.Physical(arm64.X2)},
-			arm64.ErrMissingImmediate,
-		},
-		{"unencodable logical immediate", arm64.ANDI(arm64.X1, arm64.X2, 0), arm64.ErrMissingImmediate},
-		{"int destination for SCVTF", arm64.SCVTF(arm64.X1, arm64.X2), asm.ErrInvalidOperand},
-		{"float source for CLZ", arm64.CLZ(arm64.X1, arm64.D2), asm.ErrInvalidOperand},
-		{"B offset unaligned", arm64.B(2), asm.ErrBranchOutOfRange},
-		{"B offset exceeds imm26", arm64.B(1 << 27), asm.ErrBranchOutOfRange},
-		{"BEQ offset exceeds imm19", arm64.BEQ(1 << 21), asm.ErrBranchOutOfRange},
-		{"CBZ offset exceeds imm19", arm64.CBZ(arm64.X1, 1<<21), asm.ErrBranchOutOfRange},
-		{"TBZ offset exceeds imm14", arm64.TBZ(arm64.X1, 3, 1<<17), asm.ErrBranchOutOfRange},
-	}
-	for _, tt := range invalid {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := encoder.Encode(tt.inst)
-			require.ErrorIs(t, err, tt.want)
+			switch want := tt.want.(type) {
+			case error:
+				require.ErrorIs(t, err, want)
+			case []byte:
+				require.NoError(t, err)
+				if want == nil {
+					require.Empty(t, got)
+					return
+				}
+				require.Equal(t, want, got)
+			case int:
+				require.NoError(t, err)
+				require.Equal(t, uint32(want), binary.LittleEndian.Uint32(got))
+			default:
+				require.Fail(t, "invalid encoder test case")
+			}
 		})
 	}
 }

@@ -17,7 +17,7 @@ type hostCounter struct {
 }
 
 func TestNewHostFunction(t *testing.T) {
-	t.Run("constructor", func(t *testing.T) {
+	t.Run("wraps the signature and callback", func(t *testing.T) {
 		typ := &types.FunctionType{
 			Params:  []types.Type{types.TypeI32},
 			Returns: []types.Type{types.TypeI32}}
@@ -29,20 +29,6 @@ func TestNewHostFunction(t *testing.T) {
 		got, err := fn.Fn(nil, []types.Boxed{types.BoxI32(4)})
 		require.NoError(t, err)
 		require.Equal(t, []types.Boxed{types.BoxI32(8)}, got)
-	})
-
-	t.Run("public fields", func(t *testing.T) {
-		typ := &types.FunctionType{Returns: []types.Type{types.TypeI32}}
-		fn := &interp.HostFunction{
-			Typ: typ,
-			Fn: func(*interp.Interpreter, []types.Boxed) ([]types.Boxed, error) {
-				return []types.Boxed{types.BoxI32(7)}, nil
-			}}
-
-		require.Same(t, typ, fn.Typ)
-		got, err := fn.Fn(nil, nil)
-		require.NoError(t, err)
-		require.Equal(t, []types.Boxed{types.BoxI32(7)}, got)
 	})
 }
 
@@ -100,7 +86,7 @@ func TestHostStruct_String(t *testing.T) {
 	require.Equal(t, "struct {Count: i32}\n<native>", value.(*interp.HostStruct).String())
 }
 
-func TestHostStruct_SetField(t *testing.T) {
+func TestHostStruct_Field(t *testing.T) {
 	t.Run("reads through to the Go value", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
@@ -137,7 +123,9 @@ func TestHostStruct_SetField(t *testing.T) {
 		_, err = host.Field(i, -1)
 		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
+}
 
+func TestHostStruct_SetField(t *testing.T) {
 	t.Run("writes through to the Go value", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
@@ -214,7 +202,7 @@ func TestHostArray_Len(t *testing.T) {
 	require.Equal(t, 3, host.Len())
 }
 
-func TestHostArray_SetElement(t *testing.T) {
+func TestHostArray_Element(t *testing.T) {
 	t.Run("reads through to the Go value", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
@@ -249,7 +237,9 @@ func TestHostArray_SetElement(t *testing.T) {
 		_, err = host.Element(i, -1)
 		require.ErrorIs(t, err, interp.ErrIndexOutOfRange)
 	})
+}
 
+func TestHostArray_SetElement(t *testing.T) {
 	t.Run("writes through to the Go value", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
@@ -437,7 +427,7 @@ func TestHostMap_Len(t *testing.T) {
 	require.Equal(t, 2, host.Len())
 }
 
-func TestHostMap_Set(t *testing.T) {
+func TestHostMap_Get(t *testing.T) {
 	t.Run("reads through to the Go value", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
@@ -489,7 +479,9 @@ func TestHostMap_Set(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, types.BoxI32(7), got)
 	})
+}
 
+func TestHostMap_Set(t *testing.T) {
 	t.Run("writes through to the Go value", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()

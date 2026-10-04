@@ -10,7 +10,7 @@ transform IR → mutation
 pipeline   ordered transforms + invalidation
 ```
 
-`pass.Manager` owns analysis caching/invalidation. `pass.Pipeline` owns transform order. Analyses `MUST NOT` mutate IR. Transforms `MUST` report preserved analyses through `pass.Preserved`.
+`pass.Manager` owns analysis registration/cache; `pass.Pipeline` owns transform order/invalidation. Analyses `MUST NOT` mutate IR. A transform returns `true` only when all cached analyses remain valid; errors `MUST` invalidate them because an in-place transform may have partially mutated IR.
 
 ## Layers
 
@@ -23,15 +23,19 @@ pipeline   ordered transforms + invalidation
 
 ## SSA
 
-Each pass owns one policy. Current passes include constant folding, algebraic simplification, local promotion, load forwarding, CSE, guard elimination, LICM, and DCE.
+Each pass owns one policy. Current passes include folding, simplification, promotion, forwarding, CSE, guard elimination, LICM, and DCE.
+
+LICM moves pure operations, and in a loop that calls, allocates, and releases nothing (`quiet` in `transform/hoist.go`), slot loads the loop never stores and shape guards on invariant refs in blocks every iteration runs. A hoisted guard takes the loop header's entry state, so its failure deopts at loop entry. In such a loop, the array ops on an invariant array guard read the array through one `slice` (`ssa.OpSlice`) placed in the preheader of the outermost such loop; the bytecode emitter drops it.
+
+Bounds-check elimination (`BoundPass`, JIT only: it reads `Module.Refuted`) drops the check of an array op on a slice indexed by a loop's induction variable `i`: the header tests `i <s n` with `n` invariant, `i` enters at a constant ≥ 0 and every latch adds a constant ≥ 1 that cannot wrap past `n` (any step for a constant `n`, else 1). The index becomes a `bound` (`ssa.OpBound`). `n ≤ length` is checked once, even when `n` is the array's own `array.len`, by a `guard.bounds n, length` in the preheader at the header's entry state; a loop whose header entry offset is refuted keeps its checks.
 
 SSA transforms are target-independent and `MUST` accept any valid `ssa.Function`.
 
 ## Bytecode
 
-A size-changing transform `MUST` repair all position-sensitive metadata or leave the function unchanged. `transform.SSAPass` re-emits from SSA and `MUST` decline when the encoding is invalid.
+A size-changing transform `MUST` repair position-sensitive metadata or leave the function unchanged. `transform.SSAPass` `MUST` decline invalid encodings.
 
-The agent `SHOULD` prefer local passes, `SHOULD` reuse existing analyses, and `MUST` keep target-specific policy out of target-independent passes.
+Passes `SHOULD` stay local, reuse existing analyses, and keep target policy out of target-independent code.
 
 ## Related
 

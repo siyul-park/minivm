@@ -1,6 +1,7 @@
 package transform
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/siyul-park/minivm/instr"
@@ -9,55 +10,33 @@ import (
 	"github.com/siyul-park/minivm/pass"
 )
 
-// HoistPass moves a side-effect-free, non-trapping operation out of a natural
-// loop and into its preheader when every argument it reads is defined
-// outside the loop (or was itself just hoisted): textbook loop-invariant
-// code motion, the dominance-based pass the loop-invariant design notes anticipate. It generalizes the old
-// trace-plan hoistable rule to any *ssa.Function: that mechanism's
-// one-container-per-loop and MaxHoistSlot limits were a trace-compiled
-// loop's register-budget and ARM64-encoding artifacts, not IR-level hazards
-// this pass has to honor, and its "no ref arrays" restriction does not carry
-// over either, since this pass never moves an OpLoad, an OpStore, or any
-// Heap-touching OpExec and so never bypasses the retain/release accounting
-// that restriction protected.
-//
-// Eligibility is OpConst or a pure OpExec (instr.Opcode.IsPure()) that is
-// also speculatable (see speculatable) and carries no deopt State (see
-// hoistable). Excluding every OpLoad, OpStore, and Heap-touching OpExec
-// refuses a heap read a loop's own write could invalidate with no alias
-// analysis at all - not because this pass proved the specific loop has no
-// such write, but because it never asks.
-//
-// This pass never moves an OpRetain or an OpRelease, and the operations it
-// does move never carry one of their own: a pure operation, by instr's own
-// definition, touches nothing an ownership pair would track.
-//
-// It hoists only into a preheader that already exists (see preheader) and
-// never inserts one by splitting an edge. Loop headers are processed from
-// the smallest natural loop body to the largest, so an operation hoisted out
-// of an inner loop is reconsidered once its enclosing loop is processed,
-// cascading a doubly loop-invariant operation out in one Run.
+// HoistPass moves safe loop-invariant operations to preheaders. An array op
+// of a quiet loop whose container is a loop-invariant array guard reads it
+// through one OpSlice in the preheader of the outermost such loop: nothing
+// in a quiet loop resizes or replaces a container.
 type HoistPass struct{}
 
 var _ pass.Pass[*ssa.Function] = (*HoistPass)(nil)
 
+// NewHoistPass returns the pass.
 func NewHoistPass() *HoistPass {
 	return &HoistPass{}
 }
 
-func (p *HoistPass) Run(_ *pass.Manager, fn *ssa.Function) (pass.Preserved, error) {
-	dom := graph.NewDominance(fn)
-	headers := graph.LoopHeaders(fn, dom)
+// Run applies the pass to one SSA function.
+func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
+	dominance := graph.NewDominance(function)
+	headers := graph.Headers(function, dominance)
 	if len(headers) == 0 {
-		return pass.PreserveAll(), nil
+		return true, nil
 	}
 
 	bodies := make(map[int]map[int]bool, len(headers))
 	preheaders := make(map[int]int, len(headers))
 	for _, h := range headers {
-		b := loopBody(fn, dom, h)
+		b := graph.Body(function, dominance, h)
 		bodies[h] = b
-		if p, ok := preheader(fn, b, h); ok {
+		if p, ok := graph.Preheader(function, b, h); ok {
 			preheaders[h] = p
 		}
 	}
@@ -65,27 +44,39 @@ func (p *HoistPass) Run(_ *pass.Manager, fn *ssa.Function) (pass.Preserved, erro
 		return len(bodies[headers[i]]) < len(bodies[headers[j]])
 	})
 
-	blocks := order(fn)
+	blocks := graph.Order(function)
 	defSite := map[ssa.Value]site{}
 	paramOf := map[ssa.Value]int{}
 	for _, b := range blocks {
-		blk := fn.Block(b)
-		for _, v := range blk.Params {
+		currentBlock := function.Block(b)
+		for _, v := range currentBlock.Params {
 			paramOf[v] = b
 		}
-		for i, op := range blk.Ops {
-			for _, r := range op.Results {
+		for i, operation := range currentBlock.Operations {
+			for _, r := range operation.Results {
 				defSite[r] = site{b, i}
 			}
 		}
 	}
 
-	// dest names, for a site that has been decided eligible, the block its
-	// operation now lands in; a site absent from dest still lands in its own
-	// original block. current and location read through it so a value
-	// hoisted by an inner loop is already seen at its new position when an
-	// outer loop asks where it lives.
+	quiets := make(map[int]bool, len(headers))
+	stored := make(map[int]map[ssa.Slot]bool, len(headers))
+	for _, h := range headers {
+		quiets[h], stored[h] = true, map[ssa.Slot]bool{}
+		for b := range bodies[h] {
+			for _, operation := range function.Block(b).Operations {
+				quiets[h] = quiets[h] && quiet(function, operation)
+				if operation.Op == ssa.OpStore {
+					stored[h][operation.Slot] = true
+				}
+			}
+		}
+	}
+
 	dest := map[site]int{}
+	entries := map[site]int{}
+	sliced := map[site]int{}
+	frames := map[int][]ssa.Frame{}
 	current := func(s site) int {
 		if b, ok := dest[s]; ok {
 			return b
@@ -101,150 +92,230 @@ func (p *HoistPass) Run(_ *pass.Manager, fn *ssa.Function) (pass.Preserved, erro
 		}
 		return 0, false
 	}
+	outside := func(v ssa.Value, body map[int]bool) bool {
+		loc, ok := location(v)
+		return ok && !body[loc]
+	}
 
 	changed := false
 	for _, h := range headers {
-		p, ok := preheaders[h]
+		preheader, ok := preheaders[h]
 		if !ok {
 			continue
 		}
 		body := bodies[h]
+		invariant := func(v ssa.Value) bool { return outside(v, body) }
 		for _, b := range blocks {
 			if !body[b] {
 				continue
 			}
-			ops := fn.Block(b).Ops
-			for i, op := range ops {
+			ops := function.Block(b).Operations
+			for i, operation := range ops {
 				s := site{b, i}
 				if !body[current(s)] {
 					continue
 				}
-				if !hoistable(op) {
+				switch {
+				case operation.Op == ssa.OpGuardShape:
+					if !quiets[h] || !invariant(operation.Args[0]) {
+						continue
+					}
+					// Only a guard every completed iteration runs: one under a
+					// condition may never run, and hoisted it would deopt at
+					// each loop entry and refute the unit.
+					if slices.ContainsFunc(function.Pred(h), func(latch int) bool {
+						return body[latch] && !dominance.Dominates(current(s), latch)
+					}) {
+						continue
+					}
+					entry, ok := inlet(function, defSite, h, preheader, invariant)
+					if !ok {
+						continue
+					}
+					frames[h], entries[s] = entry, h
+				case sliceable(function, defSite, operation):
+					if quiets[h] && invariant(operation.Args[0]) {
+						sliced[s] = h
+						changed = true
+					}
+					continue
+				case operation.Op == ssa.OpLoad:
+					if !quiets[h] || stored[h][operation.Slot] {
+						continue
+					}
+				case hoistable(operation):
+					if slices.ContainsFunc(operation.Args, func(v ssa.Value) bool { return !invariant(v) }) {
+						continue
+					}
+					if operation.State != ssa.NoValue && !invariant(operation.State) {
+						continue
+					}
+				default:
 					continue
 				}
-				invariant := true
-				for _, a := range op.Args {
-					loc, ok := location(a)
-					if !ok || body[loc] {
-						invariant = false
-						break
-					}
-				}
-				if invariant {
-					dest[s] = p
-					changed = true
-				}
+				dest[s] = preheader
+				changed = true
 			}
 		}
 	}
 
 	if !changed {
-		return pass.PreserveAll(), nil
+		return true, nil
 	}
 
-	rb := newRebuilder(fn)
+	r := newRebuilder(function)
+	states := map[int]ssa.Value{}
+	slices := map[[2]int]ssa.Value{}
 	for _, b := range blocks {
-		id := rb.block(b)
-		blk := fn.Block(b)
-		for _, v := range blk.Params {
-			rb.alias(v, rb.b.Param(id, fn.Type(v)))
+		id := r.open(b)
+		for i, operation := range function.Block(b).Operations {
+			target := r.block(current(site{b, i}))
+			args := operation.Args
+			operation = r.operation(operation)
+			if h, ok := sliced[site{b, i}]; ok {
+				key := [2]int{int(args[0]), h}
+				if _, ok := slices[key]; !ok {
+					v := r.builder.Value(ssa.TypeRef)
+					r.builder.Add(r.block(preheaders[h]), ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{operation.Args[0]}, Results: []ssa.Value{v}})
+					slices[key] = v
+				}
+				operation.Args[0] = slices[key]
+			}
+			if h, ok := entries[site{b, i}]; ok {
+				state, ok := states[h]
+				if !ok {
+					state = r.builder.Value(ssa.TypeState)
+					r.builder.Add(target, r.operation(ssa.Operation{Op: ssa.OpState, Frames: frames[h], Results: []ssa.Value{state}}))
+					states[h] = state
+				}
+				operation.State = state
+			}
+			r.builder.Add(target, r.define(operation))
 		}
-		for i, op := range blk.Ops {
-			target := rb.block(current(site{b, i}))
-			rb.b.Add(target, rb.define(fn, rb.operation(op)))
-		}
-		rb.b.Term(id, rb.terminator(blk.Term))
+		r.builder.Term(id, r.terminator(function.Block(b).Terminator))
 	}
-	next := rb.b.Build()
-	*fn = *next
-	return pass.PreserveNone(), nil
+	*function = *r.builder.Build()
+	return false, nil
 }
 
-// hoistable reports whether op may ever move: an OpConst, which reads
-// nothing, or an OpExec whose opcode both IsPure() (no Reads, no Writes -
-// see instr.Opcode.IsPure) and is speculatable (never faults regardless of
-// its operands). The leading op.State check is not redundant with either:
-// ssa.OverflowsI64's five arithmetic opcodes are both IsPure() and
-// speculatable yet always carry deopt State, so without this check one of
-// them would hoist into a preheader that can run on a zero-trip-count path
-// and exit its boxability guard with a Frame snapshot from before the loop
-// ever entered its body.
-func hoistable(op ssa.Operation) bool {
-	if op.State != ssa.NoValue {
+// inlet is the deopt state at loop header's entry, as seen from preheader:
+// the state of header's first operation that has one, with header's params
+// replaced by preheader's edge arguments. It fails when an effect precedes
+// that operation in header or the state names a value invariant rejects.
+func inlet(function *ssa.Function, sites map[ssa.Value]site, header, preheader int, invariant func(ssa.Value) bool) ([]ssa.Frame, bool) {
+	block := function.Block(header)
+	args := map[ssa.Value]ssa.Value{}
+	for i, param := range block.Params {
+		args[param] = function.Block(preheader).Terminator.Edges[0].Args[i]
+	}
+	at := ssa.NoValue
+	for _, operation := range block.Operations {
+		if operation.State != ssa.NoValue {
+			at = operation.State
+			break
+		}
+		if operation.Op != ssa.OpConst && operation.Op != ssa.OpLoad && operation.Op != ssa.OpState {
+			return nil, false
+		}
+	}
+	s, ok := sites[at]
+	if !ok {
+		return nil, false
+	}
+	state := function.Block(s.block).Operations[s.index]
+	substitute := func(v ssa.Value) (ssa.Value, bool) {
+		if arg, ok := args[v]; ok {
+			return arg, true
+		}
+		return v, invariant(v)
+	}
+	frames := make([]ssa.Frame, len(state.Frames))
+	for i, frame := range state.Frames {
+		stack := make([]ssa.Operand, len(frame.Stack))
+		for j, operand := range frame.Stack {
+			if stack[j].Value, ok = substitute(operand.Value); !ok {
+				return nil, false
+			}
+			stack[j].Owned = operand.Owned
+		}
+		locals := make([]ssa.Local, len(frame.Locals))
+		for j, local := range frame.Locals {
+			if locals[j].Value, ok = substitute(local.Value); !ok {
+				return nil, false
+			}
+			locals[j].Index = local.Index
+		}
+		frame.Stack, frame.Locals = stack, locals
+		frames[i] = frame
+	}
+	return frames, true
+}
+
+// quiet reports whether operation runs no code outside the unit and
+// allocates, releases, resizes, and replaces nothing: no call, allocation
+// (a boxed i64 included), or reference drop. Host code, reachable only
+// through those, is the one way a live container's representation changes
+// (interp.Interpreter.Store), so a loop of quiet operations keeps every
+// container's shape; a quiet loop also writes storage only through its own
+// OpStores.
+func quiet(function *ssa.Function, operation ssa.Operation) bool {
+	switch operation.Op {
+	case ssa.OpRelease:
+		return false
+	case ssa.OpStore:
+		t := function.Type(operation.Args[0])
+		return t != ssa.TypeRef && t != ssa.TypeI64
+	case ssa.OpExec:
+		switch {
+		case instr.TypeOf(operation.Code).Writes == 0:
+			return true
+		case operation.Code == instr.ARRAY_SET, operation.Code == instr.STRUCT_SET:
+			t := function.Type(operation.Args[len(operation.Args)-1])
+			return t != ssa.TypeRef && t != ssa.TypeI64
+		default:
+			return false
+		}
+	default:
+		return true
+	}
+}
+
+// sliceable reports whether operation is an array op whose container is a
+// guard admitting an array: it reads the container only through the array's
+// element pointer and length.
+func sliceable(function *ssa.Function, sites map[ssa.Value]site, operation ssa.Operation) bool {
+	if operation.Op != ssa.OpExec {
 		return false
 	}
-	switch op.Op {
+	switch operation.Code {
+	case instr.ARRAY_GET, instr.ARRAY_SET, instr.ARRAY_LEN:
+	default:
+		return false
+	}
+	s, ok := sites[operation.Args[0]]
+	if !ok {
+		return false
+	}
+	guard := function.Block(s.block).Operations[s.index]
+	return guard.Op == ssa.OpGuardShape && !guard.Shape.Struct && guard.Shape.Function == 0
+}
+
+func hoistable(operation ssa.Operation) bool {
+	switch operation.Op {
 	case ssa.OpConst:
 		return true
 	case ssa.OpExec:
-		return op.Code.IsPure() && speculatable(op.Code)
+		if !operation.Code.IsPure() || ssa.OverflowsI64(operation.Code) {
+			return false
+		}
+		switch operation.Code {
+		case instr.I32_DIV_S, instr.I32_DIV_U, instr.I32_REM_S, instr.I32_REM_U,
+			instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U:
+			return false
+		default:
+			return true
+		}
 	default:
 		return false
 	}
-}
-
-// speculatable reports whether a pure opcode is safe to run at a program
-// point the original bytecode might never have reached, which hoisting into
-// a preheader always risks when a loop's trip count could be zero. Every
-// IsPure() opcode but integer division and remainder qualifies: arithmetic,
-// bitwise, and comparison opcodes cannot fault on any operand value, shifts
-// mask their amount, and a narrowing conversion saturates rather than traps.
-// Integer division and remainder by a zero divisor panic the interpreter -
-// exactly the fault FoldPass also declines to pre-empt for a literal zero
-// divisor at compile time - and a loop-invariant divisor is invariant
-// precisely because it is the same value on every iteration the loop would
-// have run, including zero of them.
-func speculatable(code instr.Opcode) bool {
-	switch code {
-	case instr.I32_DIV_S, instr.I32_DIV_U, instr.I32_REM_S, instr.I32_REM_U,
-		instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U:
-		return false
-	default:
-		return true
-	}
-}
-
-// loopBody returns the natural loop of header: header itself plus every
-// block that can reach a back edge into header without passing through
-// header again - the standard construction (Aho, Sethi, and Ullman),
-// computed by walking predecessors backward from every block whose edge to
-// header is a back edge (header dominates the source).
-func loopBody(fn *ssa.Function, dom *graph.Dominance, header int) map[int]bool {
-	body := map[int]bool{header: true}
-	var stack []int
-	for _, p := range fn.Pred(header) {
-		if dom.Dominates(header, p) && !body[p] {
-			body[p] = true
-			stack = append(stack, p)
-		}
-	}
-	for len(stack) > 0 {
-		n := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		for _, p := range fn.Pred(n) {
-			if !body[p] {
-				body[p] = true
-				stack = append(stack, p)
-			}
-		}
-	}
-	return body
-}
-
-// preheader returns header's one predecessor outside body, or false when
-// header has no such predecessor (it is itself unreachable from outside the
-// loop) or more than one (control enters the loop by more than one path, and
-// this pass does not split an edge to give it a single one).
-func preheader(fn *ssa.Function, body map[int]bool, header int) (int, bool) {
-	found, ok := -1, false
-	for _, p := range fn.Pred(header) {
-		if body[p] {
-			continue
-		}
-		if ok {
-			return 0, false
-		}
-		found, ok = p, true
-	}
-	return found, ok
 }

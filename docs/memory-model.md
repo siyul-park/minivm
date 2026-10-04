@@ -14,8 +14,7 @@ Heap storage, reference ownership, RC, cycle collection.
 
 ## Model
 
-- Heap refs are stable indexes.
-- Index `0` is permanent null.
+- Heap refs are stable indexes; `0` is permanent null.
 - Only `KindRef` is reference-counted.
 - Ref-containing heap values `MUST` implement `types.Traceable`.
 - `release` is iterative.
@@ -28,29 +27,29 @@ trial []int
 work  []int
 ```
 
-Future native paths MUST preserve the threaded ownership totals.
+Native execution MUST preserve the threaded ownership totals.
 
-## Ownership
+## Transfers
 
-| Operation | Ownership |
+| Operation | Result |
 |---|---|
-| `Alloc` | one owned ref |
-| `Retain` | +1 ownership |
-| `Release` | -1 ownership |
-| stack push | owns pushed ref |
+| `Alloc` | creates one owned ref |
+| `Retain` / `DUP` | adds one owner |
+| `Release` | removes one owner; zero triggers reclamation |
+| stack push | takes ownership |
 | stack load | borrows slot ownership |
-| local/global/upvalue store | retain new, release old |
-| `DUP` | +1 ownership |
+| local/global/upvalue store | retains new, releases old |
 | `CLOSURE_NEW` | transfers function/capture ownership |
-| `RETURN` | releases retiring frame ownership |
+| `RETURN` | releases frame-owned values |
+| native call to a borrowed parameter | caller keeps ownership; materialization restores it |
 
-Each transfer above `MUST` be implemented exactly as stated. Deferred native refs `MAY` borrow backing ownership only until an interpreter-visible transfer; deopt and bridges `MUST` restore interpreter ownership.
+Transfers `MUST` preserve counts exactly. Native execution `MAY` borrow backing storage, but deopt/exits `MUST` restore interpreter ownership.
 
 ## Reference Counting
 
-`retain(addr)` increments `rc[addr]`. `release(addr)` decrements; zero clears the slot, returns the index to `free`, and releases child refs through an explicit work stack.
+`retain(addr)` adds one owner. `release(addr)` removes one; zero clears the slot, recycles the index, and iteratively releases child refs.
 
-The count includes heap objects, frames, globals, stack values, temporaries, coroutines, and host references.
+Counts cover heap edges plus frame, global, stack, temporary, coroutine, and host owners.
 
 ## Traceable
 
@@ -62,30 +61,19 @@ Implementations `MUST` append child refs without mutating existing entries and `
 
 ## Cycle Collection
 
-Trial deletion:
+Trial deletion subtracts heap-to-heap edges from exact counts, marks from externally owned objects, reclaims unmarked allocated objects, then repairs surviving counts.
 
-1. copy exact counts to `trial`;
-2. subtract heap-to-heap edges;
-3. treat positive residuals as external ownership;
-4. mark from externally owned objects;
-5. reclaim allocated unmarked objects;
-6. repair surviving counts.
-
-Heap indexes never move. Collection runs adaptively and before enforcing the hard heap limit.
+Heap indexes never move. Collection runs adaptively and before the hard heap limit.
 
 ## Strings
 
 Published strings are immutable. Concatenation `MAY` reuse interpreter-local append storage; writes `MUST` occur beyond published lengths, and reallocation `MUST` preserve old storage.
 
-## Reset
+## Reset and Host
 
-`Reset` invalidates runtime objects, recomputes collection goals, and `MAY` reuse cleared generic-array headers/storage. Reused headers `MUST` carry no prior type or contents.
+`Reset` invalidates runtime objects and may reuse cleared generic-array storage; reused headers `MUST` have no prior type or contents.
 
-## Host
-
-Host refs use the same retain/release model. Host values `MUST NOT` implicitly own VM refs.
-
-See `host-integration.md` for host API behavior.
+Host refs use the same retain/release model. Host values `MUST NOT` implicitly own VM refs. Host API details belong to `host-integration.md`.
 
 ## Related
 

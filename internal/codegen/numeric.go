@@ -47,10 +47,7 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 	}
 
 	var compile, body []jen.Code
-	// delta is the operation's net effect on the operand stack: it grows only
-	// when every operand was folded into a temporary. Fused sources never
-	// push, so one room check for delta covers the whole handler, and a
-	// conditional consumer branches instead of pushing and needs none.
+
 	delta := len(inputs) - arity + 1
 	if !conditional && local == nil && delta > 0 {
 		body = append(body, overflow())
@@ -117,33 +114,63 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 			if delta < 0 {
 				body = append(body, jen.Id("i").Dot("sp").Op("-=").Lit(-delta))
 			}
-			body = append(body, jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Op("=").Id(result))
+			body = append(body, top(1).Op("=").Id(result))
 		}
 		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
 	}
 
 	compile = append(compile,
 		jen.Id("c").Dot("ip").Op("+=").Lit(width(first)),
-		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
+		jen.Return(closure(body...)),
 	)
 	return compile, nil
 }
 
-func branchTail(condition jen.Code, consume, advance int, body []jen.Code) []jen.Code {
+func trapping(consumer instr.Opcode, inputs []value, kind instr.Kind) ([]jen.Code, error) {
+	var compile, body []jen.Code
+	for _, source := range inputs {
+		compile = append(compile, source.compile...)
+		body = append(body, source.push...)
+	}
+	body = append(body,
+		underflow(2),
+		jen.Id("rhs").Op(":=").Add(unbox(kind, jen.Id("i").Dot("sp").Op("-").Lit(1))),
+		jen.Id("lhs").Op(":=").Add(unbox(kind, jen.Id("i").Dot("sp").Op("-").Lit(2))),
+		jen.If(jen.Id("rhs").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrDivideByZero"))),
+		jen.Id("result").Op(":=").Add(compute(consumer, jen.Id("lhs"), jen.Id("rhs"))),
+		jen.Id("i").Dot("sp").Op("--"),
+		top(1).Op("=").Id("result"),
+		next(),
+	)
+	first := consumer
+	if len(inputs) > 0 {
+		first = inputs[0].op
+	}
+	compile = append(compile,
+		jen.Id("c").Dot("ip").Op("+=").Lit(width(first)),
+		jen.Return(closure(body...)),
+	)
+	return compile, nil
+}
+
+func branchTail(condition jen.Code, pops, advance int, body []jen.Code) []jen.Code {
 	code := append([]jen.Code(nil), body...)
-	if consume > 0 {
-		code = append(code, jen.Id("i").Dot("sp").Op("-=").Lit(consume))
+	if pops > 0 {
+		code = append(code, jen.Id("i").Dot("sp").Op("-=").Lit(pops))
 	}
 	path := []jen.Code{
 		jen.Id("f").Op(":=").Id("i").Dot("fr"),
 		jen.Id("f").Dot("ip").Op("+=").Id("offset").Op("+").Lit(advance),
-		jen.Return(),
 	}
-	code = append(code, jen.If(condition).Block(path...))
-	code = append(code, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
 	return []jen.Code{
-		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(code...)),
+		jen.If(jen.Id("offset").Op("+").Lit(advance).Op("<=").Lit(0)).Block(jen.Return(closure(branch(code, condition, advance, slices.Concat(path, []jen.Code{spend(nil)}))...))),
+		jen.Return(closure(branch(code, condition, advance, path)...)),
 	}
+}
+
+func branch(code []jen.Code, condition jen.Code, advance int, path []jen.Code) []jen.Code {
+	taken := jen.If(condition).Block(append(slices.Clone(path), jen.Return())...)
+	return append(slices.Clone(code), taken, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
 }
 
 func arity(op instr.Opcode) (int, bool) {
@@ -158,44 +185,17 @@ func arity(op instr.Opcode) (int, bool) {
 	return 0, false
 }
 
-func trapping(consumer instr.Opcode, inputs []value, kind instr.Kind) ([]jen.Code, error) {
-	var compile, body []jen.Code
-	for _, source := range inputs {
-		compile = append(compile, source.compile...)
-		body = append(body, source.push...)
-	}
-	body = append(body,
-		jen.If(jen.Id("i").Dot("sp").Op("<").Lit(2)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
-		jen.Id("rhs").Op(":=").Add(unbox(kind, jen.Id("i").Dot("sp").Op("-").Lit(1))),
-		jen.Id("lhs").Op(":=").Add(unbox(kind, jen.Id("i").Dot("sp").Op("-").Lit(2))),
-		jen.If(jen.Id("rhs").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrDivideByZero"))),
-		jen.Id("result").Op(":=").Add(compute(consumer, jen.Id("lhs"), jen.Id("rhs"))),
-		jen.Id("i").Dot("sp").Op("--"),
-		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Op("=").Id("result"),
-		jen.Id("i").Dot("fr").Dot("ip").Op("++"),
-	)
-	first := consumer
-	if len(inputs) > 0 {
-		first = inputs[0].op
-	}
-	compile = append(compile,
-		jen.Id("c").Dot("ip").Op("+=").Lit(width(first)),
-		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
-	)
-	return compile, nil
-}
-
 func compute(op instr.Opcode, operands ...jen.Code) jen.Code {
 	lhs := operands[0]
 	if len(operands) == 1 {
 		switch op {
 		case instr.I32_EQZ, instr.I64_EQZ:
-			return jen.Qual("github.com/siyul-park/minivm/types", "BoxI1").Call(jen.Add(lhs).Op("==").Lit(0))
+			return jen.Qual(typesPkg, "BoxI1").Call(jen.Add(lhs).Op("==").Lit(0))
 		}
 	}
 	rhs := operands[1]
 	binary := func(name string, value jen.Code) jen.Code {
-		return jen.Qual("github.com/siyul-park/minivm/types", name).Call(value)
+		return jen.Qual(typesPkg, name).Call(value)
 	}
 	compare := func(value jen.Code) jen.Code {
 		return binary("BoxI1", value)
@@ -223,12 +223,12 @@ func compute(op instr.Opcode, operands ...jen.Code) jen.Code {
 		return binary("BoxI32", jen.Int32().Call(jen.Uint32().Call(lhs).Op(">>").Parens(jen.Add(rhs).Op("&").Lit(0x1f))))
 	case instr.I32_XOR:
 		payload := jen.Uint64().Call(lhs).Op("^").Uint64().Call(rhs)
-		tag := jen.Uint64().Call(lhs).Op("&").Uint64().Call(rhs).Op("&").Op("^").Uint64().Call(jen.Qual("github.com/siyul-park/minivm/types", "VMask"))
-		return jen.Qual("github.com/siyul-park/minivm/types", "Boxed").Call(tag.Op("|").Parens(payload.Op("&").Qual("github.com/siyul-park/minivm/types", "VMask")))
+		tag := jen.Uint64().Call(lhs).Op("&").Uint64().Call(rhs).Op("&").Op("^").Uint64().Call(jen.Qual(typesPkg, "VMask"))
+		return jen.Qual(typesPkg, "Boxed").Call(tag.Op("|").Parens(payload.Op("&").Qual(typesPkg, "VMask")))
 	case instr.I32_OR:
-		return jen.Qual("github.com/siyul-park/minivm/types", "Boxed").Call(jen.Uint64().Call(lhs).Op("|").Uint64().Call(rhs))
+		return jen.Qual(typesPkg, "Boxed").Call(jen.Uint64().Call(lhs).Op("|").Uint64().Call(rhs))
 	case instr.I32_AND:
-		return jen.Qual("github.com/siyul-park/minivm/types", "Boxed").Call(jen.Uint64().Call(lhs).Op("&").Uint64().Call(rhs))
+		return jen.Qual(typesPkg, "Boxed").Call(jen.Uint64().Call(lhs).Op("&").Uint64().Call(rhs))
 	case instr.I32_ROTL:
 		return binary("BoxI32", jen.Int32().Call(jen.Qual("math/bits", "RotateLeft32").Call(jen.Uint32().Call(lhs), jen.Int().Call(rhs))))
 	case instr.I32_ROTR:
@@ -335,10 +335,10 @@ func compute(op instr.Opcode, operands ...jen.Code) jen.Code {
 	case instr.F32_REM:
 		return binary("BoxF32", jen.Float32().Call(jen.Qual("math", "Mod").Call(jen.Float64().Call(lhs), jen.Float64().Call(rhs))))
 	case instr.F32_MOD:
-		return jen.Func().Params(jen.Id("lhs"), jen.Id("rhs").Float32()).Qual("github.com/siyul-park/minivm/types", "Boxed").Block(
+		return jen.Func().Params(jen.Id("lhs"), jen.Id("rhs").Float32()).Qual(typesPkg, "Boxed").Block(
 			jen.Id("m").Op(":=").Qual("math", "Mod").Call(jen.Float64().Call(jen.Id("lhs")), jen.Float64().Call(jen.Id("rhs"))),
 			jen.If(jen.Id("m").Op("!=").Lit(0).Op("&&").Parens(jen.Id("m").Op("<").Lit(0)).Op("!=").Parens(jen.Id("rhs").Op("<").Lit(0))).Block(jen.Id("m").Op("+=").Float64().Call(jen.Id("rhs"))),
-			jen.Return(jen.Qual("github.com/siyul-park/minivm/types", "BoxF32").Call(jen.Float32().Call(jen.Id("m")))),
+			jen.Return(jen.Qual(typesPkg, "BoxF32").Call(jen.Float32().Call(jen.Id("m")))),
 		).Call(lhs, rhs)
 	case instr.F32_MIN:
 		return binary("BoxF32", jen.Min(lhs, rhs))
@@ -360,10 +360,10 @@ func compute(op instr.Opcode, operands ...jen.Code) jen.Code {
 	case instr.F64_REM:
 		return binary("BoxF64", jen.Qual("math", "Mod").Call(lhs, rhs))
 	case instr.F64_MOD:
-		return jen.Func().Params(jen.Id("lhs"), jen.Id("rhs").Float64()).Qual("github.com/siyul-park/minivm/types", "Boxed").Block(
+		return jen.Func().Params(jen.Id("lhs"), jen.Id("rhs").Float64()).Qual(typesPkg, "Boxed").Block(
 			jen.Id("m").Op(":=").Qual("math", "Mod").Call(jen.Id("lhs"), jen.Id("rhs")),
 			jen.If(jen.Id("m").Op("!=").Lit(0).Op("&&").Parens(jen.Id("m").Op("<").Lit(0)).Op("!=").Parens(jen.Id("rhs").Op("<").Lit(0))).Block(jen.Id("m").Op("+=").Id("rhs")),
-			jen.Return(jen.Qual("github.com/siyul-park/minivm/types", "BoxF64").Call(jen.Id("m"))),
+			jen.Return(jen.Qual(typesPkg, "BoxF64").Call(jen.Id("m"))),
 		).Call(lhs, rhs)
 	case instr.F64_MIN:
 		return binary("BoxF64", jen.Qual("math", "Min").Call(lhs, rhs))

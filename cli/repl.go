@@ -32,7 +32,9 @@ type REPL struct {
 }
 
 const prompt = "> "
+
 const blockPrompt = "... "
+
 const debugPrompt = "debug> "
 
 const helpText = `MiniVM Assembly REPL
@@ -402,32 +404,6 @@ func (r *REPL) showProfile(metrics []prof.Metric) {
 	}
 }
 
-func (r *REPL) breakpoint(spec string) error {
-	if spec == "" {
-		return fmt.Errorf("usage: .break <ip> or .break <fn>:<ip>")
-	}
-	fn, ip, err := parseBreakSpec(spec)
-	if err != nil {
-		return err
-	}
-	r.ensureDebugger()
-	id := r.debugger.Break(fn, ip)
-	fmt.Fprintf(r.out, "breakpoint %d set at func=%d ip=%d\n", id, fn, ip)
-	return nil
-}
-
-func (r *REPL) clearBreakpoint(arg string) error {
-	id, err := r.breakpointID(arg, "usage: .clear <id>")
-	if err != nil {
-		return err
-	}
-	if !r.debugger.Clear(id) {
-		return fmt.Errorf("breakpoint %d not found", id)
-	}
-	fmt.Fprintf(r.out, "breakpoint %d cleared\n", id)
-	return nil
-}
-
 func (r *REPL) enableBreakpoint(arg string, on bool) error {
 	verb := "enable"
 	if !on {
@@ -446,20 +422,6 @@ func (r *REPL) enableBreakpoint(arg string, on bool) error {
 	}
 	fmt.Fprintf(r.out, "breakpoint %d %s\n", id, state)
 	return nil
-}
-
-// breakpointID resolves a breakpoint id argument, ensuring the debugger
-// exists for the lookup the caller performs next.
-func (r *REPL) breakpointID(arg, usage string) (int, error) {
-	if arg == "" {
-		return 0, errors.New(usage)
-	}
-	id, err := parseInt(arg)
-	if err != nil {
-		return 0, fmt.Errorf("invalid breakpoint id %q: %w", arg, err)
-	}
-	r.ensureDebugger()
-	return id, nil
 }
 
 func (r *REPL) debug(ctx context.Context, scanner *bufio.Scanner) error {
@@ -552,12 +514,52 @@ func (r *REPL) debugLoop(scanner *bufio.Scanner, vm *interp.Interpreter, dbg *de
 		case "quit", "exit", "q":
 			return true, nil
 		case "":
-			// empty line: re-print current location
+
 			r.showStop(dbg.Stop(), vm)
 		default:
 			fmt.Fprintf(r.out, "unknown debug command: %q (step/next/finish/continue/stack/locals/globals/frames/breaks/break/clear/quit)\n", line)
 		}
 	}
+}
+
+func (r *REPL) breakpoint(spec string) error {
+	if spec == "" {
+		return fmt.Errorf("usage: .break <ip> or .break <fn>:<ip>")
+	}
+	fn, ip, err := parseBreakSpec(spec)
+	if err != nil {
+		return err
+	}
+	r.ensureDebugger()
+	id := r.debugger.Break(fn, ip)
+	fmt.Fprintf(r.out, "breakpoint %d set at func=%d ip=%d\n", id, fn, ip)
+	return nil
+}
+
+func (r *REPL) clearBreakpoint(arg string) error {
+	id, err := r.breakpointID(arg, "usage: .clear <id>")
+	if err != nil {
+		return err
+	}
+	if !r.debugger.Clear(id) {
+		return fmt.Errorf("breakpoint %d not found", id)
+	}
+	fmt.Fprintf(r.out, "breakpoint %d cleared\n", id)
+	return nil
+}
+
+// breakpointID resolves a breakpoint id argument, ensuring the debugger
+// exists for the lookup the caller performs next.
+func (r *REPL) breakpointID(arg, usage string) (int, error) {
+	if arg == "" {
+		return 0, errors.New(usage)
+	}
+	id, err := parseInt(arg)
+	if err != nil {
+		return 0, fmt.Errorf("invalid breakpoint id %q: %w", arg, err)
+	}
+	r.ensureDebugger()
+	return id, nil
 }
 
 func (r *REPL) showBreakpoints() {
