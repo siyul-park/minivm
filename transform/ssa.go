@@ -32,8 +32,7 @@ func NewSSAPass(pipeline *pass.Pipeline[*ssa.Function]) *SSAPass {
 // Run applies the SSA round trip.
 func (p *SSAPass) Run(_ *pass.Manager, prog *program.Program) (bool, error) {
 	constants := newPool(prog)
-	// The inner manager caches per-function analyses; the outer manager's
-	// unit is the whole program, a different cache key space.
+
 	manager := pass.NewManager()
 
 	root := &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}

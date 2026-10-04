@@ -20,15 +20,6 @@ func newRebuilder(function *ssa.Function) *rebuilder {
 	}
 }
 
-func (r *rebuilder) block(block int) int {
-	if id, ok := r.blocks[block]; ok {
-		return id
-	}
-	id := r.builder.Block()
-	r.blocks[block] = id
-	return id
-}
-
 // open returns block's id in the rebuilt function, declaring its params.
 func (r *rebuilder) open(block int) int {
 	id := r.block(block)
@@ -38,22 +29,18 @@ func (r *rebuilder) open(block int) int {
 	return id
 }
 
-func (r *rebuilder) value(value ssa.Value) ssa.Value {
-	if value == ssa.NoValue {
-		return ssa.NoValue
+func (r *rebuilder) operation(operation ssa.Operation) ssa.Operation {
+	operation.Args = r.list(operation.Args)
+	if len(operation.Frames) > 0 {
+		frames := make([]ssa.Frame, len(operation.Frames))
+		for i, frame := range operation.Frames {
+			frame.Stack, frame.Locals = r.stack(frame.Stack), r.locals(frame.Locals)
+			frames[i] = frame
+		}
+		operation.Frames = frames
 	}
-	return r.values[value]
-}
-
-func (r *rebuilder) list(values []ssa.Value) []ssa.Value {
-	if len(values) == 0 {
-		return nil
-	}
-	out := make([]ssa.Value, len(values))
-	for i, value := range values {
-		out[i] = r.value(value)
-	}
-	return out
+	operation.State = r.value(operation.State)
+	return operation
 }
 
 func (r *rebuilder) stack(operands []ssa.Operand) []ssa.Operand {
@@ -78,24 +65,6 @@ func (r *rebuilder) locals(locals []ssa.Local) []ssa.Local {
 	return out
 }
 
-func (r *rebuilder) alias(old, at ssa.Value) {
-	r.values[old] = at
-}
-
-func (r *rebuilder) operation(operation ssa.Operation) ssa.Operation {
-	operation.Args = r.list(operation.Args)
-	if len(operation.Frames) > 0 {
-		frames := make([]ssa.Frame, len(operation.Frames))
-		for i, frame := range operation.Frames {
-			frame.Stack, frame.Locals = r.stack(frame.Stack), r.locals(frame.Locals)
-			frames[i] = frame
-		}
-		operation.Frames = frames
-	}
-	operation.State = r.value(operation.State)
-	return operation
-}
-
 func (r *rebuilder) terminator(t ssa.Terminator) ssa.Terminator {
 	t.Args = r.list(t.Args)
 	if len(t.Edges) > 0 {
@@ -111,6 +80,33 @@ func (r *rebuilder) terminator(t ssa.Terminator) ssa.Terminator {
 	return t
 }
 
+func (r *rebuilder) block(block int) int {
+	if id, ok := r.blocks[block]; ok {
+		return id
+	}
+	id := r.builder.Block()
+	r.blocks[block] = id
+	return id
+}
+
+func (r *rebuilder) list(values []ssa.Value) []ssa.Value {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]ssa.Value, len(values))
+	for i, value := range values {
+		out[i] = r.value(value)
+	}
+	return out
+}
+
+func (r *rebuilder) value(value ssa.Value) ssa.Value {
+	if value == ssa.NoValue {
+		return ssa.NoValue
+	}
+	return r.values[value]
+}
+
 func (r *rebuilder) define(operation ssa.Operation) ssa.Operation {
 	if len(operation.Results) == 0 {
 		return operation
@@ -123,4 +119,8 @@ func (r *rebuilder) define(operation ssa.Operation) ssa.Operation {
 	}
 	operation.Results = results
 	return operation
+}
+
+func (r *rebuilder) alias(old, at ssa.Value) {
+	r.values[old] = at
 }

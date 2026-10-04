@@ -119,31 +119,6 @@ func (i Instruction) Width() int {
 	return offset
 }
 
-func (i Instruction) String() string {
-	typ := i.Type()
-
-	var sb strings.Builder
-	sb.WriteString(typ.Mnemonic)
-
-	operands := i.Operands()
-	offset := 0
-	for _, w := range typ.Widths {
-		count := offset + 1
-		if w < 0 {
-			sb.WriteByte(' ')
-			sb.WriteString(fmt.Sprintf("0x%02x", operands[offset]))
-			count += int(operands[offset])
-			w *= -1
-			offset++
-		}
-		for ; offset < count; offset++ {
-			sb.WriteByte(' ')
-			sb.WriteString(fmt.Sprintf("0x%0*X", w*2, operands[offset]))
-		}
-	}
-	return sb.String()
-}
-
 func (i Instruction) Operands() []uint64 {
 	typ := i.Type()
 
@@ -178,10 +153,37 @@ func (i Instruction) Operands() []uint64 {
 	return operands
 }
 
-func (i Instruction) Type() Type {
-	return TypeOf(i.Opcode())
-}
-
 func (i Instruction) Opcode() Opcode {
 	return Opcode(i[0])
+}
+
+// String returns the textual representation.
+func (i Instruction) String() string {
+	typ := i.Type()
+
+	var sb strings.Builder
+	sb.WriteString(typ.Mnemonic)
+
+	operands := i.Operands()
+	offset := 0
+	for _, w := range typ.Widths {
+		count := offset + 1
+		if w < 0 {
+			sb.WriteByte(' ')
+			sb.WriteString(fmt.Sprintf("0x%02x", operands[offset]))
+			count += int(operands[offset])
+			w *= -1
+			offset++
+		}
+		for ; offset < count; offset++ {
+			sb.WriteByte(' ')
+			sb.WriteString(fmt.Sprintf("0x%0*X", w*2, operands[offset]))
+		}
+	}
+	return sb.String()
+}
+
+// Type returns the value type.
+func (i Instruction) Type() Type {
+	return TypeOf(i.Opcode())
 }

@@ -205,25 +205,17 @@ func scalars() []pattern {
 		}
 	}
 	patterns = append(patterns, setPatterns...)
-	// array.get and struct.get both accept a compile-time constant field
-	// index alone, leaving whatever container instruction precedes them
-	// unfused.
+
 	fieldIndex := []pattern{op(instr.I32_CONST), constant[types.I32]()}
 	patterns = append(patterns, cross(fieldIndex, op(instr.ARRAY_GET), op(instr.STRUCT_GET))...)
-	// A struct.get container may also be a LOCAL_GET, GLOBAL_GET, or
-	// UPVAL_GET whose declared type is a concrete struct, letting the fused
-	// consumer resolve the accessed field's Kind from the declared type at
-	// threading time.
+
 	structFields := make([]pattern, 0, len(fieldIndex))
 	for _, index := range fieldIndex {
 		structFields = append(structFields, seq(index, op(instr.STRUCT_GET)))
 	}
 	structContainers := make([]pattern, 0, len(slotSources))
 	for _, source := range slotSources {
-		// One Go type covers every struct shape, so unlike typed arrays the
-		// fused struct.get consumer resolves the declared *types.StructType
-		// (and each accessed field's Kind) at threading time instead of
-		// selecting it here.
+
 		structContainers = append(structContainers, typedContainer[types.Struct](source))
 	}
 	patterns = append(patterns, cross(structContainers, structFields...)...)

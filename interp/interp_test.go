@@ -224,7 +224,7 @@ var runTests = []struct {
 		values:  zeroValues,
 	},
 	{
-		// The tail call reuses the caller's frame, whose local 0 holds 7.
+
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(
 			types.NewFunctionBuilder(&types.FunctionType{Returns: zeroTypes}).Locals(types.TypeI32).Emit(
 				instr.New(instr.I32_CONST, 7), instr.New(instr.LOCAL_SET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.RETURN_CALL),
@@ -1000,9 +1000,7 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
-			// Keep the first join live in a local, extend a copy of it, then
-			// compare the local against its original content: an append that
-			// rewrote published bytes would change what the local reads.
+
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
 			instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
@@ -1157,8 +1155,7 @@ var runTests = []struct {
 		values: []types.Value{types.TypedArray[int32]{20, 30}},
 	},
 	{
-		// array.new_default stores a generic *types.Array in an i32-declared slot; fused array.get
-		// must miss TypedArray[int32] specialization and read the actual representation.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1170,8 +1167,7 @@ var runTests = []struct {
 		values: []types.Value{types.Null},
 	},
 	{
-		// LOCAL_SET permits a f32 array in an i32-declared slot. Fused array.get must miss the
-		// TypedArray[int32] specialization and preserve generic behavior.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
@@ -1329,13 +1325,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(7)},
 	},
 	{
-		// Mirrors the LOCAL_GET parity case above: array.new_default's type
-		// index names a ref-element array type, so the heap value is the
-		// generic *types.Array representation, while the global it is stored
-		// into is declared types.TypeI32Array. array.get's fused GLOBAL_GET
-		// path proves only the global's declared element kind at threading
-		// time, so it must fall back to the *types.Array representation
-		// actually on the heap instead of trapping.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.GLOBAL_SET, 0),
@@ -1347,8 +1337,7 @@ var runTests = []struct {
 		values: []types.Value{types.Null},
 	},
 	{
-		// GLOBAL_SET permits a f32 array in an i32-declared global. Fusion must miss
-		// TypedArray[int32] and fall back to the generic array reader.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_SET, 0),
 			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
@@ -1403,9 +1392,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(7)},
 	},
 	{
-		// Mirrors the LOCAL_GET parity case above, but the ref-element array
-		// is captured as an upvalue declared types.TypeI32Array instead of
-		// stored into a local.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.CONST_GET, 0),
@@ -1421,8 +1408,7 @@ var runTests = []struct {
 		values: []types.Value{types.Null},
 	},
 	{
-		// CLOSURE_NEW permits a f32 array in an i32-declared capture. Fusion must miss
-		// TypedArray[int32] and fall back to the generic array reader.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CONST_GET, 1),
@@ -1690,12 +1676,7 @@ var runTests = []struct {
 		err: interp.ErrIndexOutOfRange,
 	},
 	{
-		// Regression: array.set fused through a CONST_GET typed-array
-		// constant container previously did i.sp -= 3 after the write, but a
-		// fused sequence never pushes its container, index, or value onto the
-		// operand stack, so its net stack effect must be zero. The stray
-		// decrement corrupted the stack pointer and crashed the next stack
-		// access (interp.Run panicked "index out of range [-3]").
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 42), instr.New(instr.ARRAY_SET),
 			instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET),
@@ -1703,10 +1684,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(42)},
 	},
 	{
-		// array.set fused onto a LOCAL_GET whose declared slot type is a
-		// concrete typed array specializes directly: the runtime value's
-		// representation matches the declared kind, so no fallback is
-		// needed.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1719,8 +1697,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(42)},
 	},
 	{
-		// Mirrors the LOCAL_GET case above, but the container is a module
-		// global instead of a local.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.GLOBAL_SET, 0),
@@ -1733,8 +1710,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(42)},
 	},
 	{
-		// Mirrors the LOCAL_GET case above, but the container is a
-		// closure's captured upvalue instead of a local.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.CONST_GET, 0),
@@ -1751,7 +1727,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(42)},
 	},
 	{
-		// array.set's fused LOCAL_GET path over the i1 (bool) element kind.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1764,7 +1740,7 @@ var runTests = []struct {
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		// array.set's fused LOCAL_GET path over the i8 element kind.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1777,7 +1753,7 @@ var runTests = []struct {
 		values: []types.Value{types.I8(7)},
 	},
 	{
-		// array.set's fused LOCAL_GET path over the i32 element kind.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1790,7 +1766,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(42)},
 	},
 	{
-		// array.set's fused LOCAL_GET path over the i64 element kind.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1803,7 +1779,7 @@ var runTests = []struct {
 		values: []types.Value{types.I64(42)},
 	},
 	{
-		// array.set's fused LOCAL_GET path over the f32 element kind.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1816,7 +1792,7 @@ var runTests = []struct {
 		values: []types.Value{types.F32(1.5)},
 	},
 	{
-		// array.set's fused LOCAL_GET path over the f64 element kind.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1829,8 +1805,7 @@ var runTests = []struct {
 		values: []types.Value{types.F64(2.5)},
 	},
 	{
-		// array.new_default produces generic *types.Array even when the slot declares i32
-		// elements. Fused array.set must miss specialization and preserve the generic store.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1843,8 +1818,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(42)},
 	},
 	{
-		// LOCAL_SET permits a f32 array in an i32-declared slot. Fusion must miss
-		// TypedArray[int32] and preserve the generic store, including raw-bit conversion.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0), instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_SET),
@@ -1856,8 +1830,7 @@ var runTests = []struct {
 		values: []types.Value{types.F32(0)},
 	},
 	{
-		// array.set's fused LOCAL_GET path still bounds-checks: an
-		// out-of-range index traps the same as the unfused handler.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.LOCAL_SET, 0),
@@ -1869,16 +1842,476 @@ var runTests = []struct {
 		err: interp.ErrIndexOutOfRange,
 	},
 	{
-		// A local declared as a typed array can still hold a non-ref value
-		// at runtime (LOCAL_SET does not recheck the declared type).
-		// array.set's fused LOCAL_GET path traps type mismatch the same as
-		// the unfused handler.
+
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5), instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 9), instr.New(instr.ARRAY_SET),
 		}, program.WithLocals(types.TypeI32Array)),
 		err: interp.ErrTypeMismatch,
 	},
+}
+
+func (v *trackedValue) Close() error {
+	v.closed++
+	return nil
+}
+
+func (h *structGetHostFields) Bump(n int32) int32 {
+	h.Count += n
+	h.hidden++
+	return h.Count
+}
+
+func (v *marshalBenchMethods) Bump(n int32) int32 {
+	v.Count += n
+	v.hidden++
+	return v.Count
+}
+
+func (v *trackedValue) Kind() types.Kind { return types.KindRef }
+
+func (v *trackedValue) Type() types.Type { return types.TypeAny }
+
+func (v *trackedValue) String() string { return "tracked" }
+
+func (v *trackedValue) Refs(dst []types.Ref) []types.Ref {
+	return append(dst, v.refs...)
+}
+
+func (upperCodec) Marshal(_ *interp.Interpreter, v any) (types.Value, error) {
+	s, ok := v.(string)
+	if !ok {
+		return nil, interp.ErrUnsupportedMarshalType
+	}
+	return types.String(strings.ToUpper(s)), nil
+}
+
+func (upperCodec) Unmarshal(_ *interp.Interpreter, v types.Value, dst any) error {
+	s, ok := v.(types.String)
+	if !ok {
+		return interp.ErrInvalidUnmarshalTarget
+	}
+	p, ok := dst.(*string)
+	if !ok {
+		return interp.ErrInvalidUnmarshalTarget
+	}
+	*p = strings.ToLower(string(s))
+	return nil
+}
+
+// zeroFunction returns its locals, one of each zeroTypes, unwritten.
+func zeroFunction() *types.Function {
+	return types.NewFunctionBuilder(&types.FunctionType{Returns: zeroTypes}).
+		Locals(zeroTypes...).
+		Emit(append(slices.Clone(zeroReads), instr.New(instr.RETURN))...).
+		MustBuild()
+}
+
+// runTestName renders a runTests case's program to a single-line name, so the
+// program itself documents the case instead of a hand-written label that can
+// drift out of sync with it. It reads the program's canonical String() dump,
+// keeps only the ".code" section (ignoring any ".locals", ".constants", etc.
+// that follow), strips each line's "%04d:\t" offset prefix, and joins the
+// remaining instruction text with "; ".
+func runTestName(prog *program.Program) string {
+	lines := strings.Split(prog.String(), "\n")
+	var parts []string
+	for _, line := range lines[1:] {
+		if strings.HasPrefix(line, ".") {
+			break
+		}
+		if line == "" {
+			continue
+		}
+		if _, rest, ok := strings.Cut(line, ":\t"); ok {
+			line = rest
+		}
+		parts = append(parts, line)
+	}
+	return strings.Join(parts, "; ")
+}
+
+// selfCycle allocates a value that references only itself, held by the heap
+// alone: it stays reachable from no root, so only cycle collection frees it.
+func selfCycle(t *testing.T, i *interp.Interpreter) (*trackedValue, int) {
+	t.Helper()
+	value := &trackedValue{}
+	addr, err := i.Alloc(value)
+	require.NoError(t, err)
+	value.refs = []types.Ref{types.Ref(addr)}
+	_, err = i.Retain(addr)
+	require.NoError(t, err)
+	require.NoError(t, i.Release(addr))
+	return value, addr
+}
+
+func i32operand(v int32) uint64 {
+	return uint64(uint32(v))
+}
+
+func i64operand(v int64) uint64 {
+	return uint64(v)
+}
+
+// structSumTree builds a small binary-tree kernel shaped like
+// benchmarks/memory_test.go's structTreeWalk, except sumFn's tree parameter
+// is declared as the concrete node struct type instead of types.TypeAny, so
+// every struct.get on it is a LOCAL_GET whose declared type is a concrete
+// *types.StructType -- the shape interp/threaded.go's generated STRUCT_GET
+// local-container fusion specializes.
+func structSumTree(depth, repeats int32) *program.Program {
+	nodeType := types.NewStructType(
+		types.NewStructField(types.TypeI32, types.FieldWithName("value")),
+		types.NewStructField(types.TypeAny, types.FieldWithName("left")),
+		types.NewStructField(types.TypeAny, types.FieldWithName("right")),
+	)
+
+	buildBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny}}).
+		Params(types.TypeI32).
+		Locals(types.TypeAny)
+	buildDone := buildBuilder.Label()
+	buildFn := buildBuilder.
+		Emit(
+			instr.New(instr.STRUCT_NEW_DEFAULT, 0), instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.STRUCT_SET),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_S),
+		).
+		BrIf(buildDone).
+		Emit(
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			instr.New(instr.STRUCT_SET),
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 2),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			instr.New(instr.STRUCT_SET),
+		).
+		Bind(buildDone).
+		Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.RETURN)).
+		MustBuild()
+
+	sumBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+		Params(nodeType)
+	nullCase := sumBuilder.Label()
+	sumFn := sumBuilder.
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.REF_IS_NULL)).
+		BrIf(nullCase).
+		Emit(
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET),
+			instr.New(instr.CONST_GET, 1), instr.New(instr.CALL),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.STRUCT_GET),
+			instr.New(instr.CONST_GET, 1), instr.New(instr.CALL),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN),
+		).
+		Bind(nullCase).
+		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN)).
+		MustBuild()
+
+	b := program.NewBuilder()
+	buildIdx := b.Const(buildFn)
+	sumIdx := b.Const(sumFn)
+	b.Type(nodeType)
+	b.Locals(types.TypeAny, types.TypeI32, types.TypeI32)
+	loop := b.Label()
+	done := b.Label()
+	b.Emit(instr.I32_CONST, uint64(uint32(depth))).
+		Emit(instr.CONST_GET, uint64(buildIdx)).Emit(instr.CALL).
+		Emit(instr.LOCAL_SET, 0).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2).
+		Bind(loop).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(repeats))).Emit(instr.I32_GE_S).
+		BrIf(done).
+		Emit(instr.LOCAL_GET, 2).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, uint64(sumIdx)).Emit(instr.CALL).
+		Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
+		Br(loop).
+		Bind(done).
+		Emit(instr.LOCAL_GET, 2)
+	prog, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
+	return prog
+}
+
+// arraySumGlobal builds a kernel that holds a size-length int32 array in a
+// declared GLOBAL_GET slot and sums its elements repeats times in a nested
+// loop, so every array.get is a GLOBAL_GET whose declared type is a concrete
+// *types.ArrayType -- the shape interp/threaded.go's generated ARRAY_GET
+// global-container fusion specializes.
+func arraySumGlobal(size, repeats int32) *program.Program {
+	elems := make([]int32, size)
+	for i := range elems {
+		elems[i] = int32(i)
+	}
+
+	b := program.NewBuilder()
+	b.Globals(types.TypeI32Array)
+	b.Locals(types.TypeI32, types.TypeI32, types.TypeI32)
+	outerLoop, outerDone := b.Label(), b.Label()
+	innerLoop, innerDone := b.Label(), b.Label()
+	b.ConstGet(types.TypedArray[int32](elems)).Emit(instr.GLOBAL_SET, 0).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0).
+		Bind(outerLoop).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(repeats))).Emit(instr.I32_GE_S).
+		BrIf(outerDone).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
+		Bind(innerLoop).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).
+		BrIf(innerDone).
+		Emit(instr.LOCAL_GET, 2).
+		Emit(instr.GLOBAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET).
+		Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
+		Br(innerLoop).
+		Bind(innerDone).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).
+		Br(outerLoop).
+		Bind(outerDone).
+		Emit(instr.LOCAL_GET, 2)
+	prog, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
+	return prog
+}
+
+// arraySumUpvalue builds the same kernel as arraySumGlobal, except the array
+// is captured as a closure upvalue instead of stored in a global, so every
+// array.get is a UPVAL_GET whose declared type is a concrete *types.ArrayType
+// -- the shape interp/threaded.go's generated ARRAY_GET upvalue-container
+// fusion specializes.
+func arraySumUpvalue(size, repeats int32) *program.Program {
+	elems := make([]int32, size)
+	for i := range elems {
+		elems[i] = int32(i)
+	}
+
+	sumBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+		Captures(types.TypeI32Array).
+		Locals(types.TypeI32, types.TypeI32, types.TypeI32)
+	outerLoop, outerDone := sumBuilder.Label(), sumBuilder.Label()
+	innerLoop, innerDone := sumBuilder.Label(), sumBuilder.Label()
+	sumFn := sumBuilder.
+		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 2)).
+		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 0)).
+		Bind(outerLoop).
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, uint64(uint32(repeats))), instr.New(instr.I32_GE_S)).
+		BrIf(outerDone).
+		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1)).
+		Bind(innerLoop).
+		Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, uint64(uint32(size))), instr.New(instr.I32_GE_S)).
+		BrIf(innerDone).
+		Emit(
+			instr.New(instr.LOCAL_GET, 2),
+			instr.New(instr.UPVAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.ARRAY_GET),
+			instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2),
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
+		).
+		Br(innerLoop).
+		Bind(innerDone).
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 0)).
+		Br(outerLoop).
+		Bind(outerDone).
+		Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN)).
+		MustBuild()
+
+	b := program.NewBuilder()
+	fnIdx := b.Const(sumFn)
+	b.ConstGet(types.TypedArray[int32](elems))
+	b.Emit(instr.CONST_GET, uint64(fnIdx)).Emit(instr.CLOSURE_NEW).Emit(instr.CALL)
+	prog, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
+	return prog
+}
+
+// arrayFillLocal builds a kernel that holds a size-length int32 array in a
+// declared LOCAL_GET slot and writes arr[j] = j repeats times in a nested
+// loop, so every array.set is a LOCAL_GET whose declared type is a concrete
+// *types.ArrayType -- the shape interp/threaded.go's generated ARRAY_SET
+// local-container fusion specializes. A final pass sums the written array
+// once to produce a checksum the benchmark can verify.
+func arrayFillLocal(size, repeats int32) *program.Program {
+	b := program.NewBuilder()
+	b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32, types.TypeI32)
+	outerLoop, outerDone := b.Label(), b.Label()
+	innerLoop, innerDone := b.Label(), b.Label()
+	sumLoop, sumDone := b.Label(), b.Label()
+	b.ConstGet(types.TypedArray[int32](make([]int32, size))).Emit(instr.LOCAL_SET, 0).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
+		Bind(outerLoop).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(repeats))).Emit(instr.I32_GE_S).
+		BrIf(outerDone).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2).
+		Bind(innerLoop).
+		Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).
+		BrIf(innerDone).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 2).Emit(instr.ARRAY_SET).
+		Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).
+		Br(innerLoop).
+		Bind(innerDone).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
+		Br(outerLoop).
+		Bind(outerDone).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2).
+		Bind(sumLoop).
+		Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).
+		BrIf(sumDone).
+		Emit(instr.LOCAL_GET, 3).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 2).Emit(instr.ARRAY_GET).
+		Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3).
+		Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).
+		Br(sumLoop).
+		Bind(sumDone).
+		Emit(instr.LOCAL_GET, 3)
+	prog, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
+	return prog
+}
+
+// arrayFillGlobal builds the same kernel as arrayFillLocal, except the array
+// is held in a declared GLOBAL_GET slot instead of a local, so every
+// array.set is a GLOBAL_GET whose declared type is a concrete
+// *types.ArrayType -- the shape interp/threaded.go's generated ARRAY_SET
+// global-container fusion specializes.
+func arrayFillGlobal(size, repeats int32) *program.Program {
+	b := program.NewBuilder()
+	b.Globals(types.TypeI32Array)
+	b.Locals(types.TypeI32, types.TypeI32, types.TypeI32)
+	outerLoop, outerDone := b.Label(), b.Label()
+	innerLoop, innerDone := b.Label(), b.Label()
+	sumLoop, sumDone := b.Label(), b.Label()
+	b.ConstGet(types.TypedArray[int32](make([]int32, size))).Emit(instr.GLOBAL_SET, 0).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0).
+		Bind(outerLoop).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(repeats))).Emit(instr.I32_GE_S).
+		BrIf(outerDone).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
+		Bind(innerLoop).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).
+		BrIf(innerDone).
+		Emit(instr.GLOBAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_SET).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
+		Br(innerLoop).
+		Bind(innerDone).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).
+		Br(outerLoop).
+		Bind(outerDone).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
+		Bind(sumLoop).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).
+		BrIf(sumDone).
+		Emit(instr.LOCAL_GET, 2).
+		Emit(instr.GLOBAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET).
+		Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
+		Br(sumLoop).
+		Bind(sumDone).
+		Emit(instr.LOCAL_GET, 2)
+	prog, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
+	return prog
+}
+
+// arrayFillUpvalue builds the same kernel as arrayFillLocal, except the
+// array is captured as a closure upvalue instead of stored in a local, so
+// every array.set is a UPVAL_GET whose declared type is a concrete
+// *types.ArrayType -- the shape interp/threaded.go's generated ARRAY_SET
+// upvalue-container fusion specializes.
+func arrayFillUpvalue(size, repeats int32) *program.Program {
+	fillBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+		Captures(types.TypeI32Array).
+		Locals(types.TypeI32, types.TypeI32, types.TypeI32)
+	outerLoop, outerDone := fillBuilder.Label(), fillBuilder.Label()
+	innerLoop, innerDone := fillBuilder.Label(), fillBuilder.Label()
+	sumLoop, sumDone := fillBuilder.Label(), fillBuilder.Label()
+	fillFn := fillBuilder.
+		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 0)).
+		Bind(outerLoop).
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, uint64(uint32(repeats))), instr.New(instr.I32_GE_S)).
+		BrIf(outerDone).
+		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1)).
+		Bind(innerLoop).
+		Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, uint64(uint32(size))), instr.New(instr.I32_GE_S)).
+		BrIf(innerDone).
+		Emit(
+			instr.New(instr.UPVAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 1), instr.New(instr.ARRAY_SET),
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
+		).
+		Br(innerLoop).
+		Bind(innerDone).
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 0)).
+		Br(outerLoop).
+		Bind(outerDone).
+		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 2)).
+		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1)).
+		Bind(sumLoop).
+		Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, uint64(uint32(size))), instr.New(instr.I32_GE_S)).
+		BrIf(sumDone).
+		Emit(
+			instr.New(instr.LOCAL_GET, 2),
+			instr.New(instr.UPVAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.ARRAY_GET),
+			instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2),
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
+		).
+		Br(sumLoop).
+		Bind(sumDone).
+		Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN)).
+		MustBuild()
+
+	b := program.NewBuilder()
+	fnIdx := b.Const(fillFn)
+	b.ConstGet(types.TypedArray[int32](make([]int32, size)))
+	b.Emit(instr.CONST_GET, uint64(fnIdx)).Emit(instr.CLOSURE_NEW).Emit(instr.CALL)
+	prog, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
+	return prog
+}
+
+// structGetHostLoop reads field 0 of a host-backed struct repeats times,
+// accumulating the reads so nothing is optimized away.
+func structGetHostLoop(repeats int32) *program.Program {
+	b := program.NewBuilder()
+	b.Locals(types.TypeAny, types.TypeI32, types.TypeI32)
+	loop := b.Label()
+	done := b.Label()
+	b.Emit(instr.LOCAL_SET, 0).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
+		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2).
+		Bind(loop).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(repeats))).Emit(instr.I32_GE_S).
+		BrIf(done).
+		Emit(instr.LOCAL_GET, 2).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).
+		Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).
+		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
+		Br(loop).
+		Bind(done).
+		Emit(instr.LOCAL_GET, 2)
+	prog, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
+	return prog
 }
 
 func TestInterpreter_Run(t *testing.T) {
@@ -1965,9 +2398,7 @@ func TestInterpreter_Run(t *testing.T) {
 	})
 
 	t.Run("releases frame slots on return", func(t *testing.T) {
-		// The callee returns a scalar, so the reference the caller passed in is
-		// discarded with the frame instead of handed back. A teardown that keeps
-		// it leaks one slot per call and exhausts a bounded heap.
+
 		callee := types.NewFunctionBuilder(&types.FunctionType{
 			Params:  []types.Type{types.TypeAny},
 			Returns: []types.Type{types.TypeI32},
@@ -1997,10 +2428,7 @@ func TestInterpreter_Run(t *testing.T) {
 	})
 
 	t.Run("reuses the frame across a self tail call", func(t *testing.T) {
-		// A tail call replaces the running frame in place, so its callee's
-		// locals must start where the caller's did. A teardown that leaves sp
-		// past the reused frame grows the stack by one frame per call and
-		// exhausts a bounded stack long before the recursion ends.
+
 		fb := types.NewFunctionBuilder(&types.FunctionType{
 			Params:  []types.Type{types.TypeI32},
 			Returns: []types.Type{types.TypeI32},
@@ -2028,9 +2456,7 @@ func TestInterpreter_Run(t *testing.T) {
 	})
 
 	t.Run("releases every string.concat intermediate", func(t *testing.T) {
-		// Each join consumes both operands and publishes one result, so an
-		// accumulating loop holds one live string at a time. A join that kept an
-		// operand ref leaks one slot per iteration and exhausts a bounded heap.
+
 		b := program.NewBuilder()
 		loop := b.Label()
 		done := b.Label()
@@ -2319,9 +2745,9 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("SELECT keeps the selected ref and releases the discarded one", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
-			instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW), // heap[2]
-			instr.New(instr.I32_CONST, 1), // cond != 0 selects the deeper operand
+			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
+			instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW),
+			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.SELECT),
 		})
 		i := interp.New(prog)
@@ -2334,16 +2760,16 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 1, top.Ref())
 		rc1, err := i.RefCount(1)
 		require.NoError(t, err)
-		require.Equal(t, 1, rc1) // selected ref survives on the stack
+		require.Equal(t, 1, rc1)
 		_, err = i.RefCount(2)
-		require.ErrorIs(t, err, interp.ErrSegmentationFault) // discarded ref released to zero
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
 
 	t.Run("GLOBAL_TEE retains the ref stored into the global", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
-			instr.New(instr.GLOBAL_TEE, 0), // duplicates ownership: stack + global
-			instr.New(instr.DROP),          // drop stack copy; global still owns
+			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
+			instr.New(instr.GLOBAL_TEE, 0),
+			instr.New(instr.DROP),
 		}, program.WithGlobals(types.TypeAny))
 		i := interp.New(prog)
 		defer i.Close()
@@ -2355,14 +2781,14 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 1, g.Ref())
 		rc, err := i.RefCount(1)
 		require.NoError(t, err)
-		require.Equal(t, 1, rc) // global slot keeps the ref alive
+		require.Equal(t, 1, rc)
 	})
 
 	t.Run("LOCAL_TEE retains the ref stored into the local", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
-			instr.New(instr.LOCAL_TEE, 0), // duplicates ownership: stack + local
-			instr.New(instr.DROP),         // drop stack copy; local still owns
+			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
+			instr.New(instr.LOCAL_TEE, 0),
+			instr.New(instr.DROP),
 		}, program.WithLocals(types.TypeI32Array))
 		i := interp.New(prog)
 		defer i.Close()
@@ -2374,7 +2800,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 1, l.Ref())
 		rc, err := i.RefCount(1)
 		require.NoError(t, err)
-		require.Equal(t, 1, rc) // local slot keeps the ref alive
+		require.Equal(t, 1, rc)
 	})
 
 	t.Run("ref operations release the refs they consume", func(t *testing.T) {
@@ -2386,8 +2812,8 @@ func TestInterpreter_Run(t *testing.T) {
 			{
 				name: "REF_EQ",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
-					instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW), // heap[2]
+					instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
+					instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW),
 					instr.New(instr.REF_EQ),
 				}),
 				released: []int{1, 2},
@@ -2395,8 +2821,8 @@ func TestInterpreter_Run(t *testing.T) {
 			{
 				name: "REF_NE",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
-					instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW), // heap[2]
+					instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
+					instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW),
 					instr.New(instr.REF_NE),
 				}),
 				released: []int{1, 2},
@@ -2404,7 +2830,7 @@ func TestInterpreter_Run(t *testing.T) {
 			{
 				name: "REF_TEST",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
+					instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
 					instr.New(instr.REF_TEST, 0),
 				}, program.WithTypes(types.TypeI32)),
 				released: []int{1},
@@ -2412,7 +2838,7 @@ func TestInterpreter_Run(t *testing.T) {
 			{
 				name: "REF_IS_NULL",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
+					instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
 					instr.New(instr.REF_IS_NULL),
 				}),
 				released: []int{1},
@@ -2513,7 +2939,7 @@ func TestInterpreter_Run(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.GLOBAL_GET, 0),
 			instr.New(instr.I32_CONST, i32operand(2)),
-			instr.New(instr.I32_ADD), // fuses without any prior GLOBAL_SET/SetGlobal
+			instr.New(instr.I32_ADD),
 			instr.New(instr.GLOBAL_GET, 1),
 			instr.New(instr.GLOBAL_GET, 2),
 		}, program.WithGlobals(types.TypeI32, types.TypeF64, types.TypeAny))
@@ -2553,18 +2979,18 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("ARRAY_FILL releases every overwritten ref element", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 1), // outer heap[1]
+			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 1),
 			instr.New(instr.DUP), instr.New(instr.I32_CONST, 0),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0), // inner heap[2]
+			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.ARRAY_SET),
 			instr.New(instr.DUP), instr.New(instr.I32_CONST, 1),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0), // inner heap[3]
+			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.ARRAY_SET),
 			instr.New(instr.DUP), instr.New(instr.I32_CONST, 2),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0), // inner heap[4]
+			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.ARRAY_SET),
 			instr.New(instr.DUP), instr.New(instr.I32_CONST, 0),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0), // fill value heap[5]
+			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_FILL),
 		}, program.WithTypes(types.TypeI32Array, types.NewArrayType(types.TypeI32Array)))
 		i := interp.New(prog)
@@ -2573,14 +2999,14 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NoError(t, i.Run(context.Background()))
 
 		_, err := i.RefCount(2)
-		require.ErrorIs(t, err, interp.ErrSegmentationFault) // every overwritten element is released,
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 		_, err = i.RefCount(3)
-		require.ErrorIs(t, err, interp.ErrSegmentationFault) // not just the first one
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 		_, err = i.RefCount(4)
 		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 		rc5, err := i.RefCount(5)
 		require.NoError(t, err)
-		require.Equal(t, 3, rc5) // fill value owned once per filled slot
+		require.Equal(t, 3, rc5)
 	})
 
 	t.Run("calls a host function with a scalar signature on the generic path", func(t *testing.T) {
@@ -2592,7 +3018,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 6), instr.New(instr.I32_CONST, 7),
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
 		}, program.WithConstants(hostFn))
-		i := interp.New(prog, interp.WithTick(1)) // exact: disables fusion, forcing the generic callHost path
+		i := interp.New(prog, interp.WithTick(1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -2614,14 +3040,14 @@ func TestInterpreter_Run(t *testing.T) {
 					return []types.Boxed{types.BoxI32(1)}, nil
 				})
 			prog := program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 9), instr.New(instr.REF_NEW), // heap[1] is hostFn; heap[2] is this ref
+				instr.New(instr.I32_CONST, 9), instr.New(instr.REF_NEW),
 				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
 			}, program.WithConstants(hostFn))
 			i := interp.New(prog, tt.opts...)
 
 			require.NoError(t, i.Run(context.Background()), tt.name)
 			_, err := i.RefCount(2)
-			require.ErrorIs(t, err, interp.ErrSegmentationFault, tt.name) // arg not returned: host cleanup released it
+			require.ErrorIs(t, err, interp.ErrSegmentationFault, tt.name)
 			require.NoError(t, i.Close(), tt.name)
 		}
 	})
@@ -2680,7 +3106,7 @@ func TestInterpreter_Run(t *testing.T) {
 				return []types.Boxed{types.BoxI32(1)}, nil
 			})
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I64_CONST, i64operand(huge)), // heap[1] is hostFn; heap[2] is this promoted i64
+			instr.New(instr.I64_CONST, i64operand(huge)),
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
 		}, program.WithConstants(hostFn))
 		i := interp.New(prog)
@@ -2688,7 +3114,7 @@ func TestInterpreter_Run(t *testing.T) {
 
 		require.NoError(t, i.Run(context.Background()))
 		_, err := i.RefCount(2)
-		require.ErrorIs(t, err, interp.ErrSegmentationFault) // promoted i64 arg released: I64 params keep the generic scanning path
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
 
 	t.Run("UPVAL_GET retains a ref capture", func(t *testing.T) {
@@ -2698,7 +3124,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.RETURN),
 		).MustBuild()
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5), instr.New(instr.REF_NEW), // heap[1] is fn; heap[2] is this capture
+			instr.New(instr.I32_CONST, 5), instr.New(instr.REF_NEW),
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CLOSURE_NEW),
 			instr.New(instr.CALL),
@@ -2714,7 +3140,7 @@ func TestInterpreter_Run(t *testing.T) {
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 2, maxRC) // UPVAL_GET's retainBox held the capture live alongside its pushed copy
+		require.Equal(t, 2, maxRC)
 	})
 
 	t.Run("UPVAL_SET releases the overwritten ref capture", func(t *testing.T) {
@@ -2725,7 +3151,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN),
 		).MustBuild()
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5), instr.New(instr.REF_NEW), // heap[1] is fn; heap[2] is this capture
+			instr.New(instr.I32_CONST, 5), instr.New(instr.REF_NEW),
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CLOSURE_NEW),
 			instr.New(instr.CALL),
@@ -2735,7 +3161,7 @@ func TestInterpreter_Run(t *testing.T) {
 
 		require.NoError(t, i.Run(context.Background()))
 		_, err := i.RefCount(2)
-		require.ErrorIs(t, err, interp.ErrSegmentationFault) // old ref capture released on overwrite
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
 
 	t.Run("UPVAL_SET releases the overwritten promoted i64 capture", func(t *testing.T) {
@@ -2749,7 +3175,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.RETURN),
 		).MustBuild()
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I64_CONST, i64operand(oldHuge)), // heap[1] is fn; heap[2] is the old promoted capture
+			instr.New(instr.I64_CONST, i64operand(oldHuge)),
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CLOSURE_NEW),
 			instr.New(instr.CALL),
@@ -2759,7 +3185,7 @@ func TestInterpreter_Run(t *testing.T) {
 
 		require.NoError(t, i.Run(context.Background()))
 		_, err := i.RefCount(2)
-		require.ErrorIs(t, err, interp.ErrSegmentationFault) // old promoted capture released: I64 captures keep the generic ref-aware path
+		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
 
 	t.Run("fused loaders compute the same result", func(t *testing.T) {
@@ -2879,7 +3305,7 @@ func TestInterpreter_Run(t *testing.T) {
 				want: types.I32(8),
 			},
 			{
-				// Exact mode disables fusion, forcing the generic path.
+
 				name: "two globals unfused",
 				prog: program.New([]instr.Instruction{
 					instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.GLOBAL_SET, 0),
@@ -2917,8 +3343,7 @@ func TestInterpreter_Run(t *testing.T) {
 	})
 
 	t.Run("fused loaders borrow promoted i64 refs", func(t *testing.T) {
-		// Regression: fused rhs loaders must borrow promoted I64 values without
-		// releasing the reference owned by the source slot.
+
 		huge := int64(1) << 62
 		upval := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI64}}).
 			Captures(types.TypeI64).Emit(
@@ -3170,8 +3595,7 @@ func TestInterpreter_Run(t *testing.T) {
 }
 
 func TestInterpreter_Marshal(t *testing.T) {
-	// Marshal forwards to the installed codec, so the conversion contract is
-	// owned by TestRegistry_Marshal and only the delegation is checked here.
+
 	i := interp.New(program.New(nil), interp.WithCodec(upperCodec(0)))
 	defer i.Close()
 
@@ -3983,8 +4407,6 @@ func TestInterpreter_Reset(t *testing.T) {
 		i.Reset()
 		require.Equal(t, 0, i.Len())
 
-		// A slot the heap reused after Reset proves the heap actually
-		// returned to its baseline rather than merely growing further.
 		reused, err := i.Alloc(types.String("temporary"))
 		require.NoError(t, err)
 		require.Equal(t, addr, reused)
@@ -4003,10 +4425,6 @@ func TestInterpreter_Reset(t *testing.T) {
 		i.Reset()
 		require.Equal(t, 1, value.closed)
 
-		// Reset must not leave the earlier value reachable: the address it
-		// lived at should no longer resolve to a live value. (This used to
-		// also scan i.heap past len for nil slots, but that pins Go slice and
-		// GC hygiene of the backing array, which no caller can observe.)
 		_, err = i.RefCount(addr)
 		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 
@@ -4289,8 +4707,6 @@ func TestWithHeap(t *testing.T) {
 
 		cycle, _ := selfCycle(t, i)
 
-		// The first collection leaves two live slots, so pace sets goal to
-		// 2+heapRunway. Reuse and the new cycle occupy two of that runway.
 		for n := range heapRunway - 2 {
 			_, err = i.Alloc(types.I32(n + 3))
 			require.NoError(t, err)
@@ -4321,8 +4737,6 @@ func TestWithHeap(t *testing.T) {
 
 		cycle, _ := selfCycle(t, i)
 
-		// After the first collection, heapRunway+2 slots survive and the
-		// dynamic live set adds heapRunway+1 slots of runway.
 		for n := range heapRunway - 2 {
 			_, err = i.Alloc(types.I32(n + heapRunway + 2))
 			require.NoError(t, err)
@@ -4352,8 +4766,6 @@ func TestWithHeap(t *testing.T) {
 
 		cycle, _ := selfCycle(t, i)
 
-		// Reset leaves only null, so the next goal is 1+heapRunway. The
-		// cycle consumes the first dynamic slot.
 		for n := range heapRunway - 1 {
 			_, err := i.Alloc(types.I32(n))
 			require.NoError(t, err)
@@ -4673,10 +5085,6 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 		})
 	}
 
-	// PerOp benchmarks every runTests case under the interpreter's default
-	// options, one sub-benchmark per case, keyed by the same derived name the
-	// test uses. Trapping cases are skipped: a trap always takes the same
-	// short exit path, so timing it case by case is noise.
 	b.Run("PerOp", func(b *testing.B) {
 		for _, tt := range runTests {
 			if tt.err != nil {
@@ -5027,7 +5435,7 @@ func BenchmarkInterpreter_Marshal(b *testing.B) {
 	for idx := range 16 {
 		entries[string(rune('a'+idx))] = int32(idx)
 	}
-	// Keys past the boxed payload, the shape a slot round trip allocates for.
+
 	counters := make(map[int64]int32, 16)
 	for idx := range 16 {
 		counters[1<<50+int64(idx)] = int32(idx)
@@ -5102,470 +5510,4 @@ func BenchmarkInterpreter_Unmarshal(b *testing.B) {
 			}
 		})
 	}
-}
-func (v *trackedValue) Kind() types.Kind { return types.KindRef }
-func (v *trackedValue) Type() types.Type { return types.TypeAny }
-func (v *trackedValue) String() string   { return "tracked" }
-
-func (v *trackedValue) Refs(dst []types.Ref) []types.Ref {
-	return append(dst, v.refs...)
-}
-
-func (v *trackedValue) Close() error {
-	v.closed++
-	return nil
-}
-
-func (upperCodec) Marshal(_ *interp.Interpreter, v any) (types.Value, error) {
-	s, ok := v.(string)
-	if !ok {
-		return nil, interp.ErrUnsupportedMarshalType
-	}
-	return types.String(strings.ToUpper(s)), nil
-}
-
-func (upperCodec) Unmarshal(_ *interp.Interpreter, v types.Value, dst any) error {
-	s, ok := v.(types.String)
-	if !ok {
-		return interp.ErrInvalidUnmarshalTarget
-	}
-	p, ok := dst.(*string)
-	if !ok {
-		return interp.ErrInvalidUnmarshalTarget
-	}
-	*p = strings.ToLower(string(s))
-	return nil
-}
-
-func (h *structGetHostFields) Bump(n int32) int32 {
-	h.Count += n
-	h.hidden++
-	return h.Count
-}
-
-func (v *marshalBenchMethods) Bump(n int32) int32 {
-	v.Count += n
-	v.hidden++
-	return v.Count
-}
-
-// zeroFunction returns its locals, one of each zeroTypes, unwritten.
-func zeroFunction() *types.Function {
-	return types.NewFunctionBuilder(&types.FunctionType{Returns: zeroTypes}).
-		Locals(zeroTypes...).
-		Emit(append(slices.Clone(zeroReads), instr.New(instr.RETURN))...).
-		MustBuild()
-}
-
-// runTestName renders a runTests case's program to a single-line name, so the
-// program itself documents the case instead of a hand-written label that can
-// drift out of sync with it. It reads the program's canonical String() dump,
-// keeps only the ".code" section (ignoring any ".locals", ".constants", etc.
-// that follow), strips each line's "%04d:\t" offset prefix, and joins the
-// remaining instruction text with "; ".
-func runTestName(prog *program.Program) string {
-	lines := strings.Split(prog.String(), "\n")
-	var parts []string
-	for _, line := range lines[1:] { // lines[0] is always the ".code" header.
-		if strings.HasPrefix(line, ".") {
-			break
-		}
-		if line == "" {
-			continue
-		}
-		if _, rest, ok := strings.Cut(line, ":\t"); ok {
-			line = rest
-		}
-		parts = append(parts, line)
-	}
-	return strings.Join(parts, "; ")
-}
-
-// selfCycle allocates a value that references only itself, held by the heap
-// alone: it stays reachable from no root, so only cycle collection frees it.
-func selfCycle(t *testing.T, i *interp.Interpreter) (*trackedValue, int) {
-	t.Helper()
-	value := &trackedValue{}
-	addr, err := i.Alloc(value)
-	require.NoError(t, err)
-	value.refs = []types.Ref{types.Ref(addr)}
-	_, err = i.Retain(addr)
-	require.NoError(t, err)
-	require.NoError(t, i.Release(addr))
-	return value, addr
-}
-
-func i32operand(v int32) uint64 {
-	return uint64(uint32(v))
-}
-
-func i64operand(v int64) uint64 {
-	return uint64(v)
-}
-
-// structSumTree builds a small binary-tree kernel shaped like
-// benchmarks/memory_test.go's structTreeWalk, except sumFn's tree parameter
-// is declared as the concrete node struct type instead of types.TypeAny, so
-// every struct.get on it is a LOCAL_GET whose declared type is a concrete
-// *types.StructType -- the shape interp/threaded.go's generated STRUCT_GET
-// local-container fusion specializes.
-func structSumTree(depth, repeats int32) *program.Program {
-	nodeType := types.NewStructType(
-		types.NewStructField(types.TypeI32, types.FieldWithName("value")),
-		types.NewStructField(types.TypeAny, types.FieldWithName("left")),
-		types.NewStructField(types.TypeAny, types.FieldWithName("right")),
-	)
-
-	// build locals: 0=d (param), 1=n
-	buildBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny}}).
-		Params(types.TypeI32).
-		Locals(types.TypeAny)
-	buildDone := buildBuilder.Label()
-	buildFn := buildBuilder.
-		Emit(
-			instr.New(instr.STRUCT_NEW_DEFAULT, 0), instr.New(instr.LOCAL_SET, 1),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 0),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.STRUCT_SET),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_S),
-		).
-		BrIf(buildDone).
-		Emit(
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-			instr.New(instr.STRUCT_SET),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 2),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-			instr.New(instr.STRUCT_SET),
-		).
-		Bind(buildDone).
-		Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.RETURN)).
-		MustBuild()
-
-	// sum params: 0=t, declared as the concrete node struct type.
-	sumBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-		Params(nodeType)
-	nullCase := sumBuilder.Label()
-	sumFn := sumBuilder.
-		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.REF_IS_NULL)).
-		BrIf(nullCase).
-		Emit(
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET),
-			instr.New(instr.CONST_GET, 1), instr.New(instr.CALL),
-			instr.New(instr.I32_ADD),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.STRUCT_GET),
-			instr.New(instr.CONST_GET, 1), instr.New(instr.CALL),
-			instr.New(instr.I32_ADD),
-			instr.New(instr.RETURN),
-		).
-		Bind(nullCase).
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN)).
-		MustBuild()
-
-	// Top level: build the tree once, then call sum(tree) repeats times in a
-	// loop, accumulating a checksum. This isolates sum's struct.get cost
-	// from build's allocation cost, which would otherwise dominate a single
-	// build+sum call and hide any per-access improvement.
-	b := program.NewBuilder()
-	buildIdx := b.Const(buildFn)
-	sumIdx := b.Const(sumFn)
-	b.Type(nodeType)
-	b.Locals(types.TypeAny, types.TypeI32, types.TypeI32) // 0=tree, 1=counter, 2=checksum
-	loop := b.Label()
-	done := b.Label()
-	b.Emit(instr.I32_CONST, uint64(uint32(depth))).
-		Emit(instr.CONST_GET, uint64(buildIdx)).Emit(instr.CALL).
-		Emit(instr.LOCAL_SET, 0).
-		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
-		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2).
-		Bind(loop).
-		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(repeats))).Emit(instr.I32_GE_S).
-		BrIf(done).
-		Emit(instr.LOCAL_GET, 2).
-		Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, uint64(sumIdx)).Emit(instr.CALL).
-		Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).
-		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
-		Br(loop).
-		Bind(done).
-		Emit(instr.LOCAL_GET, 2)
-	prog, err := b.Build()
-	if err != nil {
-		panic(err)
-	}
-	return prog
-}
-
-// arraySumGlobal builds a kernel that holds a size-length int32 array in a
-// declared GLOBAL_GET slot and sums its elements repeats times in a nested
-// loop, so every array.get is a GLOBAL_GET whose declared type is a concrete
-// *types.ArrayType -- the shape interp/threaded.go's generated ARRAY_GET
-// global-container fusion specializes.
-func arraySumGlobal(size, repeats int32) *program.Program {
-	elems := make([]int32, size)
-	for i := range elems {
-		elems[i] = int32(i)
-	}
-
-	b := program.NewBuilder()
-	b.Globals(types.TypeI32Array)
-	b.Locals(types.TypeI32, types.TypeI32, types.TypeI32) // 0=outer, 1=inner, 2=sum
-	outerLoop, outerDone := b.Label(), b.Label()
-	innerLoop, innerDone := b.Label(), b.Label()
-	b.ConstGet(types.TypedArray[int32](elems)).Emit(instr.GLOBAL_SET, 0).
-		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2).
-		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0).
-		Bind(outerLoop).
-		Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(repeats))).Emit(instr.I32_GE_S).
-		BrIf(outerDone).
-		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
-		Bind(innerLoop).
-		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).
-		BrIf(innerDone).
-		Emit(instr.LOCAL_GET, 2).
-		Emit(instr.GLOBAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET).
-		Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).
-		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
-		Br(innerLoop).
-		Bind(innerDone).
-		Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).
-		Br(outerLoop).
-		Bind(outerDone).
-		Emit(instr.LOCAL_GET, 2)
-	prog, err := b.Build()
-	if err != nil {
-		panic(err)
-	}
-	return prog
-}
-
-// arraySumUpvalue builds the same kernel as arraySumGlobal, except the array
-// is captured as a closure upvalue instead of stored in a global, so every
-// array.get is a UPVAL_GET whose declared type is a concrete *types.ArrayType
-// -- the shape interp/threaded.go's generated ARRAY_GET upvalue-container
-// fusion specializes.
-func arraySumUpvalue(size, repeats int32) *program.Program {
-	elems := make([]int32, size)
-	for i := range elems {
-		elems[i] = int32(i)
-	}
-
-	sumBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-		Captures(types.TypeI32Array).
-		Locals(types.TypeI32, types.TypeI32, types.TypeI32) // 0=outer, 1=inner, 2=sum
-	outerLoop, outerDone := sumBuilder.Label(), sumBuilder.Label()
-	innerLoop, innerDone := sumBuilder.Label(), sumBuilder.Label()
-	sumFn := sumBuilder.
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 2)).
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 0)).
-		Bind(outerLoop).
-		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, uint64(uint32(repeats))), instr.New(instr.I32_GE_S)).
-		BrIf(outerDone).
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1)).
-		Bind(innerLoop).
-		Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, uint64(uint32(size))), instr.New(instr.I32_GE_S)).
-		BrIf(innerDone).
-		Emit(
-			instr.New(instr.LOCAL_GET, 2),
-			instr.New(instr.UPVAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.ARRAY_GET),
-			instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
-		).
-		Br(innerLoop).
-		Bind(innerDone).
-		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 0)).
-		Br(outerLoop).
-		Bind(outerDone).
-		Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN)).
-		MustBuild()
-
-	b := program.NewBuilder()
-	fnIdx := b.Const(sumFn)
-	b.ConstGet(types.TypedArray[int32](elems))
-	b.Emit(instr.CONST_GET, uint64(fnIdx)).Emit(instr.CLOSURE_NEW).Emit(instr.CALL)
-	prog, err := b.Build()
-	if err != nil {
-		panic(err)
-	}
-	return prog
-}
-
-// arrayFillLocal builds a kernel that holds a size-length int32 array in a
-// declared LOCAL_GET slot and writes arr[j] = j repeats times in a nested
-// loop, so every array.set is a LOCAL_GET whose declared type is a concrete
-// *types.ArrayType -- the shape interp/threaded.go's generated ARRAY_SET
-// local-container fusion specializes. A final pass sums the written array
-// once to produce a checksum the benchmark can verify.
-func arrayFillLocal(size, repeats int32) *program.Program {
-	b := program.NewBuilder()
-	b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32, types.TypeI32) // 0=arr, 1=outer, 2=inner, 3=sum
-	outerLoop, outerDone := b.Label(), b.Label()
-	innerLoop, innerDone := b.Label(), b.Label()
-	sumLoop, sumDone := b.Label(), b.Label()
-	b.ConstGet(types.TypedArray[int32](make([]int32, size))).Emit(instr.LOCAL_SET, 0).
-		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
-		Bind(outerLoop).
-		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(repeats))).Emit(instr.I32_GE_S).
-		BrIf(outerDone).
-		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2).
-		Bind(innerLoop).
-		Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).
-		BrIf(innerDone).
-		Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 2).Emit(instr.ARRAY_SET).
-		Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).
-		Br(innerLoop).
-		Bind(innerDone).
-		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
-		Br(outerLoop).
-		Bind(outerDone).
-		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3).
-		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2).
-		Bind(sumLoop).
-		Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).
-		BrIf(sumDone).
-		Emit(instr.LOCAL_GET, 3).
-		Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 2).Emit(instr.ARRAY_GET).
-		Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3).
-		Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).
-		Br(sumLoop).
-		Bind(sumDone).
-		Emit(instr.LOCAL_GET, 3)
-	prog, err := b.Build()
-	if err != nil {
-		panic(err)
-	}
-	return prog
-}
-
-// arrayFillGlobal builds the same kernel as arrayFillLocal, except the array
-// is held in a declared GLOBAL_GET slot instead of a local, so every
-// array.set is a GLOBAL_GET whose declared type is a concrete
-// *types.ArrayType -- the shape interp/threaded.go's generated ARRAY_SET
-// global-container fusion specializes.
-func arrayFillGlobal(size, repeats int32) *program.Program {
-	b := program.NewBuilder()
-	b.Globals(types.TypeI32Array)
-	b.Locals(types.TypeI32, types.TypeI32, types.TypeI32) // 0=outer, 1=inner, 2=sum
-	outerLoop, outerDone := b.Label(), b.Label()
-	innerLoop, innerDone := b.Label(), b.Label()
-	sumLoop, sumDone := b.Label(), b.Label()
-	b.ConstGet(types.TypedArray[int32](make([]int32, size))).Emit(instr.GLOBAL_SET, 0).
-		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0).
-		Bind(outerLoop).
-		Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(repeats))).Emit(instr.I32_GE_S).
-		BrIf(outerDone).
-		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
-		Bind(innerLoop).
-		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).
-		BrIf(innerDone).
-		Emit(instr.GLOBAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_SET).
-		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
-		Br(innerLoop).
-		Bind(innerDone).
-		Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).
-		Br(outerLoop).
-		Bind(outerDone).
-		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2).
-		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
-		Bind(sumLoop).
-		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).
-		BrIf(sumDone).
-		Emit(instr.LOCAL_GET, 2).
-		Emit(instr.GLOBAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET).
-		Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).
-		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
-		Br(sumLoop).
-		Bind(sumDone).
-		Emit(instr.LOCAL_GET, 2)
-	prog, err := b.Build()
-	if err != nil {
-		panic(err)
-	}
-	return prog
-}
-
-// arrayFillUpvalue builds the same kernel as arrayFillLocal, except the
-// array is captured as a closure upvalue instead of stored in a local, so
-// every array.set is a UPVAL_GET whose declared type is a concrete
-// *types.ArrayType -- the shape interp/threaded.go's generated ARRAY_SET
-// upvalue-container fusion specializes.
-func arrayFillUpvalue(size, repeats int32) *program.Program {
-	fillBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-		Captures(types.TypeI32Array).
-		Locals(types.TypeI32, types.TypeI32, types.TypeI32) // 0=outer, 1=inner, 2=sum
-	outerLoop, outerDone := fillBuilder.Label(), fillBuilder.Label()
-	innerLoop, innerDone := fillBuilder.Label(), fillBuilder.Label()
-	sumLoop, sumDone := fillBuilder.Label(), fillBuilder.Label()
-	fillFn := fillBuilder.
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 0)).
-		Bind(outerLoop).
-		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, uint64(uint32(repeats))), instr.New(instr.I32_GE_S)).
-		BrIf(outerDone).
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1)).
-		Bind(innerLoop).
-		Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, uint64(uint32(size))), instr.New(instr.I32_GE_S)).
-		BrIf(innerDone).
-		Emit(
-			instr.New(instr.UPVAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 1), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
-		).
-		Br(innerLoop).
-		Bind(innerDone).
-		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 0)).
-		Br(outerLoop).
-		Bind(outerDone).
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 2)).
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1)).
-		Bind(sumLoop).
-		Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, uint64(uint32(size))), instr.New(instr.I32_GE_S)).
-		BrIf(sumDone).
-		Emit(
-			instr.New(instr.LOCAL_GET, 2),
-			instr.New(instr.UPVAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.ARRAY_GET),
-			instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
-		).
-		Br(sumLoop).
-		Bind(sumDone).
-		Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN)).
-		MustBuild()
-
-	b := program.NewBuilder()
-	fnIdx := b.Const(fillFn)
-	b.ConstGet(types.TypedArray[int32](make([]int32, size)))
-	b.Emit(instr.CONST_GET, uint64(fnIdx)).Emit(instr.CLOSURE_NEW).Emit(instr.CALL)
-	prog, err := b.Build()
-	if err != nil {
-		panic(err)
-	}
-	return prog
-}
-
-// structGetHostLoop reads field 0 of a host-backed struct repeats times,
-// accumulating the reads so nothing is optimized away.
-func structGetHostLoop(repeats int32) *program.Program {
-	b := program.NewBuilder()
-	b.Locals(types.TypeAny, types.TypeI32, types.TypeI32) // 0=host, 1=counter, 2=sum
-	loop := b.Label()
-	done := b.Label()
-	b.Emit(instr.LOCAL_SET, 0).
-		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
-		Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2).
-		Bind(loop).
-		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(repeats))).Emit(instr.I32_GE_S).
-		BrIf(done).
-		Emit(instr.LOCAL_GET, 2).
-		Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).
-		Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).
-		Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
-		Br(loop).
-		Bind(done).
-		Emit(instr.LOCAL_GET, 2)
-	prog, err := b.Build()
-	if err != nil {
-		panic(err)
-	}
-	return prog
 }

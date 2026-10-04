@@ -93,9 +93,7 @@ func slotRead(state *state, current step) (value, error) {
 func load(current step, slot, offset int, label string, standalone bool) (value, error) {
 	l := newLoader(current.op, slot, offset, label, standalone)
 	result := value{op: current.op, head: current.op, boxed: jen.Id(l.boxed)}
-	// A source only needs stack room when it pushes on its own. Fused into a
-	// consumer it stays in a temporary, and the consumer checks the room its
-	// own net push needs.
+
 	result.room = true
 
 	_, _, ok := slotInfo(current.op)
@@ -133,8 +131,7 @@ func newLoader(op instr.Opcode, slot, offset int, label string, standalone bool)
 		raw:   name,
 		boxed: fmt.Sprintf("r%d", slot),
 		index: fmt.Sprintf("i%d", slot),
-		// addr is a runtime slot address. Keep its prefix distinct from compile-time
-		// index names so fused producers cannot generate colliding locals.
+
 		addr:       fmt.Sprintf("a%d", slot),
 		pos:        at,
 		label:      label,
@@ -166,10 +163,7 @@ func (l loader) read(result *value, current step) error {
 		}
 		result.compile = append(result.compile, guard...)
 	}
-	// l.read is called only for LOCAL_GET, GLOBAL_GET, and UPVAL_GET (see
-	// load's switch), so current.typ != nil alone identifies a container
-	// guard; typedContainer is the only pattern builder that sets it for
-	// these three opcodes.
+
 	if current.typ != nil {
 		if current.typ == reflect.TypeFor[types.Struct]() {
 			if err := l.structGuard(result, current); err != nil {
@@ -540,6 +534,14 @@ func scalarSwitch(kinds, idx string, body jen.Code) jen.Code {
 	)
 }
 
+// isContainerSource reports whether op is a slot-read opcode (LOCAL_GET,
+// GLOBAL_GET, UPVAL_GET) that array.get/struct.get container fusion can
+// prove a declared element or field type from.
+func isContainerSource(op instr.Opcode) bool {
+	_, _, ok := slotInfo(op)
+	return ok
+}
+
 func slotInfo(op instr.Opcode) (field, method string, ok bool) {
 	switch op {
 	case instr.LOCAL_GET:
@@ -551,14 +553,6 @@ func slotInfo(op instr.Opcode) (field, method string, ok bool) {
 	default:
 		return "", "", false
 	}
-}
-
-// isContainerSource reports whether op is a slot-read opcode (LOCAL_GET,
-// GLOBAL_GET, UPVAL_GET) that array.get/struct.get container fusion can
-// prove a declared element or field type from.
-func isContainerSource(op instr.Opcode) bool {
-	_, _, ok := slotInfo(op)
-	return ok
 }
 
 // declaredTypesField names the threader field holding op's declared

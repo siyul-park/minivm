@@ -181,7 +181,7 @@ benchmark-compare:
 	done
 
 lint: vet
-	@go run ./internal/cmd/check ./...
+	@go run ./internal/cmd/check -diff ./...
 
 fmt:
 	@command -v $(GOIMPORTS) >/dev/null

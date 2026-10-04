@@ -47,27 +47,6 @@ const (
 	KindRef = instr.KindRef
 )
 
-func Zero(kind Kind) Boxed {
-	switch kind {
-	case KindI32:
-		return BoxI32(0)
-	case KindI8:
-		return BoxI8(0)
-	case KindI1:
-		return BoxI1(false)
-	case KindI64:
-		return BoxI64(0)
-	case KindF32:
-		return BoxF32(0)
-	case KindF64:
-		return BoxF64(0)
-	case KindRef:
-		return BoxedNull
-	default:
-		return 0
-	}
-}
-
 func IsNull(v Value) bool {
 	switch v := v.(type) {
 	case Ref:
@@ -103,4 +82,26 @@ func Zeros(ts []Type) []Boxed {
 		out[i] = Zero(t.Kind())
 	}
 	return out
+}
+
+// Zero returns the zero value.
+func Zero(kind Kind) Boxed {
+	switch kind {
+	case KindI32:
+		return BoxI32(0)
+	case KindI8:
+		return BoxI8(0)
+	case KindI1:
+		return BoxI1(false)
+	case KindI64:
+		return BoxI64(0)
+	case KindF32:
+		return BoxF32(0)
+	case KindF64:
+		return BoxF64(0)
+	case KindRef:
+		return BoxedNull
+	default:
+		return 0
+	}
 }

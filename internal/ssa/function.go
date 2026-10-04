@@ -50,17 +50,17 @@ func (f *Function) Values() int {
 	return len(f.types)
 }
 
+// Entry returns the frame f enters at (see Builder.Entry).
+func (f *Function) Entry() Frame {
+	return f.entry
+}
+
 // Type returns v's type or zero for an invalid value.
 func (f *Function) Type(v Value) Type {
 	if !v.valid(len(f.types)) {
 		return 0
 	}
 	return f.types[v]
-}
-
-// Entry returns the frame f enters at (see Builder.Entry).
-func (f *Function) Entry() Frame {
-	return f.entry
 }
 
 func newFunction(name string, types []Type, blocks []Block, entry Frame) *Function {

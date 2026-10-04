@@ -76,17 +76,6 @@ func past(code []byte) bool {
 	return false
 }
 
-// final is block's last instruction and its offset, -1 for an empty block.
-func final(code []byte, block *analysis.BasicBlock) (instr.Instruction, int) {
-	var inst instr.Instruction
-	last := -1
-	for ip := block.Start; ip < block.End; {
-		inst, last = instr.Instruction(code[ip:]), ip
-		ip += inst.Width()
-	}
-	return inst, last
-}
-
 // successors lists the spans block's last instruction can continue into. A
 // RETURN_CALL continues into the function's first span: the self tail call
 // the walker lowers as a loop re-enters it.
@@ -107,6 +96,17 @@ func successors(code []byte, block *analysis.BasicBlock, at map[int]int) []int {
 		return nil
 	}
 	return targets([]int{block.End}, at)
+}
+
+// final is block's last instruction and its offset, -1 for an empty block.
+func final(code []byte, block *analysis.BasicBlock) (instr.Instruction, int) {
+	var inst instr.Instruction
+	last := -1
+	for ip := block.Start; ip < block.End; {
+		inst, last = instr.Instruction(code[ip:]), ip
+		ip += inst.Width()
+	}
+	return inst, last
 }
 
 func targets(offsets []int, at map[int]int) []int {

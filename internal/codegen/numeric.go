@@ -47,10 +47,7 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 	}
 
 	var compile, body []jen.Code
-	// delta is the operation's net effect on the operand stack: it grows only
-	// when every operand was folded into a temporary. Fused sources never
-	// push, so one room check for delta covers the whole handler, and a
-	// conditional consumer branches instead of pushing and needs none.
+
 	delta := len(inputs) - arity + 1
 	if !conditional && local == nil && delta > 0 {
 		body = append(body, overflow())

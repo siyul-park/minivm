@@ -53,13 +53,6 @@ const (
 	backingUpval                 // deferred to a closure upval slot
 )
 
-func (a activation) returns() int {
-	if a.function.Typ == nil {
-		return 0
-	}
-	return len(a.function.Typ.Returns)
-}
-
 // analyze returns the facts live at each span's entry and which spans are
 // reached from root; nothing flows past a span that ends in an exit. A
 // reached span's stack is nil, not just absent, when nothing is live there
@@ -161,6 +154,13 @@ func (m Module) build(act activation, spans []span, states []frame, seen []bool,
 		b.Term(ids[id], term)
 	}
 	return b.Build()
+}
+
+func (a activation) returns() int {
+	if a.function.Typ == nil {
+		return 0
+	}
+	return len(a.function.Typ.Returns)
 }
 
 // merge joins src into f and reports whether f changed; a stack shape

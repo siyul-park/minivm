@@ -78,18 +78,6 @@ func NewCode(address, ip int, osr bool, tier Tier, results int, registers, argum
 	}, nil
 }
 
-// String returns the tier name.
-func (t Tier) String() string {
-	switch t {
-	case Baseline:
-		return "baseline"
-	case Optimized:
-		return "optimized"
-	default:
-		return "none"
-	}
-}
-
 // Native returns c's body address, offset 0: the address a native-to-native
 // call dispatches to.
 func (c *Code) Native() uintptr {
@@ -112,6 +100,18 @@ func (c *Code) Retired() bool {
 // run c's code after either call.
 func (c *Code) Free() error {
 	return c.buffer.Free()
+}
+
+// String returns the tier name.
+func (t Tier) String() string {
+	switch t {
+	case Baseline:
+		return "baseline"
+	case Optimized:
+		return "optimized"
+	default:
+		return "none"
+	}
 }
 
 // holds reports whether pc lies inside c's native code.

@@ -1105,20 +1105,20 @@ func enter(t *testing.T, stack []types.Boxed) *jit.Context {
 	return ctx
 }
 
-// read is the raw native value v names in the suspended activation.
-func read(ctx *jit.Context, v jit.Value) uint64 {
-	if v.Loc.Spilled {
-		return ctx.Slot(v.Loc.Slot)
-	}
-	return ctx.Reg(v.Loc.Reg)
-}
-
 func operands(ctx *jit.Context, f jit.Frame) []uint64 {
 	var out []uint64
 	for _, o := range f.Stack {
 		out = append(out, read(ctx, o.Value))
 	}
 	return out
+}
+
+// read is the raw native value v names in the suspended activation.
+func read(ctx *jit.Context, v jit.Value) uint64 {
+	if v.Loc.Spilled {
+		return ctx.Slot(v.Loc.Slot)
+	}
+	return ctx.Reg(v.Loc.Reg)
 }
 
 // address is the base of s kept on the heap for the test's life: native code

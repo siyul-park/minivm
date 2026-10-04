@@ -37,7 +37,9 @@ var invertOp = map[Op]Op{
 }
 
 var _ asm.Arch = arch{}
+
 var _ asm.Frame = arch{}
+
 var _ asm.Relaxer = arch{}
 
 // New returns the ARM64 assembler architecture.
@@ -48,6 +50,19 @@ func New() arch {
 // Encoder returns the target instruction encoder.
 func (a arch) Encoder() asm.Encoder {
 	return Encoder{}
+}
+
+// Writes reports which instruction operands are written.
+func (a arch) Writes(inst asm.Instruction) [4]bool {
+	switch Op(inst.Op) {
+	case OpSTR, OpSTRB, OpSTRH, OpSTRW, OpSTRR, OpSTRBR, OpSTRWR, OpSTP,
+		OpCMP, OpCMPI, OpCMN, OpCMNI, OpTST, OpTSTI, OpCCMP, OpCCMPI, OpFCMP, OpFCMPE:
+		return [4]bool{}
+	case OpLDP:
+		return [4]bool{true, false, true}
+	default:
+		return [4]bool{inst.Dst != nil && a.Flow(inst) == asm.FlowNext}
+	}
 }
 
 // Flow reports how control leaves an instruction.
@@ -64,19 +79,6 @@ func (a arch) Flow(inst asm.Instruction) asm.Flow {
 		return asm.FlowBranch
 	default:
 		return asm.FlowNext
-	}
-}
-
-// Writes reports which instruction operands are written.
-func (a arch) Writes(inst asm.Instruction) [4]bool {
-	switch Op(inst.Op) {
-	case OpSTR, OpSTRB, OpSTRH, OpSTRW, OpSTRR, OpSTRBR, OpSTRWR, OpSTP,
-		OpCMP, OpCMPI, OpCMN, OpCMNI, OpTST, OpTSTI, OpCCMP, OpCCMPI, OpFCMP, OpFCMPE:
-		return [4]bool{}
-	case OpLDP:
-		return [4]bool{true, false, true}
-	default:
-		return [4]bool{inst.Dst != nil && a.Flow(inst) == asm.FlowNext}
 	}
 }
 
@@ -120,8 +122,6 @@ func (a arch) Relax(inst asm.Instruction, disp int64) ([]asm.Instruction, bool) 
 		return nil, false
 	}
 
-	// Inserting B leaves forward displacement unchanged; a backward target
-	// moves four bytes farther from the conditional branch.
 	bDisp := disp
 	if disp < 0 {
 		bDisp -= 4

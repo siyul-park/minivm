@@ -38,82 +38,6 @@ func newWalker(m Module, b *ssa.Builder, block int, act activation, in frame) (*
 	return &walker{Module: m, builder: b, block: block, activation: act, stack: stack, closures: slices.Clone(in.closures)}, true
 }
 
-func (w *walker) adopt() {
-	for i := range w.stack {
-		w.own(i)
-	}
-}
-
-func (w *walker) detach(from backing, offset int) {
-	for i := range w.stack {
-		if w.stack[i].backing == from && w.stack[i].offset == offset {
-			w.own(i)
-		}
-	}
-}
-
-func (w *walker) own(at int) {
-	o := &w.stack[at]
-	if o.kind != types.KindRef || o.backing == backingStack {
-		return
-	}
-	w.retain(o.value)
-	o.backing, o.offset = backingStack, 0
-	if at < len(w.before) {
-		w.before[at] = *o
-		w.state = ssa.NoValue
-	}
-}
-
-func (w *walker) retain(value ssa.Value) {
-	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{value}})
-}
-
-func (w *walker) release(o operand) {
-	if o.kind != types.KindRef || o.backing != backingStack {
-		return
-	}
-	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{o.value}, State: w.deopt()})
-}
-
-func (w *walker) dup() bool {
-	if len(w.stack) == 0 {
-		return false
-	}
-	top := w.stack[len(w.stack)-1]
-	if top.kind == types.KindRef && top.backing == backingStack {
-		w.retain(top.value)
-	}
-	w.stack = append(w.stack, top)
-	return true
-}
-
-func (w *walker) begin(ip int) {
-	w.ip, w.state = ip, ssa.NoValue
-	w.before = append(w.before[:0], w.stack...)
-}
-
-func (w *walker) deopt() ssa.Value {
-	if w.state != ssa.NoValue {
-		return w.state
-	}
-	stack := make([]ssa.Operand, len(w.before))
-	for i, o := range w.before {
-		stack[i] = ssa.Operand{Value: o.value, Owned: o.kind == types.KindRef && o.backing == backingStack}
-	}
-	w.state = w.builder.Value(ssa.TypeState)
-	w.builder.Add(w.block, ssa.Operation{
-		Op:      ssa.OpState,
-		Frames:  []ssa.Frame{{Address: w.activation.address, IP: w.ip, Returns: w.activation.returns(), Stack: stack}},
-		Results: []ssa.Value{w.state},
-	})
-	return w.state
-}
-
-func (w *walker) push(value ssa.Value, out fact) {
-	w.stack = append(w.stack, operand{value: value, fact: out})
-}
-
 func (w *walker) translate(s span) (ssa.Terminator, bool) {
 	code := w.activation.function.Code
 	for ip := s.start; ip < s.end; {
@@ -276,9 +200,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		if len(w.stack) < 1 {
 			return false
 		}
-		// The element kind is a best-effort hint: array.len needs no
-		// declared type to translate, but native code needs one to pick a
-		// representation, so guard only when the array's type is known.
+
 		if kind, ok := w.element(w.stack[len(w.stack)-1].fact); ok {
 			w.guard(len(w.stack)-1, ssa.Shape{Kind: kind})
 		}
@@ -290,7 +212,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		kind := w.stack[len(w.stack)-1].kind
 		if elem, ok := w.element(w.stack[len(w.stack)-3].fact); ok {
 			if elem == types.KindRef {
-				// A []any stores Boxed words of any kind: guard the container.
+
 				kind = types.KindRef
 			} else if (elem == types.KindI1 || elem == types.KindI8) && kind == types.KindI32 {
 				kind = elem
@@ -429,6 +351,18 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 	return w.emit(operation, len(effect.Pop), results)
 }
 
+func (w *walker) dup() bool {
+	if len(w.stack) == 0 {
+		return false
+	}
+	top := w.stack[len(w.stack)-1]
+	if top.kind == types.KindRef && top.backing == backingStack {
+		w.retain(top.value)
+	}
+	w.stack = append(w.stack, top)
+	return true
+}
+
 // named is the type inst's type operand names, nil when it names none.
 func (w *walker) named(inst instr.Instruction) types.Type {
 	idx := int(inst.Operand(0))
@@ -461,24 +395,6 @@ func (w *walker) field(container, index fact) (types.Kind, ssa.Shape, bool) {
 		return 0, ssa.Shape{}, false
 	}
 	return record.Fields[index.value].Kind, ssa.Shape{Struct: true, Type: uintptr(unsafe.Pointer(record))}, true
-}
-
-// callee resolves the function a CALL at operand at calls: a constant
-// function, or the function of a closure this unit built (fact.closure).
-func (w *walker) callee(at int) *types.Function {
-	o := w.stack[at]
-	ref := o.closure
-	if ref == 0 && o.referenceKnown {
-		ref = o.reference
-	}
-	if ref <= 0 {
-		return nil
-	}
-	target := w.Objects.function(ref)
-	if target == nil || target.Typ == nil {
-		return nil
-	}
-	return target
 }
 
 // unseen reports whether the CALL at w.ip has no resolvable callee at a site
@@ -558,57 +474,6 @@ func (w *walker) load(space ssa.Space, index int) bool {
 	return true
 }
 
-func (w *walker) store(space ssa.Space, index int) bool {
-	if len(w.stack) == 0 {
-		return false
-	}
-	slot, out, ok := w.slot(space, index)
-	if !ok {
-		return false
-	}
-	top := len(w.stack) - 1
-	if w.stack[top].kind == types.KindRef {
-		w.own(top)
-		w.detach(out.backing, out.offset)
-	}
-	if space == ssa.SpaceLocal {
-		w.closures[index] = w.stack[top].closure
-	}
-	w.builder.Add(w.block, ssa.Operation{
-		Op:    ssa.OpStore,
-		Slot:  slot,
-		Args:  []ssa.Value{w.stack[top].value},
-		State: w.deopt(),
-	})
-	w.stack = w.stack[:top]
-	return true
-}
-
-func (w *walker) slot(space ssa.Space, index int) (ssa.Slot, fact, bool) {
-	slot := ssa.Slot{Space: space, Index: index}
-	var out fact
-	switch space {
-	case ssa.SpaceLocal:
-		if index >= len(w.activation.slots) {
-			return slot, out, false
-		}
-		out = holds(w.activation.slots[index])
-		out.backing, out.offset = backingLocal, index
-	case ssa.SpaceUpval:
-		if index >= len(w.activation.function.Captures) {
-			return slot, out, false
-		}
-		out = holds(w.activation.function.Captures[index])
-		out.backing, out.offset = backingUpval, index
-	default:
-		if index >= len(w.Globals) {
-			return slot, out, false
-		}
-		out = fact{kind: w.Globals[index], backing: backingGlobal, offset: index}
-	}
-	return slot, out, true
-}
-
 func (w *walker) fetch(index int) bool {
 	if index >= len(w.Constants) {
 		return false
@@ -622,17 +487,6 @@ func (w *walker) fetch(index int) bool {
 		}
 	}
 	return w.constant(word, out)
-}
-
-func (w *walker) constant(word uint64, out fact) bool {
-	t, ok := typ(out.kind)
-	if !ok {
-		return false
-	}
-	value := w.builder.Value(t)
-	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpConst, Const: word, Results: []ssa.Value{value}})
-	w.push(value, out)
-	return true
 }
 
 func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
@@ -681,16 +535,14 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 	for i, r := range results {
 		w.push(out[i], r)
 	}
-	// select returns one of its operands: retain it before both are released.
+
 	if opcode == instr.SELECT && results[0].kind == types.KindRef {
 		w.retain(out[0])
 	}
 	for i := 0; i < len(consumed)-adopted; i++ {
 		w.release(consumed[i])
 	}
-	// A CALL never adopts a borrowed argument, so the callee's OpReturn
-	// never releases it either; the caller releases what it owned for the
-	// call here instead.
+
 	for i, borrowed := range borrows {
 		if borrowed {
 			w.release(consumed[i])
@@ -780,6 +632,24 @@ func (w *walker) tail(ip int) (ssa.Terminator, bool) {
 	return w.loop(ip), true
 }
 
+// callee resolves the function a CALL at operand at calls: a constant
+// function, or the function of a closure this unit built (fact.closure).
+func (w *walker) callee(at int) *types.Function {
+	o := w.stack[at]
+	ref := o.closure
+	if ref == 0 && o.referenceKnown {
+		ref = o.reference
+	}
+	if ref <= 0 {
+		return nil
+	}
+	target := w.Objects.function(ref)
+	if target == nil || target.Typ == nil {
+		return nil
+	}
+	return target
+}
+
 // reuses reports whether the RETURN_CALL at the stack's top re-enters this
 // unit's own function with the frame it already has: a plain function, not a
 // closure, with every argument on the stack and no slot a store could box
@@ -825,10 +695,119 @@ func (w *walker) loop(ip int) ssa.Terminator {
 	return ssa.Terminator{Op: ssa.OpJump}
 }
 
+func (w *walker) release(o operand) {
+	if o.kind != types.KindRef || o.backing != backingStack {
+		return
+	}
+	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{o.value}, State: w.deopt()})
+}
+
+func (w *walker) store(space ssa.Space, index int) bool {
+	if len(w.stack) == 0 {
+		return false
+	}
+	slot, out, ok := w.slot(space, index)
+	if !ok {
+		return false
+	}
+	top := len(w.stack) - 1
+	if w.stack[top].kind == types.KindRef {
+		w.own(top)
+		w.detach(out.backing, out.offset)
+	}
+	if space == ssa.SpaceLocal {
+		w.closures[index] = w.stack[top].closure
+	}
+	w.builder.Add(w.block, ssa.Operation{
+		Op:    ssa.OpStore,
+		Slot:  slot,
+		Args:  []ssa.Value{w.stack[top].value},
+		State: w.deopt(),
+	})
+	w.stack = w.stack[:top]
+	return true
+}
+
+func (w *walker) slot(space ssa.Space, index int) (ssa.Slot, fact, bool) {
+	slot := ssa.Slot{Space: space, Index: index}
+	var out fact
+	switch space {
+	case ssa.SpaceLocal:
+		if index >= len(w.activation.slots) {
+			return slot, out, false
+		}
+		out = holds(w.activation.slots[index])
+		out.backing, out.offset = backingLocal, index
+	case ssa.SpaceUpval:
+		if index >= len(w.activation.function.Captures) {
+			return slot, out, false
+		}
+		out = holds(w.activation.function.Captures[index])
+		out.backing, out.offset = backingUpval, index
+	default:
+		if index >= len(w.Globals) {
+			return slot, out, false
+		}
+		out = fact{kind: w.Globals[index], backing: backingGlobal, offset: index}
+	}
+	return slot, out, true
+}
+
+func (w *walker) detach(from backing, offset int) {
+	for i := range w.stack {
+		if w.stack[i].backing == from && w.stack[i].offset == offset {
+			w.own(i)
+		}
+	}
+}
+
+func (w *walker) constant(word uint64, out fact) bool {
+	t, ok := typ(out.kind)
+	if !ok {
+		return false
+	}
+	value := w.builder.Value(t)
+	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpConst, Const: word, Results: []ssa.Value{value}})
+	w.push(value, out)
+	return true
+}
+
+func (w *walker) push(value ssa.Value, out fact) {
+	w.stack = append(w.stack, operand{value: value, fact: out})
+}
+
 func (w *walker) exit(ip int) ssa.Terminator {
 	w.begin(ip)
 	w.adopt()
 	return ssa.Terminator{Op: ssa.OpExit, State: w.deopt()}
+}
+
+func (w *walker) adopt() {
+	for i := range w.stack {
+		w.own(i)
+	}
+}
+
+func (w *walker) own(at int) {
+	o := &w.stack[at]
+	if o.kind != types.KindRef || o.backing == backingStack {
+		return
+	}
+	w.retain(o.value)
+	o.backing, o.offset = backingStack, 0
+	if at < len(w.before) {
+		w.before[at] = *o
+		w.state = ssa.NoValue
+	}
+}
+
+func (w *walker) retain(value ssa.Value) {
+	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{value}})
+}
+
+func (w *walker) begin(ip int) {
+	w.ip, w.state = ip, ssa.NoValue
+	w.before = append(w.before[:0], w.stack...)
 }
 
 func (w *walker) guard(at int, shape ssa.Shape) {
@@ -844,6 +823,23 @@ func (w *walker) guard(at int, shape ssa.Shape) {
 		Results: []ssa.Value{value},
 	})
 	w.stack[at].value = value
+}
+
+func (w *walker) deopt() ssa.Value {
+	if w.state != ssa.NoValue {
+		return w.state
+	}
+	stack := make([]ssa.Operand, len(w.before))
+	for i, o := range w.before {
+		stack[i] = ssa.Operand{Value: o.value, Owned: o.kind == types.KindRef && o.backing == backingStack}
+	}
+	w.state = w.builder.Value(ssa.TypeState)
+	w.builder.Add(w.block, ssa.Operation{
+		Op:      ssa.OpState,
+		Frames:  []ssa.Frame{{Address: w.activation.address, IP: w.ip, Returns: w.activation.returns(), Stack: stack}},
+		Results: []ssa.Value{w.state},
+	})
+	return w.state
 }
 
 func values(stack []operand) []ssa.Value {

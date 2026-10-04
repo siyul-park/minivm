@@ -269,13 +269,6 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	}
 	i.alloc(types.Null)
 
-	// Retain each constant root and nested edge as it becomes visible because a
-	// later constant may allocate and trigger GC. recount normalizes the final
-	// baseline after the whole constant pool has been boxed.
-	//
-	// dedup gives identical string literals one shared cell. Nothing depends on
-	// that sharing - every string comparison and string map key compares content
-	// - so it is a load-time pool economy only, and the index dies with the loop.
 	dedup := make(map[string]types.Ref)
 	for j, v := range prog.Constants {
 		var val types.Boxed
@@ -333,8 +326,6 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	i.handlers[0] = prog.Handlers
 	i.coros[0] = i.yields(prog.Code)
 
-	// Execution specializes from the current global values; globalTypes remains
-	// the boundary contract for SetGlobal and Reset.
 	i.seed()
 
 	i.code[0] = i.compile(i.module, i.tick == 1)
@@ -377,8 +368,7 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 		i.spend(dormancy / 32)
 	}
 	for {
-		// dispatch's recover absorbs every panic, so nothing escapes it and ctx is
-		// always cleared below; a caught throw/trap loops to resume at the handler.
+
 		caught, err := i.dispatch()
 		if caught {
 			continue
@@ -390,17 +380,6 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 		}
 		return err
 	}
-}
-
-// Marshal converts a host value to a VM value.
-func (i *Interpreter) Marshal(v any) (val types.Value, err error) {
-	defer i.guard(&err)
-	return i.codec.Marshal(i, v)
-}
-
-// Unmarshal converts a VM value to a host value.
-func (i *Interpreter) Unmarshal(v types.Value, dst any) error {
-	return i.codec.Unmarshal(i, v, dst)
 }
 
 // Context returns the current execution context.
@@ -735,7 +714,7 @@ func (i *Interpreter) Close() error {
 
 // Reset restores the initial interpreter state.
 func (i *Interpreter) Reset() {
-	// Keep the recent peak, but let a smaller heap shrink an old high-water mark.
+
 	dynamic := len(i.heap) - i.base
 	keepStructs := i.structs.trim(dynamic)
 	keepArrays := i.arrays.trim(dynamic)
@@ -798,6 +777,17 @@ func (i *Interpreter) Reset() {
 	i.pace()
 }
 
+// Marshal converts a host value to a VM value.
+func (i *Interpreter) Marshal(v any) (val types.Value, err error) {
+	defer i.guard(&err)
+	return i.codec.Marshal(i, v)
+}
+
+// Unmarshal converts a VM value to a host value.
+func (i *Interpreter) Unmarshal(v types.Value, dst any) error {
+	return i.codec.Unmarshal(i, v, dst)
+}
+
 // text is the string a UTF-32 array spells.
 func (i *Interpreter) text(array types.Boxed) types.String {
 	return types.String(string(deref[types.TypedArray[int32]](i, array)))
@@ -818,22 +808,6 @@ func (i *Interpreter) concat(left, right types.Boxed) types.String {
 // runes is a string's UTF-32 array.
 func (i *Interpreter) runes(text types.Boxed) types.TypedArray[int32] {
 	return types.TypedArray[int32](deref[types.String](i, text))
-}
-
-// newArraySized reuses a header invalidated by Reset, with its retained
-// backing storage when it fits size.
-func (i *Interpreter) newArraySized(typ *types.ArrayType, size int) *types.Array {
-	array, ok := i.arrays.get()
-	if !ok {
-		return &types.Array{Typ: typ, Elems: make([]types.Boxed, size)}
-	}
-	if cap(array.Elems) < size {
-		array.Elems = make([]types.Boxed, size)
-	} else {
-		array.Elems = array.Elems[:size]
-	}
-	array.Typ = typ
-	return array
 }
 
 // newArrayDefault is a new array of typ's element kind holding size zero elements; a
@@ -864,6 +838,22 @@ func (i *Interpreter) newArrayDefault(typ *types.ArrayType, size types.Boxed) ty
 		i.retains(0, int(n))
 		return val
 	}
+}
+
+// newArraySized reuses a header invalidated by Reset, with its retained
+// backing storage when it fits size.
+func (i *Interpreter) newArraySized(typ *types.ArrayType, size int) *types.Array {
+	array, ok := i.arrays.get()
+	if !ok {
+		return &types.Array{Typ: typ, Elems: make([]types.Boxed, size)}
+	}
+	if cap(array.Elems) < size {
+		array.Elems = make([]types.Boxed, size)
+	} else {
+		array.Elems = array.Elems[:size]
+	}
+	array.Typ = typ
+	return array
 }
 
 // arrayGet is the generic ARRAY_GET path for all container representations.
@@ -909,8 +899,7 @@ func (i *Interpreter) arrayGet(addr, at int) types.Boxed {
 		i.retainBox(result)
 		return result
 	case *HostArray:
-		// A view converts on the way out instead of holding VM words, so a
-		// conversion that fails traps the way the threaded contract expects.
+
 		result, err := array.Element(i, at)
 		if err != nil {
 			panic(err)
@@ -1005,9 +994,7 @@ func (i *Interpreter) structGet(addr, at int) types.Boxed {
 			panic(ErrTypeMismatch)
 		}
 	case *HostStruct:
-		// A host struct converts on the way out instead of holding VM words,
-		// so a conversion that fails traps the way the threaded contract
-		// expects rather than reporting inward.
+
 		result, err := value.Field(i, at)
 		if err != nil {
 			panic(err)
@@ -1100,9 +1087,7 @@ func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []type
 		addr = v.Ref()
 		i.retain(addr)
 	default:
-		// A callable the heap already holds keeps the slot it has: a second
-		// one would alias the same Go value, which Alloc refuses. Only a
-		// callable the host built and never published needs one.
+
 		if addr = i.owner(target); addr >= 0 {
 			i.retain(addr)
 			break
@@ -1135,8 +1120,6 @@ func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []type
 		*i.fr = saved
 	}()
 
-	// The trampoline runs one CALL and nothing else, so it needs no program
-	// context.
 	i.fr.code = []func(*Interpreter){threaded[instr.CALL](&threader{})}
 	i.fr.ip = 0
 	if err = i.Run(ctx); err != nil {
@@ -1190,8 +1173,7 @@ func (i *Interpreter) dispatch() (caught bool, err error) {
 
 	f := i.fr
 	code := f.code
-	// The fast path avoids safepoint bookkeeping when no coordination is needed.
-	// Each loop also ends when a handler parks its frame (Interpreter.parked).
+
 	if i.done == nil && !i.metered() {
 		for {
 			for f.ip < len(code) {
@@ -1354,7 +1336,7 @@ func (i *Interpreter) recount() {
 // seed restores each global from its declaration rather than its previous value.
 func (i *Interpreter) seed() {
 	for idx, typ := range i.globalTypes {
-		// A ref global owns its null, as a stored null is owned.
+
 		if typ.Kind() == types.KindRef {
 			i.retain(0)
 		}
@@ -1737,31 +1719,6 @@ func (i *Interpreter) retains(addr int, n int) {
 	i.rc[addr] += n
 }
 
-func (i *Interpreter) release(addr int) {
-	// Fast path: a shared object just loses one of several references and stays
-	// live. This is the common case for ref-heavy code and avoids the worklist.
-	if i.rc[addr] > 1 {
-		i.rc[addr]--
-		return
-	}
-
-	base := len(i.work)
-	i.work = append(i.work, addr)
-	for len(i.work) > base {
-		next := i.work[len(i.work)-1]
-		i.work = i.work[:len(i.work)-1]
-
-		i.rc[next]--
-		if i.rc[next] == 0 {
-			v := i.heap[next]
-			for _, r := range i.refs(v) {
-				i.work = append(i.work, int(r))
-			}
-			i.reclaim(next, v)
-		}
-	}
-}
-
 // owner returns the slot that already holds val, or -1 when val is unowned.
 // Only a pointer value can be aliased into two slots; every other kind is
 // copied into its slot, so unowned is the answer for them by construction.
@@ -1787,9 +1744,7 @@ func (i *Interpreter) own(addr int, val types.Value) {
 	if !aliasable(val) {
 		return
 	}
-	// A hint survives only while its slot still holds it, so at most one per
-	// occupied slot is live. Twice that many entries means half are stale, and
-	// trimming then costs one pass per as many insertions as it discards.
+
 	if len(i.owners) >= max(2*(len(i.heap)-len(i.free)), heapRunway) {
 		i.trim()
 	}
@@ -1897,45 +1852,6 @@ func (i *Interpreter) dispose(addr int, v types.Value) {
 	i.finalize(addr, v)
 }
 
-// reclaim finalizes slot addr holding v, clears it, and returns the stable
-// address to the free list. The caller has already settled its referents.
-func (i *Interpreter) reclaim(addr int, v types.Value) {
-	i.finalize(addr, v)
-	switch v := v.(type) {
-	case *types.Struct:
-		if len(v.Typ.Fields) <= 4 {
-			i.structs.remove()
-			i.structs.put(v)
-		}
-	case *types.Array:
-		i.arrays.remove()
-	}
-	i.heap[addr] = nil
-	i.free = append(i.free, addr)
-}
-
-func (i *Interpreter) finalize(addr int, v types.Value) {
-	if _, ok := v.(*types.Function); ok {
-		i.remove(addr)
-	}
-	if c, ok := v.(io.Closer); ok {
-		_ = c.Close()
-	}
-}
-
-func (i *Interpreter) remove(addr int) {
-	if addr < 0 || addr >= len(i.instrs) {
-		delete(i.dynamic, addr)
-		return
-	}
-	i.instrs[addr] = nil
-	i.code[addr] = nil
-	i.zeros[addr] = nil
-	i.handlers[addr] = nil
-	i.coros[addr] = false
-	delete(i.dynamic, addr)
-}
-
 // gc collects one cycle. Every pass walks the whole heap.
 func (i *Interpreter) gc() {
 	metric(i, "vm_gc_cycles_total", 1)
@@ -2036,17 +1952,6 @@ func (i *Interpreter) pace() {
 	i.target = max(target, live)
 }
 
-// refs returns v's nested refs using the interpreter's reused scratch buffer,
-// or nil if v is not Traceable. The result is only valid until the next call.
-func (i *Interpreter) refs(v types.Value) []types.Ref {
-	t, ok := v.(types.Traceable)
-	if !ok {
-		return nil
-	}
-	i.refbuf = t.Refs(i.refbuf[:0])
-	return i.refbuf
-}
-
 // deref follows a value to the one it stands for, so a caller that accepts any
 // VM value sees a standalone one however the source stored it. It is the
 // borrowing counterpart of unbox: the heap value it reports stays owned by the
@@ -2070,6 +1975,80 @@ func unboxRef[T types.Value](i *Interpreter, val types.Boxed) T {
 	v := deref[T](i, val)
 	i.release(val.Ref())
 	return v
+}
+
+func (i *Interpreter) release(addr int) {
+
+	if i.rc[addr] > 1 {
+		i.rc[addr]--
+		return
+	}
+
+	base := len(i.work)
+	i.work = append(i.work, addr)
+	for len(i.work) > base {
+		next := i.work[len(i.work)-1]
+		i.work = i.work[:len(i.work)-1]
+
+		i.rc[next]--
+		if i.rc[next] == 0 {
+			v := i.heap[next]
+			for _, r := range i.refs(v) {
+				i.work = append(i.work, int(r))
+			}
+			i.reclaim(next, v)
+		}
+	}
+}
+
+// reclaim finalizes slot addr holding v, clears it, and returns the stable
+// address to the free list. The caller has already settled its referents.
+func (i *Interpreter) reclaim(addr int, v types.Value) {
+	i.finalize(addr, v)
+	switch v := v.(type) {
+	case *types.Struct:
+		if len(v.Typ.Fields) <= 4 {
+			i.structs.remove()
+			i.structs.put(v)
+		}
+	case *types.Array:
+		i.arrays.remove()
+	}
+	i.heap[addr] = nil
+	i.free = append(i.free, addr)
+}
+
+func (i *Interpreter) finalize(addr int, v types.Value) {
+	if _, ok := v.(*types.Function); ok {
+		i.remove(addr)
+	}
+	if c, ok := v.(io.Closer); ok {
+		_ = c.Close()
+	}
+}
+
+func (i *Interpreter) remove(addr int) {
+	if addr < 0 || addr >= len(i.instrs) {
+		delete(i.dynamic, addr)
+		return
+	}
+	i.instrs[addr] = nil
+	i.code[addr] = nil
+	i.zeros[addr] = nil
+	i.handlers[addr] = nil
+	i.coros[addr] = false
+	delete(i.dynamic, addr)
+}
+
+// refs returns v's nested refs using the interpreter's reused scratch buffer,
+// or nil if v is not Traceable. The result is only valid until the next call.
+func (i *Interpreter) refs(v types.Value) []types.Ref {
+	t, ok := v.(types.Traceable)
+	if !ok {
+		return nil
+	}
+	i.refbuf = t.Refs(i.refbuf[:0])
+	return i.refbuf
 }
 
 // deref is the T val references, keeping val's reference.

@@ -34,6 +34,38 @@ func IsBoxable(v int64) bool {
 	return minI64 <= v && v <= maxI64
 }
 
+// BoxF64 boxes a float64 value.
+func BoxF64(v float64) Boxed {
+	return Boxed(math.Float64bits(v))
+}
+
+// BoxRef boxes a reference index.
+func BoxRef(v int) Boxed {
+	return Box(uint64(v), KindRef)
+}
+
+// BoxWord boxes word, the native word of kind (see Boxed.Word). An i64 word
+// outside the inline range is not representable; callers promote it first.
+// An unknown kind boxes to zero.
+func BoxWord(kind Kind, word uint64) Boxed {
+	switch kind {
+	case KindI1:
+		return BoxI1(uint32(word) != 0)
+	case KindI8:
+		return BoxI8(int8(uint32(word)))
+	case KindI32:
+		return BoxI32(int32(uint32(word)))
+	case KindI64:
+		return BoxI64(int64(word))
+	case KindF32:
+		return BoxF32(math.Float32frombits(uint32(word)))
+	case KindF64, KindRef:
+		return Boxed(word)
+	default:
+		return 0
+	}
+}
+
 func BoxI32(v int32) Boxed {
 	return Box(uint64(uint32(v)), KindI32)
 }
@@ -60,36 +92,6 @@ func BoxI64(v int64) Boxed {
 
 func BoxF32(v float32) Boxed {
 	return Box(uint64(math.Float32bits(v)), KindF32)
-}
-
-func BoxF64(v float64) Boxed {
-	return Boxed(math.Float64bits(v))
-}
-
-func BoxRef(v int) Boxed {
-	return Box(uint64(v), KindRef)
-}
-
-// BoxWord boxes word, the native word of kind (see Boxed.Word). An i64 word
-// outside the inline range is not representable; callers promote it first.
-// An unknown kind boxes to zero.
-func BoxWord(kind Kind, word uint64) Boxed {
-	switch kind {
-	case KindI1:
-		return BoxI1(uint32(word) != 0)
-	case KindI8:
-		return BoxI8(int8(uint32(word)))
-	case KindI32:
-		return BoxI32(int32(uint32(word)))
-	case KindI64:
-		return BoxI64(int64(word))
-	case KindF32:
-		return BoxF32(math.Float32frombits(uint32(word)))
-	case KindF64, KindRef:
-		return Boxed(word)
-	default:
-		return 0
-	}
 }
 
 func Box(v uint64, kind Kind) Boxed {
@@ -119,6 +121,66 @@ func Unbox(v Boxed) Value {
 	}
 }
 
+// I8 decodes an int8 value.
+func (v Boxed) I8() int8 {
+	return int8(v & VMask)
+}
+
+// F64 decodes a float64 value.
+func (v Boxed) F64() float64 {
+	return math.Float64frombits(uint64(v))
+}
+
+// Ref returns the referenced value index.
+func (v Boxed) Ref() int {
+	return int(int32(v & VMask))
+}
+
+// Word returns v's native word: i1 as 0 or 1, i8 and i32 as a zero-extended
+// 32-bit lane, i64 as the full 64 bits, f32 as its bits in the low 32, and
+// f64 and ref as the boxed word itself.
+func (v Boxed) Word() uint64 {
+	switch v.Kind() {
+	case KindI1:
+		if v.Bool() {
+			return 1
+		}
+		return 0
+	case KindI8, KindI32:
+		return uint64(uint32(v.I32()))
+	case KindI64:
+		return uint64(v.I64())
+	case KindF32:
+		return uint64(math.Float32bits(v.F32()))
+	default:
+		return uint64(v)
+	}
+}
+
+// I32 decodes an int32 value.
+func (v Boxed) I32() int32 {
+	return int32(v & VMask)
+}
+
+// I64 decodes an int64 value.
+func (v Boxed) I64() int64 {
+	i := int64(v & VMask)
+	if i>>(VBits-1) != 0 {
+		i |= ^VMask
+	}
+	return i
+}
+
+// F32 decodes a float32 value.
+func (v Boxed) F32() float32 {
+	return math.Float32frombits(uint32(v & VMask))
+}
+
+// Bool reports the boxed boolean value.
+func (v Boxed) Bool() bool {
+	return (uint64(v) & VMask) != 0
+}
+
 func (v Boxed) Type() Type {
 	switch v.Kind() {
 	case KindI32:
@@ -138,10 +200,6 @@ func (v Boxed) Type() Type {
 	default:
 		return nil
 	}
-}
-
-func (v Boxed) I8() int8 {
-	return int8(v & VMask)
 }
 
 func (v Boxed) String() string {
@@ -172,53 +230,4 @@ func (v Boxed) Kind() Kind {
 		return Kind((u >> VBits) & TMask)
 	}
 	return KindF64
-}
-
-func (v Boxed) I32() int32 {
-	return int32(v & VMask)
-}
-
-func (v Boxed) I64() int64 {
-	i := int64(v & VMask)
-	if i>>(VBits-1) != 0 {
-		i |= ^VMask
-	}
-	return i
-}
-
-func (v Boxed) F32() float32 {
-	return math.Float32frombits(uint32(v & VMask))
-}
-
-func (v Boxed) F64() float64 {
-	return math.Float64frombits(uint64(v))
-}
-
-func (v Boxed) Bool() bool {
-	return (uint64(v) & VMask) != 0
-}
-
-func (v Boxed) Ref() int {
-	return int(int32(v & VMask))
-}
-
-// Word returns v's native word: i1 as 0 or 1, i8 and i32 as a zero-extended
-// 32-bit lane, i64 as the full 64 bits, f32 as its bits in the low 32, and
-// f64 and ref as the boxed word itself.
-func (v Boxed) Word() uint64 {
-	switch v.Kind() {
-	case KindI1:
-		if v.Bool() {
-			return 1
-		}
-		return 0
-	case KindI8, KindI32:
-		return uint64(uint32(v.I32()))
-	case KindI64:
-		return uint64(v.I64())
-	case KindF32:
-		return uint64(math.Float32bits(v.F32()))
-	default:
-		return uint64(v)
-	}
 }

@@ -270,8 +270,6 @@ var lowerers = [256]lowerer{
 	instr.YIELD:               emit(yield()),
 }
 
-// emit lowers an opcode that has one handler and no fusion form.
-
 func lower(op instr.Opcode) jen.Code {
 	context := state{width: width(op), standalone: true}
 	result, err := lowerers[op](&context, step{match: match{op: op}, kind: instr.KindAny})
@@ -383,9 +381,7 @@ func resolve(pattern pattern) ([]step, error) {
 		return steps, nil
 	}
 	if consumer == instr.STRUCT_GET && consumerAt == 2 {
-		// The field's Kind depends on the runtime *types.StructType a struct
-		// container declares, not on a Go type the pattern can name, so it is
-		// resolved during composition instead of here.
+
 		steps[0].kind = instr.KindRef
 		steps[1].kind = instr.KindI32
 		return steps, nil
@@ -441,6 +437,25 @@ func handler(body ...jen.Code) jen.Code {
 	)
 }
 
+// assertType is typeAt for an operand that must name a *types.<typ>, bound as typ
+// for body; any other type traps at run time.
+func assertType(typ string, body ...jen.Code) jen.Code {
+	return typeAt(append([]jen.Code{
+		jen.List(jen.Id("typ"), jen.Id("ok")).Op(":=").Id("c").Dot("types").Index(jen.Id("idx")).Assert(jen.Op("*").Qual(typesPkg, typ)),
+		jen.If(jen.Op("!").Id("ok")).Block(jen.Return(closure(jen.Panic(jen.Id("ErrTypeMismatch"))))),
+	}, body...)...)
+}
+
+// typeAt wraps body as the handler of a three-byte opcode whose operand
+// indexes c.types. An index out of range traps at run time.
+func typeAt(body ...jen.Code) jen.Code {
+	return threaderFunc(append([]jen.Code{
+		u16("idx", jen.Id("c").Dot("ip")),
+		jen.Id("c").Dot("ip").Op("+=").Lit(3),
+		jen.If(jen.Id("idx").Op(">=").Id("len").Call(jen.Id("c").Dot("types"))).Block(jen.Return(closure(jen.Panic(jen.Id("ErrSegmentationFault"))))),
+	}, body...)...)
+}
+
 // threaderFunc wraps body as the `func(c *threader) func(*Interpreter)`
 // shape shared by every lowering entry point.
 func threaderFunc(body ...jen.Code) jen.Code {
@@ -454,25 +469,6 @@ func closure(body ...jen.Code) jen.Code {
 	return jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)
 }
 
-// typeAt wraps body as the handler of a three-byte opcode whose operand
-// indexes c.types. An index out of range traps at run time.
-func typeAt(body ...jen.Code) jen.Code {
-	return threaderFunc(append([]jen.Code{
-		u16("idx", jen.Id("c").Dot("ip")),
-		jen.Id("c").Dot("ip").Op("+=").Lit(3),
-		jen.If(jen.Id("idx").Op(">=").Id("len").Call(jen.Id("c").Dot("types"))).Block(jen.Return(closure(jen.Panic(jen.Id("ErrSegmentationFault"))))),
-	}, body...)...)
-}
-
-// assertType is typeAt for an operand that must name a *types.<typ>, bound as typ
-// for body; any other type traps at run time.
-func assertType(typ string, body ...jen.Code) jen.Code {
-	return typeAt(append([]jen.Code{
-		jen.List(jen.Id("typ"), jen.Id("ok")).Op(":=").Id("c").Dot("types").Index(jen.Id("idx")).Assert(jen.Op("*").Qual(typesPkg, typ)),
-		jen.If(jen.Op("!").Id("ok")).Block(jen.Return(closure(jen.Panic(jen.Id("ErrTypeMismatch"))))),
-	}, body...)...)
-}
-
 // u8 and u16 bind name to the one- and two-byte operand that follows the
 // opcode at code position pos.
 func u8(name string, pos jen.Code) jen.Code {
@@ -481,11 +477,6 @@ func u8(name string, pos jen.Code) jen.Code {
 
 func u16(name string, pos jen.Code) jen.Code {
 	return jen.Id(name).Op(":=").Id("int").Call(jen.Op("*").Parens(jen.Op("*").Id("uint16")).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Id("c").Dot("code").Index(jen.Add(pos).Op("+").Lit(1)))))
-}
-
-// top is the operand-stack slot k from the top; top(1) is the top.
-func top(k int) *jen.Statement {
-	return jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(k))
 }
 
 // next moves the running frame past the current instruction.
@@ -525,17 +516,22 @@ func spend(cond jen.Code) jen.Code {
 	)
 }
 
-// reference traps unless slot holds a heap reference.
-func reference(slot jen.Code) jen.Code {
-	return jen.If(jen.Add(slot).Dot("Kind").Call().Op("!=").Qual(typesPkg, "KindRef")).Block(jen.Panic(jen.Id("ErrTypeMismatch")))
-}
-
 // container binds the reference at stack slot k to ref and its heap address to
 // addr, trapping when the slot holds no reference.
 func container(k int) jen.Code {
 	return jen.Id("ref").Op(":=").Add(top(k)).Line().
 		Add(reference(jen.Id("ref"))).Line().
 		Id("addr").Op(":=").Id("ref").Dot("Ref").Call()
+}
+
+// top is the operand-stack slot k from the top; top(1) is the top.
+func top(k int) *jen.Statement {
+	return jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(k))
+}
+
+// reference traps unless slot holds a heap reference.
+func reference(slot jen.Code) jen.Code {
+	return jen.If(jen.Add(slot).Dot("Kind").Call().Op("!=").Qual(typesPkg, "KindRef")).Block(jen.Panic(jen.Id("ErrTypeMismatch")))
 }
 
 // check traps with the error call returns.
@@ -623,6 +619,20 @@ func arrayKind(typ reflect.Type) (instr.Kind, bool) {
 	}
 }
 
+// fieldKindName names the types.Kind constant for kind, keeping i1 and i8
+// narrow instead of kindName's reduced Repr, because ArrayType.ElemKind and
+// StructField.Kind both store the element or field's real width.
+func fieldKindName(kind instr.Kind) (string, bool) {
+	switch kind {
+	case instr.KindI1:
+		return "I1", true
+	case instr.KindI8:
+		return "I8", true
+	default:
+		return kindName(kind)
+	}
+}
+
 func kindName(kind instr.Kind) (string, bool) {
 	switch kind.Repr() {
 	case instr.KindI32:
@@ -637,19 +647,5 @@ func kindName(kind instr.Kind) (string, bool) {
 		return "Ref", true
 	default:
 		return "", false
-	}
-}
-
-// fieldKindName names the types.Kind constant for kind, keeping i1 and i8
-// narrow instead of kindName's reduced Repr, because ArrayType.ElemKind and
-// StructField.Kind both store the element or field's real width.
-func fieldKindName(kind instr.Kind) (string, bool) {
-	switch kind {
-	case instr.KindI1:
-		return "I1", true
-	case instr.KindI8:
-		return "I8", true
-	default:
-		return kindName(kind)
 	}
 }

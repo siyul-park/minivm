@@ -22,23 +22,42 @@ import (
 // is refused before Compile reaches the backend.
 type stub struct{}
 
-func (stub) Arch() asm.Arch                                                 { panic("unused") }
-func (stub) Reserve() []asm.PReg                                            { panic("unused") }
+// totalTest is total's offset of its loop test, where its header's entry
+// state resumes.
+var totalTest = 2*(instr.New(instr.I32_CONST, 0).Width()+instr.New(instr.LOCAL_SET, 1).Width()) +
+	instr.New(instr.LOCAL_GET, 1).Width() + instr.New(instr.I32_CONST, 4).Width()
+
+func (stub) Arch() asm.Arch { panic("unused") }
+
+func (stub) Reserve() []asm.PReg { panic("unused") }
+
 func (stub) Prologue(*asm.Assembler, int, bool, compile.Layout, []asm.VReg) { panic("unused") }
-func (stub) Epilogue(*asm.Assembler)                                        { panic("unused") }
-func (stub) Enter(*asm.Assembler, compile.Layout) asm.Label                 { panic("unused") }
-func (stub) Lower(*asm.Assembler, ssa.Operation, compile.Site) bool         { panic("unused") }
+
+func (stub) Epilogue(*asm.Assembler) { panic("unused") }
+
+func (stub) Enter(*asm.Assembler, compile.Layout) asm.Label { panic("unused") }
+
+func (stub) Lower(*asm.Assembler, ssa.Operation, compile.Site) bool { panic("unused") }
+
 func (stub) Branch(*asm.Assembler, ssa.Terminator, compile.Site, []asm.Label, asm.Label) {
 	panic("unused")
 }
-func (stub) Return(*asm.Assembler, ssa.Terminator, compile.Site)  { panic("unused") }
-func (stub) Budget(*asm.Assembler, asm.Label)                     { panic("unused") }
-func (stub) Exit(*asm.Assembler, int, jit.Kind, []asm.VReg)       { panic("unused") }
-func (stub) Spill(*asm.Assembler, asm.VReg, int)                  { panic("unused") }
-func (stub) Results(*asm.Assembler, []asm.VReg)                   { panic("unused") }
+
+func (stub) Return(*asm.Assembler, ssa.Terminator, compile.Site) { panic("unused") }
+
+func (stub) Budget(*asm.Assembler, asm.Label) { panic("unused") }
+
+func (stub) Exit(*asm.Assembler, int, jit.Kind, []asm.VReg) { panic("unused") }
+
+func (stub) Spill(*asm.Assembler, asm.VReg, int) { panic("unused") }
+
+func (stub) Results(*asm.Assembler, []asm.VReg) { panic("unused") }
+
 func (stub) Call(*asm.Assembler, compile.Call, compile.Site) bool { panic("unused") }
-func (stub) Move(*asm.Assembler, asm.VReg, asm.VReg)              { panic("unused") }
-func (stub) Const(*asm.Assembler, asm.VReg, uint64)               { panic("unused") }
+
+func (stub) Move(*asm.Assembler, asm.VReg, asm.VReg) { panic("unused") }
+
+func (stub) Const(*asm.Assembler, asm.VReg, uint64) { panic("unused") }
 
 // noop is a function of one RETURN and no parameters: valid enough for
 // translation and verification to succeed.
@@ -70,11 +89,6 @@ func sum(t *testing.T) *types.Function {
 		Code:   instr.Marshal(code),
 	}
 }
-
-// totalTest is total's offset of its loop test, where its header's entry
-// state resumes.
-var totalTest = 2*(instr.New(instr.I32_CONST, 0).Width()+instr.New(instr.LOCAL_SET, 1).Width()) +
-	instr.New(instr.LOCAL_GET, 1).Width() + instr.New(instr.I32_CONST, 4).Width()
 
 // total sums the first four elements of its i32 array parameter.
 func total(t *testing.T) *types.Function {
@@ -138,14 +152,11 @@ func run(t *testing.T, u compile.Unit, stack []types.Boxed, callees ...compile.U
 		}
 	}
 
-	// rc backs every object CALL retains and releases across the run; each
-	// function's own reference count is high enough that a recursive self-
-	// call's nested retain/release pairs never reach zero.
 	rc := make([]int, size)
 	for i := range rc {
 		rc[i] = 1
 	}
-	// entries backs each prologue's own entry count.
+
 	entries := make([]int64, size)
 
 	ctx, err := jit.NewContext(4096)
@@ -167,6 +178,13 @@ func native(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
 		t.Skip("native execution needs arm64")
 	}
+}
+
+// address is the base of s kept on the heap for the test's life: native code
+// holds it as a uintptr, which a copied goroutine stack would leave dangling.
+func address[T any](t *testing.T, s []T) uintptr {
+	t.Cleanup(func() { runtime.KeepAlive(s) })
+	return uintptr(unsafe.Pointer(&s[0]))
 }
 
 func TestCompile(t *testing.T) {
@@ -276,9 +294,7 @@ func TestCompile(t *testing.T) {
 
 	t.Run("compiles and runs an OSR unit at every tier", func(t *testing.T) {
 		native(t)
-		// acc lives on the operand stack across the header; n (the
-		// function's own parameter) and bonus (an ordinary local) stay in
-		// VM slots throughout.
+
 		b := instr.NewBuilder()
 		header, done := b.Label(), b.Label()
 		b.Emit(instr.I32_CONST, 0)
@@ -299,8 +315,7 @@ func TestCompile(t *testing.T) {
 		entry := instr.New(instr.I32_CONST, 0).Width()*2 + instr.New(instr.LOCAL_SET, 1).Width()
 
 		for _, tier := range []jit.Tier{jit.Baseline, jit.Optimized} {
-			// n=5, i=3 (partway through the loop), bonus=100, acc=3 (the
-			// operand-stack value the interpreter left at the header).
+
 			stack := []types.Boxed{types.BoxI32(5), types.BoxI32(3), types.BoxI32(100), types.BoxI32(3)}
 			u := compile.Unit{Address: 1, Function: fn, Tier: tier, IP: entry, OSR: true}
 			ctx, trap := run(t, u, stack)
@@ -312,9 +327,7 @@ func TestCompile(t *testing.T) {
 
 	t.Run("compiles and runs an OSR unit whose loop carries an i64 local", func(t *testing.T) {
 		native(t)
-		// i (slot 1, i32) counts 0..n; acc (slot 2, i64) xors i in each
-		// iteration, promoted and entry-guarded once instead of refusing
-		// (gap 5, closed by P).
+
 		b := instr.NewBuilder()
 		header, done := b.Label(), b.Label()
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
@@ -339,8 +352,7 @@ func TestCompile(t *testing.T) {
 		u := compile.Unit{Address: 1, Function: fn, Tier: jit.Optimized, IP: entry, OSR: true}
 		ctx, trap := run(t, u, stack)
 		require.Equal(t, jit.TrapReturn, trap)
-		// 0^0^1^2^3^4 = 4, raw: a register-eligible i64 result reaches its
-		// slot as Enter's raw word (R), which only the Go entry boxes.
+
 		want := int64(0 ^ 0 ^ 1 ^ 2 ^ 3 ^ 4)
 		require.Equal(t, types.Boxed(uint64(want)), stack[0])
 		require.Zero(t, ctx.Depth)
@@ -367,8 +379,7 @@ func TestCompile(t *testing.T) {
 	})
 
 	t.Run("compiles a speculated indirect self call at both tiers", func(t *testing.T) {
-		// fib(n, self) calls itself through param 1, speculated from feedback
-		// recorded at both of its dynamic CALLs.
+
 		b := instr.NewBuilder()
 		small := b.Label()
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.I32_LT_S).BrIf(small)
@@ -404,8 +415,7 @@ func TestCompile(t *testing.T) {
 
 	t.Run("runs fib through its own native code at every tier", func(t *testing.T) {
 		native(t)
-		// fib(n) = n < 2 ? n : fib(n-1) + fib(n-2), at address 2, calling
-		// itself through constant 0.
+
 		b := instr.NewBuilder()
 		small := b.Label()
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.I32_LT_S).BrIf(small)
@@ -432,9 +442,7 @@ func TestCompile(t *testing.T) {
 
 	t.Run("rereads a register-passed parameter after a call spills it", func(t *testing.T) {
 		native(t)
-		// f(n) = ident(n) + n: n's incoming register value stays live across
-		// the call, so the allocator spills it right where the prologue
-		// captures it.
+
 		b := instr.NewBuilder()
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
 		code, err := b.Assemble()
@@ -465,7 +473,7 @@ func TestCompile(t *testing.T) {
 
 	t.Run("rereads a register-passed parameter a loop stores to", func(t *testing.T) {
 		native(t)
-		// f(n) counts n down to zero in its own slot, counting iterations.
+
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
 		b.Bind(loop)
@@ -503,7 +511,7 @@ func TestCompile(t *testing.T) {
 			{types.TypeF64, types.BoxF64(1.5), types.BoxF64(-2.25)},
 		} {
 			typ := &types.FunctionType{Params: []types.Type{c.typ, c.typ}, Returns: []types.Type{c.typ}}
-			// g(x, y) = y; f(x, y) = g(x, y): both registers cross both entries.
+
 			b := instr.NewBuilder()
 			b.Emit(instr.LOCAL_GET, 1).Emit(instr.RETURN)
 			code, err := b.Assemble()
@@ -544,11 +552,4 @@ func TestCompile(t *testing.T) {
 			require.Zero(t, ctx.Depth)
 		}
 	})
-}
-
-// address is the base of s kept on the heap for the test's life: native code
-// holds it as a uintptr, which a copied goroutine stack would leave dangling.
-func address[T any](t *testing.T, s []T) uintptr {
-	t.Cleanup(func() { runtime.KeepAlive(s) })
-	return uintptr(unsafe.Pointer(&s[0]))
 }

@@ -264,20 +264,6 @@ func (a *allocator) access(row int) (reads, writes []value) {
 	return reads, writes
 }
 
-// value keys the register an operand names, and reports false for a physical
-// register the allocator never assigns and therefore never tracks.
-func (a *allocator) value(r Reg) (value, bool) {
-	switch r := r.(type) {
-	case VReg:
-		return virtual(r), true
-	case PReg:
-		v := physical(r)
-		return v, a.usable[v]
-	default:
-		return value{}, false
-	}
-}
-
 // scan assigns registers in start order; values whose live rows never meet
 // share a register. Call-live values spill first; under pressure it evicts
 // the longest-lived non-tiny value live alongside the one being assigned.
@@ -437,6 +423,20 @@ func (a *allocator) rewrite(spilled []value) {
 		repl = append(repl, slices.Concat(before, []Instruction{inst}, after))
 	}
 	a.insts, a.labels = splice(a.insts, a.labels, at, repl)
+}
+
+// value keys the register an operand names, and reports false for a physical
+// register the allocator never assigns and therefore never tracks.
+func (a *allocator) value(r Reg) (value, bool) {
+	switch r := r.(type) {
+	case VReg:
+		return virtual(r), true
+	case PReg:
+		v := physical(r)
+		return v, a.usable[v]
+	default:
+		return value{}, false
+	}
 }
 
 // fresh returns a new tiny virtual register of v's bank and width.

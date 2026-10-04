@@ -114,14 +114,6 @@ func (l *loops) indexed(loop induction, operation ssa.Operation) bool {
 	return ok && slice.Op == ssa.OpSlice && loop.frames != nil && l.dominance.Dominates(l.sites[operation.Args[0]].block, loop.preheader)
 }
 
-func (l *loops) define(v ssa.Value) (ssa.Operation, bool) {
-	at, ok := l.sites[v]
-	if !ok {
-		return ssa.Operation{}, false
-	}
-	return l.function.Block(at.block).Operations[at.index], true
-}
-
 // induction reports the loop at header h when its branch tests i <s n on a
 // header param i that enters at a constant ≥ 0 and steps up by constants
 // along every latch, n is loop-invariant, and no step wraps i past n.
@@ -220,6 +212,14 @@ func (l *loops) induction(body map[int]bool, h int) (induction, bool) {
 		loop.frames = frames
 	}
 	return loop, true
+}
+
+func (l *loops) define(v ssa.Value) (ssa.Operation, bool) {
+	at, ok := l.sites[v]
+	if !ok {
+		return ssa.Operation{}, false
+	}
+	return l.function.Block(at.block).Operations[at.index], true
 }
 
 func rebuild(function *ssa.Function, bounded map[site]bool, guards map[int][]ssa.Operation) *ssa.Function {

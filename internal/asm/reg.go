@@ -36,7 +36,9 @@ const (
 )
 
 const (
+	// Width32 is the 32-bit register width.
 	Width32 RegWidth = 32
+	// Width64 is the 64-bit register width.
 	Width64 RegWidth = 64
 )
 
@@ -50,9 +52,19 @@ func NewVReg(id int32, typ RegType, w RegWidth) VReg {
 	return VReg{id: id, typ: typ, width: w}
 }
 
-func (r PReg) ID() uint8       { return r.id }
-func (r PReg) Type() RegType   { return r.typ }
+// ID returns the register identifier.
+func (r PReg) ID() uint8 { return r.id }
+
 func (r PReg) Width() RegWidth { return r.width }
+
+// ID returns the register identifier.
+func (r VReg) ID() int32 { return r.id }
+
+// Width returns the register width.
+func (r VReg) Width() RegWidth { return r.width }
+
+// Type returns the value type.
+func (r PReg) Type() RegType { return r.typ }
 
 func (r PReg) String() string {
 	if r.typ == RegTypeFloat {
@@ -67,9 +79,8 @@ func (r PReg) String() string {
 	return fmt.Sprintf("x%d", r.id)
 }
 
-func (r VReg) ID() int32       { return r.id }
-func (r VReg) Type() RegType   { return r.typ }
-func (r VReg) Width() RegWidth { return r.width }
+// Type returns the value type.
+func (r VReg) Type() RegType { return r.typ }
 
 func (r VReg) String() string {
 	prefix := "vr"

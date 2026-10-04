@@ -70,6 +70,18 @@ func (q *Queue) Submit(u Unit) bool {
 	return true
 }
 
+// Close stops accepting units, discards units no worker has started, and
+// returns the jobs finished but not yet drained. It does not wait: a worker
+// compiling at Close frees that unit's code and exits.
+func (q *Queue) Close() []Job {
+	q.mu.Lock()
+	q.closed = true
+	q.pending = nil
+	q.cond.Broadcast()
+	q.mu.Unlock()
+	return q.Drain()
+}
+
 // Drain returns every finished job in finish order and frees its address
 // for Submit.
 func (q *Queue) Drain() []Job {
@@ -85,18 +97,6 @@ func (q *Queue) Drain() []Job {
 		delete(q.active, j.Unit.Address)
 	}
 	return jobs
-}
-
-// Close stops accepting units, discards units no worker has started, and
-// returns the jobs finished but not yet drained. It does not wait: a worker
-// compiling at Close frees that unit's code and exits.
-func (q *Queue) Close() []Job {
-	q.mu.Lock()
-	q.closed = true
-	q.pending = nil
-	q.cond.Broadcast()
-	q.mu.Unlock()
-	return q.Drain()
 }
 
 func (q *Queue) work() {
@@ -124,8 +124,7 @@ func (q *Queue) work() {
 		}
 		q.mu.Unlock()
 		if closed && code != nil {
-			// Nothing drains a closed queue again; an unmap failure here has
-			// no caller left to report to.
+
 			_ = code.Free()
 		}
 	}

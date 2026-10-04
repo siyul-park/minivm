@@ -91,16 +91,6 @@ func (d *Dominance) Dominates(a, b int) bool {
 	return true
 }
 
-// IDom returns node's immediate dominator: the unique closest node that
-// strictly dominates it. It returns -1 for the entry, which has none, and for
-// a node unreachable from the entry.
-func (d *Dominance) IDom(node int) int {
-	if node <= 0 || node >= len(d.idom) || d.idom[node] == -1 {
-		return -1
-	}
-	return d.idom[node]
-}
-
 // Children returns the dominator-tree children for every node.
 func (d *Dominance) Children() [][]int {
 	children := make([][]int, len(d.idom))
@@ -111,6 +101,16 @@ func (d *Dominance) Children() [][]int {
 		}
 	}
 	return children
+}
+
+// IDom returns node's immediate dominator: the unique closest node that
+// strictly dominates it. It returns -1 for the entry, which has none, and for
+// a node unreachable from the entry.
+func (d *Dominance) IDom(node int) int {
+	if node <= 0 || node >= len(d.idom) || d.idom[node] == -1 {
+		return -1
+	}
+	return d.idom[node]
 }
 
 // intersect finds the nearest common ancestor of a and b in the dominator

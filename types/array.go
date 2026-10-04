@@ -27,12 +27,19 @@ var (
 )
 
 var _ Value = TypedArray[bool](nil)
+
 var _ Value = TypedArray[int8](nil)
+
 var _ Value = TypedArray[int32](nil)
+
 var _ Value = TypedArray[int64](nil)
+
 var _ Value = TypedArray[float32](nil)
+
 var _ Value = TypedArray[float64](nil)
+
 var _ Traceable = (*Array)(nil)
+
 var _ Type = (*ArrayType)(nil)
 
 func NewArray(typ *ArrayType, elems ...Boxed) *Array {

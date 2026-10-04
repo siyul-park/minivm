@@ -1105,26 +1105,6 @@ func indirectRecursiveFib(t *testing.T) (*types.Function, []int) {
 	return fn, calls(fn.Code)
 }
 
-// calls returns the offset of every CALL in code, in order.
-func calls(code []byte) []int {
-	var out []int
-	for ip := 0; ip < len(code); ip += instr.Instruction(code[ip:]).Width() {
-		if instr.Instruction(code[ip:]).Opcode() == instr.CALL {
-			out = append(out, ip)
-		}
-	}
-	return out
-}
-
-func assemble(t *testing.T, emit func(b *instr.Builder)) []byte {
-	t.Helper()
-	b := instr.NewBuilder()
-	emit(b)
-	instructions, err := b.Assemble()
-	require.NoError(t, err)
-	return instr.Marshal(instructions)
-}
-
 // coldCallFunction builds func(i32, func() i32) i32 whose cold branch calls
 // param 1 and branches on its result, and reports that CALL's own ip. The
 // two blocks after the call are reached only through it.
@@ -1147,6 +1127,26 @@ func coldCallFunction(t *testing.T) (*types.Function, int) {
 		Code: instr.Marshal(code),
 	}
 	return fn, calls(fn.Code)[0]
+}
+
+// calls returns the offset of every CALL in code, in order.
+func calls(code []byte) []int {
+	var out []int
+	for ip := 0; ip < len(code); ip += instr.Instruction(code[ip:]).Width() {
+		if instr.Instruction(code[ip:]).Opcode() == instr.CALL {
+			out = append(out, ip)
+		}
+	}
+	return out
+}
+
+func assemble(t *testing.T, emit func(b *instr.Builder)) []byte {
+	t.Helper()
+	b := instr.NewBuilder()
+	emit(b)
+	instructions, err := b.Assemble()
+	require.NoError(t, err)
+	return instr.Marshal(instructions)
 }
 
 // protectedFunction divides its parameters inside a protected region whose

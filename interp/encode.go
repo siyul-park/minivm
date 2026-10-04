@@ -54,10 +54,6 @@ type sliceHeader struct {
 	cap  int
 }
 
-func (f MarshalerFunc) Marshal(e *Encoder, p unsafe.Pointer) (types.Value, error) {
-	return f(e, p)
-}
-
 // Interp returns the interpreter this conversion runs against.
 func (e *Encoder) Interp() *Interpreter { return e.interp }
 
@@ -69,6 +65,11 @@ func (e *Encoder) Encode(t reflect.Type, p unsafe.Pointer) (types.Value, error) 
 		return nil, err
 	}
 	return c.value(e, p)
+}
+
+// Marshal converts a value to its encoded form.
+func (f MarshalerFunc) Marshal(e *Encoder, p unsafe.Pointer) (types.Value, error) {
+	return f(e, p)
 }
 
 // enter records ptr as being converted and reports whether it already was, so a
@@ -85,6 +86,23 @@ func (e *Encoder) enter(ptr unsafe.Pointer) bool {
 }
 
 func (e *Encoder) leave(ptr unsafe.Pointer) { delete(e.seen, ptr) }
+
+// slot converts the Go value v into a slot of typ, the form a declared VM
+// signature holds a parameter or a result in. v is a value rather than an
+// address, so it takes a holder of its own for the conversion to read.
+func (e *Encoder) slot(v reflect.Value, typ types.Type) (types.Boxed, error) {
+	holder := reflect.New(v.Type())
+	holder.Elem().Set(v)
+	c, err := e.registry.conversion(v.Type())
+	if err != nil {
+		return 0, err
+	}
+	val, err := c.value(e, holder.UnsafePointer())
+	if err != nil {
+		return 0, err
+	}
+	return e.boxAs(val, typ)
+}
 
 // boxAs narrows a standalone value into a slot of typ, publishing a heap ref when
 // the slot holds one.
@@ -142,23 +160,6 @@ func (e *Encoder) boxAs(val types.Value, typ types.Type) (types.Boxed, error) {
 	}
 }
 
-// slot converts the Go value v into a slot of typ, the form a declared VM
-// signature holds a parameter or a result in. v is a value rather than an
-// address, so it takes a holder of its own for the conversion to read.
-func (e *Encoder) slot(v reflect.Value, typ types.Type) (types.Boxed, error) {
-	holder := reflect.New(v.Type())
-	holder.Elem().Set(v)
-	c, err := e.registry.conversion(v.Type())
-	if err != nil {
-		return 0, err
-	}
-	val, err := c.value(e, holder.UnsafePointer())
-	if err != nil {
-		return 0, err
-	}
-	return e.boxAs(val, typ)
-}
-
 // boxed holds val the way the VM holds a value on its stack, so a key or an
 // element reaches (*Interpreter).mapKey in the same form an opcode would hand
 // it over. It is the error-returning counterpart of (*Interpreter).box, which
@@ -194,15 +195,6 @@ func (e *Encoder) ref(val types.Value) (types.Boxed, error) {
 	}
 }
 
-func (e *Encoder) alloc(val types.Value) (types.Boxed, error) {
-	addr, err := e.interp.Alloc(val)
-	if err != nil {
-		return 0, err
-	}
-	e.owned = append(e.owned, addr)
-	return types.BoxRef(addr), nil
-}
-
 // retain takes ownership of a heap value the Go side only named, so a marshaled
 // alias keeps its target alive for as long as the value holding it.
 func (e *Encoder) retain(addr int) (types.Boxed, error) {
@@ -230,6 +222,15 @@ func (e *Encoder) boxI64(n int64) (types.Boxed, error) {
 		return types.BoxI64(n), nil
 	}
 	return e.alloc(types.I64(n))
+}
+
+func (e *Encoder) alloc(val types.Value) (types.Boxed, error) {
+	addr, err := e.interp.Alloc(val)
+	if err != nil {
+		return 0, err
+	}
+	e.owned = append(e.owned, addr)
+	return types.BoxRef(addr), nil
 }
 
 // wrap exposes a bound Go function to the VM. Scratch is allocated inside the
@@ -466,19 +467,6 @@ func verify(val types.Value, typ types.Type) error {
 	return nil
 }
 
-// spanOf compiles the reach of a Go array or slice, whose length a slice
-// carries in its header and an array fixes in its type.
-func spanOf(t reflect.Type) span {
-	if t.Kind() == reflect.Array {
-		n := t.Len()
-		return func(p unsafe.Pointer) (unsafe.Pointer, int) { return p, n }
-	}
-	return func(p unsafe.Pointer) (unsafe.Pointer, int) {
-		h := (*sliceHeader)(p)
-		return h.data, h.len
-	}
-}
-
 // marshalArray converts a Go array or slice. An element kind the VM stores
 // unboxed selects a typed array at compile time; anything else boxes into the
 // generic representation, where an element can reach the container again and
@@ -535,6 +523,19 @@ func marshalArray(t reflect.Type, at *types.ArrayType, elem *conversion) Marshal
 	}
 }
 
+// spanOf compiles the reach of a Go array or slice, whose length a slice
+// carries in its header and an array fixes in its type.
+func spanOf(t reflect.Type) span {
+	if t.Kind() == reflect.Array {
+		n := t.Len()
+		return func(p unsafe.Pointer) (unsafe.Pointer, int) { return p, n }
+	}
+	return func(p unsafe.Pointer) (unsafe.Pointer, int) {
+		h := (*sliceHeader)(p)
+		return h.data, h.len
+	}
+}
+
 func typedArray[T int8 | int32 | int64 | float32 | float64 | bool](
 	bounds span,
 	stride uintptr,
@@ -556,10 +557,7 @@ func typedArray[T int8 | int32 | int64 | float32 | float64 | bool](
 // chosen once at compile time.
 func marshalMap(t reflect.Type, mt *types.MapType, key, elem *conversion) MarshalerFunc {
 	write := mapWriter(mt, key)
-	// A hosted entry keeps the address it was marshaled from, so it needs
-	// storage of its own rather than the scratch every other entry shares. Go
-	// map memory is not addressable, so such a view stands for a copy either
-	// way; what matters is that two entries are not the same copy.
+
 	shared := !key.host && !elem.host
 	return func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
 		if target := *(*unsafe.Pointer)(p); target != nil {
@@ -625,9 +623,7 @@ func mapWriter(mt *types.MapType, key *conversion) func(*Encoder, types.Value, u
 		return typedMap(key, func(val types.Value) (float64, error) { return keyFloat(val, mt.Key) })
 
 	case types.KindRef:
-		// A declared string key has no identity to preserve, so it keys by
-		// content like every other typed key; NewMapForType picks the same
-		// representation from the same test. Any other ref keys by heap ref.
+
 		if mt.Key.Equals(types.TypeString) {
 			return func(e *Encoder, m types.Value, p unsafe.Pointer, value types.Boxed) error {
 				val, err := key.value(e, p)

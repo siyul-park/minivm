@@ -45,6 +45,9 @@ func run(pass *analysis.Pass) (any, error) {
 }
 
 func checkDocs(pass *analysis.Pass, file *ast.File) {
+	if strings.HasSuffix(pass.Fset.File(file.Pos()).Name(), "_test.go") {
+		return
+	}
 	for _, decl := range file.Decls {
 		switch decl := decl.(type) {
 		case *ast.FuncDecl:
@@ -94,22 +97,38 @@ func checkDeclarations(pass *analysis.Pass, file *ast.File) {
 func declarationGroup(decl ast.Decl) int {
 	switch decl := decl.(type) {
 	case *ast.FuncDecl:
+		if isTestFunction(decl.Name.Name) {
+			return -1
+		}
 		if decl.Recv != nil {
-			if decl.Name.IsExported() {
-				return 8
+			if !decl.Name.IsExported() {
+				return 11
 			}
-			return 11
+			switch {
+			case isHook(decl.Name.Name):
+				return 10
+			case isConstructor(decl.Name.Name):
+				return 8
+			default:
+				return 9
+			}
 		}
 		if decl.Name.Name == "init" {
 			return 6
 		}
 		if decl.Name.IsExported() {
+			if isConstructor(decl.Name.Name) {
+				return 8
+			}
 			return 7
 		}
 		return 11
 	case *ast.GenDecl:
 		switch decl.Tok {
 		case token.TYPE:
+			if allSpecsUnexportedType(decl.Specs) {
+				return 1
+			}
 			return 0
 		case token.CONST:
 			if allSpecsUnexported(decl.Specs) {
@@ -121,6 +140,29 @@ func declarationGroup(decl ast.Decl) int {
 		}
 	}
 	return -1
+}
+
+func allSpecsUnexportedType(specs []ast.Spec) bool {
+	for _, spec := range specs {
+		typ, ok := spec.(*ast.TypeSpec)
+		if !ok || typ.Name.IsExported() {
+			return false
+		}
+	}
+	return true
+}
+
+func isConstructor(name string) bool {
+	return name == "New" || strings.HasPrefix(name, "New")
+}
+
+func isHook(name string) bool {
+	switch name {
+	case "Cast", "Equals", "Kind", "Type", "String", "Refs", "Marshal", "Unmarshal", "Error", "Unwrap":
+		return true
+	default:
+		return false
+	}
 }
 
 func allSpecsUnexported(specs []ast.Spec) bool {
@@ -156,6 +198,8 @@ func checkDependencyOrder(pass *analysis.Pass, file *ast.File) {
 			decls[obj] = fn
 		}
 	}
+
+	deps := make(map[types.Object][]types.Object)
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Body == nil {
@@ -172,19 +216,65 @@ func checkDependencyOrder(pass *analysis.Pass, file *ast.File) {
 			}
 			dependency := pass.TypesInfo.Uses[ident]
 			dependencyDecl := decls[dependency]
-			if dependencyDecl == nil || dependency == caller || dependencyDecl.Pos() >= fn.Pos() {
+			if dependencyDecl == nil || dependency == caller ||
+				declarationGroup(fn) != declarationGroup(dependencyDecl) {
 				return true
+			}
+			deps[caller] = appendUnique(deps[caller], dependency)
+			return true
+		})
+	}
+
+	for caller, dependencies := range deps {
+		fn := decls[caller]
+		for _, dependency := range dependencies {
+			dependencyDecl := decls[dependency]
+			if dependencyDecl == nil || dependencyDecl.Pos() >= fn.Pos() {
+				continue
+			}
+			if reaches(deps, dependency, caller) {
+				continue
 			}
 			report(pass, "CP006", fn.Name.Pos(),
 				"dependent %s follows dependency %s; dependents must be declared before their dependencies",
 				fn.Name.Name, dependencyDecl.Name.Name)
-			return false
-		})
+		}
 	}
+}
+
+func appendUnique(objects []types.Object, object types.Object) []types.Object {
+	for _, existing := range objects {
+		if existing == object {
+			return objects
+		}
+	}
+	return append(objects, object)
+}
+
+func reaches(graph map[types.Object][]types.Object, start, target types.Object) bool {
+	seen := make(map[types.Object]bool)
+	var visit func(types.Object) bool
+	visit = func(object types.Object) bool {
+		if object == target {
+			return true
+		}
+		if seen[object] {
+			return false
+		}
+		seen[object] = true
+		for _, next := range graph[object] {
+			if visit(next) {
+				return true
+			}
+		}
+		return false
+	}
+	return visit(start)
 }
 
 func checkHelpers(pass *analysis.Pass) {
 	callers := make(map[types.Object]map[types.Object]bool)
+	documented := make(map[types.Object]bool)
 	var current types.Object
 	for _, file := range pass.Files {
 		if strings.HasSuffix(pass.Fset.File(file.Pos()).Name(), "_test.go") {
@@ -196,6 +286,9 @@ func checkHelpers(pass *analysis.Pass) {
 				continue
 			}
 			current = pass.TypesInfo.ObjectOf(fn.Name)
+			if current != nil && fn.Doc != nil {
+				documented[current] = true
+			}
 			ast.Inspect(fn.Body, func(node ast.Node) bool {
 				call, ok := node.(*ast.CallExpr)
 				if !ok || current == nil {
@@ -216,6 +309,9 @@ func checkHelpers(pass *analysis.Pass) {
 	for ident, obj := range pass.TypesInfo.Defs {
 		fn, ok := obj.(*types.Func)
 		if !ok || fn.Exported() {
+			continue
+		}
+		if documented[obj] {
 			continue
 		}
 		if len(callers[obj]) == 1 {
@@ -279,12 +375,21 @@ func checkConstructors(pass *analysis.Pass) {
 			continue
 		}
 		for i := 0; i < sig.Results().Len(); i++ {
-			if _, ok := sig.Results().At(i).Type().Underlying().(*types.Interface); ok {
+			typ := sig.Results().At(i).Type()
+			if isErrorType(typ) {
+				continue
+			}
+			if _, ok := typ.Underlying().(*types.Interface); ok {
 				report(pass, "CP004", ident.Pos(), "constructor %s returns an interface; constructors must return concrete types", fn.Name())
 				break
 			}
 		}
 	}
+}
+
+func isErrorType(typ types.Type) bool {
+	err := types.Universe.Lookup("error")
+	return err != nil && types.Identical(typ, err.Type())
 }
 
 func checkCohesion(pass *analysis.Pass) {
@@ -432,7 +537,7 @@ func report(pass *analysis.Pass, rule string, pos token.Pos, format string, args
 
 func ruleSeverity(rule string) severity {
 	switch rule {
-	case "CP007":
+	case "CP001", "CP007":
 		return warningSeverity
 	default:
 		return errorSeverity

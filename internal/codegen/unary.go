@@ -12,8 +12,15 @@ import (
 // conversions are not a pipeline and build their body in saturate.
 type pipe func(jen.Code) jen.Code
 
-// unary lowers a one-operand opcode: it binds operand to v and overwrites the
-// top of the stack with store.
+// float32Math lowers fn of package math over an f32.
+func float32Math(fn string) jen.Code {
+	return convert(narrow("F32"), "F32", as("float64"), via("math", fn), as("float32"))
+}
+
+// float64Math lowers fn of package math over an f64.
+func float64Math(fn string) jen.Code {
+	return convert(narrow("F64"), "F64", via("math", fn))
+}
 
 // convert lowers a unary opcode that runs operand through stages in order and
 // boxes the result as dst.
@@ -23,16 +30,6 @@ func convert(operand jen.Code, dst string, stages ...pipe) jen.Code {
 		out = stage(out)
 	}
 	return unary(operand, boxed(dst, out))
-}
-
-// float32Math lowers fn of package math over an f32.
-func float32Math(fn string) jen.Code {
-	return convert(narrow("F32"), "F32", as("float64"), via("math", fn), as("float32"))
-}
-
-// float64Math lowers fn of package math over an f64.
-func float64Math(fn string) jen.Code {
-	return convert(narrow("F64"), "F64", via("math", fn))
 }
 
 // saturate lowers the conversion of src, F32 or F64, to the Go integer type

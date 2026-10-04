@@ -28,20 +28,20 @@ var _ asm.Encoder = Encoder{}
 
 // condCode maps a conditional-branch opcode to the 4-bit AArch64 condition code.
 var condCode = map[Op]uint32{
-	OpBEQ: 0x0, // EQ  Z==1
-	OpBNE: 0x1, // NE  Z==0
-	OpBCS: 0x2, // CS  C==1
-	OpBCC: 0x3, // CC  C==0
-	OpBMI: 0x4, // MI  N==1
-	OpBPL: 0x5, // PL  N==0
-	OpBVS: 0x6, // VS  V==1
-	OpBVC: 0x7, // VC  V==0
-	OpBHI: 0x8, // HI  C==1 && Z==0
-	OpBLS: 0x9, // LS  C==0 || Z==1
-	OpBGE: 0xA, // GE  N==V
-	OpBLT: 0xB, // LT  N!=V
-	OpBGT: 0xC, // GT  Z==0 && N==V
-	OpBLE: 0xD, // LE  Z==1 || N!=V
+	OpBEQ: 0x0,
+	OpBNE: 0x1,
+	OpBCS: 0x2,
+	OpBCC: 0x3,
+	OpBMI: 0x4,
+	OpBPL: 0x5,
+	OpBVS: 0x6,
+	OpBVC: 0x7,
+	OpBHI: 0x8,
+	OpBLS: 0x9,
+	OpBGE: 0xA,
+	OpBLT: 0xB,
+	OpBGT: 0xC,
+	OpBLE: 0xD,
 }
 
 // extendOpcodes maps each sign/zero-extend opcode to its 32- and 64-bit
@@ -65,10 +65,10 @@ var floatUnaryOpcodes = map[Op]struct{ single, double uint32 }{
 	OpFABS:   {0x1E20C000, 0x1E60C000},
 	OpFNEG:   {0x1E214000, 0x1E614000},
 	OpFSQRT:  {0x1E21C000, 0x1E61C000},
-	OpFRINTN: {0x1E244000, 0x1E644000}, // round to nearest, ties to even
-	OpFRINTM: {0x1E254000, 0x1E654000}, // round toward minus infinity
-	OpFRINTP: {0x1E24C000, 0x1E64C000}, // round toward plus infinity
-	OpFRINTZ: {0x1E25C000, 0x1E65C000}, // round toward zero
+	OpFRINTN: {0x1E244000, 0x1E644000},
+	OpFRINTM: {0x1E254000, 0x1E654000},
+	OpFRINTP: {0x1E24C000, 0x1E64C000},
+	OpFRINTZ: {0x1E25C000, 0x1E65C000},
 }
 
 // reg3Opcodes maps each uniform 3-register opcode (Rm<<16 | Rn<<5 | Rd) to its
@@ -205,8 +205,6 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 	op := Op(inst.Op)
 	switch op {
 
-	// Arithmetic / bitwise / shift — register
-
 	case OpADD, OpADDS, OpSUB, OpSUBS, OpMUL, OpMNEG, OpSDIV, OpUDIV,
 		OpADC, OpADCS, OpSBC, OpSBCS, OpAND, OpANDS, OpORR, OpEOR,
 		OpBIC, OpBICS, OpEON, OpORN, OpLSL, OpLSR, OpASR, OpROR:
@@ -216,7 +214,7 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return encR3(reg3Opcodes[op], d, n, m)
 
-	case OpNEG, OpNEGS: // NEG(S) Xd, Xm  →  SUB(S) Xd, XZR, Xm
+	case OpNEG, OpNEGS:
 		d, m, err := decodeReg2(inst)
 		if err != nil {
 			return nil, err
@@ -245,8 +243,6 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return encR4(0x9B008000, d, n, m, a)
 
-	// Arithmetic — immediate
-
 	case OpADDI, OpADDSI, OpSUBI, OpSUBSI:
 		d, n, imm, err := decodeRegImm(inst)
 		if err != nil {
@@ -254,7 +250,7 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return encRImm12(arithImmOpcodes[op], d, n, imm)
 
-	case OpMVN: // MVN Xd, Xm  →  ORN Xd, XZR, Xm
+	case OpMVN:
 		d, m, err := decodeReg2(inst)
 		if err != nil {
 			return nil, err
@@ -264,8 +260,6 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 			return nil, err
 		}
 		return enc(base | reg(m)<<16 | reg(d)), nil
-
-	// Bitwise — immediate  (logical immediate encoding, N=1 for 64-bit)
 
 	case OpANDI, OpANDSI, OpORRI, OpEORI:
 		d, n, imm, err := decodeRegImm(inst)
@@ -277,8 +271,6 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 			return nil, err
 		}
 		return enc(word), nil
-
-	// Shift — immediate  (encoded as UBFM / SBFM / EXTR)
 
 	case OpLSLI:
 		d, n, shift, err := decodeRegImm(inst)
@@ -333,8 +325,6 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		imms := (l + uint32(width) - 1) & mask
 		return enc(base | l<<16 | imms<<10 | reg(n)<<5 | reg(d)), nil
 
-	// Bit manipulation
-
 	case OpCLZ, OpRBIT, OpREV16, OpREV32:
 		d, n, err := decodeReg2(inst)
 		if err != nil {
@@ -368,9 +358,7 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return enc(base | ext.imms<<10 | reg(n)<<5 | reg(d)), nil
 
-	// TST
-
-	case OpTST: // ANDS XZR, Xn, Xm
+	case OpTST:
 		return encodeCompareReg(0xEA00001F, inst)
 
 	case OpTSTI:
@@ -384,18 +372,16 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return enc(word), nil
 
-	// Compare
-
-	case OpCMP: // SUBS XZR, Xn, Xm
+	case OpCMP:
 		return encodeCompareReg(0xEB00001F, inst)
 
-	case OpCMPI: // SUBS XZR, Xn, #imm
+	case OpCMPI:
 		return encodeCompareImm(0xF100001F, inst)
 
-	case OpCMN: // ADDS XZR, Xn, Xm
+	case OpCMN:
 		return encodeCompareReg(0xAB00001F, inst)
 
-	case OpCMNI: // ADDS XZR, Xn, #imm
+	case OpCMNI:
 		return encodeCompareImm(0xB100001F, inst)
 
 	case OpCCMP:
@@ -428,9 +414,7 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return enc(base | (uint32(imm)&0x1F)<<16 | (uint32(flags.Value>>4)&0xF)<<12 | reg(n)<<5 | uint32(flags.Value)&0xF), nil
 
-	// Move
-
-	case OpMOVW: // MOV Wd, Xn: take the low 32 bits
+	case OpMOVW:
 		d, n, err := decodeReg2(inst)
 		if err != nil {
 			return nil, err
@@ -440,7 +424,7 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return enc(0x2A0003E0 | reg(n)<<16 | reg(d)), nil
 
-	case OpMOV: // MOV Xd, Xn  →  ORR Xd, XZR, Xn
+	case OpMOV:
 		d, n, err := decodeReg2(inst)
 		if err != nil {
 			return nil, err
@@ -451,7 +435,7 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return enc(base | reg(n)<<16 | reg(d)), nil
 
-	case OpMOVI: // pseudo: MOVZ + MOVK sequence; emit MOVZ for first 16 bits
+	case OpMOVI:
 		d, imm64, err := decodeDstImm(inst)
 		if err != nil {
 			return nil, err
@@ -469,8 +453,6 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		mv := moveOpcodes[op]
 		return encodeMovImmediate(mv.op32, mv.op64, inst)
 
-	// Load / Store  unsigned offset
-
 	case OpLDR, OpLDRB, OpLDRSB, OpLDRH, OpLDRSH, OpLDRSW:
 		if op == OpLDR && isFloat(inst.Dst) {
 			return encodeLoad(0xBD400000, 0xFD400000, 4, 8, inst)
@@ -485,8 +467,6 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		st := storeOpcodes[op]
 		return encodeStore(st.base, st.scale, inst)
 
-	// Load / Store  register-offset  [Xbase, Xindex, LSL or Windex, SXTW #log2(size)]
-
 	case OpLDRR, OpLDRBR, OpLDRSBR:
 		d, base, m, err := decodeReg3(inst)
 		if err != nil {
@@ -495,18 +475,15 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		return enc(extend(indexedLoad(op, d), m) | reg(m)<<16 | reg(base)<<5 | reg(d)), nil
 
 	case OpSTRR, OpSTRBR, OpSTRWR:
-		// Dst=base, Src1=src, Src2=index.
+
 		base, src, m, err := decodeReg3(inst)
 		if err != nil {
 			return nil, err
 		}
 		return enc(extend(indexedStore(op, src), m) | reg(m)<<16 | reg(base)<<5 | reg(src)), nil
 
-	// Load / Store pair
-
 	case OpLDP:
-		// LDP Xt1, Xt2, [Xbase, #offset]
-		// Encoding: Dst=Xt1, Src1=Mem(base,offset), Src2=Xt2
+
 		d1, base, offset, err := decodeMemOp(inst)
 		if err != nil {
 			return nil, err
@@ -519,8 +496,7 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		return enc(0xA9400000 | simm7<<15 | reg(d2.Reg)<<10 | reg(base)<<5 | reg(d1)), nil
 
 	case OpSTP:
-		// STP Xt1, Xt2, [Xbase, #offset]
-		// Encoding: Dst=Mem(base,offset), Src1=Xt1, Src2=Xt2
+
 		src1, base, offset, err := decodeStrOp(inst)
 		if err != nil {
 			return nil, err
@@ -531,8 +507,6 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		simm7 := uint32(offset/8) & 0x7F
 		return enc(0xA9000000 | simm7<<15 | reg(src2.Reg)<<10 | reg(base)<<5 | reg(src1)), nil
-
-	// Float — convert
 
 	case OpSCVTF, OpUCVTF, OpFCVTZS, OpFCVTZU:
 		d, n, err := decodeReg2(inst)
@@ -551,10 +525,10 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		word := cv.base
 		if intReg.Width() == asm.Width64 {
-			word |= 1 << 31 // sf: 64-bit integer register
+			word |= 1 << 31
 		}
 		if floatReg.Width() == asm.Width64 {
-			word |= 1 << 22 // ftype: double precision
+			word |= 1 << 22
 		}
 		return enc(word | reg(n)<<5 | reg(d)), nil
 
@@ -568,37 +542,31 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		switch {
 		case d.Width() == asm.Width64 && n.Width() == asm.Width32:
-			return enc(0x1E22C000 | reg(n)<<5 | reg(d)), nil // FCVT Dd, Sn
+			return enc(0x1E22C000 | reg(n)<<5 | reg(d)), nil
 		case d.Width() == asm.Width32 && n.Width() == asm.Width64:
-			return enc(0x1E624000 | reg(n)<<5 | reg(d)), nil // FCVT Sd, Dn
+			return enc(0x1E624000 | reg(n)<<5 | reg(d)), nil
 		default:
 			return nil, asm.ErrInvalidOperand
 		}
 
-	// Float — arithmetic
-
 	case OpFADD, OpFSUB, OpFMUL, OpFDIV, OpFMIN, OpFMAX:
 		fb := floatBinaryOpcodes[op]
 		return encodeFloatBinary(fb.single, fb.double, inst)
-
-	// SIMD (fixed 8B arrangement): CNT, ADDV
 
 	case OpCNT, OpADDV:
 		d, n, err := decodeReg2(inst)
 		if err != nil {
 			return nil, err
 		}
-		base := uint32(0x0E205800) // CNT Vd.8B, Vn.8B
+		base := uint32(0x0E205800)
 		if op == OpADDV {
-			base = 0x0E31B800 // ADDV Bd, Vn.8B
+			base = 0x0E31B800
 		}
 		return enc(base | reg(n)<<5 | reg(d)), nil
 
 	case OpFMADD, OpFMSUB, OpFNMADD, OpFNMSUB:
 		ft := floatTernaryOpcodes[op]
 		return encodeFloatTernary(ft.single, ft.double, inst)
-
-	// Float — unary
 
 	case OpFABS, OpFNEG, OpFSQRT, OpFRINTN, OpFRINTM, OpFRINTP, OpFRINTZ:
 		d, n, err := decodeReg2(inst)
@@ -615,8 +583,6 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return enc(base | reg(n)<<5 | reg(d)), nil
 
-	// Float — move / compare
-
 	case OpFMOV:
 		d, n, err := decodeReg2(inst)
 		if err != nil {
@@ -629,44 +595,44 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		dFloat := d.Type() == asm.RegTypeFloat
 		nFloat := n.Type() == asm.RegTypeFloat
 		switch {
-		case dFloat && nFloat: // float → float register copy
+		case dFloat && nFloat:
 			if d.Width() != n.Width() {
 				return nil, asm.ErrInvalidOperand
 			}
 			if d.Width() == asm.Width32 {
-				return enc(0x1E204000 | reg(n)<<5 | reg(d)), nil // FMOV Sd, Sn
+				return enc(0x1E204000 | reg(n)<<5 | reg(d)), nil
 			}
-			return enc(0x1E604000 | reg(n)<<5 | reg(d)), nil // FMOV Dd, Dn
-		case dFloat && !nFloat: // int → float (bit-copy)
+			return enc(0x1E604000 | reg(n)<<5 | reg(d)), nil
+		case dFloat && !nFloat:
 			if n.Type() != asm.RegTypeInt {
 				return nil, asm.ErrInvalidOperand
 			}
 			if d.Width() == asm.Width32 {
-				// Accept Width32 or Width64 int source; Width64 uses its low 32 bits.
+
 				if n.Width() != asm.Width32 && n.Width() != asm.Width64 {
 					return nil, asm.ErrInvalidOperand
 				}
-				return enc(0x1E270000 | reg(n)<<5 | reg(d)), nil // FMOV Sd, Wn
+				return enc(0x1E270000 | reg(n)<<5 | reg(d)), nil
 			}
 			if d.Width() != asm.Width64 || n.Width() != asm.Width64 {
 				return nil, asm.ErrInvalidOperand
 			}
-			return enc(0x9E670000 | reg(n)<<5 | reg(d)), nil // FMOV Dd, Xn
-		case !dFloat && nFloat: // float → int (bit-copy)
+			return enc(0x9E670000 | reg(n)<<5 | reg(d)), nil
+		case !dFloat && nFloat:
 			if d.Type() != asm.RegTypeInt {
 				return nil, asm.ErrInvalidOperand
 			}
 			if n.Width() == asm.Width32 {
-				// Accept Width32 or Width64 int destination; Width64 zero-extends.
+
 				if d.Width() != asm.Width32 && d.Width() != asm.Width64 {
 					return nil, asm.ErrInvalidOperand
 				}
-				return enc(0x1E260000 | reg(n)<<5 | reg(d)), nil // FMOV Wn, Sd (zero-extends to Xn)
+				return enc(0x1E260000 | reg(n)<<5 | reg(d)), nil
 			}
 			if n.Width() != asm.Width64 || d.Width() != asm.Width64 {
 				return nil, asm.ErrInvalidOperand
 			}
-			return enc(0x9E660000 | reg(n)<<5 | reg(d)), nil // FMOV Xn, Dd
+			return enc(0x9E660000 | reg(n)<<5 | reg(d)), nil
 		default:
 			return nil, asm.ErrInvalidOperand
 		}
@@ -688,9 +654,7 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return enc(word | reg(m)<<16 | reg(n)<<5), nil
 
-	// Conditional select
-
-	case OpCSEL, OpCSINC, OpCSINV, OpCSNEG: // CSxx Xd, Xn, Xm, cond
+	case OpCSEL, OpCSINC, OpCSINV, OpCSNEG:
 		d, n, m, cond, err := decodeSelect(inst)
 		if err != nil {
 			return nil, err
@@ -716,12 +680,12 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return enc(base | reg(m)<<16 | cond<<12 | reg(n)<<5 | reg(d)), nil
 
-	case OpCSET, OpCSETM: // CSET(M) Xd, cond  →  CSINC/CSINV Xd, XZR, XZR, !cond
+	case OpCSET, OpCSETM:
 		d, condImm, err := decodeDstImm(inst)
 		if err != nil {
 			return nil, err
 		}
-		cond := uint32(condImm)&0xF ^ 1 // invert lsb to negate condition
+		cond := uint32(condImm)&0xF ^ 1
 		word := uint32(0x9A9F07E0)
 		if op == OpCSETM {
 			word = 0xDA9F03E0
@@ -731,8 +695,6 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 			return nil, err
 		}
 		return enc(base | cond<<12 | reg(d)), nil
-
-	// Branch — unconditional
 
 	case OpB, OpBL:
 		offset, err := decodeBranch(inst)
@@ -763,10 +725,8 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		return enc(word | reg(r)<<5), nil
 
 	case OpRET:
-		// RET X30 (default link register)
-		return enc(0xD65F03C0), nil
 
-	// Branch — compare-and-branch
+		return enc(0xD65F03C0), nil
 
 	case OpCBZ, OpCBNZ:
 		r, offset, err := decodeRegBranch(inst)
@@ -787,8 +747,6 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		imm19 := (uint32(offset/4) & 0x7FFFF) << 5
 		return enc(base | imm19 | reg(r)), nil
 
-	// Branch — test-and-branch
-
 	case OpTBZ, OpTBNZ:
 		r, bit, offset, err := decodeTestBranch(inst)
 		if err != nil {
@@ -804,12 +762,10 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		if op == OpTBNZ {
 			word = 0x37000000
 		}
-		b5 := (uint32(bit) >> 5) & 1 // b5 lives in bit 31
-		b40 := uint32(bit) & 0x1F    // b40 lives in bits[23:19]
+		b5 := (uint32(bit) >> 5) & 1
+		b40 := uint32(bit) & 0x1F
 		imm14 := (uint32(offset/4) & 0x3FFF) << 5
 		return enc(word | b5<<31 | b40<<19 | imm14 | reg(r)), nil
-
-	// Branch — conditional  (B.cond)
 
 	case OpBEQ, OpBNE, OpBCS, OpBCC, OpBMI, OpBPL,
 		OpBVS, OpBVC, OpBHI, OpBLS, OpBGE, OpBLT, OpBGT, OpBLE:
@@ -824,8 +780,6 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		imm19 := (uint32(offset/4) & 0x7FFFF) << 5
 		return enc(0x54000000 | imm19 | cond), nil
 
-	// System
-
 	case OpNOP:
 		return enc(0xD503201F), nil
 
@@ -833,9 +787,9 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		return nil, nil
 
 	case OpHLT:
-		return enc(0xD4400000), nil // HLT #0
+		return enc(0xD4400000), nil
 
-	case OpBRK, OpSVC: // imm16 in Src2
+	case OpBRK, OpSVC:
 		imm, err := decodeBranch(inst)
 		if err != nil {
 			return nil, err
@@ -850,7 +804,7 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		return enc(0xD69F03E0), nil
 
 	case OpMRS:
-		// MRS Xt, sysreg  — sysreg encoded in Src1 as ImmOperand
+
 		d, sysreg, err := decodeDstImm(inst)
 		if err != nil {
 			return nil, err
@@ -858,7 +812,7 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		return enc(0xD5300000 | (uint32(sysreg)&0xFFFF)<<5 | reg(d)), nil
 
 	case OpMSR:
-		// MSR sysreg, Xt  — sysreg in Dst(ImmOperand), Xt in Src1
+
 		sysregOp, ok := inst.Dst.(asm.ImmOperand)
 		if !ok {
 			return nil, ErrMissingImmediate
@@ -870,13 +824,13 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		return enc(0xD5100000 | (uint32(sysregOp.Value)&0xFFFF)<<5 | reg(srcOp.Reg)), nil
 
 	case OpISB:
-		return enc(0xD5033FDF), nil // ISB SY
+		return enc(0xD5033FDF), nil
 
 	case OpDSB:
-		return enc(0xD5033F9F), nil // DSB SY
+		return enc(0xD5033F9F), nil
 
 	case OpDMB:
-		return enc(0xD5033BBF), nil // DMB ISH
+		return enc(0xD5033BBF), nil
 
 	default:
 		return nil, ErrUnsupportedOpcode
@@ -1476,8 +1430,6 @@ func encodeLogicalImm(val uint64, is64 bool) (immr, imms uint32, ok bool) {
 			continue
 		}
 
-		// imms is NOT(esize) in its high bits and ones-1 in its low bits:
-		// esize=2 gives imms[5:1]=11111, esize=64 gives imms[5:1]=11110.
 		immrVal := uint32(ro) & 0x3F
 		immsVal := ((^uint32(esize-1)&0x3F)<<1)&0x3E | uint32(ones-1)
 		return immrVal, immsVal, true
@@ -1489,7 +1441,7 @@ func encodeLogicalImm(val uint64, is64 bool) (immr, imms uint32, ok bool) {
 // rotated right by `rot` within an `esize`-bit field, matching ARM64's
 // logical-immediate decode (DecodeBitMasks: wmask = ROR(welem, immr)).
 func rotateMask(esize, ones, rot uint) uint64 {
-	mask := uint64((1 << ones) - 1) // ones consecutive 1s at lsb
+	mask := uint64((1 << ones) - 1)
 	rot &= esize - 1
 	if rot == 0 {
 		return mask

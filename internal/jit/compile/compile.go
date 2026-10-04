@@ -169,11 +169,6 @@ func (l *lowering) Reg(v ssa.Value) asm.VReg {
 	return vreg(int32(v), l.f.Type(v))
 }
 
-// Type is v's static type.
-func (l *lowering) Type(v ssa.Value) ssa.Type {
-	return l.f.Type(v)
-}
-
 // Slot returns the static type of slot.
 func (l *lowering) Slot(slot ssa.Slot) ssa.Type {
 	kinds := l.fn.Slots()
@@ -201,19 +196,19 @@ func (l *lowering) Fuse(v ssa.Value) bool {
 	return v == l.fuse
 }
 
+// Trap places a deopt stub as Deopt does, marked as the operation's own trap.
+func (l *lowering) Trap() asm.Label {
+	label := l.Deopt()
+	l.outlets[l.deopts[len(l.deopts)-1].id].exit.Trap = true
+	return label
+}
+
 // Deopt places a deopt stub at the current state, out of line after the
 // next terminator that does not fall through.
 func (l *lowering) Deopt() asm.Label {
 	s := stub{label: l.a.Label(), id: l.exit(jit.ExitDeopt)}
 	l.deopts = append(l.deopts, s)
 	return s.label
-}
-
-// Trap places a deopt stub as Deopt does, marked as the operation's own trap.
-func (l *lowering) Trap() asm.Label {
-	label := l.Deopt()
-	l.outlets[l.deopts[len(l.deopts)-1].id].exit.Trap = true
-	return label
 }
 
 // Release places a release stub for ref.
@@ -224,6 +219,11 @@ func (l *lowering) Release(ref asm.VReg) (exit, resume asm.Label) {
 // Box places a box stub for word, a wide i64.
 func (l *lowering) Box(word asm.VReg) (exit, resume asm.Label) {
 	return l.word(jit.ExitBox, types.KindI64, word)
+}
+
+// Type is v's static type.
+func (l *lowering) Type(v ssa.Value) ssa.Type {
+	return l.f.Type(v)
 }
 
 // word places a stub of kind k whose Word is reg, of kind kind.
@@ -245,10 +245,7 @@ func newLowering(f *ssa.Function, m Machine, fn *types.Function, objects transfo
 		return nil, fmt.Errorf("%w: entry parameters", ErrUnsupported)
 	}
 	for _, p := range f.Block(0).Params {
-		// A not-yet-loaded i64 param would need every later block-0 param's
-		// deopt map to distinguish "raw slot word" from "guarded" by
-		// position, which this backend does not implement; refuse rather
-		// than risk misboxing one on a guard failure.
+
 		if f.Type(p) == ssa.TypeI64 {
 			return nil, fmt.Errorf("%w: OSR i64 operand", ErrUnsupported)
 		}
@@ -295,8 +292,7 @@ func (l *lowering) scan() {
 	for _, h := range l.headers {
 		maps.Copy(l.loops, graph.Body(f, dom, h))
 	}
-	// A unit entered at ip 0 of code with loops gains only its prefix's
-	// dispatch, which a Go round trip outweighs: it bridges only in loops.
+
 	entry := f.Entry().IP
 	l.gate = l.osr && entry == 0 && len(l.headers) > 0
 	if l.gate {
@@ -349,23 +345,6 @@ func (l *lowering) scan() {
 			}
 		}
 	}
-}
-
-// remat reports v's constant and whether it is loaded at each use instead of
-// held in one register a call would force to spill.
-func (l *lowering) remat(v ssa.Value) (uint64, bool) {
-	c, ok := l.consts[v]
-	return c, ok && l.remats[v]
-}
-
-// validate rejects an unguarded promoted i64 slot word.
-func (l *lowering) validate(args []ssa.Value) error {
-	for _, v := range args {
-		if l.raw[v] {
-			return fmt.Errorf("%w: unguarded i64 slot word v%d", ErrUnsupported, v)
-		}
-	}
-	return nil
 }
 
 func (l *lowering) function() error {
@@ -448,40 +427,6 @@ func (l *lowering) function() error {
 	return l.err
 }
 
-// registers reports fn's register-convention results: at most two, of any
-// kind (an i64 one stays raw; Go boxes it). A function outside that shape
-// returns nil, so Return keeps boxing results to slots and Enter's stub
-// boxes nothing beyond the slot layout. The same static fact governs every unit
-// and tier of fn, so a caller compiled separately from its callee always
-// agrees with it.
-func registers(fn *types.Function) []types.Kind {
-	if fn == nil || fn.Typ == nil {
-		return nil
-	}
-	return convention(fn.Typ.Returns)
-}
-
-// arguments reports fn's register-convention parameters: at most two, of any
-// kind (an i64 one stays raw), in the target's register-convention registers
-// like registers' results. Every other function passes its arguments through
-// slots alone. Caller and callee agree on this static fact of fn at every
-// unit and tier.
-func arguments(fn *types.Function) []types.Kind {
-	if fn == nil || fn.Typ == nil {
-		return nil
-	}
-	return convention(fn.Typ.Params)
-}
-
-// convention is the kinds of ts when up to jit.Convention values travel in
-// registers.
-func convention(ts []types.Type) []types.Kind {
-	if len(ts) == 0 || len(ts) > jit.Convention {
-		return nil
-	}
-	return types.Kinds(ts)
-}
-
 // preload loads block 0's parameters from the operand-stack slots the
 // interpreter left them at (translate.go roots an OSR unit at the header,
 // block 0's parameters bottom first at len(fn.Slots())+i), boxed exactly as
@@ -511,7 +456,7 @@ func (l *lowering) operation(op ssa.Operation) error {
 	case ssa.OpConst:
 		l.consts[op.Results[0]] = op.Const
 		if _, ok := l.remat(op.Results[0]); ok {
-			// Reg loads it at each use.
+
 			return nil
 		}
 	case ssa.OpLoad:
@@ -527,14 +472,12 @@ func (l *lowering) operation(op ssa.Operation) error {
 			l.raw[op.Results[0]] = true
 		}
 	case ssa.OpGuardKind:
-		// A register-passed i64 parameter's load already holds the raw
-		// unboxed payload (see param): its guard moves instead of unboxing.
+
 		if l.param[op.Args[0]] {
 			l.m.Move(l.a, l.Reg(op.Results[0]), l.Reg(op.Args[0]))
 			return nil
 		}
-		// Only a slot word reaches a guard (promote aliases the rest away);
-		// unboxing a raw int would corrupt it.
+
 		if !l.raw[op.Args[0]] {
 			return fmt.Errorf("%w: guard.kind of raw int", ErrUnsupported)
 		}
@@ -640,6 +583,16 @@ func (l *lowering) terminator(t ssa.Terminator, labels []asm.Label, next asm.Lab
 	return nil
 }
 
+// validate rejects an unguarded promoted i64 slot word.
+func (l *lowering) validate(args []ssa.Value) error {
+	for _, v := range args {
+		if l.raw[v] {
+			return fmt.Errorf("%w: unguarded i64 slot word v%d", ErrUnsupported, v)
+		}
+	}
+	return nil
+}
+
 // deopt emits the pending deopt stubs where no row falls through into them:
 // near the checks that take them, so the values their maps name stay live
 // only that far.
@@ -656,48 +609,6 @@ func (l *lowering) jump(label asm.Label) {
 	next := l.a.Label()
 	l.m.Branch(l.a, ssa.Terminator{Op: ssa.OpJump}, l, []asm.Label{label}, next)
 	l.a.Bind(next)
-}
-
-// fresh returns an unshared register of type t.
-func (l *lowering) fresh(t ssa.Type) asm.VReg {
-	id := l.tmp
-	l.tmp++
-	return vreg(id, t)
-}
-
-// vreg is register id typed by t's static representation: its bank and
-// width.
-func vreg(id int32, t ssa.Type) asm.VReg {
-	switch t {
-	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32:
-		return asm.NewVReg(id, asm.RegTypeInt, asm.Width32)
-	case ssa.TypeI64, ssa.TypeRef:
-		return asm.NewVReg(id, asm.RegTypeInt, asm.Width64)
-	case ssa.TypeF32:
-		return asm.NewVReg(id, asm.RegTypeFloat, asm.Width32)
-	case ssa.TypeF64:
-		return asm.NewVReg(id, asm.RegTypeFloat, asm.Width64)
-	default:
-		return asm.VReg{}
-	}
-}
-
-// materialize loads word for v into a fresh register.
-func (l *lowering) materialize(v ssa.Value, word uint64) asm.VReg {
-	reg := l.fresh(l.f.Type(v))
-	l.m.Const(l.a, reg, word)
-	return reg
-}
-
-// stub places the stub of exit id; a resumable one continues at resume,
-// which its caller binds.
-func (l *lowering) stub(id int) (exit, resume asm.Label) {
-	s := stub{label: l.a.Label(), id: id}
-	if l.outlets[id].exit.Kind.Resumes() {
-		s.resume = l.a.Label()
-	}
-	l.stubs = append(l.stubs, s)
-	return s.label, s.resume
 }
 
 // call lowers a CALL of a constant function, of the closure its Shape
@@ -739,8 +650,7 @@ func (l *lowering) call(op ssa.Operation) error {
 	if below < 0 {
 		return fmt.Errorf("%w: call state without its operands", ErrUnsupported)
 	}
-	// The state's top entry is the callee operand, owned only when
-	// translation retained it.
+
 	owned := frame.Stack[len(frame.Stack)-1].Owned
 	id := l.exit(jit.ExitCall)
 	out := &l.outlets[id]
@@ -802,6 +712,51 @@ func (l *lowering) call(op ssa.Operation) error {
 	return l.err
 }
 
+// registers reports fn's register-convention results: at most two, of any
+// kind (an i64 one stays raw; Go boxes it). A function outside that shape
+// returns nil, so Return keeps boxing results to slots and Enter's stub
+// boxes nothing beyond the slot layout. The same static fact governs every unit
+// and tier of fn, so a caller compiled separately from its callee always
+// agrees with it.
+func registers(fn *types.Function) []types.Kind {
+	if fn == nil || fn.Typ == nil {
+		return nil
+	}
+	return convention(fn.Typ.Returns)
+}
+
+// arguments reports fn's register-convention parameters: at most two, of any
+// kind (an i64 one stays raw), in the target's register-convention registers
+// like registers' results. Every other function passes its arguments through
+// slots alone. Caller and callee agree on this static fact of fn at every
+// unit and tier.
+func arguments(fn *types.Function) []types.Kind {
+	if fn == nil || fn.Typ == nil {
+		return nil
+	}
+	return convention(fn.Typ.Params)
+}
+
+// convention is the kinds of ts when up to jit.Convention values travel in
+// registers.
+func convention(ts []types.Type) []types.Kind {
+	if len(ts) == 0 || len(ts) > jit.Convention {
+		return nil
+	}
+	return types.Kinds(ts)
+}
+
+// stub places the stub of exit id; a resumable one continues at resume,
+// which its caller binds.
+func (l *lowering) stub(id int) (exit, resume asm.Label) {
+	s := stub{label: l.a.Label(), id: id}
+	if l.outlets[id].exit.Kind.Resumes() {
+		s.resume = l.a.Label()
+	}
+	l.stubs = append(l.stubs, s)
+	return s.label, s.resume
+}
+
 // leave rejects owned values the native return path would not release.
 func (l *lowering) leave(t ssa.Terminator) error {
 	state, ok := l.states[t.State]
@@ -831,6 +786,37 @@ func (l *lowering) emit(id int) {
 	l.m.Exit(l.a, id, out.exit.Kind, l.live(id))
 	if len(out.results) > 0 {
 		l.m.Results(l.a, out.results)
+	}
+}
+
+// materialize loads word for v into a fresh register.
+func (l *lowering) materialize(v ssa.Value, word uint64) asm.VReg {
+	reg := l.fresh(l.f.Type(v))
+	l.m.Const(l.a, reg, word)
+	return reg
+}
+
+// fresh returns an unshared register of type t.
+func (l *lowering) fresh(t ssa.Type) asm.VReg {
+	id := l.tmp
+	l.tmp++
+	return vreg(id, t)
+}
+
+// vreg is register id typed by t's static representation: its bank and
+// width.
+func vreg(id int32, t ssa.Type) asm.VReg {
+	switch t {
+	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32:
+		return asm.NewVReg(id, asm.RegTypeInt, asm.Width32)
+	case ssa.TypeI64, ssa.TypeRef:
+		return asm.NewVReg(id, asm.RegTypeInt, asm.Width64)
+	case ssa.TypeF32:
+		return asm.NewVReg(id, asm.RegTypeFloat, asm.Width32)
+	case ssa.TypeF64:
+		return asm.NewVReg(id, asm.RegTypeFloat, asm.Width64)
+	default:
+		return asm.VReg{}
 	}
 }
 
@@ -872,8 +858,7 @@ func (l *lowering) exit(k jit.Kind) int {
 	for j, local := range frame.Locals {
 		to := &f.Locals[j]
 		to.Index = local.Index
-		// A call and a resumable safepoint keep promoted locals live across
-		// the native round trip; deopt-only exits can restore them from homes.
+
 		if k == jit.ExitCall || k == jit.ExitSafepoint || slices.Contains(l.op.Args, local.Value) {
 			l.place(id, &to.Value, local.Value)
 			continue
@@ -909,9 +894,7 @@ func (l *lowering) place(id int, to *jit.Value, v ssa.Value) {
 	to.Kind = l.f.Type(v).Kind()
 	out := &l.outlets[id]
 	if _, ok := l.remat(v); ok {
-		// An ExitCall map is also an outer activation's map, read from its
-		// spill slot by a deeper trap: the register must live across the
-		// call, one per value.
+
 		if out.exit.Kind == jit.ExitCall {
 			if out.memo == nil {
 				out.memo = map[ssa.Value]asm.VReg{}
@@ -924,11 +907,18 @@ func (l *lowering) place(id int, to *jit.Value, v ssa.Value) {
 			out.places = append(out.places, place{to: to, reg: reg})
 			return
 		}
-		// Any other map is read only at its own stub.
+
 		out.stalls = append(out.stalls, stall{to: to, v: v})
 		return
 	}
 	out.places = append(out.places, place{to: to, reg: l.Reg(v)})
+}
+
+// remat reports v's constant and whether it is loaded at each use instead of
+// held in one register a call would force to spill.
+func (l *lowering) remat(v ssa.Value) (uint64, bool) {
+	c, ok := l.consts[v]
+	return c, ok && l.remats[v]
 }
 
 func (l *lowering) live(id int) []asm.VReg {

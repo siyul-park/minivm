@@ -602,6 +602,24 @@ func (p *conversion) complete() {
 	}
 }
 
+// complexOf reads the {Real, Imag} struct both complex registrations produce.
+func complexOf(d *Decoder, val types.Value) (complex128, error) {
+	value, err := d.interp.deref(val)
+	if err != nil {
+		return 0, err
+	}
+	st, ok := value.(*types.Struct)
+	if !ok {
+		return 0, fmt.Errorf("%w: source=%T", ErrTypeMismatch, value)
+	}
+	re, reOK := asFloat(st.FieldByName("Real"))
+	im, imOK := asFloat(st.FieldByName("Imag"))
+	if !reOK || !imOK {
+		return 0, fmt.Errorf("%w: source=%s", ErrTypeMismatch, st.Typ)
+	}
+	return complex(re, im), nil
+}
+
 // asInt, asUint, and asFloat read a scalar VM value as the Go number a
 // conversion writes. asUint keeps the raw bits an unsigned Go value was stored
 // as, which is what makes its round trip through a signed VM slot exact.
@@ -733,22 +751,4 @@ func defaults() []RegistryOption {
 				return nil
 			})),
 	}
-}
-
-// complexOf reads the {Real, Imag} struct both complex registrations produce.
-func complexOf(d *Decoder, val types.Value) (complex128, error) {
-	value, err := d.interp.deref(val)
-	if err != nil {
-		return 0, err
-	}
-	st, ok := value.(*types.Struct)
-	if !ok {
-		return 0, fmt.Errorf("%w: source=%T", ErrTypeMismatch, value)
-	}
-	re, reOK := asFloat(st.FieldByName("Real"))
-	im, imOK := asFloat(st.FieldByName("Imag"))
-	if !reOK || !imOK {
-		return 0, fmt.Errorf("%w: source=%s", ErrTypeMismatch, st.Typ)
-	}
-	return complex(re, im), nil
 }

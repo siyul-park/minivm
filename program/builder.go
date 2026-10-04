@@ -98,22 +98,6 @@ func (b *Builder) Const(v types.Value) int {
 	return idx
 }
 
-// Type interns t into the type pool and returns its index, reusing an existing
-// slot when an equal type is already present.
-func (b *Builder) Type(t types.Type) int {
-	if t == nil {
-		return -1
-	}
-	for idx, existing := range b.typs {
-		if existing.Equals(t) {
-			return idx
-		}
-	}
-	idx := len(b.typs)
-	b.typs = append(b.typs, t)
-	return idx
-}
-
 // Locals declares the entry frame's local scratch slots in order; their
 // positions are the indices used by LOCAL_* at the top level.
 func (b *Builder) Locals(ts ...types.Type) *Builder {
@@ -147,4 +131,20 @@ func (b *Builder) Build() (*Program, error) {
 		Types:     b.typs,
 		Handlers:  b.code.Handlers(),
 	}, nil
+}
+
+// Type interns t into the type pool and returns its index, reusing an existing
+// slot when an equal type is already present.
+func (b *Builder) Type(t types.Type) int {
+	if t == nil {
+		return -1
+	}
+	for idx, existing := range b.typs {
+		if existing.Equals(t) {
+			return idx
+		}
+	}
+	idx := len(b.typs)
+	b.typs = append(b.typs, t)
+	return idx
 }

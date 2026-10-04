@@ -81,8 +81,7 @@ func promote(function *ssa.Function, localTypes map[int]ssa.Type) *ssa.Function 
 	children := dominance.Children()
 
 	r := newRebuilder(function)
-	// raw holds the reaching values of promoted i64 locals: already raw
-	// ints, so a guard.kind on one aliases away.
+
 	raw := map[ssa.Value]bool{}
 	var walk func(block int, reaching map[int]ssa.Value)
 	walk = func(block int, reaching map[int]ssa.Value) {

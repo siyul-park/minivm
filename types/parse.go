@@ -27,7 +27,6 @@ func ParseFunction(lines []string) (*Function, error) {
 		return nil, fmt.Errorf("expected func type, got %q", lines[0])
 	}
 
-	// Captures are emitted first, each prefixed with "capture ".
 	capturesEnd := 1
 	var captures []Type
 	for capturesEnd < len(lines) {
@@ -43,8 +42,6 @@ func ParseFunction(lines []string) (*Function, error) {
 		capturesEnd++
 	}
 
-	// Find where disassembly starts: first line that is either offset-prefixed
-	// ("NNNN:\t…") or a plain instruction (not parseable as a type).
 	localsEnd := capturesEnd
 	for localsEnd < len(lines) {
 		line := strings.TrimSpace(lines[localsEnd])
@@ -162,9 +159,9 @@ func parseMapType(s string) (*MapType, error) {
 }
 
 func parseFunctionType(s string) (*FunctionType, error) {
-	// Strip "func("
+
 	rest := s[5:]
-	// Find matching ")"
+
 	depth := 1
 	end := -1
 	for i, c := range rest {
@@ -225,7 +222,7 @@ func parseFunctionType(s string) (*FunctionType, error) {
 }
 
 func parseStructType(s string) (*StructType, error) {
-	// "struct {i32; f64}" or "struct {name: i32; f64}"
+
 	inner := strings.TrimPrefix(s, "struct {")
 	inner = strings.TrimSuffix(inner, "}")
 	if strings.TrimSpace(inner) == "" {

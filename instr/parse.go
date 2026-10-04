@@ -246,23 +246,6 @@ func parseLabelLine(line string) (name string, ok bool) {
 	return name, true
 }
 
-// isLabelIdent reports whether s is a valid label identifier: a letter or
-// underscore followed by letters, digits, or underscores.
-func isLabelIdent(s string) bool {
-	if s == "" {
-		return false
-	}
-	for i, c := range s {
-		switch {
-		case c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'):
-		case i > 0 && c >= '0' && c <= '9':
-		default:
-			return false
-		}
-	}
-	return true
-}
-
 // define binds name to the next instruction Builder emits, failing if an
 // earlier line already defined it.
 func (lt *labelTable) define(name string, line int) error {
@@ -272,26 +255,6 @@ func (lt *labelTable) define(name string, line int) error {
 	lt.b.Bind(lt.get(name))
 	lt.defLine[name] = line
 	return nil
-}
-
-// reference records line as a use site of name, the first if there are
-// several, and returns its label handle.
-func (lt *labelTable) reference(name string, line int) Label {
-	if _, ok := lt.refLine[name]; !ok {
-		lt.refLine[name] = line
-	}
-	return lt.get(name)
-}
-
-// get returns name's label handle, allocating one on first mention.
-func (lt *labelTable) get(name string) Label {
-	if l, ok := lt.byName[name]; ok {
-		return l
-	}
-	l := lt.b.Label()
-	lt.byName[name] = l
-	lt.names = append(lt.names, name)
-	return l
 }
 
 // parseBranch parses the operand fields of a br/br_if/br_table line. Each
@@ -324,9 +287,7 @@ func parseBranch(op Opcode, mnemonic string, fields []string, lt *labelTable, li
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: count: %w", mnemonic, err)
 		}
-		// Compare before narrowing: a count near the top of uint64 wraps
-		// negative as an int, which would satisfy the check below and then
-		// under-allocate operands.
+
 		if got := uint64(len(fields) - 1); count >= got {
 			return nil, nil, fmt.Errorf("%s: count %d exceeds the %d operands supplied", mnemonic, count, got)
 		}
@@ -373,6 +334,43 @@ func parseBranchOperand(tok string, lt *labelTable, line int) (uint64, *Label, e
 	return 0, &l, nil
 }
 
+// isLabelIdent reports whether s is a valid label identifier: a letter or
+// underscore followed by letters, digits, or underscores.
+func isLabelIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, c := range s {
+		switch {
+		case c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'):
+		case i > 0 && c >= '0' && c <= '9':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// reference records line as a use site of name, the first if there are
+// several, and returns its label handle.
+func (lt *labelTable) reference(name string, line int) Label {
+	if _, ok := lt.refLine[name]; !ok {
+		lt.refLine[name] = line
+	}
+	return lt.get(name)
+}
+
+// get returns name's label handle, allocating one on first mention.
+func (lt *labelTable) get(name string) Label {
+	if l, ok := lt.byName[name]; ok {
+		return l
+	}
+	l := lt.b.Label()
+	lt.byName[name] = l
+	lt.names = append(lt.names, name)
+	return l
+}
+
 func (lt *labelTable) describe(lines []int, err error) error {
 	b := lt.b
 	switch {
@@ -416,7 +414,7 @@ func parseOperands(fields []string, widths []int) ([]uint64, error) {
 			operands = append(operands, v)
 			fi++
 		} else {
-			// Variable-length: count byte followed by count x |w| elements
+
 			if fi >= len(fields) {
 				return nil, fmt.Errorf("expected count, got end of input")
 			}
@@ -452,7 +450,7 @@ func parseOperands(fields []string, widths []int) ([]uint64, error) {
 //   - decimal float (for 4- or 8-byte widths): 1.0, -3.14
 //   - signed decimal: -1, 42
 func parseOperand(s string, width int) (uint64, error) {
-	// Hex
+
 	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
 		v, err := strconv.ParseUint(s[2:], 16, 64)
 		if err != nil {
@@ -460,7 +458,7 @@ func parseOperand(s string, width int) (uint64, error) {
 		}
 		return v, nil
 	}
-	// Float literal (contains '.' or 'e'/'E') -> encode as IEEE 754 bits
+
 	if strings.ContainsAny(s, ".eE") {
 		switch width {
 		case 4:
@@ -477,7 +475,7 @@ func parseOperand(s string, width int) (uint64, error) {
 			return math.Float64bits(f), nil
 		}
 	}
-	// Signed decimal (handles negative integers)
+
 	v, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("invalid integer %q: %w", s, err)

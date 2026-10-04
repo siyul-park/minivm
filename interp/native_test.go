@@ -19,20 +19,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fibFunction is fib(n) = n < 2 ? n : fib(n-1) + fib(n-2), calling itself
-// through constant 0.
-func fibFunction() *types.Function {
-	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
-	small := b.Label()
-	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S)).BrIf(small)
-	b.Emit(
-		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_SUB), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-		instr.New(instr.I32_ADD), instr.New(instr.RETURN),
-	)
-	b.Bind(small).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
-	return b.MustBuild()
-}
+// pollDeadline bounds poll. It is a hang guard, not a performance budget: a
+// condition holds in milliseconds, but -race plus atomic coverage on a loaded
+// CI runner slows native warmup by an order of magnitude over the 5s a plain
+// run needs.
+const pollDeadline = 60 * time.Second
 
 // fibCallsProgram calls fib(15) calls times, module locals [0] the counter
 // and [1] the running sum, and leaves the sum on the stack.
@@ -72,24 +63,6 @@ func fibFlatCallsProgram(t *testing.T, calls int) *program.Program {
 	return program.New(code, program.WithConstants(fib))
 }
 
-// indirectFibFunction is fib(n, self) = n < 2 ? n : fib(n-1, self)(n-1, self)
-// + fib(n-2, self)(n-2, self), calling itself through param 1 (the callee
-// arrives on the stack, not by CONST_GET) instead of constant 0.
-func indirectFibFunction() *types.Function {
-	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}})
-	small := b.Label()
-	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S)).BrIf(small)
-	b.Emit(
-		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
-		instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL),
-		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_SUB),
-		instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL),
-		instr.New(instr.I32_ADD), instr.New(instr.RETURN),
-	)
-	b.Bind(small).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
-	return b.MustBuild()
-}
-
 // indirectFibCallsProgram calls indirectFibFunction(n, self) calls times,
 // module locals [0] the counter and [1] the running sum, and leaves the sum
 // on the stack.
@@ -110,24 +83,21 @@ func indirectFibCallsProgram(t *testing.T, n, calls int) *program.Program {
 	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32), program.WithConstants(fib))
 }
 
-// incFunction returns its one parameter plus one.
-func incFunction() *types.Function {
-	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
-	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
-	return b.MustBuild()
-}
-
-// decFunction returns its one parameter minus one.
-func decFunction() *types.Function {
-	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
-	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.RETURN))
-	return b.MustBuild()
-}
-
-// applyFunction calls fn(x) through param 1, a dynamic CALL.
-func applyFunction() *types.Function {
+// indirectFibFunction is fib(n, self) = n < 2 ? n : fib(n-1, self)(n-1, self)
+// + fib(n-2, self)(n-2, self), calling itself through param 1 (the callee
+// arrives on the stack, not by CONST_GET) instead of constant 0.
+func indirectFibFunction() *types.Function {
 	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}})
-	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL), instr.New(instr.RETURN))
+	small := b.Label()
+	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S)).BrIf(small)
+	b.Emit(
+		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+		instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL),
+		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_SUB),
+		instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL),
+		instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+	)
+	b.Bind(small).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
 	return b.MustBuild()
 }
 
@@ -165,9 +135,7 @@ func applyProgram(t *testing.T, warm int) *program.Program {
 // running sum, left on the stack.
 func lentProgram(t *testing.T, warm int) *program.Program {
 	t.Helper()
-	// a calls apply(n, global 0) through its own native-to-native CALL:
-	// global 0 is an owned (retained, then released) argument at apply's own
-	// borrowed param 1.
+
 	a := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
 	a.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.RETURN))
 	b := instr.NewBuilder()
@@ -188,6 +156,27 @@ func lentProgram(t *testing.T, warm int) *program.Program {
 	require.NoError(t, err)
 	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32), program.WithGlobals(types.TypeAny),
 		program.WithConstants(applyFunction(), a.MustBuild(), incFunction(), decFunction()))
+}
+
+// incFunction returns its one parameter plus one.
+func incFunction() *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
+	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
+	return b.MustBuild()
+}
+
+// decFunction returns its one parameter minus one.
+func decFunction() *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
+	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.RETURN))
+	return b.MustBuild()
+}
+
+// applyFunction calls fn(x) through param 1, a dynamic CALL.
+func applyFunction() *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}})
+	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL), instr.New(instr.RETURN))
+	return b.MustBuild()
 }
 
 // sumFunction is sum(n) = 0 + 1 + ... + n-1 over one parameter and two locals.
@@ -240,15 +229,6 @@ func concatFunction(t *testing.T) *types.Function {
 	}
 }
 
-// node is the struct type structs (below) allocates each iteration: an i32
-// counter and an any-typed held reference.
-func node() *types.StructType {
-	return types.NewStructType(
-		types.NewStructField(types.TypeI32, types.FieldWithName("n")),
-		types.NewStructField(types.TypeAny, types.FieldWithName("held")),
-	)
-}
-
 // texts grows a string by "ab" until it is 2n bytes long, re-deriving each
 // "ab" through string.encode_utf32 and string.new_utf32 so the ops see
 // borrowed, constant, and owned operands, and chains one struct per pass so
@@ -277,6 +257,15 @@ func texts(t *testing.T, n int) *program.Program {
 	require.NoError(t, err)
 	return program.New(code, program.WithLocals(types.TypeString, record, types.TypeI32, types.TypeI32), program.WithTypes(record),
 		program.WithConstants(types.String(""), types.String("ab")))
+}
+
+// node is the struct type structs (below) allocates each iteration: an i32
+// counter and an any-typed held reference.
+func node() *types.StructType {
+	return types.NewStructType(
+		types.NewStructField(types.TypeI32, types.FieldWithName("n")),
+		types.NewStructField(types.TypeAny, types.FieldWithName("held")),
+	)
 }
 
 // store loops a module-level header, overwriting an any local with a ref
@@ -341,16 +330,6 @@ func wideArgFunction() *types.Function {
 	}
 }
 
-// refuse emits a prologue that reads an element of a null on a path no run
-// takes: the translator declines an array read of unknown element kind, so b's
-// function never compiles.
-func refuse(b *types.FunctionBuilder) {
-	body := b.Label()
-	b.Emit(instr.New(instr.I32_CONST, 1)).BrIf(body)
-	b.Emit(instr.New(instr.REF_NULL), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET), instr.New(instr.DROP))
-	b.Bind(body)
-}
-
 // refArrayProgram warms readWrite(arr) warm times, where readWrite reads
 // element 0 (retaining it), releases it, writes a fresh string into element
 // 0 (releasing the old element, adopting the new one), and returns the new
@@ -397,11 +376,7 @@ func refArrayProgram(t *testing.T, warm int) *program.Program {
 func structTreeProgram(t *testing.T, warm int) *program.Program {
 	t.Helper()
 	record := types.NewStructType(types.NewStructField(types.TypeI32, types.FieldWithName("value")), types.NewStructField(types.TypeAny, types.FieldWithName("next")))
-	// The next field's declared type is the record itself: a self-reference,
-	// wired after construction since a field cannot name its own type before
-	// it exists. This is what lets w.field (transform/walk.go) resolve
-	// struct.get's field kind statically for a value read back out of a
-	// "next" field, not only for the root parameter.
+
 	record.Fields[1].Type = record
 
 	walk := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{record}, Returns: []types.Type{types.TypeI32}})
@@ -469,6 +444,16 @@ func relayFunction(callee int, guarded bool) *types.Function {
 	return b.MustBuild()
 }
 
+// refuse emits a prologue that reads an element of a null on a path no run
+// takes: the translator declines an array read of unknown element kind, so b's
+// function never compiles.
+func refuse(b *types.FunctionBuilder) {
+	body := b.Label()
+	b.Emit(instr.New(instr.I32_CONST, 1)).BrIf(body)
+	b.Emit(instr.New(instr.REF_NULL), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET), instr.New(instr.DROP))
+	b.Bind(body)
+}
+
 // loopFunction is loop(s, n) = callee(s, 0) + ... + callee(s, n-1) through
 // constant callee, counting an inner loop to 8 before each call, so its own
 // work pays for a served call; when global, it passes global 0 instead of
@@ -523,21 +508,6 @@ func loopProgram(t *testing.T, warm, n, final int, try bool, constants ...types.
 	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32), program.WithGlobals(types.TypeString), program.WithConstants(constants...), program.WithHandlers(b.Handlers()...))
 }
 
-// bumpFunction is bump(s, x) = x + add.
-func bumpFunction(add int) *types.Function {
-	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString, types.TypeI32}, Returns: []types.Type{types.TypeI32}})
-	b.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, uint64(add)), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
-	return b.MustBuild()
-}
-
-// relayDynamicFunction is relay(s, x, fn) = fn(s, x) through param 2, a
-// dynamic CALL.
-func relayDynamicFunction() *types.Function {
-	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString, types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}})
-	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 2), instr.New(instr.CALL), instr.New(instr.RETURN))
-	return b.MustBuild()
-}
-
 // mixedProgram calls relay(s, i, bump) warm times, bump alternating between
 // two functions of one signature by i's low bit through the same dynamic
 // CALL site; when other, it then calls relay once more with a function of
@@ -574,26 +544,19 @@ func mixedProgram(t *testing.T, warm int, other bool) *program.Program {
 		program.WithConstants(relayDynamicFunction(), bumpFunction(1), bumpFunction(3), types.String("s"), pair))
 }
 
-// tailRefFunction is sum(n, acc, held) = n == 0 ? acc : sum(n-1, acc+n, held),
-// a self tail call through constant 0 that carries a ref parameter and parks
-// it in a ref local first, so the call must release the old ref slots.
-func tailRefFunction(t *testing.T) *types.Function {
-	t.Helper()
-	b := instr.NewBuilder()
-	base := b.Label()
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_EQ).BrIf(base)
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_SET, 3)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_ADD)
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.CONST_GET, 0).Emit(instr.RETURN_CALL)
-	b.Bind(base).Emit(instr.LOCAL_GET, 1).Emit(instr.RETURN)
-	code, err := b.Assemble()
-	require.NoError(t, err)
-	return &types.Function{
-		Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}},
-		Locals: []types.Type{types.TypeAny},
-		Code:   instr.Marshal(code),
-	}
+// bumpFunction is bump(s, x) = x + add.
+func bumpFunction(add int) *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString, types.TypeI32}, Returns: []types.Type{types.TypeI32}})
+	b.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, uint64(add)), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
+	return b.MustBuild()
+}
+
+// relayDynamicFunction is relay(s, x, fn) = fn(s, x) through param 2, a
+// dynamic CALL.
+func relayDynamicFunction() *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString, types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}})
+	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 2), instr.New(instr.CALL), instr.New(instr.RETURN))
+	return b.MustBuild()
 }
 
 // tailRefProgram calls tailRefFunction(n, 0, "held") through a wrapper that
@@ -616,6 +579,28 @@ func tailRefProgram(t *testing.T, n int) *program.Program {
 	return program.New(code, program.WithConstants(tailRefFunction(t), types.String("held"), wrapper))
 }
 
+// tailRefFunction is sum(n, acc, held) = n == 0 ? acc : sum(n-1, acc+n, held),
+// a self tail call through constant 0 that carries a ref parameter and parks
+// it in a ref local first, so the call must release the old ref slots.
+func tailRefFunction(t *testing.T) *types.Function {
+	t.Helper()
+	b := instr.NewBuilder()
+	base := b.Label()
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_EQ).BrIf(base)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_SET, 3)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_ADD)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.CONST_GET, 0).Emit(instr.RETURN_CALL)
+	b.Bind(base).Emit(instr.LOCAL_GET, 1).Emit(instr.RETURN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return &types.Function{
+		Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}},
+		Locals: []types.Type{types.TypeAny},
+		Code:   instr.Marshal(code),
+	}
+}
+
 // nativeEntries is the number of native entries at either tier.
 func nativeEntries(profiler *prof.Profiler) float64 {
 	baseline, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
@@ -623,12 +608,255 @@ func nativeEntries(profiler *prof.Profiler) float64 {
 	return baseline + optimized
 }
 
+// iterativeFibProgram computes the nth Fibonacci number in a module-level
+// loop, carrying every value in locals so the loop header's own operand
+// stack is empty: a module-code OSR site, address 0 included.
+func iterativeFibProgram(t *testing.T, n int) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_SET, 2)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_SET, 2)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 1)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32))
+}
+
+// concat runs an address-0 loop with one unpromoted any local beside four
+// promoted i32 locals. STRING_CONCAT bridges with the locals live in the exit map.
+func concat(t *testing.T, n int) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_SET, 0)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 4)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 3).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+	b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_CONST, 7).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 4)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 1).Emit(instr.STRING_CONCAT).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 3).Emit(instr.I32_ADD).Emit(instr.LOCAL_GET, 4).Emit(instr.I32_ADD)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeAny, types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32),
+		program.WithConstants(types.String("seed-"), types.String("tail")))
+}
+
+// deopt loops at module level over n calls of f(i) = i, except f(k), which
+// adds string.eq of a constant with itself: an operation native code neither
+// lowers nor resumes, so f's native code deoptimizes there while the loop's
+// promoted locals live in the caller's native frame.
+func deopt(t *testing.T, n, k int) *program.Program {
+	t.Helper()
+	fb := instr.NewBuilder()
+	slow := fb.Label()
+	fb.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(k)).Emit(instr.I32_EQ).BrIf(slow)
+	fb.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
+	fb.Bind(slow).Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 1).Emit(instr.CONST_GET, 1).Emit(instr.STRING_EQ).Emit(instr.I32_ADD).Emit(instr.RETURN)
+	fcode, err := fb.Assemble()
+	require.NoError(t, err)
+	f := &types.Function{
+		Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+		Code: instr.Marshal(fcode),
+	}
+
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	for slot := range 4 {
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, uint64(slot))
+	}
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 3).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_GET, 3).Emit(instr.I32_ADD)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32),
+		program.WithConstants(f, types.String("abc")))
+}
+
+// counterProgram builds one closure over an i32 counter and a string, calls
+// it 64 times from loop-free module code, and leaves the last call's
+// results: the ClosureCounter shape.
+func counterProgram(t *testing.T) *program.Program {
+	t.Helper()
+	fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeString, types.TypeI32}}).
+		Captures(types.TypeI32, types.TypeString).
+		Emit(
+			instr.New(instr.UPVAL_GET, 1), instr.New(instr.UPVAL_SET, 1), instr.New(instr.UPVAL_GET, 1),
+			instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.DUP), instr.New(instr.UPVAL_SET, 0),
+			instr.New(instr.RETURN),
+		).MustBuild()
+	b := instr.NewBuilder()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 1).Emit(instr.CONST_GET, 0).Emit(instr.CLOSURE_NEW).Emit(instr.LOCAL_SET, 0)
+	for range 64 {
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.CALL).Emit(instr.DROP).Emit(instr.DROP)
+	}
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.CALL)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeAny), program.WithConstants(fn, types.String("held")))
+}
+
+// fib loops at module level and calls fib(8). Once the header is native,
+// the callee enters native code directly and its prologue counts every entry.
+func fib(t *testing.T, n int) *program.Program {
+	t.Helper()
+	fib := fibFunction()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.I32_CONST, 8).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 0)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(fib))
+}
+
+// fibFunction is fib(n) = n < 2 ? n : fib(n-1) + fib(n-2), calling itself
+// through constant 0.
+func fibFunction() *types.Function {
+	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
+	small := b.Label()
+	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S)).BrIf(small)
+	b.Emit(
+		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_SUB), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+	)
+	b.Bind(small).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
+	return b.MustBuild()
+}
+
+// native skips a case that runs native code off arm64.
+func native(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native execution needs arm64")
+	}
+}
+
+// poll runs cond on the calling goroutine until it holds, so nothing cond
+// touches outlives the case's deferred teardown. It fails the test after
+// pollDeadline.
+func poll(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(pollDeadline)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("condition never satisfied")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// runProgram runs prog threaded and returns the single value it leaves on
+// the stack.
+func runProgram(t *testing.T, prog *program.Program) types.Value {
+	t.Helper()
+	vm := interp.New(prog, interp.WithThreshold(-1))
+	defer vm.Close()
+	require.NoError(t, vm.Run(context.Background()))
+	v, err := vm.Pop()
+	require.NoError(t, err)
+	return v
+}
+
+// runProgramErr runs prog threaded with opts and returns Run's error.
+func runProgramErr(t *testing.T, prog *program.Program, opts ...interp.Option) error {
+	t.Helper()
+	vm := interp.New(prog, opts...)
+	defer vm.Close()
+	return vm.Run(context.Background())
+}
+
+// runProgramString runs prog threaded and returns the single stack ref
+// value it leaves, as its string content and live RefCount.
+func runProgramString(t *testing.T, prog *program.Program) (string, int) {
+	t.Helper()
+	vm := interp.New(prog, interp.WithThreshold(-1))
+	defer vm.Close()
+	require.NoError(t, vm.Run(context.Background()))
+	value, count, err := popString(vm)
+	require.NoError(t, err)
+	return value, count
+}
+
+// popString pops vm's single stack value, returning its string content and
+// live RefCount. It does not release the reference PopBoxed transfers, since
+// the caller inspects RefCount before the VM closes.
+func popString(vm *interp.Interpreter) (string, int, error) {
+	boxed, err := vm.PopBoxed()
+	if err != nil {
+		return "", 0, err
+	}
+	loaded, err := vm.Load(boxed.Ref())
+	if err != nil {
+		return "", 0, err
+	}
+	s, ok := loaded.(types.String)
+	if !ok {
+		return "", 0, interp.ErrTypeMismatch
+	}
+	count, err := vm.RefCount(boxed.Ref())
+	if err != nil {
+		return "", 0, err
+	}
+	return string(s), count, nil
+}
+
+// popLoop pops what loopProgram leaves: s, reporting its live RefCount and
+// releasing the reference PopBoxed hands over, then the sum under it.
+func popLoop(vm *interp.Interpreter) (types.Value, int, error) {
+	boxed, err := vm.PopBoxed()
+	if err != nil {
+		return nil, 0, err
+	}
+	count, err := vm.RefCount(boxed.Ref())
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := vm.Release(boxed.Ref()); err != nil {
+		return nil, 0, err
+	}
+	sum, err := vm.Pop()
+	return sum, count, err
+}
+
+// errorsEqual reports whether got and want both carry an *interp.RuntimeError
+// with the same cause and the same call stack.
+func errorsEqual(got, want error) bool {
+	var g, w *interp.RuntimeError
+	return errors.As(got, &g) && errors.As(want, &w) && reflect.DeepEqual(g, w)
+}
+
 func TestWithThreshold(t *testing.T) {
 	t.Run("reports threaded's heap exhaustion from a callout with threaded's counts", func(t *testing.T) {
 		native(t)
-		// Each fresh one-element []any holds the previous one, so every array
-		// stays live until the heap limit; an inner count to 8 gives each
-		// callout enough native work to pay for it.
+
 		b := instr.NewBuilder()
 		loop, inner, next := b.Label(), b.Label(), b.Label()
 		b.Bind(loop)
@@ -650,8 +878,7 @@ func TestWithThreshold(t *testing.T) {
 		defer threaded.Close()
 		wantErr := threaded.Run(context.Background())
 		require.ErrorIs(t, wantErr, interp.ErrHeapExhausted)
-		// Address 0 is null, whose count is no reference count: threaded
-		// retainBox counts it up, releaseBox never down, native code neither.
+
 		wantCounts := make([]int, threaded.HeapLen()-1)
 		for j := range wantCounts {
 			wantCounts[j], _ = threaded.RefCount(j + 1)
@@ -763,7 +990,6 @@ func TestWithThreshold(t *testing.T) {
 		} {
 			want := runProgram(t, prog)
 
-			// A tick past the Run's length: no safepoint ever runs.
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithProfiler(profiler), interp.WithTick(1<<30))
 			require.NoError(t, vm.Run(context.Background()))
@@ -779,8 +1005,7 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("enters native code under a hook or fuel", func(t *testing.T) {
 		native(t)
-		// The last program's module code ends in its CALL: its frame waits at
-		// the end of its code.
+
 		b := instr.NewBuilder()
 		b.Emit(instr.I32_CONST, 20).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
 		code, err := b.Assemble()
@@ -810,7 +1035,7 @@ func TestWithThreshold(t *testing.T) {
 				poll(t, func() bool {
 					return !run() || nativeEntries(profiler) > 0
 				})
-				// Native runs reach ticks at varying points: run a few more.
+
 				for range 64 {
 					if !run() {
 						break
@@ -826,8 +1051,7 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("exhausts fuel inside a native loop", func(t *testing.T) {
 		native(t)
-		// Fewer ticks of fuel than the loop has iterations: no tick mapping
-		// lets the loop finish.
+
 		prog := iterativeFibProgram(t, 1<<22)
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithFuel(1<<20))
@@ -859,10 +1083,6 @@ func TestWithThreshold(t *testing.T) {
 			fibs[k] = fibs[k-1] + fibs[k-2]
 		}
 
-		// At its 64th call between header and body the hook stops the loop
-		// by writing its counter; until then it checks a = fib(i) and b =
-		// fib(i+1). Past the header the exit test has read i already, so
-		// one more iteration runs.
 		seen, stop, at, torn := 0, -1, 0, false
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHook(func(vm *interp.Interpreter) error {
@@ -918,8 +1138,7 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("shows a hook the native callers of a call it runs", func(t *testing.T) {
 		native(t)
-		// The module loop calls f(i) = g(i); g never compiles, so f's native
-		// code exits to call it.
+
 		g := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
 		refuse(g)
 		g.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
@@ -938,7 +1157,7 @@ func TestWithThreshold(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32, types.TypeI32), program.WithConstants(f, g.MustBuild()))
-		// While g runs, the module frame waits past its CALL.
+
 		resume := 0
 		for instr.Instruction(prog.Code[resume:]).Opcode() != instr.CALL {
 			resume += instr.Instruction(prog.Code[resume:]).Width()
@@ -1022,8 +1241,7 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("recompiles a retired function only after more calls than its first compile", func(t *testing.T) {
 		native(t)
-		// apply(x, fn) calls fn(x) through a dynamic CALL; inc and dec never
-		// compile, so every ok Baseline compile is apply's.
+
 		inc := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
 		refuse(inc)
 		inc.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
@@ -1050,7 +1268,7 @@ func TestWithThreshold(t *testing.T) {
 			n := 0
 			poll(t, func() bool {
 				for range step {
-					// Reset zeroes globals: the callee is set before every Run.
+
 					if runErr = vm.SetGlobal(0, callee); runErr != nil {
 						return true
 					}
@@ -1081,7 +1299,7 @@ func TestWithThreshold(t *testing.T) {
 		} {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithProfiler(profiler))
-			// Far past waking and every threshold, with time to compile.
+
 			for range 8 {
 				for range 512 {
 					require.NoError(t, vm.Run(context.Background()))
@@ -1638,7 +1856,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, popErr)
 		require.Equal(t, wantValue, value)
 		require.Equal(t, wantCount, count)
-		// Every STRUCT_NEW bridge resumes: none of them fall back to a deopt.
+
 		require.Equal(t, float64(0), deopts)
 	})
 
@@ -1779,7 +1997,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.NoError(t, constErr)
-		// An entry that declined its first bridge could not reach a second one.
+
 		require.Greater(t, bridges, entries)
 		require.Equal(t, wantValue, value)
 		require.Equal(t, wantCount, count)
@@ -1832,8 +2050,7 @@ func TestWithThreshold(t *testing.T) {
 		b.Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_NEW_DEFAULT, 1).Emit(instr.LOCAL_SET, 3)
 		b.Bind(loop)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 300).Emit(instr.I32_GE_S).BrIf(done)
-		// Each group of bridges follows an inner loop's native work, enough
-		// to pay for the bridges (jit.Ledger).
+
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
 		b.Bind(first)
 		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 16).Emit(instr.I32_GE_S).BrIf(firstDone)
@@ -1869,13 +2086,13 @@ func TestWithThreshold(t *testing.T) {
 		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 16).Emit(instr.I32_GE_S).BrIf(thirdDone)
 		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).Br(third)
 		b.Bind(thirdDone)
-		// A wide i64 crosses the bridge boxed on the heap both ways.
+
 		b.Emit(instr.LOCAL_GET, 5).Emit(instr.LOCAL_GET, 0).Emit(instr.I64_CONST, 1<<60).Emit(instr.MAP_SET)
 		b.Emit(instr.LOCAL_GET, 5).Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_GET)
 		b.Emit(instr.I64_CONST, 58).Emit(instr.I64_SHR_U).Emit(instr.I64_TO_I32)
 		b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 4)
 		b.Emit(instr.LOCAL_GET, 5).Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_DELETE)
-		// map.delete adopts its key: native code hands it the reference.
+
 		b.Emit(instr.LOCAL_GET, 6).Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_SET)
 		b.Emit(instr.LOCAL_GET, 6).Emit(instr.CONST_GET, 0).Emit(instr.MAP_DELETE)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
@@ -2019,7 +2236,7 @@ func TestWithThreshold(t *testing.T) {
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, warm).Emit(instr.I32_NE).BrIf(same)
 		b.Emit(instr.CONST_GET, 1).Emit(instr.LOCAL_SET, 2)
 		b.Bind(same)
-		// string.eq releases "x" before it finds the array at iteration warm.
+
 		b.Emit(instr.LOCAL_GET, 2).Emit(instr.CONST_GET, 0).Emit(instr.STRING_EQ).Emit(instr.DROP)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
 		b.Bind(done).Emit(instr.LOCAL_GET, 0)
@@ -2057,7 +2274,7 @@ func TestWithThreshold(t *testing.T) {
 			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
 			return bridges > 1
 		})
-		// A bridge that deoptimizes leaves native code for the rest of the Run.
+
 		require.Greater(t, bridges, float64(1))
 		require.True(t, errorsEqual(gotErr, wantErr), "got %v, want %v", gotErr, wantErr)
 		require.NoError(t, xErr)
@@ -2141,8 +2358,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
 		require.GreaterOrEqual(t, round, runs)
-		// A retired f leaves the loop's native call nothing to enter, so the
-		// loop runs threaded and enters f's OSR code for nearly every f(i).
+
 		require.Less(t, entries, float64(n/2))
 	})
 
@@ -2268,11 +2484,7 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("deopts self-recursive fib at a frame limit", func(t *testing.T) {
 		native(t)
-		// The handler unwinds every native and interpreter frame the deopt
-		// left above it and releases the operand stack, so RefCount after a
-		// successful Run reflects only durable state, comparable across
-		// threaded and native runs. (An uncaught error leaves abandoned
-		// frames on both paths, by design, and is not comparable this way.)
+
 		fib := fibFunction()
 		b := instr.NewBuilder()
 		loop, done, start, end, catch := b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
@@ -2318,17 +2530,13 @@ func TestWithThreshold(t *testing.T) {
 		})
 		require.NoError(t, runErr)
 		require.NoError(t, rcErr)
-		// The module's own constant pool is fib's only live reference: a
-		// mid-depth deopt through the CSE'd, borrowed callee must neither
-		// leak an extra retain nor drop the constant pool's own.
+
 		require.Equal(t, wantRC, gotRC)
 	})
 
 	t.Run("deopts a callee with register-passed ref and i32 parameters", func(t *testing.T) {
 		native(t)
-		// rec(s, n) = n < 1 ? n : rec(s, n-1) + 1. The module warms rec(s, 2),
-		// then calls rec(s, 30) under a handler: WithFrame(10) deopts it
-		// several native activations deep.
+
 		fb := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString, types.TypeI32}, Returns: []types.Type{types.TypeI32}})
 		small := fb.Label()
 		fb.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_LT_S)).BrIf(small)
@@ -2463,7 +2671,6 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, want.Close())
 
-		// Both callees are seen before the caller compiles.
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(8), interp.WithProfiler(profiler))
 		defer vm.Close()
@@ -2496,15 +2703,14 @@ func TestWithThreshold(t *testing.T) {
 		require.Greater(t, entries(), beforeEntries)
 		require.Greater(t, metric("vm_jit_exits_total", call), beforeCalls)
 		require.Zero(t, metric("vm_jit_exits_total", deopt))
-		// The caller of the dynamic call compiles instead of being refused.
+
 		require.Zero(t, metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "unsupported"}))
 	})
 
 	t.Run("retires a caller whose served calls outweigh its work", func(t *testing.T) {
 		native(t)
 		const runs = 16
-		// held(x) = x never compiles, so a native caller always reaches it
-		// through ExitCall.
+
 		held := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}})
 		refuse(held)
 		held.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
@@ -2537,7 +2743,7 @@ func TestWithThreshold(t *testing.T) {
 			return runErr != nil || calls() > 0
 		})
 		require.NoError(t, runErr)
-		// Until the ledger retires served.
+
 		poll(t, func() bool {
 			before := calls()
 			for range runs {
@@ -2693,8 +2899,7 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("serves a trapping, throwing, or coroutine callee by call exit", func(t *testing.T) {
 		native(t)
 		s := types.String("s")
-		// A coroutine's CALL returns a handle, not the results the native
-		// caller's own call site types: the caller cannot resume.
+
 		co := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString, types.TypeI32}, Returns: []types.Type{types.TypeAny}}).
 			Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.YIELD), instr.New(instr.RETURN)).MustBuild()
 		drive := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString, types.TypeI32}, Returns: []types.Type{types.TypeI32}}).Locals(types.TypeI32)
@@ -2810,7 +3015,7 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("keeps a borrowed callee's RefCount across a served call", func(t *testing.T) {
 		native(t)
-		// inner never compiles, so native outer always serves its call.
+
 		held := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString}, Returns: []types.Type{types.TypeString}})
 		refuse(held)
 		inner := held.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).MustBuild()
@@ -2865,9 +3070,7 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("passes a borrowed parameter through native recursion", func(t *testing.T) {
 		native(t)
-		// self (param 1) is borrowed at both of indirectFibFunction's own
-		// dynamic CALLs: a native caller never retains it, so a deopt at the
-		// frame limit exercises the served call's own retain of it.
+
 		fib := indirectFibFunction()
 		b := instr.NewBuilder()
 		loop, done, start, end, catch := b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
@@ -2912,9 +3115,7 @@ func TestWithThreshold(t *testing.T) {
 		})
 		require.NoError(t, runErr)
 		require.NoError(t, rcErr)
-		// The module's own constant pool is fib's only live reference: a
-		// mid-depth deopt through the borrowed self parameter must neither
-		// leak an extra retain nor drop the constant pool's own.
+
 		require.Equal(t, wantRC, gotRC)
 	})
 
@@ -2979,10 +3180,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, popErr)
 		require.NoError(t, rcErr)
 		require.Equal(t, want, got)
-		// If the !Owned filter in compile.call's Lent were missing, a's own
-		// global-backed argument would be retained twice at the deopt: once
-		// by a's own translator-side owning of it, once by a wrongly
-		// populated Lent entry for apply's borrowed param 1.
+
 		require.Equal(t, wantIncRC, gotIncRC)
 		require.Equal(t, wantDecRC, gotDecRC)
 		require.GreaterOrEqual(t, deopts, float64(1))
@@ -2992,9 +3190,6 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("deopts a deep recursion at its frame limit", func(t *testing.T) {
 		native(t)
 
-		// rec(n): a 20000-iteration loop (a resumed safepoint in every
-		// activation), a dropped fresh struct (a resumed release), then
-		// rec(n-1). Param 0 is n; local 1 the counter.
 		record := types.NewStructType(types.NewStructField(types.TypeI32, types.FieldWithName("n")))
 		fb := instr.NewBuilder()
 		loop, done, small := fb.Label(), fb.Label(), fb.Label()
@@ -3015,9 +3210,6 @@ func TestWithThreshold(t *testing.T) {
 			Code:   instr.Marshal(fnCode),
 		}
 
-		// The module warms rec(2), then calls rec(15) under a handler:
-		// WithFrame(8) makes the native chain take ExitCall several
-		// activations deep, and the handler catches the overflow.
 		mb := instr.NewBuilder()
 		wloop, wdone, start, end, catch := mb.Label(), mb.Label(), mb.Label(), mb.Label(), mb.Label()
 		mb.Bind(wloop)
@@ -3522,7 +3714,7 @@ func TestWithThreshold(t *testing.T) {
 		})
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
-		// OpComplete's own wide box used to deopt once (B); it now resumes.
+
 		require.Zero(t, deopts)
 		require.Equal(t, want, got)
 	})
@@ -3836,7 +4028,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Reset()
 		}
 		require.GreaterOrEqual(t, entries()-before, float64(batches*calls))
-		// Neither the caller nor its callee is refused.
+
 		require.Zero(t, metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "unsupported"}))
 	})
 
@@ -3887,7 +4079,7 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("escapes guest handlers on a cancelled context", func(t *testing.T) {
 		native(t)
-		// The final call repeats natively until the timer cancels it.
+
 		sum := sumFunction(t)
 		b := instr.NewBuilder()
 		loop, done, start, end, catch := b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
@@ -4075,11 +4267,7 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("reads and writes a ref array element", func(t *testing.T) {
 		native(t)
-		// Each interpreter gets its own freshly built program: array.set
-		// mutates the array constant in place, and program.Program shares
-		// that *types.Array Go object across every interp.New call that
-		// reuses it, so a program run to completion once must not be reused
-		// for a second run (want, then every retry below).
+
 		wantValue, wantCount := runProgramString(t, refArrayProgram(t, 20000))
 
 		var runErr, popErr error
@@ -4111,10 +4299,7 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("walks a struct tree", func(t *testing.T) {
 		native(t)
-		// Each interpreter gets its own freshly built program: the module's
-		// own linking code (struct.set) mutates the leaf/mid/root struct
-		// constants in place, another instance of the refArrayProgram
-		// cross-run-reuse hazard above.
+
 		want := runProgram(t, structTreeProgram(t, 20000))
 
 		var runErr, popErr error
@@ -4134,8 +4319,7 @@ func TestWithThreshold(t *testing.T) {
 			}
 			vm.Reset()
 			vm.Flush()
-			// The module loop may enter by OSR before walk's first Go entry,
-			// calling walk natively: walk compiled and any native entry.
+
 			compiles, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
 			return compiles > 0 && nativeEntries(profiler) > 0
 		})
@@ -4282,7 +4466,7 @@ func TestWithThreshold(t *testing.T) {
 		b.Emit(instr.CONST_GET, 1).Emit(instr.LOCAL_SET, 2)
 		b.Bind(loop)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(rounds)).Emit(instr.I32_GE_S).BrIf(done)
-		// A read no run reaches keeps the module loop threaded.
+
 		b.Emit(instr.I32_CONST, 1).BrIf(live)
 		b.Emit(instr.REF_NULL).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.DROP)
 		b.Bind(live).Bind(start)
@@ -4345,7 +4529,7 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("keeps a loop with a never-true null array read native", func(t *testing.T) {
 		native(t)
 		const runs = 32
-		// A null []i32 local read only under a branch no iteration takes.
+
 		b := instr.NewBuilder()
 		loop, skip, done := b.Label(), b.Label(), b.Label()
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
@@ -4400,7 +4584,7 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("guards an array replaced inside an Optimized loop afresh", func(t *testing.T) {
 		native(t)
-		// The []i32 local is replaced by a fresh array of varying length every iteration.
+
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
@@ -4542,17 +4726,14 @@ func TestWithThreshold(t *testing.T) {
 		vm.Flush()
 
 		require.Equal(t, want, got)
-		// One Optimized compile is the header's own OSR unit; a second is
-		// only possible if fib, called solely from that native loop, also
-		// reached the promote threshold.
+
 		compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
 		require.GreaterOrEqual(t, compiles, float64(2))
 	})
 
 	t.Run("tiers up a native-only callee across short Runs", func(t *testing.T) {
 		native(t)
-		// inc is entered once per iteration: its 1024 Baseline entries
-		// arrive only after the loop itself runs natively.
+
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
@@ -4642,18 +4823,16 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("catches a deopt inside an OSR loop in a guest handler", func(t *testing.T) {
 		native(t)
-		// The OSR-eligible loop lives in a called function with no handlers
-		// of its own; the module's handler wraps the call and catches the
-		// real trap once it unwinds out of that frame.
+
 		fnBuilder := instr.NewBuilder()
 		loop, done := fnBuilder.Label(), fnBuilder.Label()
-		fnBuilder.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0) // i = 0
-		fnBuilder.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1) // sum = 0
+		fnBuilder.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		fnBuilder.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
 		fnBuilder.Bind(loop)
 		fnBuilder.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(2_000_000)).Emit(instr.I32_GE_S).BrIf(done)
 		fnBuilder.Emit(instr.LOCAL_GET, 1)
 		fnBuilder.Emit(instr.I32_CONST, 100)
-		fnBuilder.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(1_500_000)).Emit(instr.I32_SUB) // i-1_500_000
+		fnBuilder.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(1_500_000)).Emit(instr.I32_SUB)
 		fnBuilder.Emit(instr.I32_DIV_S)
 		fnBuilder.Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
 		fnBuilder.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
@@ -4727,12 +4906,12 @@ func TestWithThreshold(t *testing.T) {
 		native(t)
 		b := instr.NewBuilder()
 		header, done := b.Label(), b.Label()
-		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0) // counter = 0
-		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1) // flag = 0
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
 		b.Bind(header)
 		b.Emit(instr.LOCAL_GET, 1).BrIf(done)
-		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)                // counter++
-		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(200_000)).Emit(instr.I32_GE_S).Emit(instr.LOCAL_SET, 1) // flag = counter >= 200_000
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(200_000)).Emit(instr.I32_GE_S).Emit(instr.LOCAL_SET, 1)
 		b.Br(header)
 		b.Bind(done).Emit(instr.LOCAL_GET, 0)
 		code, err := b.Assemble()
@@ -4763,13 +4942,9 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
-		// A site submits its OSR unit once: the failed compile is never
-		// resubmitted, however many further back edges the loop takes.
+
 		require.Equal(t, float64(1), unsupported)
 
-		// The failed site restores its threaded handler and stops polling:
-		// a second Run on the same interpreter takes the same many back
-		// edges again, and the metric does not move.
 		require.NoError(t, vm.Run(context.Background()))
 		got2, popErr2 := vm.Pop()
 		require.NoError(t, popErr2)
@@ -4784,7 +4959,7 @@ func TestWithThreshold(t *testing.T) {
 		const n = 600
 		b := instr.NewBuilder()
 		header, done := b.Label(), b.Label()
-		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0) // i = 0
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
 		b.Bind(header)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
 		b.Emit(instr.I32_CONST, 0).Emit(instr.MAP_NEW_DEFAULT, 0).Emit(instr.MAP_KEYS).Emit(instr.DROP)
@@ -4827,17 +5002,9 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, runErr)
 		require.NoError(t, popErr)
 		require.Equal(t, want, got)
-		// Two submits, two compiles: the header's own OSR unit, and module
-		// code's own ip-0 unit (reachable prefix and loop both, including
-		// the same always-bridging op); every native entry bridges immediately.
+
 		require.Equal(t, float64(2), compiles)
 
-		// The ip-0 unit's own bridge-and-deopt count starts fresh once
-		// published (materializing hides the rest of a Run from its
-		// observer, so it takes one Run per deopt, like the header's own
-		// retirement): run comfortably past refute (8) deopts so it
-		// retires too, then confirm two further runs report the same
-		// steady-state exits count.
 		for range 12 {
 			require.NoError(t, vm.Run(ctx))
 			_, err := vm.Pop()
@@ -4908,7 +5075,7 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("runs an indirect self call through a parameter", func(t *testing.T) {
 		native(t)
-		// Both dynamic sites are recorded before fib compiles.
+
 		prog := indirectFibCallsProgram(t, 20, 50)
 
 		wantVM := interp.New(indirectFibCallsProgram(t, 20, 50), interp.WithThreshold(-1))
@@ -4988,7 +5155,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Reset()
 			return err != nil || metric("vm_jit_compiles_total", compiled, ok) >= 2
 		})
-		// Settled: the recompiled code traps at no site.
+
 		for range 16 {
 			run()
 			time.Sleep(time.Millisecond)
@@ -5096,7 +5263,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, wantIncRC, gotIncRC)
 		require.Equal(t, wantDecRC, gotDecRC)
 		require.GreaterOrEqual(t, deopts, float64(1))
-		// A retired site stops deopting long before its 3000 refuting calls end.
+
 		require.Less(t, deopts, float64(3000))
 	})
 
@@ -5145,7 +5312,7 @@ func TestWithThreshold(t *testing.T) {
 		}
 		deopts := func() float64 { return metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"}) }
 		calls := func() float64 { return metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"}) }
-		// Reset clears globals: every polymorphic Run sets global 0 again.
+
 		run := func() {
 			require.NoError(t, vm.SetGlobal(0, types.BoxI32(1)))
 			require.NoError(t, vm.Run(context.Background()))
@@ -5154,7 +5321,7 @@ func TestWithThreshold(t *testing.T) {
 			require.Equal(t, want, got)
 			vm.Reset()
 		}
-		// Monomorphic until relay compiles with its one observed callee.
+
 		compiled := prof.Label{Key: "tier", Value: "baseline"}
 		ok := prof.Label{Key: "outcome", Value: "ok"}
 		var runErr error
@@ -5174,7 +5341,7 @@ func TestWithThreshold(t *testing.T) {
 			run()
 			time.Sleep(time.Millisecond)
 		}
-		// Fewer than refute: the moved feedback retires the code at once.
+
 		require.Less(t, deopts()-turned, float64(8))
 
 		settled, served := deopts(), calls()
@@ -5199,9 +5366,7 @@ func TestWithThreshold(t *testing.T) {
 		b.Bind(done).Emit(instr.LOCAL_GET, 0)
 		code, err := b.Assemble()
 		require.NoError(t, err)
-		// wrap calls a closure through param 1, a dynamic CALL: native never
-		// records a closure callee (call's own hook only reaches a
-		// *types.Function target), so this site never speculates.
+
 		wrap := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}})
 		wrap.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL), instr.New(instr.RETURN))
 		prog := program.New(code, program.WithLocals(types.TypeI32, types.TypeAny),
@@ -5258,8 +5423,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Reset()
 			vm.Flush()
 			entries, deopts, called = metric("vm_jit_entries_total", entry)-entered, metric("vm_jit_exits_total", deopt)-deopted, metric("vm_jit_exits_total", call)-exited
-			// The closure body is the only Baseline unit: compiled, it is
-			// called natively, or the Run takes a call exit.
+
 			compiled, _ = profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
 			return compiled > 0 && entries > 0 && deopts == 0 && called == 0
 		})
@@ -5276,9 +5440,7 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("keeps a caller entering while its closure callee's Baseline is pending", func(t *testing.T) {
 		native(t)
-		// The callee counts only on its ExitCalls, so at a threshold
-		// above refute its Baseline is pending for more entries than a
-		// refuted caller survives.
+
 		prog := counterProgram(t)
 		want := runProgram(t, prog)
 
@@ -5427,9 +5589,7 @@ func TestWithThreshold(t *testing.T) {
 			}
 			vm.Reset()
 			vm.Flush()
-			// A closure runs natively only through a native caller: an
-			// ARRAY_NEW bridge exit, which never resumes, with no call exit
-			// means every closure call ran natively, the last one into it.
+
 			compiled = metric("vm_jit_compiles_total", baseline, prof.Label{Key: "outcome", Value: "ok"})
 			bridged, called = metric("vm_jit_exits_total", bridge)-declined, metric("vm_jit_exits_total", call)-exited
 			return compiled >= 2 && bridged > 0 && called == 0
@@ -5487,8 +5647,7 @@ func TestWithThreshold(t *testing.T) {
 			vm.Flush()
 			bridges, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
 			deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
-			// A declined bridge deopts and its site retires within a few
-			// entries; only resumed ones number in the thousands.
+
 			return bridges > 1000
 		})
 		require.NoError(t, runErr)
@@ -5661,8 +5820,7 @@ func TestWithThreshold(t *testing.T) {
 			fn := fb.Emit(instr.New(c.code), instr.New(instr.RETURN)).MustBuild()
 
 			for _, args := range c.args {
-				// The module calls fn with args 1000 times so fn compiles,
-				// then once more for the result.
+
 				b := instr.NewBuilder()
 				loop, done := b.Label(), b.Label()
 				call := func() {
@@ -5680,7 +5838,6 @@ func TestWithThreshold(t *testing.T) {
 				require.NoError(t, err)
 				prog := program.New(code, program.WithLocals(i32), program.WithConstants(fn))
 
-				// Boxed words compare bits: NaN payloads and the sign of zero.
 				threaded := interp.New(prog, interp.WithThreshold(-1))
 				require.NoError(t, threaded.Run(context.Background()))
 				want, err := threaded.PopBoxed()
@@ -5728,240 +5885,4 @@ func TestWithThreshold(t *testing.T) {
 		v, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "failed"})
 		require.Equal(t, float64(1), v)
 	})
-}
-
-// iterativeFibProgram computes the nth Fibonacci number in a module-level
-// loop, carrying every value in locals so the loop header's own operand
-// stack is empty: a module-code OSR site, address 0 included.
-func iterativeFibProgram(t *testing.T, n int) *program.Program {
-	t.Helper()
-	b := instr.NewBuilder()
-	loop, done := b.Label(), b.Label()
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0) // i = 0
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1) // a = 0
-	b.Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_SET, 2) // b = 1
-	b.Bind(loop)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3) // tmp = a+b
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_SET, 1)                                              // a = b
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_SET, 2)                                              // b = tmp
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0) // i++
-	b.Br(loop)
-	b.Bind(done).Emit(instr.LOCAL_GET, 1)
-	code, err := b.Assemble()
-	require.NoError(t, err)
-	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32))
-}
-
-// concat runs an address-0 loop with one unpromoted any local beside four
-// promoted i32 locals. STRING_CONCAT bridges with the locals live in the exit map.
-func concat(t *testing.T, n int) *program.Program {
-	t.Helper()
-	b := instr.NewBuilder()
-	loop, done := b.Label(), b.Label()
-	b.Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_SET, 0)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 4)
-	b.Bind(loop)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 3).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
-	b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_CONST, 7).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 4)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 1).Emit(instr.STRING_CONCAT).Emit(instr.DROP)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
-	b.Br(loop)
-	b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 3).Emit(instr.I32_ADD).Emit(instr.LOCAL_GET, 4).Emit(instr.I32_ADD)
-	code, err := b.Assemble()
-	require.NoError(t, err)
-	return program.New(code, program.WithLocals(types.TypeAny, types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32),
-		program.WithConstants(types.String("seed-"), types.String("tail")))
-}
-
-// deopt loops at module level over n calls of f(i) = i, except f(k), which
-// adds string.eq of a constant with itself: an operation native code neither
-// lowers nor resumes, so f's native code deoptimizes there while the loop's
-// promoted locals live in the caller's native frame.
-func deopt(t *testing.T, n, k int) *program.Program {
-	t.Helper()
-	fb := instr.NewBuilder()
-	slow := fb.Label()
-	fb.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(k)).Emit(instr.I32_EQ).BrIf(slow)
-	fb.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
-	fb.Bind(slow).Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 1).Emit(instr.CONST_GET, 1).Emit(instr.STRING_EQ).Emit(instr.I32_ADD).Emit(instr.RETURN)
-	fcode, err := fb.Assemble()
-	require.NoError(t, err)
-	f := &types.Function{
-		Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
-		Code: instr.Marshal(fcode),
-	}
-
-	b := instr.NewBuilder()
-	loop, done := b.Label(), b.Label()
-	for slot := range 4 {
-		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, uint64(slot))
-	}
-	b.Bind(loop)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 3).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
-	b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
-	b.Br(loop)
-	b.Bind(done).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_GET, 3).Emit(instr.I32_ADD)
-	code, err := b.Assemble()
-	require.NoError(t, err)
-	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32, types.TypeI32, types.TypeI32),
-		program.WithConstants(f, types.String("abc")))
-}
-
-// counterProgram builds one closure over an i32 counter and a string, calls
-// it 64 times from loop-free module code, and leaves the last call's
-// results: the ClosureCounter shape.
-func counterProgram(t *testing.T) *program.Program {
-	t.Helper()
-	fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeString, types.TypeI32}}).
-		Captures(types.TypeI32, types.TypeString).
-		Emit(
-			instr.New(instr.UPVAL_GET, 1), instr.New(instr.UPVAL_SET, 1), instr.New(instr.UPVAL_GET, 1),
-			instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.DUP), instr.New(instr.UPVAL_SET, 0),
-			instr.New(instr.RETURN),
-		).MustBuild()
-	b := instr.NewBuilder()
-	b.Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 1).Emit(instr.CONST_GET, 0).Emit(instr.CLOSURE_NEW).Emit(instr.LOCAL_SET, 0)
-	for range 64 {
-		b.Emit(instr.LOCAL_GET, 0).Emit(instr.CALL).Emit(instr.DROP).Emit(instr.DROP)
-	}
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.CALL)
-	code, err := b.Assemble()
-	require.NoError(t, err)
-	return program.New(code, program.WithLocals(types.TypeAny), program.WithConstants(fn, types.String("held")))
-}
-
-// fib loops at module level and calls fib(8). Once the header is native,
-// the callee enters native code directly and its prologue counts every entry.
-func fib(t *testing.T, n int) *program.Program {
-	t.Helper()
-	fib := fibFunction()
-	b := instr.NewBuilder()
-	loop, done := b.Label(), b.Label()
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
-	b.Bind(loop)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
-	b.Emit(instr.I32_CONST, 8).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
-	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
-	b.Br(loop)
-	b.Bind(done).Emit(instr.LOCAL_GET, 0)
-	code, err := b.Assemble()
-	require.NoError(t, err)
-	return program.New(code, program.WithLocals(types.TypeI32), program.WithConstants(fib))
-}
-
-// native skips a case that runs native code off arm64.
-func native(t *testing.T) {
-	if runtime.GOARCH != "arm64" {
-		t.Skip("native execution needs arm64")
-	}
-}
-
-// pollDeadline bounds poll. It is a hang guard, not a performance budget: a
-// condition holds in milliseconds, but -race plus atomic coverage on a loaded
-// CI runner slows native warmup by an order of magnitude over the 5s a plain
-// run needs.
-const pollDeadline = 60 * time.Second
-
-// poll runs cond on the calling goroutine until it holds, so nothing cond
-// touches outlives the case's deferred teardown. It fails the test after
-// pollDeadline.
-func poll(t *testing.T, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(pollDeadline)
-	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatalf("condition never satisfied")
-		}
-		time.Sleep(time.Millisecond)
-	}
-}
-
-// runProgram runs prog threaded and returns the single value it leaves on
-// the stack.
-func runProgram(t *testing.T, prog *program.Program) types.Value {
-	t.Helper()
-	vm := interp.New(prog, interp.WithThreshold(-1))
-	defer vm.Close()
-	require.NoError(t, vm.Run(context.Background()))
-	v, err := vm.Pop()
-	require.NoError(t, err)
-	return v
-}
-
-// runProgramErr runs prog threaded with opts and returns Run's error.
-func runProgramErr(t *testing.T, prog *program.Program, opts ...interp.Option) error {
-	t.Helper()
-	vm := interp.New(prog, opts...)
-	defer vm.Close()
-	return vm.Run(context.Background())
-}
-
-// runProgramString runs prog threaded and returns the single stack ref
-// value it leaves, as its string content and live RefCount.
-func runProgramString(t *testing.T, prog *program.Program) (string, int) {
-	t.Helper()
-	vm := interp.New(prog, interp.WithThreshold(-1))
-	defer vm.Close()
-	require.NoError(t, vm.Run(context.Background()))
-	value, count, err := popString(vm)
-	require.NoError(t, err)
-	return value, count
-}
-
-// popString pops vm's single stack value, returning its string content and
-// live RefCount. It does not release the reference PopBoxed transfers, since
-// the caller inspects RefCount before the VM closes.
-func popString(vm *interp.Interpreter) (string, int, error) {
-	boxed, err := vm.PopBoxed()
-	if err != nil {
-		return "", 0, err
-	}
-	loaded, err := vm.Load(boxed.Ref())
-	if err != nil {
-		return "", 0, err
-	}
-	s, ok := loaded.(types.String)
-	if !ok {
-		return "", 0, interp.ErrTypeMismatch
-	}
-	count, err := vm.RefCount(boxed.Ref())
-	if err != nil {
-		return "", 0, err
-	}
-	return string(s), count, nil
-}
-
-// popLoop pops what loopProgram leaves: s, reporting its live RefCount and
-// releasing the reference PopBoxed hands over, then the sum under it.
-func popLoop(vm *interp.Interpreter) (types.Value, int, error) {
-	boxed, err := vm.PopBoxed()
-	if err != nil {
-		return nil, 0, err
-	}
-	count, err := vm.RefCount(boxed.Ref())
-	if err != nil {
-		return nil, 0, err
-	}
-	if err := vm.Release(boxed.Ref()); err != nil {
-		return nil, 0, err
-	}
-	sum, err := vm.Pop()
-	return sum, count, err
-}
-
-// errorsEqual reports whether got and want both carry an *interp.RuntimeError
-// with the same cause and the same call stack.
-func errorsEqual(got, want error) bool {
-	var g, w *interp.RuntimeError
-	return errors.As(got, &g) && errors.As(want, &w) && reflect.DeepEqual(g, w)
 }

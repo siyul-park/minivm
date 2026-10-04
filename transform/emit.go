@@ -286,6 +286,17 @@ func (e *emitter) close(id int) bool {
 	return true
 }
 
+func (e *emitter) carry(args []ssa.Value) bool {
+	if !e.load(args) {
+		return false
+	}
+	if len(e.stack) != len(args) {
+		e.needed = e.stack[0]
+		return false
+	}
+	return true
+}
+
 func (e *emitter) load(args []ssa.Value) bool {
 	at := 0
 	for n := min(len(args), len(e.stack)); n > 0; n-- {
@@ -302,17 +313,6 @@ func (e *emitter) load(args []ssa.Value) bool {
 		}
 		e.write(instr.New(instr.LOCAL_GET, uint64(slot)))
 		e.stack = append(e.stack, v)
-	}
-	return true
-}
-
-func (e *emitter) carry(args []ssa.Value) bool {
-	if !e.load(args) {
-		return false
-	}
-	if len(e.stack) != len(args) {
-		e.needed = e.stack[0]
-		return false
 	}
 	return true
 }
@@ -430,6 +430,14 @@ func (e *emitter) write(inst instr.Instruction) {
 	e.code = append(e.code, inst)
 }
 
+func (e *emitter) values(vals []ssa.Value) []ssa.Value {
+	out := make([]ssa.Value, len(vals))
+	for i, v := range vals {
+		out[i] = e.resolve(v)
+	}
+	return out
+}
+
 func (e *emitter) resolve(v ssa.Value) ssa.Value {
 	for {
 		at, ok := e.subst[v]
@@ -438,14 +446,6 @@ func (e *emitter) resolve(v ssa.Value) ssa.Value {
 		}
 		v = at
 	}
-}
-
-func (e *emitter) values(vals []ssa.Value) []ssa.Value {
-	out := make([]ssa.Value, len(vals))
-	for i, v := range vals {
-		out[i] = e.resolve(v)
-	}
-	return out
 }
 
 func local(t ssa.Type) (types.Type, bool) {

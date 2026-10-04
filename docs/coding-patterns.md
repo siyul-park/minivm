@@ -172,7 +172,7 @@ Necessary comments `MUST` state the smallest sufficient fact, constraint, invari
 
 Comments `MUST NOT` narrate code, restate names, label `arrange/act/assert`, or explain obvious control flow. Prefer a better name, type, or structure.
 
-Exported symbols `MUST` have normal Go doc comments.
+Exported symbols `SHOULD` have normal Go doc comments. Public API changes `SHOULD` document user-visible behavior, constraints, ownership, or other facts the code cannot express.
 
 ## Generated and Platform Code
 

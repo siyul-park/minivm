@@ -22,8 +22,10 @@ type StructField struct {
 }
 
 var _ Traceable = (*Struct)(nil)
+
 var _ Type = (*StructType)(nil)
 
+// FieldWithName returns a field option that sets its name.
 func FieldWithName(name string) func(*StructField) {
 	return func(f *StructField) {
 		f.Name = name
@@ -121,6 +123,26 @@ func (s *Struct) SetRaw(i int, bits uint64) {
 	s.Data[i] = bits
 }
 
+// FieldByName returns the field with the given name.
+func (t *StructType) FieldByName(name string) (StructField, bool) {
+	idx := t.FieldIndex(name)
+	if idx < 0 {
+		return StructField{}, false
+	}
+	return t.Fields[idx], true
+}
+
+// FieldIndex returns the index of the field named name, or -1 if no such
+// field exists.
+func (t *StructType) FieldIndex(name string) int {
+	for i, field := range t.Fields {
+		if field.Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
 func (s *Struct) Kind() Kind {
 	return KindRef
 }
@@ -146,25 +168,6 @@ func (s *Struct) Refs(dst []Ref) []Ref {
 		}
 	}
 	return dst
-}
-
-func (t *StructType) FieldByName(name string) (StructField, bool) {
-	idx := t.FieldIndex(name)
-	if idx < 0 {
-		return StructField{}, false
-	}
-	return t.Fields[idx], true
-}
-
-// FieldIndex returns the index of the field named name, or -1 if no such
-// field exists.
-func (t *StructType) FieldIndex(name string) int {
-	for i, field := range t.Fields {
-		if field.Name == name {
-			return i
-		}
-	}
-	return -1
 }
 
 func (t *StructType) Kind() Kind {

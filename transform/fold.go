@@ -187,8 +187,7 @@ func eval(code instr.Opcode, args []uint64) (uint64, bool) {
 	case instr.F32_ADD, instr.F32_SUB, instr.F32_MUL, instr.F32_DIV, instr.F32_REM, instr.F32_MOD,
 		instr.F32_EQ, instr.F32_NE, instr.F32_LT, instr.F32_GT, instr.F32_LE, instr.F32_GE:
 		return evalF32(code, math.Float32frombits(uint32(args[0])), math.Float32frombits(uint32(args[1])))
-	// Threaded saturates NaN and out-of-range float-to-int conversions, where
-	// Go's result is implementation-specific: fold leaves those to it.
+
 	case instr.F32_TO_I32_S:
 		f := float64(math.Float32frombits(uint32(args[0])))
 		if math.IsNaN(f) || f < -(1<<31) || f >= 1<<31 {

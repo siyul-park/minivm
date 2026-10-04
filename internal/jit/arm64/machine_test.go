@@ -22,12 +22,20 @@ import (
 // exit it is asked for is exit, and every release resumes at resume.
 type regs map[ssa.Value]ssa.Type
 
+// fused is regs whose every value is the condition of the branch right
+// after its operation.
+type fused struct{ regs }
+
+// known is regs where an OpConst defines each value of words.
+type known struct {
+	regs
+	words map[ssa.Value]uint64
+}
+
 const (
 	exit   = asm.Label(99)
 	resume = asm.Label(98)
 )
-
-func (r regs) Type(v ssa.Value) ssa.Type { return r[v] }
 
 func (r regs) Slot(s ssa.Slot) ssa.Type {
 	if s.Space == ssa.SpaceGlobal || s.Space == ssa.SpaceUpval {
@@ -48,17 +56,7 @@ func (r regs) Release(asm.VReg) (asm.Label, asm.Label) { return exit, resume }
 
 func (r regs) Box(asm.VReg) (asm.Label, asm.Label) { return exit, resume }
 
-// fused is regs whose every value is the condition of the branch right
-// after its operation.
-type fused struct{ regs }
-
 func (fused) Fuse(ssa.Value) bool { return true }
-
-// known is regs where an OpConst defines each value of words.
-type known struct {
-	regs
-	words map[ssa.Value]uint64
-}
 
 func (k known) Const(v ssa.Value) (uint64, bool) {
 	word, ok := k.words[v]
@@ -77,6 +75,8 @@ func (r regs) Reg(v ssa.Value) asm.VReg {
 		return asm.NewVReg(int32(v), asm.RegTypeInt, asm.Width32)
 	}
 }
+
+func (r regs) Type(v ssa.Value) ssa.Type { return r[v] }
 
 func TestMachine_Arch(t *testing.T) {
 	require.Equal(t, target.New(), arm64.New().Arch())
@@ -233,8 +233,6 @@ func TestMachine_Enter(t *testing.T) {
 		start := len(a.Rows())
 		label := m.Enter(a, compile.Layout{})
 
-		// entry is Prologue's own label, the second label a fresh Assembler
-		// allocates (end is the first).
 		entry := asm.Label(1)
 		require.Equal(t, []asm.Instruction{
 			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
@@ -703,9 +701,7 @@ func TestMachine_Lower(t *testing.T) {
 			rows: append(boxed(types.KindI8, target.UXTW(target.X16, w(1))), target.STR(target.X16, target.X25, 16)), lower: true,
 		},
 		{
-			// The inline (in-range) path is row-identical to a narrow
-			// store: the CBNZ target is the only difference from before
-			// resumable boxing (a Box exit instead of a deopt).
+
 			name: "store i64 boxes outside the inline range",
 			regs: regs{1: i64},
 			op:   ssa.Operation{Op: ssa.OpStore, Slot: local(1), Args: []ssa.Value{1}},
@@ -1720,8 +1716,7 @@ func TestMachine_Return(t *testing.T) {
 
 		m, a := arm64.New(), asm.New(target.New())
 		m.Prologue(a, 0, true, compile.Layout{Kinds: []types.Kind{types.KindRef, types.KindRef}, Borrows: []bool{true, false}}, nil)
-		// Prologue's own Label calls claim end (0) then entry (1); Return's
-		// skip is the next one allocated.
+
 		skip := asm.Label(2)
 		start := len(a.Rows())
 		m.Return(a, ssa.Terminator{Op: ssa.OpReturn}, r)
@@ -1738,9 +1733,7 @@ func TestMachine_Return(t *testing.T) {
 	})
 
 	t.Run("emits no depth-1 guard when no parameter is borrowed", func(t *testing.T) {
-		// borrows non-nil but every entry false (an ordinary function with a
-		// ref parameter it writes, or none borrowed) must not pay the
-		// CMPI/B.NE at every return.
+
 		m, a := arm64.New(), asm.New(target.New())
 		m.Prologue(a, 0, true, compile.Layout{Kinds: []types.Kind{types.KindI32}, Borrows: []bool{false}}, nil)
 		start := len(a.Rows())
@@ -2052,8 +2045,6 @@ func TestMachine_Call(t *testing.T) {
 			Base: 4, Size: 3, Exit: 7, Live: []asm.VReg{live}, Stub: bridge, Safepoint: safe, Resume: next, Owned: true, Self: true,
 		}, r))
 
-		// entry is Prologue's own label, bound before any other row: the
-		// second label a fresh Assembler allocates (end is the first).
 		entry := asm.Label(1)
 		callee := r.Reg(2)
 		require.Equal(t, slices.Concat(
@@ -2116,8 +2107,6 @@ func TestMachine_Call(t *testing.T) {
 			Arguments: []types.Kind{types.KindI32, types.KindF64},
 		}, r))
 
-		// entry is Prologue's own label, bound before any other row: the
-		// second label a fresh Assembler allocates (end is the first).
 		entry := asm.Label(1)
 		require.Equal(t, slices.Concat(
 			[]asm.Instruction{target.UXTW(target.X16, r.Reg(1))},
@@ -2167,8 +2156,6 @@ func TestMachine_Call(t *testing.T) {
 			Arguments: []types.Kind{types.KindI64},
 		}, r64))
 
-		// entry is Prologue's own label, bound before any other row: the
-		// second label a fresh Assembler allocates (end is the first).
 		entry := asm.Label(1)
 		require.Equal(t, slices.Concat(
 			target.LDI(target.X16, 1<<48),

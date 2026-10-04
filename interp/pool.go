@@ -157,8 +157,7 @@ func (p *Pool) grow() *Interpreter {
 // its reference; a mismatched runtime stays private. Interpreters without JIT
 // have no shared runtime.
 func (p *Pool) share(i *Interpreter) {
-	// A pool exists to reuse its program: its members skip dormancy, which
-	// may also leave a program without a JIT.
+
 	if i.attach() != nil {
 		i.spend(dormancy)
 	}
@@ -175,16 +174,14 @@ func (p *Pool) share(i *Interpreter) {
 	if !reflect.DeepEqual(i.native.shared.module, p.shared.module) {
 		return
 	}
-	// i's own runtime is unpublished and unreferenced from here: i runs on
-	// the pool runtime, so a release failure only leaks its mappings and no
-	// caller can recover it.
+
 	if err := i.native.join(p.shared.retain()); err != nil && p.closeErr == nil {
 		p.closeErr = err
 	}
 }
 
 func (p *Pool) drop(i *Interpreter) {
-	// Put has no error channel and i is discarded either way.
+
 	err := i.Close()
 	p.sharedMu.Lock()
 	if err != nil && p.closeErr == nil {

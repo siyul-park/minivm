@@ -226,8 +226,6 @@ const (
 	CondAL uint8 = 0xE
 )
 
-// Arithmetic
-
 // ADD returns an ARM64 instruction.
 func ADD(dst, src1, src2 asm.Reg) asm.Instruction { return newReg3(OpADD, dst, src1, src2) }
 
@@ -292,8 +290,6 @@ func SBC(dst, src1, src2 asm.Reg) asm.Instruction { return newReg3(OpSBC, dst, s
 // SBCS returns an ARM64 instruction.
 func SBCS(dst, src1, src2 asm.Reg) asm.Instruction { return newReg3(OpSBCS, dst, src1, src2) }
 
-// Bitwise / Shift
-
 // AND returns an ARM64 instruction.
 func AND(dst, src1, src2 asm.Reg) asm.Instruction { return newReg3(OpAND, dst, src1, src2) }
 
@@ -347,8 +343,6 @@ func TST(src1, src2 asm.Reg) asm.Instruction { return newCmp(OpTST, src1, src2) 
 // TSTI returns an ARM64 instruction.
 func TSTI(src asm.Reg, mask uint64) asm.Instruction { return newCmpImm(OpTSTI, src, int64(mask)) }
 
-// Shift (register)
-
 // LSL returns an ARM64 instruction.
 func LSL(dst, src1, src2 asm.Reg) asm.Instruction { return newReg3(OpLSL, dst, src1, src2) }
 
@@ -360,8 +354,6 @@ func ASR(dst, src1, src2 asm.Reg) asm.Instruction { return newReg3(OpASR, dst, s
 
 // ROR returns an ARM64 instruction.
 func ROR(dst, src1, src2 asm.Reg) asm.Instruction { return newReg3(OpROR, dst, src1, src2) }
-
-// Shift (immediate)
 
 // LSLI returns an ARM64 instruction.
 func LSLI(dst, src asm.Reg, shift uint8) asm.Instruction {
@@ -387,8 +379,6 @@ func RORI(dst, src asm.Reg, shift uint8) asm.Instruction {
 func SBFX(dst, src asm.Reg, lsb, width uint8) asm.Instruction {
 	return newInst(OpSBFX, regOperand(dst), regOperand(src), imm(int64(lsb)), imm(int64(width)))
 }
-
-// Bit-manipulation
 
 // CLZ returns an ARM64 instruction.
 func CLZ(dst, src asm.Reg) asm.Instruction { return newReg2(OpCLZ, dst, src) }
@@ -422,8 +412,6 @@ func UXTH(dst, src asm.Reg) asm.Instruction { return newReg2(OpUXTH, dst, src) }
 
 // UXTW returns an ARM64 instruction.
 func UXTW(dst, src asm.Reg) asm.Instruction { return newReg2(OpUXTW, dst, src) }
-
-// Move
 
 // MOV returns an ARM64 instruction.
 func MOV(dst, src asm.Reg) asm.Instruction { return newReg2(OpMOV, dst, src) }
@@ -472,8 +460,6 @@ func MOVN(dst asm.Reg, val uint16, shift uint8) asm.Instruction {
 	return newInst(OpMOVN, regOperand(dst), imm(int64(val)), imm(int64(shift)))
 }
 
-// Compare
-
 // CMP returns an ARM64 instruction.
 func CMP(src1, src2 asm.Reg) asm.Instruction { return newCmp(OpCMP, src1, src2) }
 
@@ -499,10 +485,6 @@ func CCMPI(src asm.Reg, val uint8, nzcv uint8, cond uint8) asm.Instruction {
 	return newInst(OpCCMPI, nil, regOperand(src), imm(int64(val)), imm(flags))
 }
 
-// Load / Store
-
-// 64-bit
-
 // LDR returns an ARM64 instruction.
 func LDR(dst, base asm.Reg, offset int16) asm.Instruction {
 	return newRegMem(OpLDR, dst, base, int64(offset))
@@ -512,8 +494,6 @@ func LDR(dst, base asm.Reg, offset int16) asm.Instruction {
 func STR(src, base asm.Reg, offset int16) asm.Instruction {
 	return newMemReg(OpSTR, src, base, int64(offset))
 }
-
-// 8-bit
 
 // LDRB returns an ARM64 instruction.
 func LDRB(dst, base asm.Reg, offset int16) asm.Instruction {
@@ -530,8 +510,6 @@ func STRB(src, base asm.Reg, offset int16) asm.Instruction {
 	return newMemReg(OpSTRB, src, base, int64(offset))
 }
 
-// 16-bit
-
 // LDRH returns an ARM64 instruction.
 func LDRH(dst, base asm.Reg, offset int16) asm.Instruction {
 	return newRegMem(OpLDRH, dst, base, int64(offset))
@@ -547,8 +525,6 @@ func STRH(src, base asm.Reg, offset int16) asm.Instruction {
 	return newMemReg(OpSTRH, src, base, int64(offset))
 }
 
-// 32-bit sign-extended to 64-bit
-
 // LDRSW returns an ARM64 instruction.
 func LDRSW(dst, base asm.Reg, offset int16) asm.Instruction {
 	return newRegMem(OpLDRSW, dst, base, int64(offset))
@@ -558,9 +534,6 @@ func LDRSW(dst, base asm.Reg, offset int16) asm.Instruction {
 func STRW(src, base asm.Reg, offset int16) asm.Instruction {
 	return newMemReg(OpSTRW, src, base, int64(offset))
 }
-
-// Register-offset variants: [Xbase, Xindex, LSL #log2(size)], or
-// [Xbase, Windex, SXTW #log2(size)] for a 32-bit index.
 
 // LDRR loads dst from base plus index scaled by the access size, chosen by
 // dst as LDR chooses it: W and S load 4 bytes, X and D 8.
@@ -612,8 +585,6 @@ func STP(src1, src2, base asm.Reg, offset int16) asm.Instruction {
 	)
 }
 
-// Float-point convert
-
 // SCVTF returns an ARM64 instruction.
 func SCVTF(dst, src asm.Reg) asm.Instruction { return newReg2(OpSCVTF, dst, src) }
 
@@ -628,8 +599,6 @@ func FCVTZU(dst, src asm.Reg) asm.Instruction { return newReg2(OpFCVTZU, dst, sr
 
 // FCVT — convert between float precisions (single↔double)
 func FCVT(dst, src asm.Reg) asm.Instruction { return newReg2(OpFCVT, dst, src) }
-
-// Float-point arithmetic
 
 // FADD returns an ARM64 instruction.
 func FADD(dst, src1, src2 asm.Reg) asm.Instruction { return newReg3(OpFADD, dst, src1, src2) }
@@ -669,8 +638,6 @@ func FNMSUB(dst, src1, src2, acc asm.Reg) asm.Instruction {
 	return newInst(OpFNMSUB, regOperand(dst), regOperand(src1), regOperand(src2), regOperand(acc))
 }
 
-// Float-point unary
-
 // FABS returns an ARM64 instruction.
 func FABS(dst, src asm.Reg) asm.Instruction { return newReg2(OpFABS, dst, src) }
 
@@ -692,14 +659,11 @@ func FRINTP(dst, src asm.Reg) asm.Instruction { return newReg2(OpFRINTP, dst, sr
 // FRINTZ returns an ARM64 instruction.
 func FRINTZ(dst, src asm.Reg) asm.Instruction { return newReg2(OpFRINTZ, dst, src) }
 
-// CNT Vd.8B, Vn.8B counts the set bits of each byte lane.
-
+// CNT is the ARM64 count instruction.
 func CNT(dst, src asm.Reg) asm.Instruction { return newReg2(OpCNT, dst, src) }
 
 // ADDV Bd, Vn.8B sums the 8 byte lanes into the low byte of dst.
 func ADDV(dst, src asm.Reg) asm.Instruction { return newReg2(OpADDV, dst, src) }
-
-// Float-point move / compare
 
 // FMOV returns an ARM64 instruction.
 func FMOV(dst, src asm.Reg) asm.Instruction { return newReg2(OpFMOV, dst, src) }
@@ -709,8 +673,6 @@ func FCMP(src1, src2 asm.Reg) asm.Instruction { return newCmp(OpFCMP, src1, src2
 
 // FCMPE — compare and raise Invalid Operation exception on NaN
 func FCMPE(src1, src2 asm.Reg) asm.Instruction { return newCmp(OpFCMPE, src1, src2) }
-
-// Conditional select
 
 // CSEL Xd, Xn, Xm, cond  — Xd = cond ? Xn : Xm  (cond encoded in Src2 upper bits)
 func CSEL(dst, trueReg, falseReg asm.Reg, cond uint8) asm.Instruction {
@@ -746,8 +708,6 @@ func CSETM(dst asm.Reg, cond uint8) asm.Instruction {
 func FCSEL(dst, trueReg, falseReg asm.Reg, cond uint8) asm.Instruction {
 	return newInst(OpFCSEL, regOperand(dst), regOperand(trueReg), imm(int64(cond)), regOperand(falseReg))
 }
-
-// Branch (unconditional / register)
 
 // B returns an ARM64 instruction.
 func B(offset int32) asm.Instruction { return newBranch(OpB, int64(offset)) }
@@ -785,8 +745,6 @@ func BCondLabel(condOp Op, id asm.Label) asm.Instruction {
 	return asm.Instruction{Op: uint16(condOp), Src2: asm.LabelOperand{ID: id}}
 }
 
-// Branch (compare-and-branch)
-
 // CBZ returns an ARM64 instruction.
 func CBZ(reg asm.Reg, offset int32) asm.Instruction {
 	return newInst(OpCBZ, nil, regOperand(reg), imm(int64(offset)))
@@ -807,8 +765,6 @@ func CBNZLabel(reg asm.Reg, id asm.Label) asm.Instruction {
 	return asm.Instruction{Op: uint16(OpCBNZ), Src1: regOperand(reg), Src2: asm.LabelOperand{ID: id}}
 }
 
-// Branch (test-and-branch)
-
 // TBZ reg, #bit, offset — branch if bit N is zero
 func TBZ(reg asm.Reg, bit uint8, offset int32) asm.Instruction {
 	return newInst(OpTBZ, nil, regOperand(reg), imm(int64(bit)|int64(offset)<<8))
@@ -818,8 +774,6 @@ func TBZ(reg asm.Reg, bit uint8, offset int32) asm.Instruction {
 func TBNZ(reg asm.Reg, bit uint8, offset int32) asm.Instruction {
 	return newInst(OpTBNZ, nil, regOperand(reg), imm(int64(bit)|int64(offset)<<8))
 }
-
-// Branch (conditional)
 
 // BEQ returns an ARM64 instruction.
 func BEQ(offset int32) asm.Instruction { return newBranch(OpBEQ, int64(offset)) }
@@ -840,23 +794,28 @@ func BLE(offset int32) asm.Instruction { return newBranch(OpBLE, int64(offset)) 
 func BGE(offset int32) asm.Instruction { return newBranch(OpBGE, int64(offset)) }
 
 // BMI returns an ARM64 instruction.
-func BMI(offset int32) asm.Instruction { return newBranch(OpBMI, int64(offset)) } // Minus / negative
-// BPL returns an ARM64 instruction.
-func BPL(offset int32) asm.Instruction { return newBranch(OpBPL, int64(offset)) } // Plus / non-negative
-// BVS returns an ARM64 instruction.
-func BVS(offset int32) asm.Instruction { return newBranch(OpBVS, int64(offset)) } // Overflow set
-// BVC returns an ARM64 instruction.
-func BVC(offset int32) asm.Instruction { return newBranch(OpBVC, int64(offset)) } // Overflow clear
-// BHI returns an ARM64 instruction.
-func BHI(offset int32) asm.Instruction { return newBranch(OpBHI, int64(offset)) } // Unsigned higher
-// BLS returns an ARM64 instruction.
-func BLS(offset int32) asm.Instruction { return newBranch(OpBLS, int64(offset)) } // Unsigned lower or same
-// BCS returns an ARM64 instruction.
-func BCS(offset int32) asm.Instruction { return newBranch(OpBCS, int64(offset)) } // Carry set  (BHS)
-// BCC returns an ARM64 instruction.
-func BCC(offset int32) asm.Instruction { return newBranch(OpBCC, int64(offset)) } // Carry clear (BLO)
+func BMI(offset int32) asm.Instruction { return newBranch(OpBMI, int64(offset)) }
 
-// System
+// BPL returns an ARM64 instruction.
+func BPL(offset int32) asm.Instruction { return newBranch(OpBPL, int64(offset)) }
+
+// BVS returns an ARM64 instruction.
+func BVS(offset int32) asm.Instruction { return newBranch(OpBVS, int64(offset)) }
+
+// BVC returns an ARM64 instruction.
+func BVC(offset int32) asm.Instruction { return newBranch(OpBVC, int64(offset)) }
+
+// BHI returns an ARM64 instruction.
+func BHI(offset int32) asm.Instruction { return newBranch(OpBHI, int64(offset)) }
+
+// BLS returns an ARM64 instruction.
+func BLS(offset int32) asm.Instruction { return newBranch(OpBLS, int64(offset)) }
+
+// BCS returns an ARM64 instruction.
+func BCS(offset int32) asm.Instruction { return newBranch(OpBCS, int64(offset)) }
+
+// BCC returns an ARM64 instruction.
+func BCC(offset int32) asm.Instruction { return newBranch(OpBCC, int64(offset)) }
 
 // NOP returns an ARM64 instruction.
 func NOP() asm.Instruction { return newInst(OpNOP, nil) }
@@ -899,8 +858,6 @@ func DSB() asm.Instruction { return newInst(OpDSB, nil) }
 
 // DMB returns an ARM64 instruction.
 func DMB() asm.Instruction { return newInst(OpDMB, nil) }
-
-// Internal helpers
 
 func newReg3(op Op, dst, src1, src2 asm.Reg) asm.Instruction {
 	return newInst(op, regOperand(dst), regOperand(src1), regOperand(src2))

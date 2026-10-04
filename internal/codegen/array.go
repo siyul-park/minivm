@@ -75,9 +75,7 @@ func containerGet(state *state, current step) (value, error) {
 			reference(container.boxed),
 			jen.Id("at").Op(":=").Int().Call(index.raw),
 		)
-		// Each arm below pushes its own result and returns immediately: no
-		// variable is live across the two heap-type assertions, so the
-		// success path stays straight-line with no join point.
+
 		tail := func(result jen.Code) []jen.Code {
 			return []jen.Code{
 				jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Add(result),
@@ -86,9 +84,7 @@ func containerGet(state *state, current step) (value, error) {
 				jen.Return(),
 			}
 		}
-		// arrayGuard proves only the declared element kind. A runtime
-		// representation miss falls back to Interpreter.arrayGet, preserving
-		// the unfused handler's accepted representations.
+
 		body = append(body, jen.If(
 			jen.List(jen.Id("array"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.raw).Assert(typeName(container.typ)),
 			jen.Id("ok"),
@@ -167,9 +163,6 @@ func arrayStore(state *state, current step) (value, error) {
 	compile := append(append(append([]jen.Code(nil), container.compile...), index.compile...), val.compile...)
 	body := []jen.Code{overflow()}
 
-	// tail emits the shared bounds-check/store/advance-ip/return sequence
-	// once at, array, and raw are resolved; both acquisition arms below
-	// return through it on their success path.
 	tail := func(array jen.Code) []jen.Code {
 		return []jen.Code{
 			indexGuard(jen.Id("at"), jen.Lit(1), jen.Len(array)),
@@ -203,8 +196,7 @@ func arrayStore(state *state, current step) (value, error) {
 			reference(container.boxed),
 			jen.Id("at").Op(":=").Int().Call(index.raw),
 		)
-		// A specialized TypedArray[T] miss falls back to arraySet. The container
-		// is borrowed and a fused store leaves sp unchanged.
+
 		body = append(body, jen.If(
 			jen.List(jen.Id("array"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.raw).Assert(typeName(container.typ)),
 			jen.Id("ok"),
@@ -497,18 +489,9 @@ func typeName(typ reflect.Type) jen.Code {
 	return jen.Qual(typ.PkgPath(), typ.Name())
 }
 
-// array is the type of a typed array of e.
-func (e typedElem) array() *jen.Statement {
-	return jen.Qual(typesPkg, "TypedArray").Index(jen.Id(e.typ))
-}
-
-// instance is the type-switch case of a typed array of e.
-func (e typedElem) instance() jen.Code { return e.array() }
-
-// kindConst is the types.Kind constant name of e.
-func (e typedElem) kindConst() string {
-	name, _ := fieldKindName(e.kind)
-	return "Kind" + name
+// arrayHeap dispatches on the array at heap address addr.
+func arrayHeap(body func(typedElem) []jen.Code, rest ...jen.Code) jen.Code {
+	return arraySwitch(jen.Id("arr").Op(":=").Id("i").Dot("heap").Index(jen.Id("addr")).Assert(jen.Type()), body, rest...)
 }
 
 // arraySwitch dispatches on the array behind subject: each typed instantiation
@@ -517,10 +500,8 @@ func arraySwitch(subject jen.Code, body func(typedElem) []jen.Code, rest ...jen.
 	return typeSwitch(subject, typedElems, typedElem.instance, body, rest...)
 }
 
-// arrayHeap dispatches on the array at heap address addr.
-func arrayHeap(body func(typedElem) []jen.Code, rest ...jen.Code) jen.Code {
-	return arraySwitch(jen.Id("arr").Op(":=").Id("i").Dot("heap").Index(jen.Id("addr")).Assert(jen.Type()), body, rest...)
-}
+// instance is the type-switch case of a typed array of e.
+func (e typedElem) instance() jen.Code { return e.array() }
 
 // hostArrayCase is the type-switch case of a host array view.
 func hostArrayCase(body ...jen.Code) jen.Code {
@@ -548,6 +529,11 @@ func copyCases() []jen.Code {
 	return cases
 }
 
+// array is the type of a typed array of e.
+func (e typedElem) array() *jen.Statement {
+	return jen.Qual(typesPkg, "TypedArray").Index(jen.Id(e.typ))
+}
+
 // arrayKindCases dispatches on the element kind of typ: each typed kind lowers
 // through typed, and generic handles every other.
 func arrayKindCases(body func(typedElem) jen.Code, generic jen.Code) jen.Code {
@@ -557,6 +543,12 @@ func arrayKindCases(body func(typedElem) jen.Code, generic jen.Code) jen.Code {
 	}
 	cases = append(cases, jen.Default().Block(jen.Return(generic)))
 	return jen.Switch(jen.Id("typ").Dot("ElemKind")).Block(cases...)
+}
+
+// kindConst is the types.Kind constant name of e.
+func (e typedElem) kindConst() string {
+	name, _ := fieldKindName(e.kind)
+	return "Kind" + name
 }
 
 // bounds traps unless [offset, offset+size) lies within slice.

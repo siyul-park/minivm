@@ -4,9 +4,6 @@ import (
 	"github.com/dave/jennifer/jen"
 )
 
-// stringConcat pushes Interpreter.concat of its operands, releasing them
-// first.
-
 func stringNewUTF32() jen.Code {
 	return convertCall("text")
 }

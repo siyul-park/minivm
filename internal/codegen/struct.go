@@ -37,9 +37,7 @@ func structGet(state *state, current step) (value, error) {
 		body = append(body,
 			reference(container.boxed),
 		)
-		// Each arm below pushes its own result and returns immediately: no
-		// variable is live across the two heap-type assertions, so the
-		// success path stays straight-line with no join point.
+
 		tail := func(result jen.Code) []jen.Code {
 			return []jen.Code{
 				jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Add(result),
@@ -57,12 +55,7 @@ func structGet(state *state, current step) (value, error) {
 			structBody = append(structBody, jen.Id("i").Dot("retainBox").Call(jen.Id("result")))
 		}
 		structBody = append(structBody, tail(jen.Id("result"))...)
-		// The declared *types.StructType only proves what to specialize for,
-		// never the runtime value's concrete representation, so a miss on the
-		// specialized *types.Struct assertion falls back to
-		// (*Interpreter).structGet, the same generic reader the unfused
-		// handler calls unconditionally, instead of trapping a case it
-		// accepts.
+
 		body = append(body, jen.If(
 			jen.List(jen.Id("value"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.raw).Assert(jen.Op("*").Qual(typesPkg, "Struct")),
 			jen.Id("ok"),

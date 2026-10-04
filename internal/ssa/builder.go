@@ -33,14 +33,6 @@ func (b *Builder) Value(t Type) Value {
 	return Value(len(b.types) - 1)
 }
 
-// Type returns the type reserved for v.
-func (b *Builder) Type(v Value) Type {
-	if !v.valid(len(b.types)) {
-		return 0
-	}
-	return b.types[v]
-}
-
 // Add appends operation to block.
 func (b *Builder) Add(block int, operation Operation) {
 	b.blocks[block].Operations = append(b.blocks[block].Operations, operation)
@@ -62,4 +54,12 @@ func (b *Builder) Build() *Function {
 	f := newFunction(b.name, b.types, b.blocks, b.entry)
 	b.types, b.blocks, b.entry = make([]Type, 1), nil, Frame{}
 	return f
+}
+
+// Type returns the type reserved for v.
+func (b *Builder) Type(v Value) Type {
+	if !v.valid(len(b.types)) {
+		return 0
+	}
+	return b.types[v]
 }

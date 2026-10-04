@@ -92,10 +92,6 @@ var (
 	_ Type      = (*MapType)(nil)
 )
 
-func NewTypedMap[K comparable](typ *MapType, capacity int) *TypedMap[K] {
-	return &TypedMap[K]{Typ: typ, Zero: Zero(typ.ElemKind), entries: make(map[K]Boxed, capacity)}
-}
-
 func NewMap(typ *MapType) *Map {
 	return NewMapWithCapacity(typ, 0)
 }
@@ -115,13 +111,17 @@ func NewMapForType(typ *MapType, capacity int) Value {
 	case KindF64:
 		return NewTypedMap[float64](typ, capacity)
 	case KindRef:
-		// A declared string key has no identity to preserve, so it keys by
-		// content like every other typed key. Any other ref keys by heap ref.
+
 		if typ.Key.Equals(TypeString) {
 			return NewTypedMap[string](typ, capacity)
 		}
 	}
 	return NewMapWithCapacity(typ, capacity)
+}
+
+// NewTypedMap creates a typed map.
+func NewTypedMap[K comparable](typ *MapType, capacity int) *TypedMap[K] {
+	return &TypedMap[K]{Typ: typ, Zero: Zero(typ.ElemKind), entries: make(map[K]Boxed, capacity)}
 }
 
 func NewMapWithCapacity(typ *MapType, capacity int) *Map {
@@ -182,10 +182,6 @@ func NewMapType(key Type, elem Type) *MapType {
 	}
 }
 
-func (m *TypedMap[K]) Kind() Kind { return KindRef }
-
-func (m *TypedMap[K]) Type() Type { return m.Typ }
-
 func (m *TypedMap[K]) Get(key K) (Boxed, bool) {
 	value, ok := m.entries[key]
 	return value, ok
@@ -212,15 +208,6 @@ func (m *TypedMap[K]) Clear(fn func(Boxed)) {
 	m.entries = make(map[K]Boxed)
 }
 
-func (m *TypedMap[K]) String() string {
-	parts := make([]string, 0, m.Len())
-	m.Range(func(key K, value Boxed) {
-		parts = append(parts, fmt.Sprintf("%s: %s", formatKey(any(key)), value.String()))
-	})
-	sort.Strings(parts)
-	return fmt.Sprintf("%s{%s}", m.Typ, strings.Join(parts, ", "))
-}
-
 func (m *TypedMap[K]) Len() int { return len(m.entries) }
 
 func (m *TypedMap[K]) Range(fn func(K, Boxed)) {
@@ -228,22 +215,6 @@ func (m *TypedMap[K]) Range(fn func(K, Boxed)) {
 		fn(key, value)
 	}
 }
-
-func (m *TypedMap[K]) Refs(dst []Ref) []Ref {
-	if !m.Typ.TraceValues {
-		return dst
-	}
-	for _, value := range m.entries {
-		if value.Kind() == KindRef {
-			dst = append(dst, Ref(value.Ref()))
-		}
-	}
-	return dst
-}
-
-func (m *Map) Kind() Kind { return KindRef }
-
-func (m *Map) Type() Type { return m.Typ }
 
 func (m *Map) Get(key MapKey) (MapEntry, bool) {
 	entry, ok := m.entries[key]
@@ -271,15 +242,6 @@ func (m *Map) Clear(fn func(MapEntry)) {
 	m.entries = make(map[MapKey]MapEntry)
 }
 
-func (m *Map) String() string {
-	parts := make([]string, 0, m.Len())
-	m.Range(func(key MapKey, entry MapEntry) {
-		parts = append(parts, fmt.Sprintf("%s: %s", key.String(), entry.Value.String()))
-	})
-	sort.Strings(parts)
-	return fmt.Sprintf("%s{%s}", m.Typ, strings.Join(parts, ", "))
-}
-
 func (m *Map) Len() int { return len(m.entries) }
 
 func (m *Map) Range(fn func(MapKey, MapEntry)) {
@@ -287,29 +249,6 @@ func (m *Map) Range(fn func(MapKey, MapEntry)) {
 		fn(key, entry)
 	}
 }
-
-func (m *Map) Refs(dst []Ref) []Ref {
-	traceKeys := m.Typ.TraceKeys
-	traceValues := m.Typ.TraceValues
-	if !traceKeys && !traceValues {
-		return dst
-	}
-	for _, entry := range m.entries {
-		if traceKeys && entry.Key.Kind() == KindRef {
-			dst = append(dst, Ref(entry.Key.Ref()))
-		}
-		if traceValues && entry.Value.Kind() == KindRef {
-			dst = append(dst, Ref(entry.Value.Ref()))
-		}
-	}
-	return dst
-}
-
-func (it *MapIterator) Kind() Kind { return KindRef }
-
-func (it *MapIterator) Type() Type { return it.typ }
-
-func (it *MapIterator) String() string { return "map.iterator" }
 
 func (it *MapIterator) Next() bool {
 	if it.started && it.done {
@@ -354,6 +293,102 @@ func (it *MapIterator) Current() Value { return it.current }
 
 func (it *MapIterator) Done() bool { return it.done }
 
+// Value reports the key this entry is indexed by, from the entry's own key
+// when it holds one and from the index otherwise.
+func (k MapKey) Value(entry MapEntry) Value {
+	if entry.Key != 0 {
+		return entry.Key
+	}
+	switch k.Kind {
+	case KindI32:
+		return I32(int32(k.Bits))
+	case KindI64:
+		return I64(int64(k.Bits))
+	case KindF32:
+		return F32(math.Float32frombits(uint32(k.Bits)))
+	case KindF64:
+		return F64(math.Float64frombits(k.Bits))
+	case KindRef:
+		return Ref(int32(k.Bits))
+	case KindText:
+		return String(k.Text)
+	default:
+		return BoxedNull
+	}
+}
+
+// Kind returns the value kind.
+func (m *TypedMap[K]) Kind() Kind { return KindRef }
+
+// Type returns the value type.
+func (m *TypedMap[K]) Type() Type { return m.Typ }
+
+// String returns the textual representation.
+func (m *TypedMap[K]) String() string {
+	parts := make([]string, 0, m.Len())
+	m.Range(func(key K, value Boxed) {
+		parts = append(parts, fmt.Sprintf("%s: %s", formatKey(any(key)), value.String()))
+	})
+	sort.Strings(parts)
+	return fmt.Sprintf("%s{%s}", m.Typ, strings.Join(parts, ", "))
+}
+
+// Refs returns the referenced values.
+func (m *TypedMap[K]) Refs(dst []Ref) []Ref {
+	if !m.Typ.TraceValues {
+		return dst
+	}
+	for _, value := range m.entries {
+		if value.Kind() == KindRef {
+			dst = append(dst, Ref(value.Ref()))
+		}
+	}
+	return dst
+}
+
+// Kind returns the value kind.
+func (m *Map) Kind() Kind { return KindRef }
+
+// Type returns the value type.
+func (m *Map) Type() Type { return m.Typ }
+
+// String returns the textual representation.
+func (m *Map) String() string {
+	parts := make([]string, 0, m.Len())
+	m.Range(func(key MapKey, entry MapEntry) {
+		parts = append(parts, fmt.Sprintf("%s: %s", key.String(), entry.Value.String()))
+	})
+	sort.Strings(parts)
+	return fmt.Sprintf("%s{%s}", m.Typ, strings.Join(parts, ", "))
+}
+
+// Refs returns the referenced values.
+func (m *Map) Refs(dst []Ref) []Ref {
+	traceKeys := m.Typ.TraceKeys
+	traceValues := m.Typ.TraceValues
+	if !traceKeys && !traceValues {
+		return dst
+	}
+	for _, entry := range m.entries {
+		if traceKeys && entry.Key.Kind() == KindRef {
+			dst = append(dst, Ref(entry.Key.Ref()))
+		}
+		if traceValues && entry.Value.Kind() == KindRef {
+			dst = append(dst, Ref(entry.Value.Ref()))
+		}
+	}
+	return dst
+}
+
+// Kind returns the value kind.
+func (it *MapIterator) Kind() Kind { return KindRef }
+
+// Type returns the value type.
+func (it *MapIterator) Type() Type { return it.typ }
+
+// String returns the textual representation.
+func (it *MapIterator) String() string { return "map.iterator" }
+
 func (it *MapIterator) Refs(dst []Ref) []Ref {
 	dst = append(dst, it.ref)
 	if !it.done {
@@ -385,30 +420,6 @@ func (k MapKey) String() string {
 		return String(k.Text).String()
 	default:
 		return "<invalid>"
-	}
-}
-
-// Value reports the key this entry is indexed by, from the entry's own key
-// when it holds one and from the index otherwise.
-func (k MapKey) Value(entry MapEntry) Value {
-	if entry.Key != 0 {
-		return entry.Key
-	}
-	switch k.Kind {
-	case KindI32:
-		return I32(int32(k.Bits))
-	case KindI64:
-		return I64(int64(k.Bits))
-	case KindF32:
-		return F32(math.Float32frombits(uint32(k.Bits)))
-	case KindF64:
-		return F64(math.Float64frombits(k.Bits))
-	case KindRef:
-		return Ref(int32(k.Bits))
-	case KindText:
-		return String(k.Text)
-	default:
-		return BoxedNull
 	}
 }
 

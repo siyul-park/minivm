@@ -31,10 +31,6 @@ var typedKeys = []typedKey{
 	},
 }
 
-func (k typedKey) instance() jen.Code {
-	return jen.Op("*").Qual(typesPkg, "TypedMap").Index(jen.Id(k.typ))
-}
-
 func mapNew() jen.Code {
 	return assertType("MapType",
 		jen.Return(closure(underflow(1),
@@ -279,9 +275,8 @@ func mapSwitch(subject jen.Code, body func(typedKey) []jen.Code, rest ...jen.Cod
 	return typeSwitch(subject, typedKeys, typedKey.instance, body, rest...)
 }
 
-// genericMapCase is the type-switch case of a boxed-key map.
-func genericMapCase(body ...jen.Code) jen.Code {
-	return jen.Case(jen.Op("*").Qual(typesPkg, "Map")).Block(body...)
+func (k typedKey) instance() jen.Code {
+	return jen.Op("*").Qual(typesPkg, "TypedMap").Index(jen.Id(k.typ))
 }
 
 // hostMapCase is the type-switch case of a host map view.
@@ -324,6 +319,11 @@ func mapEntrySet() jen.Code {
 		jen.List(jen.Id("old"), jen.Id("ok")).Op(":=").Id("m").Dot("Set").Call(jen.Id("k"), jen.Id("entry")),
 		releaseEntry(),
 	)
+}
+
+// genericMapCase is the type-switch case of a boxed-key map.
+func genericMapCase(body ...jen.Code) jen.Code {
+	return jen.Case(jen.Op("*").Qual(typesPkg, "Map")).Block(body...)
 }
 
 // releaseOld releases the value a typed Delete or Set displaced.
