@@ -277,6 +277,7 @@ func reaches(graph map[types.Object][]types.Object, start, target types.Object) 
 func checkHelpers(pass *analysis.Pass) {
 	callers := make(map[types.Object]map[types.Object]bool)
 	documented := make(map[types.Object]bool)
+	functions := make(map[types.Object]*ast.FuncDecl)
 	var current types.Object
 	for _, file := range pass.Files {
 		if strings.HasSuffix(pass.Fset.File(file.Pos()).Name(), "_test.go") {
@@ -288,6 +289,9 @@ func checkHelpers(pass *analysis.Pass) {
 				continue
 			}
 			current = pass.TypesInfo.ObjectOf(fn.Name)
+			if current != nil {
+				functions[current] = fn
+			}
 			if current != nil && fn.Doc != nil {
 				documented[current] = true
 			}
@@ -317,9 +321,16 @@ func checkHelpers(pass *analysis.Pass) {
 			continue
 		}
 		if len(callers[obj]) == 1 {
-			report(pass, "CP007", ident.Pos(),
-				"private helper %s has one caller; inline it unless it names a real policy or mechanic",
-				ident.Name)
+			fn := functions[obj]
+			if fn == nil {
+				continue
+			}
+			cyclomatic, statements, _ := measureComplexity(fn.Body)
+			if cyclomatic <= 2 && statements <= 5 {
+				report(pass, "CP007", ident.Pos(),
+					"private helper %s is a simple one-use helper; inline it unless it names a real policy or mechanic",
+					ident.Name)
+			}
 		}
 	}
 }

@@ -60,7 +60,7 @@ The checker `SHOULD` report high-confidence structural signals rather than asser
 
 A helper `MUST` be extracted only when it removes semantic duplication, names reusable behavior or policy, isolates an abstraction level, or is required as a function value.
 
-A private helper `SHOULD` have at least two callers. A single-use helper `MUST` be inlined unless its name expresses a real policy or mechanic.
+A private helper `SHOULD` have at least two callers. A simple single-use wrapper `SHOULD` be inlined unless its name expresses a real policy or mechanic; complex one-use mechanics require review rather than mechanical removal.
 
 Methods `SHOULD` be used for receiver-owned behavior and package functions for construction or behavior with no natural receiver.
 
