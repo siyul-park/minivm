@@ -543,7 +543,13 @@ func listRulesOutput() {
 		"TP004 tests do not reference private target symbols",
 		"CP006 dependents are declared before their dependencies",
 		"CP007 private helpers have at least two callers [warning]",
+		"CP008 high complexity is a review signal [warning]",
+		"CP009 extreme fan-in/fan-out is a review signal [warning]",
+		"CP010 near-clone symbols are a review signal [warning]",
+		"CP011 separated similar siblings are a review signal [warning]",
+		"CP012 declaration order may invert abstraction level [warning]",
 		"TP005 one top-level owner test per public symbol [warning if missing, error if split]",
+		"TP006 tests do not mix direct assertions with t.Run cases [warning]",
 	} {
 		fmt.Fprintln(os.Stdout, rule)
 	}
