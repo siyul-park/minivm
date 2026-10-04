@@ -11,8 +11,18 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// canon deduplicates the *types.StructType pointers a parsed program reaches,
+// so structurally equal struct literals collapse to one pointer per equality
+// class. Parse gives every struct literal it reads a distinct pointer; the JIT
+// guards struct.get on pointer identity against the declared type, so
+// duplicate pointers defeat that guard even though the types are equal.
+type canon struct {
+	seen []*types.StructType
+}
+
 const maxParseLineBytes = 1 << 20 // 1 MiB
 
+// Parse reads either supported program encoding from r and returns its Program.
 func Parse(r io.Reader) (*Program, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -208,15 +218,6 @@ func legacy(text string) (*Program, error) {
 		opts = append(opts, WithTypes(typs...))
 	}
 	return New(code, opts...), nil
-}
-
-// canon deduplicates the *types.StructType pointers a parsed program reaches,
-// so structurally equal struct literals collapse to one pointer per equality
-// class. Parse gives every struct literal it reads a distinct pointer; the JIT
-// guards struct.get on pointer identity against the declared type, so
-// duplicate pointers defeat that guard even though the types are equal.
-type canon struct {
-	seen []*types.StructType
 }
 
 // program canonicalizes every type prog's parsed data reaches. .types is

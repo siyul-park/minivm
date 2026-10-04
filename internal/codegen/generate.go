@@ -23,6 +23,10 @@ func Generate() ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
+	threaded, err = normalizeLocalNames(threaded)
+	if err != nil {
+		return nil, err
+	}
 	threaded, err = imports.Process("", threaded, nil)
 	if err != nil {
 		return nil, err

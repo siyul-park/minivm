@@ -80,7 +80,7 @@ const interval = 256
 func (n *native) observe(i *Interpreter, addr int, fn *types.Function) {
 	headers, err := analysis.Headers(fn)
 	if err != nil {
-		metric(i, metricCompiles, prof.Label{Key: "tier", Value: jit.Optimized.String()}, prof.Label{Key: "outcome", Value: outcomeFailed})
+		metric(i, metricCompiles, 1, prof.Label{Key: "tier", Value: jit.Optimized.String()}, prof.Label{Key: "outcome", Value: outcomeFailed})
 		return
 	}
 	code := i.code[addr]

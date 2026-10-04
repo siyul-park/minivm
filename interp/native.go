@@ -85,8 +85,8 @@ type native struct {
 	// borrows caches transform.Borrows by address for entries above depth
 	// 0, whose activation's return keeps its borrowed parameters (it
 	// releases them only at depth 1).
-	borrows    [][]bool
-	reclaimErr error
+	borrows [][]bool
+	freeErr error
 
 	// compile is captured once so deoptimization does not add a static
 	// dependency from generated threaded handlers back to their compiler.
@@ -463,7 +463,7 @@ func (n *native) close() error {
 		return nil
 	}
 	n.reader.Detach()
-	return errors.Join(n.reclaimErr, n.shared.release())
+	return errors.Join(n.freeErr, n.shared.release())
 }
 
 // join moves n onto r, a Pool's runtime, releasing its own; n has never
@@ -482,7 +482,7 @@ func (n *native) quiesce() {
 		return
 	}
 	n.reader.Quiesce()
-	n.reclaimErr = errors.Join(n.reclaimErr, n.store.Reclaim())
+	n.freeErr = errors.Join(n.freeErr, n.store.Reclaim())
 }
 
 // call is the CALL handler's hook for a *types.Function target at addr,
@@ -608,12 +608,6 @@ func (n *native) feedback(addr int) transform.Module {
 	return m
 }
 
-// same reports whether feedback snapshots a and b hold the same callees and
-// refuted sites.
-func same(a, b transform.Module) bool {
-	return maps.Equal(a.Callees, b.Callees) && maps.Equal(a.Refuted, b.Refuted)
-}
-
 // moved reports whether addr's feedback changed since its code at tier was
 // built: a recompile at that tier has new input.
 func (n *native) moved(addr int, tier jit.Tier) bool {
@@ -699,7 +693,7 @@ func (n *native) drain(i *Interpreter) {
 			if errors.Is(job.Err, compile.ErrUnsupported) {
 				outcome = outcomeUnsupported
 			}
-			metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: outcome})
+			metric(i, metricCompiles, 1, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: outcome})
 			continue
 		}
 		n.store.Publish(job.Code)
@@ -711,7 +705,7 @@ func (n *native) drain(i *Interpreter) {
 		if job.Code.Tier == jit.Baseline {
 			n.nominate(job.Unit.Address)
 		}
-		metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: outcomeOK})
+		metric(i, metricCompiles, 1, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: outcomeOK})
 	}
 	// Candidates are pool-wide: a native that never drains a Baseline job
 	// still promotes it once its own entries reach graduate.
@@ -753,7 +747,7 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 			entered = n.store.Find(ctx.PC())
 		}
 		exit := entered.Exits[ctx.Exit()]
-		metric(i, metricExits, prof.Label{Key: "kind", Value: exit.Kind.String()})
+		metric(i, metricExits, 1, prof.Label{Key: "kind", Value: exit.Kind.String()})
 		switch exit.Kind {
 		case jit.ExitSafepoint:
 			if cancelled(i) {
@@ -957,16 +951,6 @@ func (n *native) widen(i *Interpreter, exit jit.Exit) (ok bool) {
 	return true
 }
 
-// boxRegisters boxes each i64 register-convention result at bp, which the
-// Go entry stub left as a raw word, as threaded RETURN would: inline or heap.
-func boxRegisters(i *Interpreter, code *jit.Code, bp int) {
-	for index, k := range code.Registers {
-		if k == types.KindI64 {
-			i.stack[bp+index] = i.boxI64(int64(i.stack[bp+index]))
-		}
-	}
-}
-
 // bridge runs exit's threaded handler once against its boxed operands and
 // reports the exit's class: jit.ClassBridge when native code resumes,
 // jit.ClassTrap when the op raised its trap or is a control transfer, and
@@ -1080,44 +1064,6 @@ func (n *native) callout(i *Interpreter, exit jit.Exit, serve callout) (ok bool)
 	return true
 }
 
-// index is the two-byte type index the operation at code[0] carries, read
-// as the threader reads it.
-func index(code []byte) int {
-	return int(*(*uint16)(unsafe.Pointer(&code[1])))
-}
-
-// rollback releases each held operand back down to its saved count.
-func rollback(i *Interpreter, holds []hold) {
-	for _, h := range holds {
-		for i.rc[h.ref] > h.count {
-			i.release(h.ref)
-		}
-	}
-}
-
-// exec runs f's own instruction and reports whether it completed; a panic is
-// recovered and reported as false.
-func exec(i *Interpreter, f *frame) (ok bool) {
-	defer func() {
-		if recover() != nil {
-			ok = false
-		}
-	}()
-	f.code[f.ip](i)
-	return true
-}
-
-// hosted reports whether v is a host view: its operations run a Registry's
-// conversions, host code a declined attempt would run a second time.
-func hosted(v types.Value) bool {
-	switch v.(type) {
-	case *HostStruct, *HostArray, *HostMap:
-		return true
-	default:
-		return false
-	}
-}
-
 // rebuild materializes every native activation of the current run, from
 // depth upward, as frames from start and positions the interpreter at the
 // innermost one. The run's first activation was entered through ref, and
@@ -1191,38 +1137,6 @@ func (n *native) replay(i *Interpreter, exit jit.Exit, ref int) {
 			}
 		}
 	}
-}
-
-// target resolves exit's callee, the value ref, to the address of the
-// function it runs. A generic call, which names none, is served only for a
-// function or closure that takes the call's arguments and returns the kinds
-// it reads back; any other callee ok reports false and the caller deoptimizes
-// to run its own CALL.
-func target(i *Interpreter, exit jit.Exit, ref int) (addr int, ok bool) {
-	if exit.Callee != 0 {
-		return exit.Callee, true
-	}
-	if ref <= 0 || ref >= len(i.heap) {
-		return 0, false
-	}
-	var typ *types.FunctionType
-	switch callee := i.heap[ref].(type) {
-	case *types.Function:
-		addr, typ = ref, callee.Typ
-	case *types.Closure:
-		addr, typ = int(callee.Fn), callee.Typ
-	default:
-		return 0, false
-	}
-	if len(typ.Params) != exit.Args || len(typ.Returns) != len(exit.Returns) {
-		return 0, false
-	}
-	for j, t := range typ.Returns {
-		if t.Kind() != exit.Returns[j] {
-			return 0, false
-		}
-	}
-	return addr, true
 }
 
 // nests reports whether exit's call to the function at addr can run while its
@@ -1299,19 +1213,6 @@ func (n *native) nest(i *Interpreter, exit jit.Exit, ref, start int, deopt func(
 		fault = nil
 	}
 	return fault, false
-}
-
-// dispatch runs the threaded loop for nest until its stand-in frame's CALL
-// completes, reporting a cancellation as err and any panic no handler above
-// the floor caught as fault.
-func dispatch(i *Interpreter) (fault any, err error) {
-	defer func() {
-		fault = recover()
-	}()
-	for caught := true; caught; {
-		caught, err = i.dispatch()
-	}
-	return nil, err
 }
 
 // callee is the reference activation k's ExitCall e calls through: the
@@ -1395,19 +1296,8 @@ func toWord(i *Interpreter, kind types.Kind, v types.Boxed) uint64 {
 	return v.Word()
 }
 
-func metric(i *Interpreter, name string, labels ...prof.Label) {
-	metricValue(i, name, 1, labels...)
-}
-
-func metricValue(i *Interpreter, name string, value float64, labels ...prof.Label) {
-	if i.profiler == nil {
-		return
-	}
-	i.samples.AddMetric(name, value, labels...)
-}
-
 func (n *native) metricEntry(i *Interpreter, c *jit.Code) {
-	metric(i, metricEntries, prof.Label{Key: "tier", Value: c.Tier.String()})
+	metric(i, metricEntries, 1, prof.Label{Key: "tier", Value: c.Tier.String()})
 }
 
 // cancelled reports whether i's active Run context is done, without
@@ -1477,4 +1367,110 @@ func slots(fn *types.Function) int {
 		return len(fn.Locals)
 	}
 	return len(fn.Typ.Params) + len(fn.Locals)
+}
+
+// same reports whether feedback snapshots a and b hold the same callees and
+// refuted sites.
+func same(a, b transform.Module) bool {
+	return maps.Equal(a.Callees, b.Callees) && maps.Equal(a.Refuted, b.Refuted)
+}
+
+// boxRegisters boxes each i64 register-convention result at bp, which the
+// Go entry stub left as a raw word, as threaded RETURN would: inline or heap.
+func boxRegisters(i *Interpreter, code *jit.Code, bp int) {
+	for index, k := range code.Registers {
+		if k == types.KindI64 {
+			i.stack[bp+index] = i.boxI64(int64(i.stack[bp+index]))
+		}
+	}
+}
+
+// index is the two-byte type index the operation at code[0] carries, read
+// as the threader reads it.
+func index(code []byte) int {
+	return int(*(*uint16)(unsafe.Pointer(&code[1])))
+}
+
+// rollback releases each held operand back down to its saved count.
+func rollback(i *Interpreter, holds []hold) {
+	for _, h := range holds {
+		for i.rc[h.ref] > h.count {
+			i.release(h.ref)
+		}
+	}
+}
+
+// exec runs f's own instruction and reports whether it completed; a panic is
+// recovered and reported as false.
+func exec(i *Interpreter, f *frame) (ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	f.code[f.ip](i)
+	return true
+}
+
+// hosted reports whether v is a host view: its operations run a Registry's
+// conversions, host code a declined attempt would run a second time.
+func hosted(v types.Value) bool {
+	switch v.(type) {
+	case *HostStruct, *HostArray, *HostMap:
+		return true
+	default:
+		return false
+	}
+}
+
+// target resolves exit's callee, the value ref, to the address of the
+// function it runs. A generic call, which names none, is served only for a
+// function or closure that takes the call's arguments and returns the kinds
+// it reads back; any other callee ok reports false and the caller deoptimizes
+// to run its own CALL.
+func target(i *Interpreter, exit jit.Exit, ref int) (addr int, ok bool) {
+	if exit.Callee != 0 {
+		return exit.Callee, true
+	}
+	if ref <= 0 || ref >= len(i.heap) {
+		return 0, false
+	}
+	var typ *types.FunctionType
+	switch callee := i.heap[ref].(type) {
+	case *types.Function:
+		addr, typ = ref, callee.Typ
+	case *types.Closure:
+		addr, typ = int(callee.Fn), callee.Typ
+	default:
+		return 0, false
+	}
+	if len(typ.Params) != exit.Args || len(typ.Returns) != len(exit.Returns) {
+		return 0, false
+	}
+	for j, t := range typ.Returns {
+		if t.Kind() != exit.Returns[j] {
+			return 0, false
+		}
+	}
+	return addr, true
+}
+
+// dispatch runs the threaded loop for nest until its stand-in frame's CALL
+// completes, reporting a cancellation as err and any panic no handler above
+// the floor caught as fault.
+func dispatch(i *Interpreter) (fault any, err error) {
+	defer func() {
+		fault = recover()
+	}()
+	for caught := true; caught; {
+		caught, err = i.dispatch()
+	}
+	return nil, err
+}
+
+func metric(i *Interpreter, name string, value float64, labels ...prof.Label) {
+	if i.profiler == nil {
+		return
+	}
+	i.samples.AddMetric(name, value, labels...)
 }

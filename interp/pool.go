@@ -24,9 +24,9 @@ type Pool struct {
 	shared   *shared
 	sharedMu sync.Mutex
 
-	mu     sync.RWMutex
-	closed bool
-	err    error
+	mu       sync.RWMutex
+	closed   bool
+	closeErr error
 }
 
 // ErrPoolClosed is returned by Get once the pool is closed.
@@ -130,8 +130,8 @@ func (p *Pool) Close() error {
 		errs = append(errs, p.shared.release())
 		p.shared = nil
 	}
-	if p.err != nil {
-		errs = append(errs, p.err)
+	if p.closeErr != nil {
+		errs = append(errs, p.closeErr)
 	}
 	p.sharedMu.Unlock()
 	return errors.Join(errs...)
@@ -178,8 +178,8 @@ func (p *Pool) share(i *Interpreter) {
 	// i's own runtime is unpublished and unreferenced from here: i runs on
 	// the pool runtime, so a release failure only leaks its mappings and no
 	// caller can recover it.
-	if err := i.native.join(p.shared.retain()); err != nil && p.err == nil {
-		p.err = err
+	if err := i.native.join(p.shared.retain()); err != nil && p.closeErr == nil {
+		p.closeErr = err
 	}
 }
 
@@ -187,8 +187,8 @@ func (p *Pool) drop(i *Interpreter) {
 	// Put has no error channel and i is discarded either way.
 	err := i.Close()
 	p.sharedMu.Lock()
-	if err != nil && p.err == nil {
-		p.err = err
+	if err != nil && p.closeErr == nil {
+		p.closeErr = err
 	}
 	p.sharedMu.Unlock()
 	p.live.Add(-1)

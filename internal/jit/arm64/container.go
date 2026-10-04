@@ -9,6 +9,13 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// address is a memory operand: base plus offset bytes, or, when index is
+// set, base plus index scaled by the access size.
+type address struct {
+	base, index asm.Reg
+	offset      int16
+}
+
 // shape lowers guard.shape. It admits only the representation and optional
 // concrete type encoded by Shape; null, host, or mismatched containers deopt.
 // A closure guard first deopts a word that is no reference at all, since a
@@ -380,21 +387,6 @@ func (m *Machine) elements(a *asm.Assembler, s compile.Site, v ssa.Value, shape 
 	return ptr, ln
 }
 
-// address is a memory operand: base plus offset bytes, or, when index is
-// set, base plus index scaled by the access size.
-type address struct {
-	base, index asm.Reg
-	offset      int16
-}
-
-// row is the access at p: imm's form for an offset, reg's for an index.
-func (p address) row(imm func(r, base asm.Reg, offset int16) asm.Instruction, reg func(r, base, index asm.Reg) asm.Instruction, r asm.Reg) asm.Instruction {
-	if p.index == nil {
-		return imm(r, p.base, p.offset)
-	}
-	return reg(r, p.base, p.index)
-}
-
 // element deopts unless op's array index is within [0, ln) and addresses
 // its element of 1<<shift bytes off ptr: through the index's own 32-bit
 // register, sign-extended, with no check for an index a bound proves within
@@ -437,6 +429,14 @@ func (m *Machine) replace(a *asm.Assembler, s compile.Site, p address, word asm.
 	a.Emit(p.row(target.LDR, target.LDRR, old))
 	a.Emit(p.row(target.STR, target.STRR, word))
 	m.release(a, old, s)
+}
+
+// row is the access at p: imm's form for an offset, reg's for an index.
+func (p address) row(imm func(r, base asm.Reg, offset int16) asm.Instruction, reg func(r, base, index asm.Reg) asm.Instruction, r asm.Reg) asm.Instruction {
+	if p.index == nil {
+		return imm(r, p.base, p.offset)
+	}
+	return reg(r, p.base, p.index)
 }
 
 // field returns v widened to a struct.Data slot's 64 bits. Unlike box, an i64

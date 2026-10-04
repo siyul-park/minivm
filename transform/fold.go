@@ -150,30 +150,14 @@ func log2(v uint64) (uint64, bool) {
 	return uint64(bits.TrailingZeros64(v)), true
 }
 
-// word encodes a folded result as its native word.
-func word[T bool | int32 | float32](v T) uint64 {
-	switch v := any(v).(type) {
-	case bool:
-		if v {
-			return 1
-		}
-	case int32:
-		return uint64(uint32(v))
-	case float32:
-		return uint64(math.Float32bits(v))
-	}
-	return 0
-}
-
 func eval(code instr.Opcode, args []uint64) (uint64, bool) {
 	switch code {
 	case instr.I32_ADD, instr.I32_SUB, instr.I32_MUL, instr.I32_DIV_S, instr.I32_DIV_U,
 		instr.I32_REM_S, instr.I32_REM_U, instr.I32_SHL, instr.I32_SHR_S, instr.I32_SHR_U,
-		instr.I32_XOR, instr.I32_AND, instr.I32_OR:
-		return evalI32(code, int32(uint32(args[0])), int32(uint32(args[1])))
-	case instr.I32_EQ, instr.I32_NE, instr.I32_LT_S, instr.I32_LT_U, instr.I32_GT_S, instr.I32_GT_U,
+		instr.I32_XOR, instr.I32_AND, instr.I32_OR,
+		instr.I32_EQ, instr.I32_NE, instr.I32_LT_S, instr.I32_LT_U, instr.I32_GT_S, instr.I32_GT_U,
 		instr.I32_LE_S, instr.I32_LE_U, instr.I32_GE_S, instr.I32_GE_U:
-		return evalI32Cmp(code, int32(uint32(args[0])), int32(uint32(args[1])))
+		return evalI32(code, int32(uint32(args[0])), int32(uint32(args[1])))
 	case instr.I32_EQZ:
 		return word(int32(uint32(args[0])) == 0), true
 	case instr.I32_TO_F32_S:
@@ -183,11 +167,10 @@ func eval(code instr.Opcode, args []uint64) (uint64, bool) {
 
 	case instr.I64_ADD, instr.I64_SUB, instr.I64_MUL, instr.I64_DIV_S, instr.I64_DIV_U,
 		instr.I64_REM_S, instr.I64_REM_U, instr.I64_SHL, instr.I64_SHR_S, instr.I64_SHR_U,
-		instr.I64_XOR, instr.I64_AND, instr.I64_OR:
-		return evalI64(code, int64(args[0]), int64(args[1]))
-	case instr.I64_EQ, instr.I64_NE, instr.I64_LT_S, instr.I64_LT_U, instr.I64_GT_S, instr.I64_GT_U,
+		instr.I64_XOR, instr.I64_AND, instr.I64_OR,
+		instr.I64_EQ, instr.I64_NE, instr.I64_LT_S, instr.I64_LT_U, instr.I64_GT_S, instr.I64_GT_U,
 		instr.I64_LE_S, instr.I64_LE_U, instr.I64_GE_S, instr.I64_GE_U:
-		return evalI64Cmp(code, int64(args[0]), int64(args[1]))
+		return evalI64(code, int64(args[0]), int64(args[1]))
 	case instr.I64_EQZ:
 		return word(int64(args[0]) == 0), true
 	case instr.I64_TO_I32:
@@ -201,10 +184,9 @@ func eval(code instr.Opcode, args []uint64) (uint64, bool) {
 	case instr.I64_TO_F64_U:
 		return math.Float64bits(float64(uint64(args[0]))), true
 
-	case instr.F32_ADD, instr.F32_SUB, instr.F32_MUL, instr.F32_DIV, instr.F32_REM, instr.F32_MOD:
+	case instr.F32_ADD, instr.F32_SUB, instr.F32_MUL, instr.F32_DIV, instr.F32_REM, instr.F32_MOD,
+		instr.F32_EQ, instr.F32_NE, instr.F32_LT, instr.F32_GT, instr.F32_LE, instr.F32_GE:
 		return evalF32(code, math.Float32frombits(uint32(args[0])), math.Float32frombits(uint32(args[1])))
-	case instr.F32_EQ, instr.F32_NE, instr.F32_LT, instr.F32_GT, instr.F32_LE, instr.F32_GE:
-		return evalF32Cmp(code, math.Float32frombits(uint32(args[0])), math.Float32frombits(uint32(args[1])))
 	// Threaded saturates NaN and out-of-range float-to-int conversions, where
 	// Go's result is implementation-specific: fold leaves those to it.
 	case instr.F32_TO_I32_S:
@@ -220,10 +202,9 @@ func eval(code instr.Opcode, args []uint64) (uint64, bool) {
 		}
 		return word(int32(uint32(f))), true
 
-	case instr.F64_ADD, instr.F64_SUB, instr.F64_MUL, instr.F64_DIV, instr.F64_REM, instr.F64_MOD:
+	case instr.F64_ADD, instr.F64_SUB, instr.F64_MUL, instr.F64_DIV, instr.F64_REM, instr.F64_MOD,
+		instr.F64_EQ, instr.F64_NE, instr.F64_LT, instr.F64_GT, instr.F64_LE, instr.F64_GE:
 		return evalF64(code, math.Float64frombits(args[0]), math.Float64frombits(args[1]))
-	case instr.F64_EQ, instr.F64_NE, instr.F64_LT, instr.F64_GT, instr.F64_LE, instr.F64_GE:
-		return evalF64Cmp(code, math.Float64frombits(args[0]), math.Float64frombits(args[1]))
 	case instr.F64_TO_I32_S:
 		f := math.Float64frombits(args[0])
 		if math.IsNaN(f) || f < -(1<<31) || f >= 1<<31 {
@@ -296,13 +277,6 @@ func evalI32(code instr.Opcode, a, b int32) (uint64, bool) {
 		return word(a & b), true
 	case instr.I32_OR:
 		return word(a | b), true
-	default:
-		return 0, false
-	}
-}
-
-func evalI32Cmp(code instr.Opcode, a, b int32) (uint64, bool) {
-	switch code {
 	case instr.I32_EQ:
 		return word(a == b), true
 	case instr.I32_NE:
@@ -368,13 +342,6 @@ func evalI64(code instr.Opcode, a, b int64) (uint64, bool) {
 		return uint64(a & b), true
 	case instr.I64_OR:
 		return uint64(a | b), true
-	default:
-		return 0, false
-	}
-}
-
-func evalI64Cmp(code instr.Opcode, a, b int64) (uint64, bool) {
-	switch code {
 	case instr.I64_EQ:
 		return word(a == b), true
 	case instr.I64_NE:
@@ -423,13 +390,6 @@ func evalF32(code instr.Opcode, a, b float32) (uint64, bool) {
 			return 0, false
 		}
 		return word(float32(mod(float64(a), float64(b), true))), true
-	default:
-		return 0, false
-	}
-}
-
-func evalF32Cmp(code instr.Opcode, a, b float32) (uint64, bool) {
-	switch code {
 	case instr.F32_EQ:
 		return word(a == b), true
 	case instr.F32_NE:
@@ -470,13 +430,6 @@ func evalF64(code instr.Opcode, a, b float64) (uint64, bool) {
 			return 0, false
 		}
 		return math.Float64bits(mod(a, b, true)), true
-	default:
-		return 0, false
-	}
-}
-
-func evalF64Cmp(code instr.Opcode, a, b float64) (uint64, bool) {
-	switch code {
 	case instr.F64_EQ:
 		return word(a == b), true
 	case instr.F64_NE:
@@ -492,6 +445,21 @@ func evalF64Cmp(code instr.Opcode, a, b float64) (uint64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// word encodes a folded result as its native word.
+func word[v bool | int32 | float32](x v) uint64 {
+	switch v := any(x).(type) {
+	case bool:
+		if v {
+			return 1
+		}
+	case int32:
+		return uint64(uint32(v))
+	case float32:
+		return uint64(math.Float32bits(v))
+	}
+	return 0
 }
 
 func mod(a, b float64, floored bool) float64 {

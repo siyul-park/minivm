@@ -1161,6 +1161,22 @@ func (m *Machine) join(a *asm.Assembler, c compile.Call, s compile.Site) {
 	}
 }
 
+// vreg is a fresh 64-bit register no SSA value names.
+func (m *Machine) vreg() asm.VReg { return m.ivreg(asm.Width64) }
+
+// ivreg returns a fresh integer scratch register at width, tracked by the
+// allocator like any SSA temp.
+func (m *Machine) ivreg(width asm.RegWidth) asm.VReg {
+	m.temp--
+	return asm.NewVReg(m.temp, asm.RegTypeInt, width)
+}
+
+// fvreg returns a fresh float scratch register at width.
+func (m *Machine) fvreg(width asm.RegWidth) asm.VReg {
+	m.temp--
+	return asm.NewVReg(m.temp, asm.RegTypeFloat, width)
+}
+
 // register is the register-convention register at index i (0 or 1).
 func register(i int) asm.PReg {
 	if i == 1 {
@@ -1196,20 +1212,4 @@ func convention(a *asm.Assembler, v asm.Reg, i int, into bool) {
 			a.Emit(target.MOV(reg, v))
 		}
 	}
-}
-
-// vreg is a fresh 64-bit register no SSA value names.
-func (m *Machine) vreg() asm.VReg { return m.ivreg(asm.Width64) }
-
-// ivreg returns a fresh integer scratch register at width, tracked by the
-// allocator like any SSA temp.
-func (m *Machine) ivreg(width asm.RegWidth) asm.VReg {
-	m.temp--
-	return asm.NewVReg(m.temp, asm.RegTypeInt, width)
-}
-
-// fvreg returns a fresh float scratch register at width.
-func (m *Machine) fvreg(width asm.RegWidth) asm.VReg {
-	m.temp--
-	return asm.NewVReg(m.temp, asm.RegTypeFloat, width)
 }
