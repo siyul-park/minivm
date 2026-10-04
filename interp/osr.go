@@ -132,7 +132,7 @@ func (n *native) resolved(addr int, ips []int) bool {
 	return true
 }
 
-func (s *site) due() bool {
+func (s *site) onCadence() bool {
 	s.count++
 	return s.count%s.cadence == 0
 }
@@ -148,7 +148,7 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 		if s.code != nil && n.enter(i, s, code, inner) {
 			return
 		}
-		onCadence := s.due()
+		due := s.onCadence()
 		switch {
 		case !s.submitted:
 			if s.total == nil {
@@ -163,7 +163,7 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 				u := compile.Unit{Address: s.address, Function: s.fn, Module: n.feedback(s.address), Tier: jit.Optimized, IP: s.ip, OSR: true}
 				s.submitted = n.queue.Submit(u)
 			}
-		case onCadence:
+		case due:
 			n.drain(i)
 			s.code = n.store.CodeAt(s.address, s.ip)
 		}
@@ -183,7 +183,7 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	if (s.entry && len(s.headers) == 0 && cancelled(i)) || len(i.fr.upvals) < len(s.fn.Captures) || n.depth >= uint64(len(n.ctx.Records)) {
 		return false
 	}
-	if s.due() {
+	if s.onCadence() {
 		n.drain(i)
 		if n.depth == 0 {
 			n.quiesce()

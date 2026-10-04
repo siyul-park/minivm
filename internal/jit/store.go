@@ -189,7 +189,7 @@ func (s *Store) Attach() *Reader {
 // quiescent point since; with no Reader attached, every retired code.
 func (s *Store) Reclaim() error {
 	if s.pending.Load() == 0 {
-		if p := s.freeErr.Load(); p != nil {
+		if p := s.freeErr.Swap(nil); p != nil {
 			return *p
 		}
 		return nil
@@ -212,7 +212,7 @@ func (s *Store) Reclaim() error {
 	for _, c := range freed {
 		err = errors.Join(err, c.Free())
 	}
-	if p := s.freeErr.Load(); p != nil {
+	if p := s.freeErr.Swap(nil); p != nil {
 		err = errors.Join(err, *p)
 	}
 	return err
@@ -238,7 +238,7 @@ func (s *Store) Close() error {
 	for _, c := range retired {
 		err = errors.Join(err, c.Free())
 	}
-	if p := s.freeErr.Load(); p != nil {
+	if p := s.freeErr.Swap(nil); p != nil {
 		err = errors.Join(err, *p)
 	}
 	s.pending.Store(0)

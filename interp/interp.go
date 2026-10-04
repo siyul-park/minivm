@@ -1938,10 +1938,8 @@ func (i *Interpreter) remove(addr int) {
 
 // gc collects one cycle. Every pass walks the whole heap.
 func (i *Interpreter) gc() {
-	if i.profiler != nil {
-		i.samples.AddMetric("vm_gc_cycles_total", 1)
-		i.samples.AddMetric("vm_gc_slots_total", float64(len(i.heap)))
-	}
+	metricValue(i, "vm_gc_cycles_total", 1)
+	metricValue(i, "vm_gc_slots_total", float64(len(i.heap)))
 	i.scan()
 	i.mark()
 	i.sweep()

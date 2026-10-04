@@ -1396,10 +1396,14 @@ func toWord(i *Interpreter, kind types.Kind, v types.Boxed) uint64 {
 }
 
 func metric(i *Interpreter, name string, labels ...prof.Label) {
+	metricValue(i, name, 1, labels...)
+}
+
+func metricValue(i *Interpreter, name string, value float64, labels ...prof.Label) {
 	if i.profiler == nil {
 		return
 	}
-	i.samples.AddMetric(name, 1, labels...)
+	i.samples.AddMetric(name, value, labels...)
 }
 
 func (n *native) metricEntry(i *Interpreter, c *jit.Code) {
