@@ -1,0 +1,35 @@
+.code
+0000:	i32.const 0x0000001E
+0005:	local.set 0x00
+0007:	i32.const 0x00000000
+0012:	local.set 0x01
+0014:	i32.const 0x00000001
+0019:	local.set 0x02
+0021:	i32.const 0x00000000
+0026:	local.set 0x03
+L0028:
+0028:	local.get 0x03
+0030:	local.get 0x00
+0032:	i32.ge_s
+0033:	br_if L0064
+0036:	local.get 0x01
+0038:	local.get 0x02
+0040:	i32.add
+0041:	local.set 0x04
+0043:	local.get 0x02
+0045:	local.set 0x01
+0047:	local.get 0x04
+0049:	local.set 0x02
+0051:	local.get 0x03
+0053:	i32.const 0x00000001
+0058:	i32.add
+0059:	local.set 0x03
+0061:	br L0028
+L0064:
+0064:	local.get 0x01
+.locals
+0000:	i32
+0001:	i32
+0002:	i32
+0003:	i32
+0004:	i32

@@ -1,0 +1,129 @@
+.code
+0000:	i32.const 0x00000000
+0005:	local.set 0x00
+0007:	i32.const 0x00000000
+0012:	local.set 0x01
+L0014:
+0014:	local.get 0x01
+0016:	i32.const 0x00000010
+0021:	i32.ge_s
+0022:	br_if L0177
+0025:	f64.const 0xBFF8000000000000
+0034:	f64.const 0x3FF8000000000000
+0043:	f64.const 0xBFF8000000000000
+0052:	f64.sub
+0053:	local.get 0x01
+0055:	i32.to_f64_s
+0056:	f64.mul
+0057:	f64.const 0x402E000000000000
+0066:	f64.div
+0067:	f64.add
+0068:	local.set 0x02
+0070:	i32.const 0x00000000
+0075:	local.set 0x03
+L0077:
+0077:	local.get 0x03
+0079:	i32.const 0x00000010
+0084:	i32.ge_s
+0085:	br_if L0164
+0088:	f64.const 0xC000000000000000
+0097:	f64.const 0x3FF0000000000000
+0106:	f64.const 0xC000000000000000
+0115:	f64.sub
+0116:	local.get 0x03
+0118:	i32.to_f64_s
+0119:	f64.mul
+0120:	f64.const 0x402E000000000000
+0129:	f64.div
+0130:	f64.add
+0131:	local.set 0x04
+0133:	local.get 0x00
+0135:	local.get 0x04
+0137:	local.get 0x02
+0139:	i32.const 0x00000032
+0144:	const.get 0x0000
+0147:	call
+0148:	i32.add
+0149:	local.set 0x00
+0151:	local.get 0x03
+0153:	i32.const 0x00000001
+0158:	i32.add
+0159:	local.set 0x03
+0161:	br L0077
+L0164:
+0164:	local.get 0x01
+0166:	i32.const 0x00000001
+0171:	i32.add
+0172:	local.set 0x01
+0174:	br L0014
+L0177:
+0177:	local.get 0x00
+.locals
+0000:	i32
+0001:	i32
+0002:	f64
+0003:	i32
+0004:	f64
+.constants
+0000:	func(f64, f64, i32) i32
+	f64
+	f64
+	i32
+	f64
+	f64
+	f64
+	f64
+	0000:	f64.const 0x0000000000000000
+	0009:	local.set 0x03
+	0011:	f64.const 0x0000000000000000
+	0020:	local.set 0x04
+	0022:	i32.const 0x00000000
+	0027:	local.set 0x05
+	L0029:
+	0029:	local.get 0x05
+	0031:	local.get 0x02
+	0033:	i32.ge_s
+	0034:	br_if L0123
+	0037:	local.get 0x03
+	0039:	local.get 0x03
+	0041:	f64.mul
+	0042:	local.set 0x06
+	0044:	local.get 0x04
+	0046:	local.get 0x04
+	0048:	f64.mul
+	0049:	local.set 0x07
+	0051:	local.get 0x06
+	0053:	local.get 0x07
+	0055:	f64.add
+	0056:	f64.const 0x4010000000000000
+	0065:	f64.gt
+	0066:	br_if L0120
+	0069:	local.get 0x06
+	0071:	local.get 0x07
+	0073:	f64.sub
+	0074:	local.get 0x00
+	0076:	f64.add
+	0077:	local.set 0x08
+	0079:	f64.const 0x4000000000000000
+	0088:	local.get 0x03
+	0090:	f64.mul
+	0091:	local.get 0x04
+	0093:	f64.mul
+	0094:	local.get 0x01
+	0096:	f64.add
+	0097:	local.set 0x09
+	0099:	local.get 0x08
+	0101:	local.set 0x03
+	0103:	local.get 0x09
+	0105:	local.set 0x04
+	0107:	local.get 0x05
+	0109:	i32.const 0x00000001
+	0114:	i32.add
+	0115:	local.set 0x05
+	0117:	br L0029
+	L0120:
+	0120:	local.get 0x05
+	0122:	return
+	L0123:
+	0123:	local.get 0x02
+	0125:	return

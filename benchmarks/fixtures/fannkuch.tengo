@@ -1,0 +1,62 @@
+count_flips := func(perm) {
+    a := [0, 0, 0, 0, 0, 0]
+    for i := 0; i < 6; i = i + 1 {
+        a[i] = perm[i]
+    }
+
+    flips := 0
+    k := a[0]
+    for k != 0 {
+        i := 0
+        j := k
+        for i < j {
+            tmp := a[i]
+            a[i] = a[j]
+            a[j] = tmp
+            i = i + 1
+            j = j - 1
+        }
+        flips = flips + 1
+        k = a[0]
+    }
+    return flips
+}
+
+permcount := 0
+checksum := 0
+maxflips := 0
+
+permute := func(a, k) {
+    if k == 1 {
+        flips := count_flips(a)
+        if flips > maxflips {
+            maxflips = flips
+        }
+        if permcount % 2 == 0 {
+            checksum = checksum + flips
+        } else {
+            checksum = checksum - flips
+        }
+        permcount = permcount + 1
+        return
+    }
+
+    i := 0
+    for i < k {
+        permute(a, k - 1)
+        if k % 2 == 0 {
+            tmp := a[i]
+            a[i] = a[k-1]
+            a[k-1] = tmp
+        } else {
+            tmp := a[0]
+            a[0] = a[k-1]
+            a[k-1] = tmp
+        }
+        i = i + 1
+    }
+}
+
+perm := [0, 1, 2, 3, 4, 5]
+permute(perm, 6)
+result := checksum * 1000 + maxflips

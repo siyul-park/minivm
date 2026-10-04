@@ -1,0 +1,32 @@
+make_list := func(n, seed) {
+    xs := []
+    s := seed
+    for i := 0; i < n; i = i + 1 {
+        s = (s*1103515245 + 12345) % 2147483648
+        xs = append(xs, s % 1000000)
+    }
+    return xs
+}
+
+sort := func(xs) {
+    for i := 1; i < len(xs); i = i + 1 {
+        key := xs[i]
+        j := i - 1
+        for j >= 0 && xs[j] > key {
+            xs[j+1] = xs[j]
+            j = j - 1
+        }
+        xs[j+1] = key
+    }
+}
+
+result := 0
+n := 128
+for round := 0; round < 2; round = round + 1 {
+    xs := make_list(n, 1+round)
+    sort(xs)
+    for i := 0; i < n; i = i + 1 {
+        result = result + xs[i] * (i % 7)
+    }
+    result = result % 1000000007
+}

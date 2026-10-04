@@ -1,0 +1,654 @@
+.code
+0000:	f64.const 0x400921FB54442D18
+0009:	local.set 0x07
+0011:	f64.const 0x4010000000000000
+0020:	local.get 0x07
+0022:	f64.mul
+0023:	local.get 0x07
+0025:	f64.mul
+0026:	local.set 0x08
+0028:	f64.const 0x4076D3D70A3D70A4
+0037:	local.set 0x09
+0039:	i32.const 0x00000005
+0044:	array.new_default 0x0000
+0047:	local.set 0x00
+0049:	local.get 0x00
+0051:	i32.const 0x00000000
+0056:	f64.const 0x0000000000000000
+0065:	array.set
+0066:	local.get 0x00
+0068:	i32.const 0x00000001
+0073:	f64.const 0x40135DA0343CD92C
+0082:	array.set
+0083:	local.get 0x00
+0085:	i32.const 0x00000002
+0090:	f64.const 0x4020AFCDC332CA67
+0099:	array.set
+0100:	local.get 0x00
+0102:	i32.const 0x00000003
+0107:	f64.const 0x4029E31327969772
+0116:	array.set
+0117:	local.get 0x00
+0119:	i32.const 0x00000004
+0124:	f64.const 0x402EC267A905573A
+0133:	array.set
+0134:	i32.const 0x00000005
+0139:	array.new_default 0x0000
+0142:	local.set 0x01
+0144:	local.get 0x01
+0146:	i32.const 0x00000000
+0151:	f64.const 0x0000000000000000
+0160:	array.set
+0161:	local.get 0x01
+0163:	i32.const 0x00000001
+0168:	f64.const 0xBFF290ABC01FDB7C
+0177:	array.set
+0178:	local.get 0x01
+0180:	i32.const 0x00000002
+0185:	f64.const 0x40107FCB31DE01B0
+0194:	array.set
+0195:	local.get 0x01
+0197:	i32.const 0x00000003
+0202:	f64.const 0xC02E39185D8000F0
+0211:	array.set
+0212:	local.get 0x01
+0214:	i32.const 0x00000004
+0219:	f64.const 0xC039EB5833C8A220
+0228:	array.set
+0229:	i32.const 0x00000005
+0234:	array.new_default 0x0000
+0237:	local.set 0x02
+0239:	local.get 0x02
+0241:	i32.const 0x00000000
+0246:	f64.const 0x0000000000000000
+0255:	array.set
+0256:	local.get 0x02
+0258:	i32.const 0x00000001
+0263:	f64.const 0xBFBA86F96C25EBF0
+0272:	array.set
+0273:	local.get 0x02
+0275:	i32.const 0x00000002
+0280:	f64.const 0xBFD9D353E1EB467C
+0289:	array.set
+0290:	local.get 0x02
+0292:	i32.const 0x00000003
+0297:	f64.const 0xBFCCA2643B9809C4
+0306:	array.set
+0307:	local.get 0x02
+0309:	i32.const 0x00000004
+0314:	f64.const 0x3FC6F1F393ABE540
+0323:	array.set
+0324:	i32.const 0x00000005
+0329:	array.new_default 0x0000
+0332:	local.set 0x03
+0334:	local.get 0x03
+0336:	i32.const 0x00000000
+0341:	f64.const 0x0000000000000000
+0350:	array.set
+0351:	local.get 0x03
+0353:	i32.const 0x00000001
+0358:	f64.const 0x3F5B32DDB8EC91E9
+0367:	local.get 0x09
+0369:	f64.mul
+0370:	array.set
+0371:	local.get 0x03
+0373:	i32.const 0x00000002
+0378:	f64.const 0x3F672F21841535D7
+0387:	local.get 0x09
+0389:	f64.mul
+0390:	array.set
+0391:	local.get 0x03
+0393:	i32.const 0x00000003
+0398:	f64.const 0x3F6849383E87D946
+0407:	local.get 0x09
+0409:	f64.mul
+0410:	array.set
+0411:	local.get 0x03
+0413:	i32.const 0x00000004
+0418:	f64.const 0x3F65F5C9E51B4319
+0427:	local.get 0x09
+0429:	f64.mul
+0430:	array.set
+0431:	i32.const 0x00000005
+0436:	array.new_default 0x0000
+0439:	local.set 0x04
+0441:	local.get 0x04
+0443:	i32.const 0x00000000
+0448:	f64.const 0x0000000000000000
+0457:	array.set
+0458:	local.get 0x04
+0460:	i32.const 0x00000001
+0465:	f64.const 0x3F7F88FF93F670B1
+0474:	local.get 0x09
+0476:	f64.mul
+0477:	array.set
+0478:	local.get 0x04
+0480:	i32.const 0x00000002
+0485:	f64.const 0x3F728E0D2DA58857
+0494:	local.get 0x09
+0496:	f64.mul
+0497:	array.set
+0498:	local.get 0x04
+0500:	i32.const 0x00000003
+0505:	f64.const 0x3F637C044AC0ACCB
+0514:	local.get 0x09
+0516:	f64.mul
+0517:	array.set
+0518:	local.get 0x04
+0520:	i32.const 0x00000004
+0525:	f64.const 0x3F5AAD5736999D7A
+0534:	local.get 0x09
+0536:	f64.mul
+0537:	array.set
+0538:	i32.const 0x00000005
+0543:	array.new_default 0x0000
+0546:	local.set 0x05
+0548:	local.get 0x05
+0550:	i32.const 0x00000000
+0555:	f64.const 0x0000000000000000
+0564:	array.set
+0565:	local.get 0x05
+0567:	i32.const 0x00000001
+0572:	f64.const 0xBF1218322D868A8C
+0581:	local.get 0x09
+0583:	f64.mul
+0584:	array.set
+0585:	local.get 0x05
+0587:	i32.const 0x00000002
+0592:	f64.const 0xBF2913652FE6B464
+0601:	local.get 0x09
+0603:	f64.mul
+0604:	array.set
+0605:	local.get 0x05
+0607:	i32.const 0x00000003
+0612:	f64.const 0xBF33644247A73D73
+0621:	local.get 0x09
+0623:	f64.mul
+0624:	array.set
+0625:	local.get 0x05
+0627:	i32.const 0x00000004
+0632:	f64.const 0xBF4F2E88CE5E9882
+0641:	local.get 0x09
+0643:	f64.mul
+0644:	array.set
+0645:	i32.const 0x00000005
+0650:	array.new_default 0x0000
+0653:	local.set 0x06
+0655:	local.get 0x06
+0657:	i32.const 0x00000000
+0662:	local.get 0x08
+0664:	array.set
+0665:	local.get 0x06
+0667:	i32.const 0x00000001
+0672:	f64.const 0x3F4F49601333C135
+0681:	local.get 0x08
+0683:	f64.mul
+0684:	array.set
+0685:	local.get 0x06
+0687:	i32.const 0x00000002
+0692:	f64.const 0x3F32BC5EEFF5E6F8
+0701:	local.get 0x08
+0703:	f64.mul
+0704:	array.set
+0705:	local.get 0x06
+0707:	i32.const 0x00000003
+0712:	f64.const 0x3F06E44607A13BD6
+0721:	local.get 0x08
+0723:	f64.mul
+0724:	array.set
+0725:	local.get 0x06
+0727:	i32.const 0x00000004
+0732:	f64.const 0x3F0B0213CA2D0EEC
+0741:	local.get 0x08
+0743:	f64.mul
+0744:	array.set
+0745:	f64.const 0x0000000000000000
+0754:	local.set 0x0A
+0756:	f64.const 0x0000000000000000
+0765:	local.set 0x0B
+0767:	f64.const 0x0000000000000000
+0776:	local.set 0x0C
+0778:	i32.const 0x00000000
+0783:	local.set 0x0D
+L0785:
+0785:	local.get 0x0D
+0787:	i32.const 0x00000005
+0792:	i32.ge_s
+0793:	br_if L0857
+0796:	local.get 0x0A
+0798:	local.get 0x03
+0800:	local.get 0x0D
+0802:	array.get
+0803:	local.get 0x06
+0805:	local.get 0x0D
+0807:	array.get
+0808:	f64.mul
+0809:	f64.add
+0810:	local.set 0x0A
+0812:	local.get 0x0B
+0814:	local.get 0x04
+0816:	local.get 0x0D
+0818:	array.get
+0819:	local.get 0x06
+0821:	local.get 0x0D
+0823:	array.get
+0824:	f64.mul
+0825:	f64.add
+0826:	local.set 0x0B
+0828:	local.get 0x0C
+0830:	local.get 0x05
+0832:	local.get 0x0D
+0834:	array.get
+0835:	local.get 0x06
+0837:	local.get 0x0D
+0839:	array.get
+0840:	f64.mul
+0841:	f64.add
+0842:	local.set 0x0C
+0844:	local.get 0x0D
+0846:	i32.const 0x00000001
+0851:	i32.add
+0852:	local.set 0x0D
+0854:	br L0785
+L0857:
+0857:	local.get 0x03
+0859:	i32.const 0x00000000
+0864:	f64.const 0x0000000000000000
+0873:	local.get 0x0A
+0875:	local.get 0x08
+0877:	f64.div
+0878:	f64.sub
+0879:	array.set
+0880:	local.get 0x04
+0882:	i32.const 0x00000000
+0887:	f64.const 0x0000000000000000
+0896:	local.get 0x0B
+0898:	local.get 0x08
+0900:	f64.div
+0901:	f64.sub
+0902:	array.set
+0903:	local.get 0x05
+0905:	i32.const 0x00000000
+0910:	f64.const 0x0000000000000000
+0919:	local.get 0x0C
+0921:	local.get 0x08
+0923:	f64.div
+0924:	f64.sub
+0925:	array.set
+0926:	i32.const 0x00000000
+0931:	local.set 0x0E
+L0933:
+0933:	local.get 0x0E
+0935:	i32.const 0x00000064
+0940:	i32.ge_s
+0941:	br_if L0989
+0944:	i32.const 0x00000005
+0949:	local.get 0x00
+0951:	local.get 0x01
+0953:	local.get 0x02
+0955:	local.get 0x03
+0957:	local.get 0x04
+0959:	local.get 0x05
+0961:	local.get 0x06
+0963:	f64.const 0x3F847AE147AE147B
+0972:	const.get 0x0000
+0975:	call
+0976:	local.get 0x0E
+0978:	i32.const 0x00000001
+0983:	i32.add
+0984:	local.set 0x0E
+0986:	br L0933
+L0989:
+0989:	f64.const 0x0000000000000000
+0998:	local.set 0x10
+1000:	i32.const 0x00000000
+1005:	local.set 0x0D
+L1007:
+1007:	local.get 0x0D
+1009:	i32.const 0x00000005
+1014:	i32.ge_s
+1015:	br_if L1199
+1018:	local.get 0x10
+1020:	f64.const 0x3FE0000000000000
+1029:	local.get 0x06
+1031:	local.get 0x0D
+1033:	array.get
+1034:	f64.mul
+1035:	local.get 0x03
+1037:	local.get 0x0D
+1039:	array.get
+1040:	local.get 0x03
+1042:	local.get 0x0D
+1044:	array.get
+1045:	f64.mul
+1046:	local.get 0x04
+1048:	local.get 0x0D
+1050:	array.get
+1051:	local.get 0x04
+1053:	local.get 0x0D
+1055:	array.get
+1056:	f64.mul
+1057:	f64.add
+1058:	local.get 0x05
+1060:	local.get 0x0D
+1062:	array.get
+1063:	local.get 0x05
+1065:	local.get 0x0D
+1067:	array.get
+1068:	f64.mul
+1069:	f64.add
+1070:	f64.mul
+1071:	f64.add
+1072:	local.set 0x10
+1074:	local.get 0x0D
+1076:	i32.const 0x00000001
+1081:	i32.add
+1082:	local.set 0x0F
+L1084:
+1084:	local.get 0x0F
+1086:	i32.const 0x00000005
+1091:	i32.ge_s
+1092:	br_if L1186
+1095:	local.get 0x00
+1097:	local.get 0x0D
+1099:	array.get
+1100:	local.get 0x00
+1102:	local.get 0x0F
+1104:	array.get
+1105:	f64.sub
+1106:	local.set 0x11
+1108:	local.get 0x01
+1110:	local.get 0x0D
+1112:	array.get
+1113:	local.get 0x01
+1115:	local.get 0x0F
+1117:	array.get
+1118:	f64.sub
+1119:	local.set 0x12
+1121:	local.get 0x02
+1123:	local.get 0x0D
+1125:	array.get
+1126:	local.get 0x02
+1128:	local.get 0x0F
+1130:	array.get
+1131:	f64.sub
+1132:	local.set 0x13
+1134:	local.get 0x11
+1136:	local.get 0x11
+1138:	f64.mul
+1139:	local.get 0x12
+1141:	local.get 0x12
+1143:	f64.mul
+1144:	f64.add
+1145:	local.get 0x13
+1147:	local.get 0x13
+1149:	f64.mul
+1150:	f64.add
+1151:	f64.sqrt
+1152:	local.set 0x14
+1154:	local.get 0x10
+1156:	local.get 0x06
+1158:	local.get 0x0D
+1160:	array.get
+1161:	local.get 0x06
+1163:	local.get 0x0F
+1165:	array.get
+1166:	f64.mul
+1167:	local.get 0x14
+1169:	f64.div
+1170:	f64.sub
+1171:	local.set 0x10
+1173:	local.get 0x0F
+1175:	i32.const 0x00000001
+1180:	i32.add
+1181:	local.set 0x0F
+1183:	br L1084
+L1186:
+1186:	local.get 0x0D
+1188:	i32.const 0x00000001
+1193:	i32.add
+1194:	local.set 0x0D
+1196:	br L1007
+L1199:
+1199:	local.get 0x10
+1201:	f64.const 0x41CDCD6500000000
+1210:	f64.mul
+1211:	f64.to_i32_s
+.locals
+0000:	[]f64
+0001:	[]f64
+0002:	[]f64
+0003:	[]f64
+0004:	[]f64
+0005:	[]f64
+0006:	[]f64
+0007:	f64
+0008:	f64
+0009:	f64
+0010:	f64
+0011:	f64
+0012:	f64
+0013:	i32
+0014:	i32
+0015:	i32
+0016:	f64
+0017:	f64
+0018:	f64
+0019:	f64
+0020:	f64
+.constants
+0000:	func(i32, []f64, []f64, []f64, []f64, []f64, []f64, []f64, f64)
+	i32
+	i32
+	f64
+	f64
+	f64
+	f64
+	f64
+	0000:	i32.const 0x00000000
+	0005:	local.set 0x09
+	L0007:
+	0007:	local.get 0x09
+	0009:	local.get 0x00
+	0011:	i32.ge_s
+	0012:	br_if L0260
+	0015:	local.get 0x09
+	0017:	i32.const 0x00000001
+	0022:	i32.add
+	0023:	local.set 0x0A
+	L0025:
+	0025:	local.get 0x0A
+	0027:	local.get 0x00
+	0029:	i32.ge_s
+	0030:	br_if L0247
+	0033:	local.get 0x01
+	0035:	local.get 0x09
+	0037:	array.get
+	0038:	local.get 0x01
+	0040:	local.get 0x0A
+	0042:	array.get
+	0043:	f64.sub
+	0044:	local.set 0x0B
+	0046:	local.get 0x02
+	0048:	local.get 0x09
+	0050:	array.get
+	0051:	local.get 0x02
+	0053:	local.get 0x0A
+	0055:	array.get
+	0056:	f64.sub
+	0057:	local.set 0x0C
+	0059:	local.get 0x03
+	0061:	local.get 0x09
+	0063:	array.get
+	0064:	local.get 0x03
+	0066:	local.get 0x0A
+	0068:	array.get
+	0069:	f64.sub
+	0070:	local.set 0x0D
+	0072:	local.get 0x0B
+	0074:	local.get 0x0B
+	0076:	f64.mul
+	0077:	local.get 0x0C
+	0079:	local.get 0x0C
+	0081:	f64.mul
+	0082:	f64.add
+	0083:	local.get 0x0D
+	0085:	local.get 0x0D
+	0087:	f64.mul
+	0088:	f64.add
+	0089:	local.set 0x0E
+	0091:	local.get 0x08
+	0093:	local.get 0x0E
+	0095:	local.get 0x0E
+	0097:	f64.sqrt
+	0098:	f64.mul
+	0099:	f64.div
+	0100:	local.set 0x0F
+	0102:	local.get 0x04
+	0104:	local.get 0x09
+	0106:	local.get 0x04
+	0108:	local.get 0x09
+	0110:	array.get
+	0111:	local.get 0x0B
+	0113:	local.get 0x07
+	0115:	local.get 0x0A
+	0117:	array.get
+	0118:	f64.mul
+	0119:	local.get 0x0F
+	0121:	f64.mul
+	0122:	f64.sub
+	0123:	array.set
+	0124:	local.get 0x05
+	0126:	local.get 0x09
+	0128:	local.get 0x05
+	0130:	local.get 0x09
+	0132:	array.get
+	0133:	local.get 0x0C
+	0135:	local.get 0x07
+	0137:	local.get 0x0A
+	0139:	array.get
+	0140:	f64.mul
+	0141:	local.get 0x0F
+	0143:	f64.mul
+	0144:	f64.sub
+	0145:	array.set
+	0146:	local.get 0x06
+	0148:	local.get 0x09
+	0150:	local.get 0x06
+	0152:	local.get 0x09
+	0154:	array.get
+	0155:	local.get 0x0D
+	0157:	local.get 0x07
+	0159:	local.get 0x0A
+	0161:	array.get
+	0162:	f64.mul
+	0163:	local.get 0x0F
+	0165:	f64.mul
+	0166:	f64.sub
+	0167:	array.set
+	0168:	local.get 0x04
+	0170:	local.get 0x0A
+	0172:	local.get 0x04
+	0174:	local.get 0x0A
+	0176:	array.get
+	0177:	local.get 0x0B
+	0179:	local.get 0x07
+	0181:	local.get 0x09
+	0183:	array.get
+	0184:	f64.mul
+	0185:	local.get 0x0F
+	0187:	f64.mul
+	0188:	f64.add
+	0189:	array.set
+	0190:	local.get 0x05
+	0192:	local.get 0x0A
+	0194:	local.get 0x05
+	0196:	local.get 0x0A
+	0198:	array.get
+	0199:	local.get 0x0C
+	0201:	local.get 0x07
+	0203:	local.get 0x09
+	0205:	array.get
+	0206:	f64.mul
+	0207:	local.get 0x0F
+	0209:	f64.mul
+	0210:	f64.add
+	0211:	array.set
+	0212:	local.get 0x06
+	0214:	local.get 0x0A
+	0216:	local.get 0x06
+	0218:	local.get 0x0A
+	0220:	array.get
+	0221:	local.get 0x0D
+	0223:	local.get 0x07
+	0225:	local.get 0x09
+	0227:	array.get
+	0228:	f64.mul
+	0229:	local.get 0x0F
+	0231:	f64.mul
+	0232:	f64.add
+	0233:	array.set
+	0234:	local.get 0x0A
+	0236:	i32.const 0x00000001
+	0241:	i32.add
+	0242:	local.set 0x0A
+	0244:	br L0025
+	L0247:
+	0247:	local.get 0x09
+	0249:	i32.const 0x00000001
+	0254:	i32.add
+	0255:	local.set 0x09
+	0257:	br L0007
+	L0260:
+	0260:	i32.const 0x00000000
+	0265:	local.set 0x09
+	L0267:
+	0267:	local.get 0x09
+	0269:	local.get 0x00
+	0271:	i32.ge_s
+	0272:	br_if L0345
+	0275:	local.get 0x01
+	0277:	local.get 0x09
+	0279:	local.get 0x01
+	0281:	local.get 0x09
+	0283:	array.get
+	0284:	local.get 0x08
+	0286:	local.get 0x04
+	0288:	local.get 0x09
+	0290:	array.get
+	0291:	f64.mul
+	0292:	f64.add
+	0293:	array.set
+	0294:	local.get 0x02
+	0296:	local.get 0x09
+	0298:	local.get 0x02
+	0300:	local.get 0x09
+	0302:	array.get
+	0303:	local.get 0x08
+	0305:	local.get 0x05
+	0307:	local.get 0x09
+	0309:	array.get
+	0310:	f64.mul
+	0311:	f64.add
+	0312:	array.set
+	0313:	local.get 0x03
+	0315:	local.get 0x09
+	0317:	local.get 0x03
+	0319:	local.get 0x09
+	0321:	array.get
+	0322:	local.get 0x08
+	0324:	local.get 0x06
+	0326:	local.get 0x09
+	0328:	array.get
+	0329:	f64.mul
+	0330:	f64.add
+	0331:	array.set
+	0332:	local.get 0x09
+	0334:	i32.const 0x00000001
+	0339:	i32.add
+	0340:	local.set 0x09
+	0342:	br L0267
+	L0345:
+	0345:	return
+.types
+0000:	[]f64

@@ -1,0 +1,24 @@
+walk := func(d) {
+    if d == 0 {
+        return 0
+    }
+
+    arr := []
+    for i := 0; i < 24; i++ {
+        arr = append(arr, 24-1-i)
+    }
+
+    lo := 0
+    hi := 24 - 1
+    for lo < hi {
+        t := arr[lo]
+        arr[lo] = arr[hi]
+        arr[hi] = t
+        lo++
+        hi--
+    }
+
+    return arr[24-1] + walk(d-1)
+}
+
+result := walk(64)

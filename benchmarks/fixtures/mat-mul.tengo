@@ -1,0 +1,38 @@
+mul := func(n, a, b, out) {
+    for i := 0; i < n; i = i + 1 {
+        for j := 0; j < n; j = j + 1 {
+            sum := 0.0
+            for k := 0; k < n; k = k + 1 {
+                sum = sum + a[i*n+k] * b[k*n+j]
+            }
+            out[i*n+j] = sum
+        }
+    }
+}
+
+n := 16
+a := []
+b := []
+out := []
+
+for i := 0; i < n*n; i = i + 1 {
+    a = append(a, 0.0)
+    b = append(b, 0.0)
+    out = append(out, 0.0)
+}
+
+for i := 0; i < n; i = i + 1 {
+    for j := 0; j < n; j = j + 1 {
+        a[i*n+j] = float((i*7+j*3)%13) - 6.0
+        b[i*n+j] = float((i*5+j*11)%17) - 8.0
+    }
+}
+
+mul(n, a, b, out)
+
+sum := 0.0
+for i := 0; i < n*n; i = i + 1 {
+    sum = sum + out[i]
+}
+
+result := int(sum * 1e6)

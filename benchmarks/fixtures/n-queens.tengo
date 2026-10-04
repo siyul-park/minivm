@@ -1,0 +1,36 @@
+solve := func(row, n, cols, diag1, diag2) {
+    if row == n {
+        return 1
+    }
+
+    count := 0
+    for col := 0; col < n; col = col + 1 {
+        d1 := row-col+n-1
+        d2 := row+col
+        if !cols[col] && !diag1[d1] && !diag2[d2] {
+            cols[col] = true
+            diag1[d1] = true
+            diag2[d2] = true
+            count = count + solve(row+1, n, cols, diag1, diag2)
+            cols[col] = false
+            diag1[d1] = false
+            diag2[d2] = false
+        }
+    }
+
+    return count
+}
+
+cols := []
+diag1 := []
+diag2 := []
+
+for i := 0; i < 7; i = i + 1 {
+    cols = append(cols, false)
+}
+for i := 0; i < 13; i = i + 1 {
+    diag1 = append(diag1, false)
+    diag2 = append(diag2, false)
+}
+
+result := solve(0, 7, cols, diag1, diag2)

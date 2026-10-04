@@ -67,6 +67,10 @@ func checkDeclarations(pass *analysis.Pass, file *ast.File) {
 			continue
 		}
 		if group < last {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "init" {
+				report(pass, decl.Pos(), "init must appear immediately after package-level declarations")
+				continue
+			}
 			report(pass, decl.Pos(), "declaration %s follows %s in the wrong file-order group", declarationName(decl), declarationName(lastDecl))
 		}
 		last = group

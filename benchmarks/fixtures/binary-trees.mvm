@@ -1,0 +1,185 @@
+.code
+0000:	i32.const 0x00000000
+0005:	i32.const 0x00000007
+0010:	const.get 0x0000
+0013:	call
+0014:	local.set 0x00
+0016:	local.get 0x00
+0018:	const.get 0x0001
+0021:	call
+0022:	local.set 0x01
+0024:	i32.const 0x00000000
+0029:	i32.const 0x00000006
+0034:	const.get 0x0000
+0037:	call
+0038:	local.set 0x02
+0040:	i32.const 0x00000004
+0045:	local.set 0x03
+L0047:
+0047:	local.get 0x03
+0049:	i32.const 0x00000006
+0054:	i32.gt_s
+0055:	br_if L0218
+0058:	i32.const 0x00000001
+0063:	local.set 0x04
+0065:	i32.const 0x00000000
+0070:	local.set 0x05
+L0072:
+0072:	local.get 0x05
+0074:	i32.const 0x00000006
+0079:	local.get 0x03
+0081:	i32.sub
+0082:	i32.const 0x00000004
+0087:	i32.add
+0088:	i32.ge_s
+0089:	br_if L0115
+0092:	local.get 0x04
+0094:	i32.const 0x00000002
+0099:	i32.mul
+0100:	local.set 0x04
+0102:	local.get 0x05
+0104:	i32.const 0x00000001
+0109:	i32.add
+0110:	local.set 0x05
+0112:	br L0072
+L0115:
+0115:	i32.const 0x00000000
+0120:	local.set 0x06
+0122:	i32.const 0x00000001
+0127:	local.set 0x07
+L0129:
+0129:	local.get 0x07
+0131:	local.get 0x04
+0133:	i32.gt_s
+0134:	br_if L0198
+0137:	local.get 0x07
+0139:	local.get 0x03
+0141:	const.get 0x0000
+0144:	call
+0145:	local.set 0x08
+0147:	local.get 0x06
+0149:	local.get 0x08
+0151:	const.get 0x0001
+0154:	call
+0155:	i32.add
+0156:	local.set 0x06
+0158:	i32.const 0x00000000
+0163:	local.get 0x07
+0165:	i32.sub
+0166:	local.get 0x03
+0168:	const.get 0x0000
+0171:	call
+0172:	local.set 0x09
+0174:	local.get 0x06
+0176:	local.get 0x09
+0178:	const.get 0x0001
+0181:	call
+0182:	i32.add
+0183:	local.set 0x06
+0185:	local.get 0x07
+0187:	i32.const 0x00000001
+0192:	i32.add
+0193:	local.set 0x07
+0195:	br L0129
+L0198:
+0198:	local.get 0x01
+0200:	local.get 0x06
+0202:	i32.add
+0203:	local.set 0x01
+0205:	local.get 0x03
+0207:	i32.const 0x00000002
+0212:	i32.add
+0213:	local.set 0x03
+0215:	br L0047
+L0218:
+0218:	local.get 0x01
+0220:	local.get 0x02
+0222:	const.get 0x0001
+0225:	call
+0226:	i32.add
+.locals
+0000:	struct {item: i32; left: any; right: any}
+0001:	i32
+0002:	struct {item: i32; left: any; right: any}
+0003:	i32
+0004:	i32
+0005:	i32
+0006:	i32
+0007:	i32
+0008:	struct {item: i32; left: any; right: any}
+0009:	struct {item: i32; left: any; right: any}
+.constants
+0000:	func(i32, i32) struct {item: i32; left: any; right: any}
+	struct {item: i32; left: any; right: any}
+	0000:	struct.new_default 0x0000
+	0003:	local.set 0x02
+	0005:	local.get 0x02
+	0007:	i32.const 0x00000000
+	0012:	local.get 0x00
+	0014:	struct.set
+	0015:	local.get 0x01
+	0017:	i32.const 0x00000000
+	0022:	i32.le_s
+	0023:	br_if L0088
+	0026:	local.get 0x02
+	0028:	i32.const 0x00000001
+	0033:	local.get 0x00
+	0035:	i32.const 0x00000002
+	0040:	i32.mul
+	0041:	i32.const 0x00000001
+	0046:	i32.sub
+	0047:	local.get 0x01
+	0049:	i32.const 0x00000001
+	0054:	i32.sub
+	0055:	const.get 0x0000
+	0058:	call
+	0059:	struct.set
+	0060:	local.get 0x02
+	0062:	i32.const 0x00000002
+	0067:	local.get 0x00
+	0069:	i32.const 0x00000002
+	0074:	i32.mul
+	0075:	local.get 0x01
+	0077:	i32.const 0x00000001
+	0082:	i32.sub
+	0083:	const.get 0x0000
+	0086:	call
+	0087:	struct.set
+	L0088:
+	0088:	local.get 0x02
+	0090:	return
+0001:	func(struct {item: i32; left: any; right: any}) i32
+	0000:	local.get 0x00
+	0002:	ref.is_null
+	0003:	br_if L0062
+	0006:	local.get 0x00
+	0008:	i32.const 0x00000001
+	0013:	struct.get
+	0014:	ref.is_null
+	0015:	br_if L0053
+	0018:	local.get 0x00
+	0020:	i32.const 0x00000000
+	0025:	struct.get
+	0026:	local.get 0x00
+	0028:	i32.const 0x00000001
+	0033:	struct.get
+	0034:	const.get 0x0001
+	0037:	call
+	0038:	i32.add
+	0039:	local.get 0x00
+	0041:	i32.const 0x00000002
+	0046:	struct.get
+	0047:	const.get 0x0001
+	0050:	call
+	0051:	i32.sub
+	0052:	return
+	L0053:
+	0053:	local.get 0x00
+	0055:	i32.const 0x00000000
+	0060:	struct.get
+	0061:	return
+	L0062:
+	0062:	i32.const 0x00000000
+	0067:	return
+.types
+0000:	struct {item: i32; left: any; right: any}

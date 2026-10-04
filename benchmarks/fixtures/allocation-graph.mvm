@@ -1,0 +1,30 @@
+.code
+0000:	i32.const 0x00000001
+0005:	array.new_default 0x0000
+0008:	local.set 0x00
+0010:	i32.const 0x00000001
+0015:	local.set 0x01
+L0017:
+0017:	local.get 0x01
+0019:	i32.const 0x00000080
+0024:	i32.ge_s
+0025:	br_if L0060
+0028:	i32.const 0x00000001
+0033:	array.new_default 0x0000
+0036:	dup
+0037:	i32.const 0x00000000
+0042:	local.get 0x00
+0044:	array.set
+0045:	local.set 0x00
+0047:	local.get 0x01
+0049:	i32.const 0x00000001
+0054:	i32.add
+0055:	local.set 0x01
+0057:	br L0017
+L0060:
+0060:	local.get 0x01
+.locals
+0000:	any
+0001:	i32
+.types
+0000:	[]any

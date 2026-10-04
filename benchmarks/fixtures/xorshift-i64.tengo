@@ -1,0 +1,15 @@
+result := func() {
+    state := 2463534242
+    total := 0
+    for i := 0; i < 256; i++ {
+        state ^= state << 13
+        shift := state >> 7
+        if state < 0 {
+            shift += 144115188075855872
+        }
+        state ^= shift
+        state ^= state << 17
+        total += state
+    }
+    return total
+}()

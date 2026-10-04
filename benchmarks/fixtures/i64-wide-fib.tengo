@@ -1,0 +1,10 @@
+result := func() {
+    current := 1 << 50
+    next := (1 << 50) + 1
+    for i := 2; i <= 25; i++ {
+        sum := current + next
+        current = next
+        next = sum
+    }
+    return next
+}()

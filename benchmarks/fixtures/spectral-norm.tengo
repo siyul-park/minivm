@@ -1,0 +1,46 @@
+math := import("math")
+
+a := func(i, j) {
+    k := i + j
+    return 1.0 / float(k*(k+1)/2+i+1)
+}
+
+atimes := func(n, u, out, transpose) {
+    for i := 0; i < n; i++ {
+        sum := 0.0
+        for j := 0; j < n; j++ {
+            if transpose {
+                sum += a(j, i) * u[j]
+            } else {
+                sum += a(i, j) * u[j]
+            }
+        }
+        out[i] = sum
+    }
+}
+
+n := 24
+u := []
+v := []
+tmp := []
+for i := 0; i < n; i++ {
+    u = append(u, 1.0)
+    v = append(v, 0.0)
+    tmp = append(tmp, 0.0)
+}
+
+for iteration := 0; iteration < 2; iteration++ {
+    atimes(n, u, tmp, false)
+    atimes(n, tmp, v, true)
+    atimes(n, v, tmp, false)
+    atimes(n, tmp, u, true)
+}
+
+vbv := 0.0
+vv := 0.0
+for i := 0; i < n; i++ {
+    vbv += u[i] * v[i]
+    vv += v[i] * v[i]
+}
+
+result := int(math.sqrt(vbv/vv) * 1e9)

@@ -1,0 +1,219 @@
+.code
+0000:	i32.const 0x00000018
+0005:	array.new_default 0x0000
+0008:	local.set 0x00
+0010:	local.get 0x00
+0012:	i32.const 0x00000000
+0017:	f64.const 0x3FF0000000000000
+0026:	i32.const 0x00000018
+0031:	array.fill
+0032:	i32.const 0x00000018
+0037:	array.new_default 0x0000
+0040:	local.set 0x01
+0042:	i32.const 0x00000018
+0047:	array.new_default 0x0000
+0050:	local.set 0x02
+0052:	i32.const 0x00000000
+0057:	local.set 0x03
+L0059:
+0059:	local.get 0x03
+0061:	i32.const 0x00000002
+0066:	i32.ge_s
+0067:	br_if L0135
+0070:	i32.const 0x00000018
+0075:	local.get 0x00
+0077:	local.get 0x02
+0079:	const.get 0x0001
+0082:	call
+0083:	i32.const 0x00000018
+0088:	local.get 0x02
+0090:	local.get 0x01
+0092:	const.get 0x0002
+0095:	call
+0096:	i32.const 0x00000018
+0101:	local.get 0x01
+0103:	local.get 0x02
+0105:	const.get 0x0001
+0108:	call
+0109:	i32.const 0x00000018
+0114:	local.get 0x02
+0116:	local.get 0x00
+0118:	const.get 0x0002
+0121:	call
+0122:	local.get 0x03
+0124:	i32.const 0x00000001
+0129:	i32.add
+0130:	local.set 0x03
+0132:	br L0059
+L0135:
+0135:	f64.const 0x0000000000000000
+0144:	local.set 0x04
+0146:	f64.const 0x0000000000000000
+0155:	local.set 0x05
+0157:	i32.const 0x00000000
+0162:	local.set 0x06
+L0164:
+0164:	local.get 0x06
+0166:	i32.const 0x00000018
+0171:	i32.ge_s
+0172:	br_if L0220
+0175:	local.get 0x04
+0177:	local.get 0x00
+0179:	local.get 0x06
+0181:	array.get
+0182:	local.get 0x01
+0184:	local.get 0x06
+0186:	array.get
+0187:	f64.mul
+0188:	f64.add
+0189:	local.set 0x04
+0191:	local.get 0x05
+0193:	local.get 0x01
+0195:	local.get 0x06
+0197:	array.get
+0198:	local.get 0x01
+0200:	local.get 0x06
+0202:	array.get
+0203:	f64.mul
+0204:	f64.add
+0205:	local.set 0x05
+0207:	local.get 0x06
+0209:	i32.const 0x00000001
+0214:	i32.add
+0215:	local.set 0x06
+0217:	br L0164
+L0220:
+0220:	local.get 0x04
+0222:	local.get 0x05
+0224:	f64.div
+0225:	f64.sqrt
+0226:	f64.const 0x41CDCD6500000000
+0235:	f64.mul
+0236:	f64.to_i32_s
+.locals
+0000:	[]f64
+0001:	[]f64
+0002:	[]f64
+0003:	i32
+0004:	f64
+0005:	f64
+0006:	i32
+.constants
+0000:	func(i32, i32) f64
+	0000:	f64.const 0x3FF0000000000000
+	0009:	local.get 0x00
+	0011:	local.get 0x01
+	0013:	i32.add
+	0014:	local.get 0x00
+	0016:	local.get 0x01
+	0018:	i32.add
+	0019:	i32.const 0x00000001
+	0024:	i32.add
+	0025:	i32.mul
+	0026:	i32.const 0x00000002
+	0031:	i32.div_s
+	0032:	local.get 0x00
+	0034:	i32.const 0x00000001
+	0039:	i32.add
+	0040:	i32.add
+	0041:	i32.to_f64_s
+	0042:	f64.div
+	0043:	return
+0001:	func(i32, []f64, []f64)
+	i32
+	i32
+	f64
+	0000:	i32.const 0x00000000
+	0005:	local.set 0x03
+	L0007:
+	0007:	local.get 0x03
+	0009:	local.get 0x00
+	0011:	i32.ge_s
+	0012:	br_if L0093
+	0015:	f64.const 0x0000000000000000
+	0024:	local.set 0x05
+	0026:	i32.const 0x00000000
+	0031:	local.set 0x04
+	L0033:
+	0033:	local.get 0x04
+	0035:	local.get 0x00
+	0037:	i32.ge_s
+	0038:	br_if L0073
+	0041:	local.get 0x05
+	0043:	local.get 0x03
+	0045:	local.get 0x04
+	0047:	const.get 0x0000
+	0050:	call
+	0051:	local.get 0x01
+	0053:	local.get 0x04
+	0055:	array.get
+	0056:	f64.mul
+	0057:	f64.add
+	0058:	local.set 0x05
+	0060:	local.get 0x04
+	0062:	i32.const 0x00000001
+	0067:	i32.add
+	0068:	local.set 0x04
+	0070:	br L0033
+	L0073:
+	0073:	local.get 0x02
+	0075:	local.get 0x03
+	0077:	local.get 0x05
+	0079:	array.set
+	0080:	local.get 0x03
+	0082:	i32.const 0x00000001
+	0087:	i32.add
+	0088:	local.set 0x03
+	0090:	br L0007
+	L0093:
+	0093:	return
+0002:	func(i32, []f64, []f64)
+	i32
+	i32
+	f64
+	0000:	i32.const 0x00000000
+	0005:	local.set 0x03
+	L0007:
+	0007:	local.get 0x03
+	0009:	local.get 0x00
+	0011:	i32.ge_s
+	0012:	br_if L0093
+	0015:	f64.const 0x0000000000000000
+	0024:	local.set 0x05
+	0026:	i32.const 0x00000000
+	0031:	local.set 0x04
+	L0033:
+	0033:	local.get 0x04
+	0035:	local.get 0x00
+	0037:	i32.ge_s
+	0038:	br_if L0073
+	0041:	local.get 0x05
+	0043:	local.get 0x04
+	0045:	local.get 0x03
+	0047:	const.get 0x0000
+	0050:	call
+	0051:	local.get 0x01
+	0053:	local.get 0x04
+	0055:	array.get
+	0056:	f64.mul
+	0057:	f64.add
+	0058:	local.set 0x05
+	0060:	local.get 0x04
+	0062:	i32.const 0x00000001
+	0067:	i32.add
+	0068:	local.set 0x04
+	0070:	br L0033
+	L0073:
+	0073:	local.get 0x02
+	0075:	local.get 0x03
+	0077:	local.get 0x05
+	0079:	array.set
+	0080:	local.get 0x03
+	0082:	i32.const 0x00000001
+	0087:	i32.add
+	0088:	local.set 0x03
+	0090:	br L0007
+	L0093:
+	0093:	return
+.types
+0000:	[]f64

@@ -1,0 +1,8 @@
+result := func() {
+    root := [undefined]
+    for index := 1; index < 128; index++ {
+        root = [root]
+    }
+
+    return 128 + len(root) - 1
+}()

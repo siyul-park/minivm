@@ -1,0 +1,15 @@
+build := func(d) {
+    n := {left: undefined, right: undefined}
+    if d > 0 {
+        n.left = build(d - 1)
+        n.right = build(d - 1)
+    }
+    return n
+}
+check := func(n) {
+    if n == undefined {
+        return 0
+    }
+    return 1 + check(n.left) + check(n.right)
+}
+result := check(build(9))

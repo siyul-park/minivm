@@ -1,0 +1,13 @@
+result := func() {
+    value := 0
+     next := func() {
+        value++
+        return value
+    }
+
+    for index := 0; index < 128; index++ {
+        value = next()
+    }
+
+    return value
+}()

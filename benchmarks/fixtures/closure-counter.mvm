@@ -1,0 +1,399 @@
+.code
+0000:	i32.const 0x00000000
+0005:	const.get 0x0000
+0008:	closure.new
+0009:	local.set 0x00
+0011:	local.get 0x00
+0013:	call
+0014:	drop
+0015:	local.get 0x00
+0017:	call
+0018:	drop
+0019:	local.get 0x00
+0021:	call
+0022:	drop
+0023:	local.get 0x00
+0025:	call
+0026:	drop
+0027:	local.get 0x00
+0029:	call
+0030:	drop
+0031:	local.get 0x00
+0033:	call
+0034:	drop
+0035:	local.get 0x00
+0037:	call
+0038:	drop
+0039:	local.get 0x00
+0041:	call
+0042:	drop
+0043:	local.get 0x00
+0045:	call
+0046:	drop
+0047:	local.get 0x00
+0049:	call
+0050:	drop
+0051:	local.get 0x00
+0053:	call
+0054:	drop
+0055:	local.get 0x00
+0057:	call
+0058:	drop
+0059:	local.get 0x00
+0061:	call
+0062:	drop
+0063:	local.get 0x00
+0065:	call
+0066:	drop
+0067:	local.get 0x00
+0069:	call
+0070:	drop
+0071:	local.get 0x00
+0073:	call
+0074:	drop
+0075:	local.get 0x00
+0077:	call
+0078:	drop
+0079:	local.get 0x00
+0081:	call
+0082:	drop
+0083:	local.get 0x00
+0085:	call
+0086:	drop
+0087:	local.get 0x00
+0089:	call
+0090:	drop
+0091:	local.get 0x00
+0093:	call
+0094:	drop
+0095:	local.get 0x00
+0097:	call
+0098:	drop
+0099:	local.get 0x00
+0101:	call
+0102:	drop
+0103:	local.get 0x00
+0105:	call
+0106:	drop
+0107:	local.get 0x00
+0109:	call
+0110:	drop
+0111:	local.get 0x00
+0113:	call
+0114:	drop
+0115:	local.get 0x00
+0117:	call
+0118:	drop
+0119:	local.get 0x00
+0121:	call
+0122:	drop
+0123:	local.get 0x00
+0125:	call
+0126:	drop
+0127:	local.get 0x00
+0129:	call
+0130:	drop
+0131:	local.get 0x00
+0133:	call
+0134:	drop
+0135:	local.get 0x00
+0137:	call
+0138:	drop
+0139:	local.get 0x00
+0141:	call
+0142:	drop
+0143:	local.get 0x00
+0145:	call
+0146:	drop
+0147:	local.get 0x00
+0149:	call
+0150:	drop
+0151:	local.get 0x00
+0153:	call
+0154:	drop
+0155:	local.get 0x00
+0157:	call
+0158:	drop
+0159:	local.get 0x00
+0161:	call
+0162:	drop
+0163:	local.get 0x00
+0165:	call
+0166:	drop
+0167:	local.get 0x00
+0169:	call
+0170:	drop
+0171:	local.get 0x00
+0173:	call
+0174:	drop
+0175:	local.get 0x00
+0177:	call
+0178:	drop
+0179:	local.get 0x00
+0181:	call
+0182:	drop
+0183:	local.get 0x00
+0185:	call
+0186:	drop
+0187:	local.get 0x00
+0189:	call
+0190:	drop
+0191:	local.get 0x00
+0193:	call
+0194:	drop
+0195:	local.get 0x00
+0197:	call
+0198:	drop
+0199:	local.get 0x00
+0201:	call
+0202:	drop
+0203:	local.get 0x00
+0205:	call
+0206:	drop
+0207:	local.get 0x00
+0209:	call
+0210:	drop
+0211:	local.get 0x00
+0213:	call
+0214:	drop
+0215:	local.get 0x00
+0217:	call
+0218:	drop
+0219:	local.get 0x00
+0221:	call
+0222:	drop
+0223:	local.get 0x00
+0225:	call
+0226:	drop
+0227:	local.get 0x00
+0229:	call
+0230:	drop
+0231:	local.get 0x00
+0233:	call
+0234:	drop
+0235:	local.get 0x00
+0237:	call
+0238:	drop
+0239:	local.get 0x00
+0241:	call
+0242:	drop
+0243:	local.get 0x00
+0245:	call
+0246:	drop
+0247:	local.get 0x00
+0249:	call
+0250:	drop
+0251:	local.get 0x00
+0253:	call
+0254:	drop
+0255:	local.get 0x00
+0257:	call
+0258:	drop
+0259:	local.get 0x00
+0261:	call
+0262:	drop
+0263:	local.get 0x00
+0265:	call
+0266:	drop
+0267:	local.get 0x00
+0269:	call
+0270:	drop
+0271:	local.get 0x00
+0273:	call
+0274:	drop
+0275:	local.get 0x00
+0277:	call
+0278:	drop
+0279:	local.get 0x00
+0281:	call
+0282:	drop
+0283:	local.get 0x00
+0285:	call
+0286:	drop
+0287:	local.get 0x00
+0289:	call
+0290:	drop
+0291:	local.get 0x00
+0293:	call
+0294:	drop
+0295:	local.get 0x00
+0297:	call
+0298:	drop
+0299:	local.get 0x00
+0301:	call
+0302:	drop
+0303:	local.get 0x00
+0305:	call
+0306:	drop
+0307:	local.get 0x00
+0309:	call
+0310:	drop
+0311:	local.get 0x00
+0313:	call
+0314:	drop
+0315:	local.get 0x00
+0317:	call
+0318:	drop
+0319:	local.get 0x00
+0321:	call
+0322:	drop
+0323:	local.get 0x00
+0325:	call
+0326:	drop
+0327:	local.get 0x00
+0329:	call
+0330:	drop
+0331:	local.get 0x00
+0333:	call
+0334:	drop
+0335:	local.get 0x00
+0337:	call
+0338:	drop
+0339:	local.get 0x00
+0341:	call
+0342:	drop
+0343:	local.get 0x00
+0345:	call
+0346:	drop
+0347:	local.get 0x00
+0349:	call
+0350:	drop
+0351:	local.get 0x00
+0353:	call
+0354:	drop
+0355:	local.get 0x00
+0357:	call
+0358:	drop
+0359:	local.get 0x00
+0361:	call
+0362:	drop
+0363:	local.get 0x00
+0365:	call
+0366:	drop
+0367:	local.get 0x00
+0369:	call
+0370:	drop
+0371:	local.get 0x00
+0373:	call
+0374:	drop
+0375:	local.get 0x00
+0377:	call
+0378:	drop
+0379:	local.get 0x00
+0381:	call
+0382:	drop
+0383:	local.get 0x00
+0385:	call
+0386:	drop
+0387:	local.get 0x00
+0389:	call
+0390:	drop
+0391:	local.get 0x00
+0393:	call
+0394:	drop
+0395:	local.get 0x00
+0397:	call
+0398:	drop
+0399:	local.get 0x00
+0401:	call
+0402:	drop
+0403:	local.get 0x00
+0405:	call
+0406:	drop
+0407:	local.get 0x00
+0409:	call
+0410:	drop
+0411:	local.get 0x00
+0413:	call
+0414:	drop
+0415:	local.get 0x00
+0417:	call
+0418:	drop
+0419:	local.get 0x00
+0421:	call
+0422:	drop
+0423:	local.get 0x00
+0425:	call
+0426:	drop
+0427:	local.get 0x00
+0429:	call
+0430:	drop
+0431:	local.get 0x00
+0433:	call
+0434:	drop
+0435:	local.get 0x00
+0437:	call
+0438:	drop
+0439:	local.get 0x00
+0441:	call
+0442:	drop
+0443:	local.get 0x00
+0445:	call
+0446:	drop
+0447:	local.get 0x00
+0449:	call
+0450:	drop
+0451:	local.get 0x00
+0453:	call
+0454:	drop
+0455:	local.get 0x00
+0457:	call
+0458:	drop
+0459:	local.get 0x00
+0461:	call
+0462:	drop
+0463:	local.get 0x00
+0465:	call
+0466:	drop
+0467:	local.get 0x00
+0469:	call
+0470:	drop
+0471:	local.get 0x00
+0473:	call
+0474:	drop
+0475:	local.get 0x00
+0477:	call
+0478:	drop
+0479:	local.get 0x00
+0481:	call
+0482:	drop
+0483:	local.get 0x00
+0485:	call
+0486:	drop
+0487:	local.get 0x00
+0489:	call
+0490:	drop
+0491:	local.get 0x00
+0493:	call
+0494:	drop
+0495:	local.get 0x00
+0497:	call
+0498:	drop
+0499:	local.get 0x00
+0501:	call
+0502:	drop
+0503:	local.get 0x00
+0505:	call
+0506:	drop
+0507:	local.get 0x00
+0509:	call
+0510:	drop
+0511:	local.get 0x00
+0513:	call
+0514:	drop
+0515:	local.get 0x00
+0517:	call
+0518:	drop
+0519:	local.get 0x00
+0521:	call
+.locals
+0000:	any
+.constants
+0000:	func() i32
+	capture i32
+	0000:	upval.get 0x00
+	0002:	i32.const 0x00000001
+	0007:	i32.add
+	0008:	dup
+	0009:	upval.set 0x00
+	0011:	return

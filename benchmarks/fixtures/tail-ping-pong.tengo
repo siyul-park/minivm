@@ -1,0 +1,6 @@
+value := 0
+result := 0
+for value < 1000 {
+    value = value + 1
+    result = result + value
+}

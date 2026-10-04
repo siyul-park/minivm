@@ -1,95 +1,91 @@
-# VM Kernel Benchmarks
+# VM Benchmarks
 
-Runtime-neutral workloads for measuring minivm programs that combine multiple instructions.
+Owns the benchmark fixture contract, registry, runtime matrix, and measurement commands for contributors adding or reviewing benchmark workloads.
 
-## When to Read
+## Fixtures
 
-Read when adding a VM workload, comparing execution tiers, or running cross-runtime measurements.
+Each workload uses one flat, lower-kebab-case stem under `benchmarks/fixtures/`. Runtime source stays in its native language; Go registers the executable contract in `init()`, and the registry supplies source, expected result, native implementation, program factory, and Wazero metadata to the runners.
 
-## Canonical Kernels
+| Artifact | Purpose |
+|---|---|
+| `.mvm` | canonical minivm program text |
+| `.go` | Native Go implementation and registry entry; also the Yaegi input |
+| `.tengo` | Tengo fixture |
+| `.lua` | GopherLua fixture |
+| `.js` | Goja fixture |
+| `.py` | gpython and CPython fixture |
 
-| Owner | Kernel | Signal |
-|---|---|---|
-| `BenchmarkControl_IterativeFib` | iterative Fibonacci | integer arithmetic, locals, loops, conditional branches |
-| `BenchmarkControl_Sieve` | prime sieve | typed-array allocation, indexed mutation, nested loops, branches |
-| `BenchmarkCall_RecursiveFib` | recursive Fibonacci | call frames, recursion, returns, stack growth |
-| `BenchmarkCall_IndirectRecursiveFib` | indirect recursive Fibonacci | first-class function refs and recursive indirect calls |
-| `BenchmarkCall_ClosureCounter` | closure counter | closure creation, captures, mutation, repeated calls |
-| `BenchmarkMemory_TypedArraySum` | typed-array sum | array loads, accumulation, loop guards |
-| `BenchmarkMemory_AllocationGraph` | allocation graph | reference allocation, linking, traversal, release, reuse |
-| `BenchmarkNumeric_BranchTree` | branch tree | comparisons, skewed control flow, JIT guards |
-| `BenchmarkMemory_PermutationFlips` | permutation flips | per-call boxed array allocation with in-place `array.get`/`array.set` |
-| `BenchmarkMemory_StructTreeWalk` | struct tree walk | recursive `struct.new_default`/`struct.set` with `ref.cast` traversal |
+`typed-array-sum` uses a registry `Program` factory because its typed-array constant cannot currently be represented by the `.mvm` text format. `wasm.go` owns the shared Wazero bytecode encoder helpers.
 
-Canonical fixture sizes are part of the benchmark contract: iterative Fibonacci 30, recursive Fibonacci 20 and 35, sieve 256, closure iterations 128, typed-array elements 256, allocation depth 128, branch-tree nodes 96 with input 37, permutation size 24 at depth 64, and struct-tree depth 9.
+## Registry
 
-Every fixture uses fixed input and an exact-result or checksum test. Construction, verification, result checks, reset, and JIT warmup stay outside execution timers.
+`benchmarks/registry` is the only benchmark execution index. `registry.All()` returns benchmarks in name order with all registered runtime sources attached. Benchmark runners and report generation do not inspect the fixture directory directly.
 
-## Ported minipy Kernels
+Each Go fixture registers its implementation directly:
 
-These translate `siyul-park/minipy`'s benchmark corpus (`conformance/testdata/benchmark/*.py`) instruction for instruction. minipy compiles Python to minivm bytecode, so its own numbers conflate its code generation with minivm's execution cost; hand-written kernels isolate the second. They are also the module's only f64, i64, and string coverage.
-
-| Owner | minipy source | Signal |
-|---|---|---|
-| `BenchmarkNumeric_NBody` | `nbody.py` | pairwise f64 arithmetic, `f64.sqrt`, seven arrays through call parameters |
-| `BenchmarkNumeric_SpectralNorm` | `spectralnorm.py` | f64 division, nested index loops, called evaluation functions |
-| `BenchmarkNumeric_Mandelbrot` | `mandelbrot.py` | tight f64 loop with an early return |
-| `BenchmarkNumeric_MatMul` | `matmul.py` | f64 multiply-accumulate over flat row-major arrays |
-| `BenchmarkCall_NQueens` | `nqueens.py` | backtracking recursion over `i1` array state |
-| `BenchmarkCall_Fannkuch` | `fannkuch.py` | recursive permutation search, `array.slice` copy per call, three i32 returns |
-| `BenchmarkMemory_BinaryTrees` | `binarytrees.py` | struct allocation, recursive construction and checksum traversal |
-| `BenchmarkMemory_SortStress` | `sortstress.py` | i64 modular arithmetic, in-place i32 array sort |
-| `BenchmarkMemory_StringBuild` | `strbuild.py` | `string.new_utf32`, `string.concat`, `string.len`, `string.encode_utf32` |
-
-`fib.py` needs no port: `BenchmarkCall_RecursiveFib` already is it.
-
-Fixture sizes are part of the contract, reduced from minipy's ~1-3 s CPython target so each lands at 300-900 us/op under CPython 3.13: NBody 5 bodies over 100 `advance()` steps, spectral norm n=24 over 2 power iterations, Mandelbrot 16x16 at max_iter 50, matrix multiply n=16, N-Queens n=7, fannkuch n=6, binary trees min depth 4 and max depth 6, sort stress n=128 over 2 rounds, and string build 512 tokens.
-
-Three of these produce a float checksum. Each projects it to an i32 by scaling and truncating, because Python's `int()`, Go's `int32()`, and `f64.to_i32_s` all truncate toward zero and agree exactly, so one number gates correctness across every compared implementation.
-
-### Translation deviations
-
-Two programs use minipy host builtins that minivm has no opcode for. Both are translated as the same computation rather than dropped, and both deviations are part of the kernel's contract:
-
-- `sortstress` calls `xs.sort()`. The sort is written out in bytecode, so the kernel measures VM dispatch over an insertion sort rather than a builtin. **Every compared implementation runs that same insertion sort**; timing bytecode insertion sort against CPython's C Timsort would measure algorithm choice, not either interpreter. `n` is 128 rather than the source's 13000 to keep the quadratic sort inside the shared fixture band.
-- `strbuild` ends with `upper`, `lower`, `replace`, `strip`, `count`, `find`, `startswith`, and `endswith`. minivm has none of them, so the port keeps token generation, the per-character checksum, and the concatenation accumulator, and drops the method chain. The expected checksum accounts for the omission.
-
-## Modes
-
-Every canonical kernel defines `threaded`, the generated interpreter with the JIT off (`interp.WithThreshold(-1)`), and `jit`, default options: the ARM64 native tier when the kernel reaches a compiled function. Native scope and entry rules belong to `docs/jit-internals.md`.
-
-With the `compare` build tag, each kernel also adds the applicable external runtimes: native Go, wazero, Tengo, gopher-lua, Goja, gpython, CPython, and Yaegi. A runtime whose script is empty is skipped, so a kernel declares only the comparisons that answer a question about it; the ported minipy kernels declare `native`, `cpython`, and `gpython`, and wazero is omitted when no equivalent canonical WASM fixture exists.
-
-CPython is not a Go library, so it runs as a subprocess: the driver spawns `python3.13` once, executes the workload `b.N` times inside a `time.perf_counter()` window, and reports that elapsed time, which excludes the interpreter's own ~13 ms startup. It checks the result against the expected checksum before timing, runs with `PYTHONHASHSEED=0`, and skips cleanly when `python3.13` is not on `PATH`. Because CPython is a pure interpreter, `threaded` is the minivm mode its ratio is meaningful against.
-
-## Commands
-
-Canonical minivm kernels:
-
-```bash
-go test -run '^$' -bench='^(BenchmarkControl|BenchmarkCall|BenchmarkMemory|BenchmarkNumeric)' -benchmem ./...
+```go
+func init() {
+	run := func() int32 { return iterativeFib(30) }
+	registry.Register(registry.Spec{
+		Name:   "iterative-fib",
+		Result: func() types.Value { return types.I32(run()) },
+		Native: registry.Native{I32: run},
+	})
+}
 ```
 
-Correctness:
+Yaegi supplies the compiled `registry.Register` and dependency symbols, evaluates the same Go fixture source, captures the registered function, and benchmarks it. No AST rewriting or `Run...` adapter is used.
+
+## Runtimes
+
+The corpus contains 25 workloads.
+
+| Runtime | Coverage | Notes |
+|---|---:|---|
+| Threaded | 25 | minivm interpreter with JIT disabled |
+| JIT | 25 | minivm default execution |
+| Native Go | 25 | direct compiled Go implementation |
+| Wazero | 7 | exact WebAssembly implementations |
+| Tengo | 25 | all workloads |
+| GopherLua | 22 | I32 workloads; exact I64 values are outside Lua's numeric model |
+| Goja | 25 | I32 plus BigInt-based I64 fixtures |
+| gpython | 25 | Python fixture |
+| CPython | 25 | same Python fixture through `python3.13` |
+| Yaegi | 25 | Go fixture; two cases are intentionally unmeasured |
+
+A runtime cell is `—` only when no meaningful implementation exists or the benchmark is intentionally inapplicable. Yaegi skips `typed-array-sum` because its generic typed-array program is outside Yaegi's supported syntax and `recursive-fib-35` because the interpreted workload is impractical.
+
+## Measurement
+
+`make benchmark` is the only benchmark command. Only measurement time changes by level.
+
+| Level | Target |
+|---|---:|
+| `quick` | 100 ms |
+| `standard` | 300 ms |
+| `deep` | 1 s |
+
+Fixture loading, compilation, module construction, function lookup, and correctness checks stay outside the timed loop where the runtime permits it. CPython measures the repeated workload inside `perf_counter()` so process startup is excluded.
+
+## Maintenance
+
+Use one shared workload stem and one Go registry entry. Add every runtime fixture that can express the same deterministic algorithm and input without changing its computation. Keep expected-result calculation owned by the Go registration.
+
+Regenerate the result document with:
 
 ```bash
-go test ./...
+make benchmark
 ```
 
-Complete external comparison with three samples:
+## Ownership
 
-```bash
-go test -tags=compare -run '^$' -bench='.' -benchmem -benchtime=300ms -count=3 ./...
-```
+- `benchmarks/registry` owns benchmark metadata and source attachment.
+- `benchmarks/fixtures` owns workload source and native implementations.
+- `benchmarks/cmd/benchreport` owns conversion of benchmark output into `docs/benchmarks.md`.
 
-External comparisons are informational. Parsing, compilation, module creation, and function lookup stay outside the timed loop where supported. They are excluded from canonical regression gates because runtime initialization, value models, and reset policies differ.
+## Related
 
-## Maintenance Notes
-
-Keep inputs deterministic. Add a kernel only when it exposes a distinct VM signal. Do not add service-domain models, network state, mutable files, random seeds, or aggregate scores.
-
-## Related Docs
-
-- `../docs/benchmarks.md` - current measurements, ownership, and methodology
-- `../docs/instruction-set.md` - opcode semantics and JIT support
-- `../docs/jit-internals.md` - native execution lifecycle and contract
+- `../docs/benchmarks.md` — current benchmark results
+- `../docs/writing.md` — Markdown document rules
+- `../docs/testing.md` — test structure and validation
+- `../docs/coding-patterns.md` — Go design and naming rules

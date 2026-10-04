@@ -1,0 +1,1449 @@
+.code
+0000:	i32.const 0x00000025
+0005:	local.set 0x00
+0007:	i32.const 0x00000000
+0012:	local.set 0x01
+0014:	local.get 0x00
+0016:	i32.const 0x0000000B
+0021:	i32.lt_s
+0022:	br_if L0038
+0025:	local.get 0x01
+0027:	i32.const 0x00000002
+0032:	i32.add
+0033:	local.set 0x01
+0035:	br L0048
+L0038:
+0038:	local.get 0x01
+0040:	i32.const 0x00000001
+0045:	i32.add
+0046:	local.set 0x01
+L0048:
+0048:	local.get 0x00
+0050:	i32.const 0x0000001C
+0055:	i32.lt_s
+0056:	br_if L0072
+0059:	local.get 0x01
+0061:	i32.const 0x00000003
+0066:	i32.add
+0067:	local.set 0x01
+0069:	br L0082
+L0072:
+0072:	local.get 0x01
+0074:	i32.const 0x00000002
+0079:	i32.add
+0080:	local.set 0x01
+L0082:
+0082:	local.get 0x00
+0084:	i32.const 0x0000002D
+0089:	i32.lt_s
+0090:	br_if L0106
+0093:	local.get 0x01
+0095:	i32.const 0x00000004
+0100:	i32.add
+0101:	local.set 0x01
+0103:	br L0116
+L0106:
+0106:	local.get 0x01
+0108:	i32.const 0x00000003
+0113:	i32.add
+0114:	local.set 0x01
+L0116:
+0116:	local.get 0x00
+0118:	i32.const 0x0000003E
+0123:	i32.lt_s
+0124:	br_if L0140
+0127:	local.get 0x01
+0129:	i32.const 0x00000005
+0134:	i32.add
+0135:	local.set 0x01
+0137:	br L0150
+L0140:
+0140:	local.get 0x01
+0142:	i32.const 0x00000004
+0147:	i32.add
+0148:	local.set 0x01
+L0150:
+0150:	local.get 0x00
+0152:	i32.const 0x0000004F
+0157:	i32.lt_s
+0158:	br_if L0174
+0161:	local.get 0x01
+0163:	i32.const 0x00000006
+0168:	i32.add
+0169:	local.set 0x01
+0171:	br L0184
+L0174:
+0174:	local.get 0x01
+0176:	i32.const 0x00000005
+0181:	i32.add
+0182:	local.set 0x01
+L0184:
+0184:	local.get 0x00
+0186:	i32.const 0x00000060
+0191:	i32.lt_s
+0192:	br_if L0208
+0195:	local.get 0x01
+0197:	i32.const 0x00000002
+0202:	i32.add
+0203:	local.set 0x01
+0205:	br L0218
+L0208:
+0208:	local.get 0x01
+0210:	i32.const 0x00000006
+0215:	i32.add
+0216:	local.set 0x01
+L0218:
+0218:	local.get 0x00
+0220:	i32.const 0x00000010
+0225:	i32.lt_s
+0226:	br_if L0242
+0229:	local.get 0x01
+0231:	i32.const 0x00000003
+0236:	i32.add
+0237:	local.set 0x01
+0239:	br L0252
+L0242:
+0242:	local.get 0x01
+0244:	i32.const 0x00000007
+0249:	i32.add
+0250:	local.set 0x01
+L0252:
+0252:	local.get 0x00
+0254:	i32.const 0x00000021
+0259:	i32.lt_s
+0260:	br_if L0276
+0263:	local.get 0x01
+0265:	i32.const 0x00000004
+0270:	i32.add
+0271:	local.set 0x01
+0273:	br L0286
+L0276:
+0276:	local.get 0x01
+0278:	i32.const 0x00000001
+0283:	i32.add
+0284:	local.set 0x01
+L0286:
+0286:	local.get 0x00
+0288:	i32.const 0x00000032
+0293:	i32.lt_s
+0294:	br_if L0310
+0297:	local.get 0x01
+0299:	i32.const 0x00000005
+0304:	i32.add
+0305:	local.set 0x01
+0307:	br L0320
+L0310:
+0310:	local.get 0x01
+0312:	i32.const 0x00000002
+0317:	i32.add
+0318:	local.set 0x01
+L0320:
+0320:	local.get 0x00
+0322:	i32.const 0x00000043
+0327:	i32.lt_s
+0328:	br_if L0344
+0331:	local.get 0x01
+0333:	i32.const 0x00000006
+0338:	i32.add
+0339:	local.set 0x01
+0341:	br L0354
+L0344:
+0344:	local.get 0x01
+0346:	i32.const 0x00000003
+0351:	i32.add
+0352:	local.set 0x01
+L0354:
+0354:	local.get 0x00
+0356:	i32.const 0x00000054
+0361:	i32.lt_s
+0362:	br_if L0378
+0365:	local.get 0x01
+0367:	i32.const 0x00000002
+0372:	i32.add
+0373:	local.set 0x01
+0375:	br L0388
+L0378:
+0378:	local.get 0x01
+0380:	i32.const 0x00000004
+0385:	i32.add
+0386:	local.set 0x01
+L0388:
+0388:	local.get 0x00
+0390:	i32.const 0x00000004
+0395:	i32.lt_s
+0396:	br_if L0412
+0399:	local.get 0x01
+0401:	i32.const 0x00000003
+0406:	i32.add
+0407:	local.set 0x01
+0409:	br L0422
+L0412:
+0412:	local.get 0x01
+0414:	i32.const 0x00000005
+0419:	i32.add
+0420:	local.set 0x01
+L0422:
+0422:	local.get 0x00
+0424:	i32.const 0x00000015
+0429:	i32.lt_s
+0430:	br_if L0446
+0433:	local.get 0x01
+0435:	i32.const 0x00000004
+0440:	i32.add
+0441:	local.set 0x01
+0443:	br L0456
+L0446:
+0446:	local.get 0x01
+0448:	i32.const 0x00000006
+0453:	i32.add
+0454:	local.set 0x01
+L0456:
+0456:	local.get 0x00
+0458:	i32.const 0x00000026
+0463:	i32.lt_s
+0464:	br_if L0480
+0467:	local.get 0x01
+0469:	i32.const 0x00000005
+0474:	i32.add
+0475:	local.set 0x01
+0477:	br L0490
+L0480:
+0480:	local.get 0x01
+0482:	i32.const 0x00000007
+0487:	i32.add
+0488:	local.set 0x01
+L0490:
+0490:	local.get 0x00
+0492:	i32.const 0x00000037
+0497:	i32.lt_s
+0498:	br_if L0514
+0501:	local.get 0x01
+0503:	i32.const 0x00000006
+0508:	i32.add
+0509:	local.set 0x01
+0511:	br L0524
+L0514:
+0514:	local.get 0x01
+0516:	i32.const 0x00000001
+0521:	i32.add
+0522:	local.set 0x01
+L0524:
+0524:	local.get 0x00
+0526:	i32.const 0x00000048
+0531:	i32.lt_s
+0532:	br_if L0548
+0535:	local.get 0x01
+0537:	i32.const 0x00000002
+0542:	i32.add
+0543:	local.set 0x01
+0545:	br L0558
+L0548:
+0548:	local.get 0x01
+0550:	i32.const 0x00000002
+0555:	i32.add
+0556:	local.set 0x01
+L0558:
+0558:	local.get 0x00
+0560:	i32.const 0x00000059
+0565:	i32.lt_s
+0566:	br_if L0582
+0569:	local.get 0x01
+0571:	i32.const 0x00000003
+0576:	i32.add
+0577:	local.set 0x01
+0579:	br L0592
+L0582:
+0582:	local.get 0x01
+0584:	i32.const 0x00000003
+0589:	i32.add
+0590:	local.set 0x01
+L0592:
+0592:	local.get 0x00
+0594:	i32.const 0x00000009
+0599:	i32.lt_s
+0600:	br_if L0616
+0603:	local.get 0x01
+0605:	i32.const 0x00000004
+0610:	i32.add
+0611:	local.set 0x01
+0613:	br L0626
+L0616:
+0616:	local.get 0x01
+0618:	i32.const 0x00000004
+0623:	i32.add
+0624:	local.set 0x01
+L0626:
+0626:	local.get 0x00
+0628:	i32.const 0x0000001A
+0633:	i32.lt_s
+0634:	br_if L0650
+0637:	local.get 0x01
+0639:	i32.const 0x00000005
+0644:	i32.add
+0645:	local.set 0x01
+0647:	br L0660
+L0650:
+0650:	local.get 0x01
+0652:	i32.const 0x00000005
+0657:	i32.add
+0658:	local.set 0x01
+L0660:
+0660:	local.get 0x00
+0662:	i32.const 0x0000002B
+0667:	i32.lt_s
+0668:	br_if L0684
+0671:	local.get 0x01
+0673:	i32.const 0x00000006
+0678:	i32.add
+0679:	local.set 0x01
+0681:	br L0694
+L0684:
+0684:	local.get 0x01
+0686:	i32.const 0x00000006
+0691:	i32.add
+0692:	local.set 0x01
+L0694:
+0694:	local.get 0x00
+0696:	i32.const 0x0000003C
+0701:	i32.lt_s
+0702:	br_if L0718
+0705:	local.get 0x01
+0707:	i32.const 0x00000002
+0712:	i32.add
+0713:	local.set 0x01
+0715:	br L0728
+L0718:
+0718:	local.get 0x01
+0720:	i32.const 0x00000007
+0725:	i32.add
+0726:	local.set 0x01
+L0728:
+0728:	local.get 0x00
+0730:	i32.const 0x0000004D
+0735:	i32.lt_s
+0736:	br_if L0752
+0739:	local.get 0x01
+0741:	i32.const 0x00000003
+0746:	i32.add
+0747:	local.set 0x01
+0749:	br L0762
+L0752:
+0752:	local.get 0x01
+0754:	i32.const 0x00000001
+0759:	i32.add
+0760:	local.set 0x01
+L0762:
+0762:	local.get 0x00
+0764:	i32.const 0x0000005E
+0769:	i32.lt_s
+0770:	br_if L0786
+0773:	local.get 0x01
+0775:	i32.const 0x00000004
+0780:	i32.add
+0781:	local.set 0x01
+0783:	br L0796
+L0786:
+0786:	local.get 0x01
+0788:	i32.const 0x00000002
+0793:	i32.add
+0794:	local.set 0x01
+L0796:
+0796:	local.get 0x00
+0798:	i32.const 0x0000000E
+0803:	i32.lt_s
+0804:	br_if L0820
+0807:	local.get 0x01
+0809:	i32.const 0x00000005
+0814:	i32.add
+0815:	local.set 0x01
+0817:	br L0830
+L0820:
+0820:	local.get 0x01
+0822:	i32.const 0x00000003
+0827:	i32.add
+0828:	local.set 0x01
+L0830:
+0830:	local.get 0x00
+0832:	i32.const 0x0000001F
+0837:	i32.lt_s
+0838:	br_if L0854
+0841:	local.get 0x01
+0843:	i32.const 0x00000006
+0848:	i32.add
+0849:	local.set 0x01
+0851:	br L0864
+L0854:
+0854:	local.get 0x01
+0856:	i32.const 0x00000004
+0861:	i32.add
+0862:	local.set 0x01
+L0864:
+0864:	local.get 0x00
+0866:	i32.const 0x00000030
+0871:	i32.lt_s
+0872:	br_if L0888
+0875:	local.get 0x01
+0877:	i32.const 0x00000002
+0882:	i32.add
+0883:	local.set 0x01
+0885:	br L0898
+L0888:
+0888:	local.get 0x01
+0890:	i32.const 0x00000005
+0895:	i32.add
+0896:	local.set 0x01
+L0898:
+0898:	local.get 0x00
+0900:	i32.const 0x00000041
+0905:	i32.lt_s
+0906:	br_if L0922
+0909:	local.get 0x01
+0911:	i32.const 0x00000003
+0916:	i32.add
+0917:	local.set 0x01
+0919:	br L0932
+L0922:
+0922:	local.get 0x01
+0924:	i32.const 0x00000006
+0929:	i32.add
+0930:	local.set 0x01
+L0932:
+0932:	local.get 0x00
+0934:	i32.const 0x00000052
+0939:	i32.lt_s
+0940:	br_if L0956
+0943:	local.get 0x01
+0945:	i32.const 0x00000004
+0950:	i32.add
+0951:	local.set 0x01
+0953:	br L0966
+L0956:
+0956:	local.get 0x01
+0958:	i32.const 0x00000007
+0963:	i32.add
+0964:	local.set 0x01
+L0966:
+0966:	local.get 0x00
+0968:	i32.const 0x00000002
+0973:	i32.lt_s
+0974:	br_if L0990
+0977:	local.get 0x01
+0979:	i32.const 0x00000005
+0984:	i32.add
+0985:	local.set 0x01
+0987:	br L1000
+L0990:
+0990:	local.get 0x01
+0992:	i32.const 0x00000001
+0997:	i32.add
+0998:	local.set 0x01
+L1000:
+1000:	local.get 0x00
+1002:	i32.const 0x00000013
+1007:	i32.lt_s
+1008:	br_if L1024
+1011:	local.get 0x01
+1013:	i32.const 0x00000006
+1018:	i32.add
+1019:	local.set 0x01
+1021:	br L1034
+L1024:
+1024:	local.get 0x01
+1026:	i32.const 0x00000002
+1031:	i32.add
+1032:	local.set 0x01
+L1034:
+1034:	local.get 0x00
+1036:	i32.const 0x00000024
+1041:	i32.lt_s
+1042:	br_if L1058
+1045:	local.get 0x01
+1047:	i32.const 0x00000002
+1052:	i32.add
+1053:	local.set 0x01
+1055:	br L1068
+L1058:
+1058:	local.get 0x01
+1060:	i32.const 0x00000003
+1065:	i32.add
+1066:	local.set 0x01
+L1068:
+1068:	local.get 0x00
+1070:	i32.const 0x00000035
+1075:	i32.lt_s
+1076:	br_if L1092
+1079:	local.get 0x01
+1081:	i32.const 0x00000003
+1086:	i32.add
+1087:	local.set 0x01
+1089:	br L1102
+L1092:
+1092:	local.get 0x01
+1094:	i32.const 0x00000004
+1099:	i32.add
+1100:	local.set 0x01
+L1102:
+1102:	local.get 0x00
+1104:	i32.const 0x00000046
+1109:	i32.lt_s
+1110:	br_if L1126
+1113:	local.get 0x01
+1115:	i32.const 0x00000004
+1120:	i32.add
+1121:	local.set 0x01
+1123:	br L1136
+L1126:
+1126:	local.get 0x01
+1128:	i32.const 0x00000005
+1133:	i32.add
+1134:	local.set 0x01
+L1136:
+1136:	local.get 0x00
+1138:	i32.const 0x00000057
+1143:	i32.lt_s
+1144:	br_if L1160
+1147:	local.get 0x01
+1149:	i32.const 0x00000005
+1154:	i32.add
+1155:	local.set 0x01
+1157:	br L1170
+L1160:
+1160:	local.get 0x01
+1162:	i32.const 0x00000006
+1167:	i32.add
+1168:	local.set 0x01
+L1170:
+1170:	local.get 0x00
+1172:	i32.const 0x00000007
+1177:	i32.lt_s
+1178:	br_if L1194
+1181:	local.get 0x01
+1183:	i32.const 0x00000006
+1188:	i32.add
+1189:	local.set 0x01
+1191:	br L1204
+L1194:
+1194:	local.get 0x01
+1196:	i32.const 0x00000007
+1201:	i32.add
+1202:	local.set 0x01
+L1204:
+1204:	local.get 0x00
+1206:	i32.const 0x00000018
+1211:	i32.lt_s
+1212:	br_if L1228
+1215:	local.get 0x01
+1217:	i32.const 0x00000002
+1222:	i32.add
+1223:	local.set 0x01
+1225:	br L1238
+L1228:
+1228:	local.get 0x01
+1230:	i32.const 0x00000001
+1235:	i32.add
+1236:	local.set 0x01
+L1238:
+1238:	local.get 0x00
+1240:	i32.const 0x00000029
+1245:	i32.lt_s
+1246:	br_if L1262
+1249:	local.get 0x01
+1251:	i32.const 0x00000003
+1256:	i32.add
+1257:	local.set 0x01
+1259:	br L1272
+L1262:
+1262:	local.get 0x01
+1264:	i32.const 0x00000002
+1269:	i32.add
+1270:	local.set 0x01
+L1272:
+1272:	local.get 0x00
+1274:	i32.const 0x0000003A
+1279:	i32.lt_s
+1280:	br_if L1296
+1283:	local.get 0x01
+1285:	i32.const 0x00000004
+1290:	i32.add
+1291:	local.set 0x01
+1293:	br L1306
+L1296:
+1296:	local.get 0x01
+1298:	i32.const 0x00000003
+1303:	i32.add
+1304:	local.set 0x01
+L1306:
+1306:	local.get 0x00
+1308:	i32.const 0x0000004B
+1313:	i32.lt_s
+1314:	br_if L1330
+1317:	local.get 0x01
+1319:	i32.const 0x00000005
+1324:	i32.add
+1325:	local.set 0x01
+1327:	br L1340
+L1330:
+1330:	local.get 0x01
+1332:	i32.const 0x00000004
+1337:	i32.add
+1338:	local.set 0x01
+L1340:
+1340:	local.get 0x00
+1342:	i32.const 0x0000005C
+1347:	i32.lt_s
+1348:	br_if L1364
+1351:	local.get 0x01
+1353:	i32.const 0x00000006
+1358:	i32.add
+1359:	local.set 0x01
+1361:	br L1374
+L1364:
+1364:	local.get 0x01
+1366:	i32.const 0x00000005
+1371:	i32.add
+1372:	local.set 0x01
+L1374:
+1374:	local.get 0x00
+1376:	i32.const 0x0000000C
+1381:	i32.lt_s
+1382:	br_if L1398
+1385:	local.get 0x01
+1387:	i32.const 0x00000002
+1392:	i32.add
+1393:	local.set 0x01
+1395:	br L1408
+L1398:
+1398:	local.get 0x01
+1400:	i32.const 0x00000006
+1405:	i32.add
+1406:	local.set 0x01
+L1408:
+1408:	local.get 0x00
+1410:	i32.const 0x0000001D
+1415:	i32.lt_s
+1416:	br_if L1432
+1419:	local.get 0x01
+1421:	i32.const 0x00000003
+1426:	i32.add
+1427:	local.set 0x01
+1429:	br L1442
+L1432:
+1432:	local.get 0x01
+1434:	i32.const 0x00000007
+1439:	i32.add
+1440:	local.set 0x01
+L1442:
+1442:	local.get 0x00
+1444:	i32.const 0x0000002E
+1449:	i32.lt_s
+1450:	br_if L1466
+1453:	local.get 0x01
+1455:	i32.const 0x00000004
+1460:	i32.add
+1461:	local.set 0x01
+1463:	br L1476
+L1466:
+1466:	local.get 0x01
+1468:	i32.const 0x00000001
+1473:	i32.add
+1474:	local.set 0x01
+L1476:
+1476:	local.get 0x00
+1478:	i32.const 0x0000003F
+1483:	i32.lt_s
+1484:	br_if L1500
+1487:	local.get 0x01
+1489:	i32.const 0x00000005
+1494:	i32.add
+1495:	local.set 0x01
+1497:	br L1510
+L1500:
+1500:	local.get 0x01
+1502:	i32.const 0x00000002
+1507:	i32.add
+1508:	local.set 0x01
+L1510:
+1510:	local.get 0x00
+1512:	i32.const 0x00000050
+1517:	i32.lt_s
+1518:	br_if L1534
+1521:	local.get 0x01
+1523:	i32.const 0x00000006
+1528:	i32.add
+1529:	local.set 0x01
+1531:	br L1544
+L1534:
+1534:	local.get 0x01
+1536:	i32.const 0x00000003
+1541:	i32.add
+1542:	local.set 0x01
+L1544:
+1544:	local.get 0x00
+1546:	i32.const 0x00000000
+1551:	i32.lt_s
+1552:	br_if L1568
+1555:	local.get 0x01
+1557:	i32.const 0x00000002
+1562:	i32.add
+1563:	local.set 0x01
+1565:	br L1578
+L1568:
+1568:	local.get 0x01
+1570:	i32.const 0x00000004
+1575:	i32.add
+1576:	local.set 0x01
+L1578:
+1578:	local.get 0x00
+1580:	i32.const 0x00000011
+1585:	i32.lt_s
+1586:	br_if L1602
+1589:	local.get 0x01
+1591:	i32.const 0x00000003
+1596:	i32.add
+1597:	local.set 0x01
+1599:	br L1612
+L1602:
+1602:	local.get 0x01
+1604:	i32.const 0x00000005
+1609:	i32.add
+1610:	local.set 0x01
+L1612:
+1612:	local.get 0x00
+1614:	i32.const 0x00000022
+1619:	i32.lt_s
+1620:	br_if L1636
+1623:	local.get 0x01
+1625:	i32.const 0x00000004
+1630:	i32.add
+1631:	local.set 0x01
+1633:	br L1646
+L1636:
+1636:	local.get 0x01
+1638:	i32.const 0x00000006
+1643:	i32.add
+1644:	local.set 0x01
+L1646:
+1646:	local.get 0x00
+1648:	i32.const 0x00000033
+1653:	i32.lt_s
+1654:	br_if L1670
+1657:	local.get 0x01
+1659:	i32.const 0x00000005
+1664:	i32.add
+1665:	local.set 0x01
+1667:	br L1680
+L1670:
+1670:	local.get 0x01
+1672:	i32.const 0x00000007
+1677:	i32.add
+1678:	local.set 0x01
+L1680:
+1680:	local.get 0x00
+1682:	i32.const 0x00000044
+1687:	i32.lt_s
+1688:	br_if L1704
+1691:	local.get 0x01
+1693:	i32.const 0x00000006
+1698:	i32.add
+1699:	local.set 0x01
+1701:	br L1714
+L1704:
+1704:	local.get 0x01
+1706:	i32.const 0x00000001
+1711:	i32.add
+1712:	local.set 0x01
+L1714:
+1714:	local.get 0x00
+1716:	i32.const 0x00000055
+1721:	i32.lt_s
+1722:	br_if L1738
+1725:	local.get 0x01
+1727:	i32.const 0x00000002
+1732:	i32.add
+1733:	local.set 0x01
+1735:	br L1748
+L1738:
+1738:	local.get 0x01
+1740:	i32.const 0x00000002
+1745:	i32.add
+1746:	local.set 0x01
+L1748:
+1748:	local.get 0x00
+1750:	i32.const 0x00000005
+1755:	i32.lt_s
+1756:	br_if L1772
+1759:	local.get 0x01
+1761:	i32.const 0x00000003
+1766:	i32.add
+1767:	local.set 0x01
+1769:	br L1782
+L1772:
+1772:	local.get 0x01
+1774:	i32.const 0x00000003
+1779:	i32.add
+1780:	local.set 0x01
+L1782:
+1782:	local.get 0x00
+1784:	i32.const 0x00000016
+1789:	i32.lt_s
+1790:	br_if L1806
+1793:	local.get 0x01
+1795:	i32.const 0x00000004
+1800:	i32.add
+1801:	local.set 0x01
+1803:	br L1816
+L1806:
+1806:	local.get 0x01
+1808:	i32.const 0x00000004
+1813:	i32.add
+1814:	local.set 0x01
+L1816:
+1816:	local.get 0x00
+1818:	i32.const 0x00000027
+1823:	i32.lt_s
+1824:	br_if L1840
+1827:	local.get 0x01
+1829:	i32.const 0x00000005
+1834:	i32.add
+1835:	local.set 0x01
+1837:	br L1850
+L1840:
+1840:	local.get 0x01
+1842:	i32.const 0x00000005
+1847:	i32.add
+1848:	local.set 0x01
+L1850:
+1850:	local.get 0x00
+1852:	i32.const 0x00000038
+1857:	i32.lt_s
+1858:	br_if L1874
+1861:	local.get 0x01
+1863:	i32.const 0x00000006
+1868:	i32.add
+1869:	local.set 0x01
+1871:	br L1884
+L1874:
+1874:	local.get 0x01
+1876:	i32.const 0x00000006
+1881:	i32.add
+1882:	local.set 0x01
+L1884:
+1884:	local.get 0x00
+1886:	i32.const 0x00000049
+1891:	i32.lt_s
+1892:	br_if L1908
+1895:	local.get 0x01
+1897:	i32.const 0x00000002
+1902:	i32.add
+1903:	local.set 0x01
+1905:	br L1918
+L1908:
+1908:	local.get 0x01
+1910:	i32.const 0x00000007
+1915:	i32.add
+1916:	local.set 0x01
+L1918:
+1918:	local.get 0x00
+1920:	i32.const 0x0000005A
+1925:	i32.lt_s
+1926:	br_if L1942
+1929:	local.get 0x01
+1931:	i32.const 0x00000003
+1936:	i32.add
+1937:	local.set 0x01
+1939:	br L1952
+L1942:
+1942:	local.get 0x01
+1944:	i32.const 0x00000001
+1949:	i32.add
+1950:	local.set 0x01
+L1952:
+1952:	local.get 0x00
+1954:	i32.const 0x0000000A
+1959:	i32.lt_s
+1960:	br_if L1976
+1963:	local.get 0x01
+1965:	i32.const 0x00000004
+1970:	i32.add
+1971:	local.set 0x01
+1973:	br L1986
+L1976:
+1976:	local.get 0x01
+1978:	i32.const 0x00000002
+1983:	i32.add
+1984:	local.set 0x01
+L1986:
+1986:	local.get 0x00
+1988:	i32.const 0x0000001B
+1993:	i32.lt_s
+1994:	br_if L2010
+1997:	local.get 0x01
+1999:	i32.const 0x00000005
+2004:	i32.add
+2005:	local.set 0x01
+2007:	br L2020
+L2010:
+2010:	local.get 0x01
+2012:	i32.const 0x00000003
+2017:	i32.add
+2018:	local.set 0x01
+L2020:
+2020:	local.get 0x00
+2022:	i32.const 0x0000002C
+2027:	i32.lt_s
+2028:	br_if L2044
+2031:	local.get 0x01
+2033:	i32.const 0x00000006
+2038:	i32.add
+2039:	local.set 0x01
+2041:	br L2054
+L2044:
+2044:	local.get 0x01
+2046:	i32.const 0x00000004
+2051:	i32.add
+2052:	local.set 0x01
+L2054:
+2054:	local.get 0x00
+2056:	i32.const 0x0000003D
+2061:	i32.lt_s
+2062:	br_if L2078
+2065:	local.get 0x01
+2067:	i32.const 0x00000002
+2072:	i32.add
+2073:	local.set 0x01
+2075:	br L2088
+L2078:
+2078:	local.get 0x01
+2080:	i32.const 0x00000005
+2085:	i32.add
+2086:	local.set 0x01
+L2088:
+2088:	local.get 0x00
+2090:	i32.const 0x0000004E
+2095:	i32.lt_s
+2096:	br_if L2112
+2099:	local.get 0x01
+2101:	i32.const 0x00000003
+2106:	i32.add
+2107:	local.set 0x01
+2109:	br L2122
+L2112:
+2112:	local.get 0x01
+2114:	i32.const 0x00000006
+2119:	i32.add
+2120:	local.set 0x01
+L2122:
+2122:	local.get 0x00
+2124:	i32.const 0x0000005F
+2129:	i32.lt_s
+2130:	br_if L2146
+2133:	local.get 0x01
+2135:	i32.const 0x00000004
+2140:	i32.add
+2141:	local.set 0x01
+2143:	br L2156
+L2146:
+2146:	local.get 0x01
+2148:	i32.const 0x00000007
+2153:	i32.add
+2154:	local.set 0x01
+L2156:
+2156:	local.get 0x00
+2158:	i32.const 0x0000000F
+2163:	i32.lt_s
+2164:	br_if L2180
+2167:	local.get 0x01
+2169:	i32.const 0x00000005
+2174:	i32.add
+2175:	local.set 0x01
+2177:	br L2190
+L2180:
+2180:	local.get 0x01
+2182:	i32.const 0x00000001
+2187:	i32.add
+2188:	local.set 0x01
+L2190:
+2190:	local.get 0x00
+2192:	i32.const 0x00000020
+2197:	i32.lt_s
+2198:	br_if L2214
+2201:	local.get 0x01
+2203:	i32.const 0x00000006
+2208:	i32.add
+2209:	local.set 0x01
+2211:	br L2224
+L2214:
+2214:	local.get 0x01
+2216:	i32.const 0x00000002
+2221:	i32.add
+2222:	local.set 0x01
+L2224:
+2224:	local.get 0x00
+2226:	i32.const 0x00000031
+2231:	i32.lt_s
+2232:	br_if L2248
+2235:	local.get 0x01
+2237:	i32.const 0x00000002
+2242:	i32.add
+2243:	local.set 0x01
+2245:	br L2258
+L2248:
+2248:	local.get 0x01
+2250:	i32.const 0x00000003
+2255:	i32.add
+2256:	local.set 0x01
+L2258:
+2258:	local.get 0x00
+2260:	i32.const 0x00000042
+2265:	i32.lt_s
+2266:	br_if L2282
+2269:	local.get 0x01
+2271:	i32.const 0x00000003
+2276:	i32.add
+2277:	local.set 0x01
+2279:	br L2292
+L2282:
+2282:	local.get 0x01
+2284:	i32.const 0x00000004
+2289:	i32.add
+2290:	local.set 0x01
+L2292:
+2292:	local.get 0x00
+2294:	i32.const 0x00000053
+2299:	i32.lt_s
+2300:	br_if L2316
+2303:	local.get 0x01
+2305:	i32.const 0x00000004
+2310:	i32.add
+2311:	local.set 0x01
+2313:	br L2326
+L2316:
+2316:	local.get 0x01
+2318:	i32.const 0x00000005
+2323:	i32.add
+2324:	local.set 0x01
+L2326:
+2326:	local.get 0x00
+2328:	i32.const 0x00000003
+2333:	i32.lt_s
+2334:	br_if L2350
+2337:	local.get 0x01
+2339:	i32.const 0x00000005
+2344:	i32.add
+2345:	local.set 0x01
+2347:	br L2360
+L2350:
+2350:	local.get 0x01
+2352:	i32.const 0x00000006
+2357:	i32.add
+2358:	local.set 0x01
+L2360:
+2360:	local.get 0x00
+2362:	i32.const 0x00000014
+2367:	i32.lt_s
+2368:	br_if L2384
+2371:	local.get 0x01
+2373:	i32.const 0x00000006
+2378:	i32.add
+2379:	local.set 0x01
+2381:	br L2394
+L2384:
+2384:	local.get 0x01
+2386:	i32.const 0x00000007
+2391:	i32.add
+2392:	local.set 0x01
+L2394:
+2394:	local.get 0x00
+2396:	i32.const 0x00000025
+2401:	i32.lt_s
+2402:	br_if L2418
+2405:	local.get 0x01
+2407:	i32.const 0x00000002
+2412:	i32.add
+2413:	local.set 0x01
+2415:	br L2428
+L2418:
+2418:	local.get 0x01
+2420:	i32.const 0x00000001
+2425:	i32.add
+2426:	local.set 0x01
+L2428:
+2428:	local.get 0x00
+2430:	i32.const 0x00000036
+2435:	i32.lt_s
+2436:	br_if L2452
+2439:	local.get 0x01
+2441:	i32.const 0x00000003
+2446:	i32.add
+2447:	local.set 0x01
+2449:	br L2462
+L2452:
+2452:	local.get 0x01
+2454:	i32.const 0x00000002
+2459:	i32.add
+2460:	local.set 0x01
+L2462:
+2462:	local.get 0x00
+2464:	i32.const 0x00000047
+2469:	i32.lt_s
+2470:	br_if L2486
+2473:	local.get 0x01
+2475:	i32.const 0x00000004
+2480:	i32.add
+2481:	local.set 0x01
+2483:	br L2496
+L2486:
+2486:	local.get 0x01
+2488:	i32.const 0x00000003
+2493:	i32.add
+2494:	local.set 0x01
+L2496:
+2496:	local.get 0x00
+2498:	i32.const 0x00000058
+2503:	i32.lt_s
+2504:	br_if L2520
+2507:	local.get 0x01
+2509:	i32.const 0x00000005
+2514:	i32.add
+2515:	local.set 0x01
+2517:	br L2530
+L2520:
+2520:	local.get 0x01
+2522:	i32.const 0x00000004
+2527:	i32.add
+2528:	local.set 0x01
+L2530:
+2530:	local.get 0x00
+2532:	i32.const 0x00000008
+2537:	i32.lt_s
+2538:	br_if L2554
+2541:	local.get 0x01
+2543:	i32.const 0x00000006
+2548:	i32.add
+2549:	local.set 0x01
+2551:	br L2564
+L2554:
+2554:	local.get 0x01
+2556:	i32.const 0x00000005
+2561:	i32.add
+2562:	local.set 0x01
+L2564:
+2564:	local.get 0x00
+2566:	i32.const 0x00000019
+2571:	i32.lt_s
+2572:	br_if L2588
+2575:	local.get 0x01
+2577:	i32.const 0x00000002
+2582:	i32.add
+2583:	local.set 0x01
+2585:	br L2598
+L2588:
+2588:	local.get 0x01
+2590:	i32.const 0x00000006
+2595:	i32.add
+2596:	local.set 0x01
+L2598:
+2598:	local.get 0x00
+2600:	i32.const 0x0000002A
+2605:	i32.lt_s
+2606:	br_if L2622
+2609:	local.get 0x01
+2611:	i32.const 0x00000003
+2616:	i32.add
+2617:	local.set 0x01
+2619:	br L2632
+L2622:
+2622:	local.get 0x01
+2624:	i32.const 0x00000007
+2629:	i32.add
+2630:	local.set 0x01
+L2632:
+2632:	local.get 0x00
+2634:	i32.const 0x0000003B
+2639:	i32.lt_s
+2640:	br_if L2656
+2643:	local.get 0x01
+2645:	i32.const 0x00000004
+2650:	i32.add
+2651:	local.set 0x01
+2653:	br L2666
+L2656:
+2656:	local.get 0x01
+2658:	i32.const 0x00000001
+2663:	i32.add
+2664:	local.set 0x01
+L2666:
+2666:	local.get 0x00
+2668:	i32.const 0x0000004C
+2673:	i32.lt_s
+2674:	br_if L2690
+2677:	local.get 0x01
+2679:	i32.const 0x00000005
+2684:	i32.add
+2685:	local.set 0x01
+2687:	br L2700
+L2690:
+2690:	local.get 0x01
+2692:	i32.const 0x00000002
+2697:	i32.add
+2698:	local.set 0x01
+L2700:
+2700:	local.get 0x00
+2702:	i32.const 0x0000005D
+2707:	i32.lt_s
+2708:	br_if L2724
+2711:	local.get 0x01
+2713:	i32.const 0x00000006
+2718:	i32.add
+2719:	local.set 0x01
+2721:	br L2734
+L2724:
+2724:	local.get 0x01
+2726:	i32.const 0x00000003
+2731:	i32.add
+2732:	local.set 0x01
+L2734:
+2734:	local.get 0x00
+2736:	i32.const 0x0000000D
+2741:	i32.lt_s
+2742:	br_if L2758
+2745:	local.get 0x01
+2747:	i32.const 0x00000002
+2752:	i32.add
+2753:	local.set 0x01
+2755:	br L2768
+L2758:
+2758:	local.get 0x01
+2760:	i32.const 0x00000004
+2765:	i32.add
+2766:	local.set 0x01
+L2768:
+2768:	local.get 0x00
+2770:	i32.const 0x0000001E
+2775:	i32.lt_s
+2776:	br_if L2792
+2779:	local.get 0x01
+2781:	i32.const 0x00000003
+2786:	i32.add
+2787:	local.set 0x01
+2789:	br L2802
+L2792:
+2792:	local.get 0x01
+2794:	i32.const 0x00000005
+2799:	i32.add
+2800:	local.set 0x01
+L2802:
+2802:	local.get 0x00
+2804:	i32.const 0x0000002F
+2809:	i32.lt_s
+2810:	br_if L2826
+2813:	local.get 0x01
+2815:	i32.const 0x00000004
+2820:	i32.add
+2821:	local.set 0x01
+2823:	br L2836
+L2826:
+2826:	local.get 0x01
+2828:	i32.const 0x00000006
+2833:	i32.add
+2834:	local.set 0x01
+L2836:
+2836:	local.get 0x00
+2838:	i32.const 0x00000040
+2843:	i32.lt_s
+2844:	br_if L2860
+2847:	local.get 0x01
+2849:	i32.const 0x00000005
+2854:	i32.add
+2855:	local.set 0x01
+2857:	br L2870
+L2860:
+2860:	local.get 0x01
+2862:	i32.const 0x00000007
+2867:	i32.add
+2868:	local.set 0x01
+L2870:
+2870:	local.get 0x00
+2872:	i32.const 0x00000051
+2877:	i32.lt_s
+2878:	br_if L2894
+2881:	local.get 0x01
+2883:	i32.const 0x00000006
+2888:	i32.add
+2889:	local.set 0x01
+2891:	br L2904
+L2894:
+2894:	local.get 0x01
+2896:	i32.const 0x00000001
+2901:	i32.add
+2902:	local.set 0x01
+L2904:
+2904:	local.get 0x00
+2906:	i32.const 0x00000001
+2911:	i32.lt_s
+2912:	br_if L2928
+2915:	local.get 0x01
+2917:	i32.const 0x00000002
+2922:	i32.add
+2923:	local.set 0x01
+2925:	br L2938
+L2928:
+2928:	local.get 0x01
+2930:	i32.const 0x00000002
+2935:	i32.add
+2936:	local.set 0x01
+L2938:
+2938:	local.get 0x00
+2940:	i32.const 0x00000012
+2945:	i32.lt_s
+2946:	br_if L2962
+2949:	local.get 0x01
+2951:	i32.const 0x00000003
+2956:	i32.add
+2957:	local.set 0x01
+2959:	br L2972
+L2962:
+2962:	local.get 0x01
+2964:	i32.const 0x00000003
+2969:	i32.add
+2970:	local.set 0x01
+L2972:
+2972:	local.get 0x00
+2974:	i32.const 0x00000023
+2979:	i32.lt_s
+2980:	br_if L2996
+2983:	local.get 0x01
+2985:	i32.const 0x00000004
+2990:	i32.add
+2991:	local.set 0x01
+2993:	br L3006
+L2996:
+2996:	local.get 0x01
+2998:	i32.const 0x00000004
+3003:	i32.add
+3004:	local.set 0x01
+L3006:
+3006:	local.get 0x00
+3008:	i32.const 0x00000034
+3013:	i32.lt_s
+3014:	br_if L3030
+3017:	local.get 0x01
+3019:	i32.const 0x00000005
+3024:	i32.add
+3025:	local.set 0x01
+3027:	br L3040
+L3030:
+3030:	local.get 0x01
+3032:	i32.const 0x00000005
+3037:	i32.add
+3038:	local.set 0x01
+L3040:
+3040:	local.get 0x00
+3042:	i32.const 0x00000045
+3047:	i32.lt_s
+3048:	br_if L3064
+3051:	local.get 0x01
+3053:	i32.const 0x00000006
+3058:	i32.add
+3059:	local.set 0x01
+3061:	br L3074
+L3064:
+3064:	local.get 0x01
+3066:	i32.const 0x00000006
+3071:	i32.add
+3072:	local.set 0x01
+L3074:
+3074:	local.get 0x00
+3076:	i32.const 0x00000056
+3081:	i32.lt_s
+3082:	br_if L3098
+3085:	local.get 0x01
+3087:	i32.const 0x00000002
+3092:	i32.add
+3093:	local.set 0x01
+3095:	br L3108
+L3098:
+3098:	local.get 0x01
+3100:	i32.const 0x00000007
+3105:	i32.add
+3106:	local.set 0x01
+L3108:
+3108:	local.get 0x00
+3110:	i32.const 0x00000006
+3115:	i32.lt_s
+3116:	br_if L3132
+3119:	local.get 0x01
+3121:	i32.const 0x00000003
+3126:	i32.add
+3127:	local.set 0x01
+3129:	br L3142
+L3132:
+3132:	local.get 0x01
+3134:	i32.const 0x00000001
+3139:	i32.add
+3140:	local.set 0x01
+L3142:
+3142:	local.get 0x00
+3144:	i32.const 0x00000017
+3149:	i32.lt_s
+3150:	br_if L3166
+3153:	local.get 0x01
+3155:	i32.const 0x00000004
+3160:	i32.add
+3161:	local.set 0x01
+3163:	br L3176
+L3166:
+3166:	local.get 0x01
+3168:	i32.const 0x00000002
+3173:	i32.add
+3174:	local.set 0x01
+L3176:
+3176:	local.get 0x00
+3178:	i32.const 0x00000028
+3183:	i32.lt_s
+3184:	br_if L3200
+3187:	local.get 0x01
+3189:	i32.const 0x00000005
+3194:	i32.add
+3195:	local.set 0x01
+3197:	br L3210
+L3200:
+3200:	local.get 0x01
+3202:	i32.const 0x00000003
+3207:	i32.add
+3208:	local.set 0x01
+L3210:
+3210:	local.get 0x00
+3212:	i32.const 0x00000039
+3217:	i32.lt_s
+3218:	br_if L3234
+3221:	local.get 0x01
+3223:	i32.const 0x00000006
+3228:	i32.add
+3229:	local.set 0x01
+3231:	br L3244
+L3234:
+3234:	local.get 0x01
+3236:	i32.const 0x00000004
+3241:	i32.add
+3242:	local.set 0x01
+L3244:
+3244:	local.get 0x00
+3246:	i32.const 0x0000004A
+3251:	i32.lt_s
+3252:	br_if L3268
+3255:	local.get 0x01
+3257:	i32.const 0x00000002
+3262:	i32.add
+3263:	local.set 0x01
+3265:	br L3278
+L3268:
+3268:	local.get 0x01
+3270:	i32.const 0x00000005
+3275:	i32.add
+3276:	local.set 0x01
+L3278:
+3278:	local.get 0x01
+.locals
+0000:	i32
+0001:	i32

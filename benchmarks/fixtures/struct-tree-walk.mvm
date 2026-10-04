@@ -1,0 +1,62 @@
+.code
+0000:	i32.const 0x00000009
+0005:	const.get 0x0000
+0008:	call
+0009:	const.get 0x0001
+0012:	call
+.constants
+0000:	func(i32) struct {value: i64; left: any; right: any}
+	struct {value: i64; left: any; right: any}
+	0000:	struct.new_default 0x0000
+	0003:	local.set 0x01
+	0005:	local.get 0x01
+	0007:	i32.const 0x00000000
+	0012:	local.get 0x00
+	0014:	i32.to_i64_s
+	0015:	struct.set
+	0016:	local.get 0x00
+	0018:	i32.const 0x00000000
+	0023:	i32.le_s
+	0024:	br_if L0067
+	0027:	local.get 0x01
+	0029:	i32.const 0x00000001
+	0034:	local.get 0x00
+	0036:	i32.const 0x00000001
+	0041:	i32.sub
+	0042:	const.get 0x0000
+	0045:	call
+	0046:	struct.set
+	0047:	local.get 0x01
+	0049:	i32.const 0x00000002
+	0054:	local.get 0x00
+	0056:	i32.const 0x00000001
+	0061:	i32.sub
+	0062:	const.get 0x0000
+	0065:	call
+	0066:	struct.set
+	L0067:
+	0067:	local.get 0x01
+	0069:	return
+0001:	func(struct {value: i64; left: any; right: any}) i32
+	0000:	local.get 0x00
+	0002:	ref.is_null
+	0003:	br_if L0038
+	0006:	local.get 0x00
+	0008:	i32.const 0x00000001
+	0013:	struct.get
+	0014:	const.get 0x0001
+	0017:	call
+	0018:	local.get 0x00
+	0020:	i32.const 0x00000002
+	0025:	struct.get
+	0026:	const.get 0x0001
+	0029:	call
+	0030:	i32.add
+	0031:	i32.const 0x00000001
+	0036:	i32.add
+	0037:	return
+	L0038:
+	0038:	i32.const 0x00000000
+	0043:	return
+.types
+0000:	struct {value: i64; left: any; right: any}

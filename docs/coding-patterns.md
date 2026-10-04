@@ -146,19 +146,21 @@ Normal runtime failures `MUST` return errors.
 
 ## File Order
 
-Within a Go file, declarations `MUST` appear in this order:
+Within a Go file, package-level declarations `MUST` appear in this order:
 
 1. public types
 2. private types
 3. public constants
 4. private constants
 5. variables
-6. `init`
+6. all `init` functions, immediately after package-level declarations
 7. public options/functions
 8. public constructors
 9. public methods
 10. clone/conversion and interface hooks
 11. private functions/methods
+
+`init` functions `MUST NOT` appear after any non-`init` function or method. Multiple `init` functions `MUST` stay together in source order.
 
 Within each declaration group:
 

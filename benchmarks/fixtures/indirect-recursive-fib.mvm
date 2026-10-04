@@ -1,0 +1,28 @@
+.code
+0000:	i32.const 0x00000014
+0005:	const.get 0x0000
+0008:	const.get 0x0000
+0011:	call
+.constants
+0000:	func(i32, any) i32
+	0000:	local.get 0x00
+	0002:	i32.const 0x00000002
+	0007:	i32.lt_s
+	0008:	br_if L0039
+	0011:	local.get 0x00
+	0013:	i32.const 0x00000001
+	0018:	i32.sub
+	0019:	local.get 0x01
+	0021:	local.get 0x01
+	0023:	call
+	0024:	local.get 0x00
+	0026:	i32.const 0x00000002
+	0031:	i32.sub
+	0032:	local.get 0x01
+	0034:	local.get 0x01
+	0036:	call
+	0037:	i32.add
+	0038:	return
+	L0039:
+	0039:	local.get 0x00
+	0041:	return

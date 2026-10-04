@@ -142,7 +142,7 @@ This is a dated history/audit document. It owns no current contract, describes n
 
 **Evidence**: PR #160 ("Sieve(256) drops from 4.19us to 1.61us... on M4 Pro interleaved A/B"); commit f617023 ("NQueens/jit... back: 129.8us against the pre-soundness baseline's 129.0us, +0.6%, with that baseline in the faster run position"); `docs/benchmarks.md` Statistics note ("canonical rows use `-benchtime=300ms -count=3` and report the median").
 
-**Consequence for the rebuild**: `make benchmark-pr` numbers are recorded, not gated, during the rebuild. Any perf claim compares interleaved A/B runs, never two runs taken minutes apart with the tree changing in between.
+**Consequence for the rebuild**: `make benchmark benchmark-level=quick` numbers are recorded, not gated, during the rebuild. Any perf claim compares interleaved A/B runs, never two runs taken minutes apart with the tree changing in between.
 
 ### L18 — Memory-carried runtime counters serialize native recursion
 

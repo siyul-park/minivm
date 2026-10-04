@@ -85,5 +85,5 @@ jobs:
             go.sum
             benchmarks/go.sum
 
-      - name: Run Pull Request Benchmark Subset
-        run: make benchmark-pr
+      - name: Run Benchmark
+        run: make benchmark benchmark-level=quick

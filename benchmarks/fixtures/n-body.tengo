@@ -1,0 +1,118 @@
+math := import("math")
+
+advance := func(x, y, z, vx, vy, vz, mass, dt) {
+    for i := 0; i < 5; i = i + 1 {
+        for j := i + 1; j < 5; j = j + 1 {
+            dx := x[i] - x[j]
+            dy := y[i] - y[j]
+            dz := z[i] - z[j]
+            dist2 := dx*dx + dy*dy + dz*dz
+            magnitude := dt / (dist2 * math.sqrt(dist2))
+
+            vx[i] = vx[i] - dx*mass[j]*magnitude
+            vy[i] = vy[i] - dy*mass[j]*magnitude
+            vz[i] = vz[i] - dz*mass[j]*magnitude
+            vx[j] = vx[j] + dx*mass[i]*magnitude
+            vy[j] = vy[j] + dy*mass[i]*magnitude
+            vz[j] = vz[j] + dz*mass[i]*magnitude
+        }
+    }
+
+    for i := 0; i < 5; i = i + 1 {
+        x[i] = x[i] + dt*vx[i]
+        y[i] = y[i] + dt*vy[i]
+        z[i] = z[i] + dt*vz[i]
+    }
+}
+
+energy := func(x, y, z, vx, vy, vz, mass) {
+    value := 0.0
+    for i := 0; i < 5; i = i + 1 {
+        speed := vx[i]*vx[i] + vy[i]*vy[i] + vz[i]*vz[i]
+        value = value + 0.5*mass[i]*speed
+
+        for j := i + 1; j < 5; j = j + 1 {
+            dx := x[i] - x[j]
+            dy := y[i] - y[j]
+            dz := z[i] - z[j]
+            distance := math.sqrt(dx*dx + dy*dy + dz*dz)
+            value = value - mass[i]*mass[j]/distance
+        }
+    }
+
+    return value
+}
+
+pi := math.pi
+solarMass := 4 * pi * pi
+daysPerYear := 365.24
+
+x := [
+    0.0,
+    4.841431442464721,
+    8.34336671824458,
+    12.943505513317835,
+    15.379697114850945
+]
+y := [
+    0.0,
+    -1.1603200440274284,
+    4.124798564124305,
+    -15.111514016986319,
+    -25.919314609987964
+]
+z := [
+    0.0,
+    -0.10362204447112311,
+    -0.4035234171143214,
+    -0.2237057963357768,
+    0.17925877295037118
+]
+
+vx := [
+    0.0,
+    0.00166007664274403 * daysPerYear,
+    0.00283009096225471 * daysPerYear,
+    0.00296460137564761 * daysPerYear,
+    0.00268067772490389 * daysPerYear
+]
+vy := [
+    0.0,
+    0.0076990111841974 * daysPerYear,
+    0.00453000209594919 * daysPerYear,
+    0.0023784717395948 * daysPerYear,
+    0.00162824170038242 * daysPerYear
+]
+vz := [
+    0.0,
+    -0.00006902509938426 * daysPerYear,
+    -0.00019131288713706 * daysPerYear,
+    -0.0002958928886558 * daysPerYear,
+    -0.00095159225451337 * daysPerYear
+]
+mass := [
+    solarMass,
+    0.0009547919384243266 * solarMass,
+    0.0002858859806661308 * solarMass,
+    0.00004366244043351563 * solarMass,
+    0.00005151389020466115 * solarMass
+]
+
+px := 0.0
+py := 0.0
+pz := 0.0
+for i := 0; i < 5; i = i + 1 {
+    px = px + vx[i]*mass[i]
+    py = py + vy[i]*mass[i]
+    pz = pz + vz[i]*mass[i]
+}
+
+vx[0] = -px / solarMass
+vy[0] = -py / solarMass
+vz[0] = -pz / solarMass
+
+for i := 0; i < 100; i = i + 1 {
+    advance(x, y, z, vx, vy, vz, mass, 0.01)
+}
+
+result := int(energy(x, y, z, vx, vy, vz, mass) * 1e9)

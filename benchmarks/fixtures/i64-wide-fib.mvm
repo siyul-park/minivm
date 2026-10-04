@@ -1,0 +1,29 @@
+.code
+0000:	i64.const 0x0000000000000019
+0009:	const.get 0x0000
+0012:	call
+.constants
+0000:	func(i64) i64
+	0000:	local.get 0x00
+	0002:	i64.const 0x0000000000000002
+	0011:	i64.lt_s
+	0012:	br_if L0049
+	0015:	local.get 0x00
+	0017:	i64.const 0x0000000000000001
+	0026:	i64.sub
+	0027:	const.get 0x0000
+	0030:	call
+	0031:	local.get 0x00
+	0033:	i64.const 0x0000000000000002
+	0042:	i64.sub
+	0043:	const.get 0x0000
+	0046:	call
+	0047:	i64.add
+	0048:	return
+	L0049:
+	0049:	local.get 0x00
+	0051:	i64.const 0x0000000000000001
+	0060:	i64.const 0x0000000000000032
+	0069:	i64.shl
+	0070:	i64.add
+	0071:	return

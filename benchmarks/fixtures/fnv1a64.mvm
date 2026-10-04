@@ -1,0 +1,34 @@
+.code
+0000:	i32.const 0x00000400
+0005:	const.get 0x0000
+0008:	call
+.constants
+0000:	func(i32) i64
+	i64
+	i32
+	0000:	i64.const 0xCBF29CE484222325
+	0009:	local.set 0x01
+	0011:	i32.const 0x00000000
+	0016:	local.set 0x02
+	L0018:
+	0018:	local.get 0x02
+	0020:	local.get 0x00
+	0022:	i32.ge_s
+	0023:	br_if L0063
+	0026:	local.get 0x01
+	0028:	local.get 0x02
+	0030:	i32.const 0x000000FF
+	0035:	i32.and
+	0036:	i32.to_i64_s
+	0037:	i64.xor
+	0038:	i64.const 0x00000100000001B3
+	0047:	i64.mul
+	0048:	local.set 0x01
+	0050:	local.get 0x02
+	0052:	i32.const 0x00000001
+	0057:	i32.add
+	0058:	local.set 0x02
+	0060:	br L0018
+	L0063:
+	0063:	local.get 0x01
+	0065:	return

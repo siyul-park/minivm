@@ -1,0 +1,7 @@
+result := func() {
+    total := 0
+    for value := 1; value <= 256; value++ {
+        total += value
+    }
+    return total
+}()
