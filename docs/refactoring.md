@@ -57,7 +57,7 @@ The agent `MUST` apply passes in this order:
 4. **Mechanics** — redundant work, allocation, conversion, traversal, or lookup when behavior and required performance remain intact.
 5. **Tests / docs** — preserve contract tests; remove structure-only tests; describe final state.
 
-The agent `MUST NOT` create an abstraction merely to move complexity elsewhere. It `SHOULD` prefer one cohesive symbol serving all legitimate callers over parallel variants.
+The agent `MUST NOT` create an abstraction merely to move complexity elsewhere. Symbol extraction is deferred by default: complexity, fan-in, fan-out, duplication, or one-call indirection is a review signal, not sufficient evidence for a new symbol. Extract only when distinct ownership, reuse, invariant, abstraction boundary, or independently testable behavior is demonstrated. It `SHOULD` prefer one cohesive symbol serving all legitimate callers over parallel variants.
 
 ### Fixed Point
 

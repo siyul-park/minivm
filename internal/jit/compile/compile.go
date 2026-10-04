@@ -285,48 +285,37 @@ func newLowering(f *ssa.Function, m Machine, fn *types.Function, objects transfo
 // constant is rematerialized when f has a call and no loop block uses it: a
 // loop keeps its constants in registers.
 func (l *lowering) scan() {
-	dom := graph.NewDominance(l.f)
-	l.scanLoops(dom)
-	looped, caller := l.scanUses()
-	if caller {
-		l.scanRemats(looped)
-	}
-}
-
-func (l *lowering) scanLoops(dom *graph.Dominance) {
-	l.headers = graph.Headers(l.f, dom)
+	f := l.f
+	dom := graph.NewDominance(f)
+	l.headers = graph.Headers(f, dom)
 	l.loops = map[int]bool{}
 	for _, h := range l.headers {
-		maps.Copy(l.loops, graph.Body(l.f, dom, h))
+		maps.Copy(l.loops, graph.Body(f, dom, h))
 	}
 
-	entry := l.f.Entry().IP
+	entry := f.Entry().IP
 	l.gate = l.osr && entry == 0 && len(l.headers) > 0
 	if l.gate {
 		if bytecode, err := analysis.Headers(l.fn); err == nil && slices.Contains(bytecode, entry) {
 			l.gate = false
 		}
 	}
-}
-
-func (l *lowering) scanUses() (map[ssa.Value]bool, bool) {
-	looped := map[ssa.Value]bool{}
 	caller := false
-	mark := func(block int, args []ssa.Value) {
-		for _, v := range args {
-			l.uses[v]++
-			if l.loops[block] {
-				looped[v] = true
+	looped := map[ssa.Value]bool{}
+	for id := 0; id < f.Len(); id++ {
+		b := f.Block(id)
+		mark := func(args []ssa.Value) {
+			for _, v := range args {
+				l.uses[v]++
+				if l.loops[id] {
+					looped[v] = true
+				}
 			}
 		}
-	}
-
-	for id := 0; id < l.f.Len(); id++ {
-		b := l.f.Block(id)
 		for _, op := range b.Operations {
 			caller = caller || op.Op == ssa.OpExec && op.Code == instr.CALL
 			l.upvals = l.upvals || (op.Op == ssa.OpLoad || op.Op == ssa.OpStore) && op.Slot.Space == ssa.SpaceUpval
-			mark(id, op.Args)
+			mark(op.Args)
 			for _, frame := range op.Frames {
 				for _, o := range frame.Stack {
 					l.uses[o.Value]++
@@ -336,21 +325,20 @@ func (l *lowering) scanUses() (map[ssa.Value]bool, bool) {
 				}
 			}
 		}
-		mark(id, b.Terminator.Args)
+		mark(b.Terminator.Args)
 		for _, e := range b.Terminator.Edges {
-			mark(id, e.Args)
+			mark(e.Args)
 		}
 	}
-	return looped, caller
-}
-
-func (l *lowering) scanRemats(looped map[ssa.Value]bool) {
-	for id := 0; id < l.f.Len(); id++ {
-		for _, op := range l.f.Block(id).Operations {
+	if !caller {
+		return
+	}
+	for id := 0; id < f.Len(); id++ {
+		for _, op := range f.Block(id).Operations {
 			if op.Op != ssa.OpConst || looped[op.Results[0]] {
 				continue
 			}
-			switch l.f.Type(op.Results[0]) {
+			switch f.Type(op.Results[0]) {
 			case ssa.TypeF32, ssa.TypeF64:
 			default:
 				l.remats[op.Results[0]] = true
@@ -629,81 +617,47 @@ func (l *lowering) jump(label asm.Label) {
 // through its closure: called directly, it has no upvals to read.
 func (l *lowering) call(op ssa.Operation) error {
 	callee := op.Args[len(op.Args)-1]
-	ref, target, generic, closure, err := l.resolveCall(op, callee)
-	if err != nil {
-		return err
+	generic := op.Shape.Function == 0 && op.Shape.Type != 0
+	ref, closure := op.Shape.Function, op.Shape.Function != 0
+	var target *types.Function
+	if !generic {
+		if !closure {
+			c, ok := l.consts[callee]
+			if !ok || l.f.Type(callee) != ssa.TypeRef {
+				return fmt.Errorf("%w: call of v%d", ErrUnsupported, callee)
+			}
+			ref = types.Boxed(c).Ref()
+		}
+		target = l.objects[ref].Function
+		if target == nil || target.Typ == nil || len(target.Captures) > 0 && !closure {
+			return fmt.Errorf("%w: call of %d", ErrUnsupported, ref)
+		}
 	}
 	regs := registers(target)
-	if err := l.validateCallResults(op, regs); err != nil {
-		return err
-	}
-	frame, below, owned, err := l.callFrame(op)
-	if err != nil {
-		return err
-	}
-
-	id := l.exit(jit.ExitCall)
-	l.configureCallExit(id, op, callee, ref, target, generic, frame, below, owned, regs)
-	bridge, join := l.stub(id)
-	site := l.callSite(op, callee, ref, target, generic, closure, below, owned, regs, id, bridge, join)
-	if !l.m.Call(l.a, site, l) {
-		return fmt.Errorf("%w: call of %d", ErrUnsupported, ref)
-	}
-	return l.err
-}
-
-func (l *lowering) resolveCall(op ssa.Operation, callee ssa.Value) (int, *types.Function, bool, bool, error) {
-	generic := op.Shape.Function == 0 && op.Shape.Type != 0
-	closure := op.Shape.Function != 0
-	ref := op.Shape.Function
-	if generic {
-		return 0, nil, true, false, nil
-	}
-	if !closure {
-		c, ok := l.consts[callee]
-		if !ok || l.f.Type(callee) != ssa.TypeRef {
-			return 0, nil, false, false, fmt.Errorf("%w: call of v%d", ErrUnsupported, callee)
-		}
-		ref = types.Boxed(c).Ref()
-	}
-	target := l.objects[ref].Function
-	if target == nil || target.Typ == nil || len(target.Captures) > 0 && !closure {
-		return 0, nil, false, false, fmt.Errorf("%w: call of %d", ErrUnsupported, ref)
-	}
-	return ref, target, false, closure, nil
-}
-
-func (l *lowering) validateCallResults(op ssa.Operation, regs []types.Kind) error {
-	if regs != nil {
-		return nil
-	}
-	for _, v := range op.Results {
-		if l.f.Type(v) == ssa.TypeI64 {
-			return fmt.Errorf("%w: i64 call result v%d", ErrUnsupported, v)
+	if regs == nil {
+		for _, v := range op.Results {
+			if l.f.Type(v) == ssa.TypeI64 {
+				return fmt.Errorf("%w: i64 call result v%d", ErrUnsupported, v)
+			}
 		}
 	}
-	return nil
-}
-
-func (l *lowering) callFrame(op ssa.Operation) (ssa.Frame, int, bool, error) {
 	state, ok := l.states[op.State]
 	if !ok || len(state.Frames) == 0 {
-		return ssa.Frame{}, 0, false, fmt.Errorf("%w: call without a state", ErrUnsupported)
+		return fmt.Errorf("%w: call without a state", ErrUnsupported)
 	}
 	frame := state.Frames[len(state.Frames)-1]
 	below := len(frame.Stack) - len(op.Args)
 	if below < 0 {
-		return ssa.Frame{}, 0, false, fmt.Errorf("%w: call state without its operands", ErrUnsupported)
+		return fmt.Errorf("%w: call state without its operands", ErrUnsupported)
 	}
-	return frame, below, frame.Stack[len(frame.Stack)-1].Owned, nil
-}
 
-func (l *lowering) configureCallExit(id int, op ssa.Operation, callee ssa.Value, ref int, target *types.Function, generic bool, frame ssa.Frame, below int, owned bool, regs []types.Kind) {
+	owned := frame.Stack[len(frame.Stack)-1].Owned
+	id := l.exit(jit.ExitCall)
 	out := &l.outlets[id]
 	out.exit.Callee = ref
 	out.exit.Args = len(op.Args) - 1
 	out.exit.Owned = owned
-	if generic || op.Shape.Function != 0 {
+	if closure || generic {
 		out.exit.Target = &jit.Value{}
 		l.place(id, out.exit.Target, callee)
 	}
@@ -712,13 +666,12 @@ func (l *lowering) configureCallExit(id int, op ssa.Operation, callee ssa.Value,
 			out.exit.Returns = append(out.exit.Returns, l.f.Type(v).Kind())
 		}
 	}
-	for j, borrowed := range transform.Borrows(target) {
-		if !borrowed {
-			continue
-		}
-		if frame.Stack[below+j].Owned {
+	for j, b := range transform.Borrows(target) {
+		switch {
+		case !b:
+		case frame.Stack[below+j].Owned:
 			out.exit.Kept = append(out.exit.Kept, j)
-		} else {
+		default:
 			out.exit.Lent = append(out.exit.Lent, j)
 		}
 	}
@@ -728,13 +681,20 @@ func (l *lowering) configureCallExit(id int, op ssa.Operation, callee ssa.Value,
 			out.results = append(out.results, l.Reg(v))
 		}
 	}
-}
-
-func (l *lowering) callSite(op ssa.Operation, callee ssa.Value, ref int, target *types.Function, generic, closure bool, below int, owned bool, regs []types.Kind, id int, bridge, join asm.Label) Call {
+	bridge, join := l.stub(id)
 	site := Call{
-		Callee: ref, Target: callee, Args: op.Args[:len(op.Args)-1], Results: op.Results,
-		Base: len(l.fn.Slots()) + below, Exit: id, Stub: bridge, Join: join,
-		Owned: owned, Registers: regs, Arguments: arguments(target), Generic: generic,
+		Callee:    ref,
+		Target:    callee,
+		Args:      op.Args[:len(op.Args)-1],
+		Results:   op.Results,
+		Base:      len(l.fn.Slots()) + below,
+		Exit:      id,
+		Stub:      bridge,
+		Join:      join,
+		Owned:     owned,
+		Registers: regs,
+		Arguments: arguments(target),
+		Generic:   generic,
 	}
 	if generic {
 		site.Size = max(len(op.Args)-1, len(op.Results))
@@ -746,7 +706,10 @@ func (l *lowering) callSite(op ssa.Operation, callee ssa.Value, ref int, target 
 		site.Upvals = closure && len(target.Captures) > 0
 	}
 	site.Live = l.live(id)
-	return site
+	if !l.m.Call(l.a, site, l) {
+		return fmt.Errorf("%w: call of %d", ErrUnsupported, ref)
+	}
+	return l.err
 }
 
 // registers reports fn's register-convention results: at most two, of any
