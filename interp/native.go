@@ -176,6 +176,10 @@ const (
 	metricCompiles = "vm_jit_compiles_total"
 	metricEntries  = "vm_jit_entries_total"
 	metricExits    = "vm_jit_exits_total"
+
+	outcomeOK          = "ok"
+	outcomeFailed      = "failed"
+	outcomeUnsupported = "unsupported"
 )
 
 // bridgeable reports, by opcode, whether an ExitBridge for it runs its
@@ -691,9 +695,9 @@ func (n *native) drain(i *Interpreter) {
 				// another try instead of a permanent failure.
 				n.markFailed(job.Unit.Address, job.Unit.Tier)
 			}
-			outcome := "failed"
+			outcome := outcomeFailed
 			if errors.Is(job.Err, compile.ErrUnsupported) {
-				outcome = "unsupported"
+				outcome = outcomeUnsupported
 			}
 			metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: outcome})
 			continue
@@ -707,7 +711,7 @@ func (n *native) drain(i *Interpreter) {
 		if job.Code.Tier == jit.Baseline {
 			n.nominate(job.Unit.Address)
 		}
-		metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: "ok"})
+		metric(i, metricCompiles, prof.Label{Key: "tier", Value: job.Unit.Tier.String()}, prof.Label{Key: "outcome", Value: outcomeOK})
 	}
 	// Candidates are pool-wide: a native that never drains a Baseline job
 	// still promotes it once its own entries reach graduate.
@@ -749,9 +753,7 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 			entered = n.store.Find(ctx.PC())
 		}
 		exit := entered.Exits[ctx.Exit()]
-		if i.profiler != nil {
-			metric(i, metricExits, prof.Label{Key: "kind", Value: exit.Kind.String()})
-		}
+		metric(i, metricExits, prof.Label{Key: "kind", Value: exit.Kind.String()})
 		switch exit.Kind {
 		case jit.ExitSafepoint:
 			if cancelled(i) {

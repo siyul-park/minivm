@@ -32,6 +32,9 @@ type Store struct {
 	pending atomic.Int64
 
 	mu sync.Mutex
+	// freeErr records the first Free failure from Publish's own uninstall
+	// free; Reclaim and Close surface it.
+	freeErr atomic.Pointer[error]
 }
 
 // Reader is one interpreter's registration with a Store: Reclaim frees no
@@ -131,7 +134,9 @@ func (s *Store) Publish(c *Code) bool {
 		s.mu.Unlock()
 	}
 	if !installed {
-		_ = c.Free()
+		if err := c.Free(); err != nil {
+			s.freeErr.CompareAndSwap(nil, &err)
+		}
 	}
 	return installed
 }
@@ -184,6 +189,9 @@ func (s *Store) Attach() *Reader {
 // quiescent point since; with no Reader attached, every retired code.
 func (s *Store) Reclaim() error {
 	if s.pending.Load() == 0 {
+		if p := s.freeErr.Load(); p != nil {
+			return *p
+		}
 		return nil
 	}
 	s.mu.Lock()
@@ -203,6 +211,9 @@ func (s *Store) Reclaim() error {
 	var err error
 	for _, c := range freed {
 		err = errors.Join(err, c.Free())
+	}
+	if p := s.freeErr.Load(); p != nil {
+		err = errors.Join(err, *p)
 	}
 	return err
 }
@@ -226,6 +237,9 @@ func (s *Store) Close() error {
 	}
 	for _, c := range retired {
 		err = errors.Join(err, c.Free())
+	}
+	if p := s.freeErr.Load(); p != nil {
+		err = errors.Join(err, *p)
 	}
 	s.pending.Store(0)
 	return err

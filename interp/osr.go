@@ -80,7 +80,7 @@ const interval = 256
 func (n *native) observe(i *Interpreter, addr int, fn *types.Function) {
 	headers, err := analysis.Headers(fn)
 	if err != nil {
-		metric(i, metricCompiles, prof.Label{Key: "tier", Value: jit.Optimized.String()}, prof.Label{Key: "outcome", Value: "failed"})
+		metric(i, metricCompiles, prof.Label{Key: "tier", Value: jit.Optimized.String()}, prof.Label{Key: "outcome", Value: outcomeFailed})
 		return
 	}
 	code := i.code[addr]
@@ -132,7 +132,7 @@ func (n *native) resolved(addr int, ips []int) bool {
 	return true
 }
 
-func (s *site) tick() bool {
+func (s *site) due() bool {
 	s.count++
 	return s.count%s.cadence == 0
 }
@@ -148,7 +148,7 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 		if s.code != nil && n.enter(i, s, code, inner) {
 			return
 		}
-		due := s.tick()
+		onCadence := s.due()
 		switch {
 		case !s.submitted:
 			if s.total == nil {
@@ -163,7 +163,7 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 				u := compile.Unit{Address: s.address, Function: s.fn, Module: n.feedback(s.address), Tier: jit.Optimized, IP: s.ip, OSR: true}
 				s.submitted = n.queue.Submit(u)
 			}
-		case due:
+		case onCadence:
 			n.drain(i)
 			s.code = n.store.CodeAt(s.address, s.ip)
 		}
@@ -183,7 +183,7 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	if (s.entry && len(s.headers) == 0 && cancelled(i)) || len(i.fr.upvals) < len(s.fn.Captures) || n.depth >= uint64(len(n.ctx.Records)) {
 		return false
 	}
-	if s.tick() {
+	if s.due() {
 		n.drain(i)
 		if n.depth == 0 {
 			n.quiesce()

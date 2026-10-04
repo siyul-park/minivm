@@ -5714,6 +5714,20 @@ func TestWithThreshold(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("records a failed Headers analysis through the compiles metric", func(t *testing.T) {
+		profiler := prof.New()
+		bad := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			Emit(instr.New(instr.BR, 10)).MustBuild()
+		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)}, program.WithConstants(bad))
+		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+
+		require.NoError(t, vm.Run(context.Background()))
+		vm.Flush()
+		v, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "failed"})
+		require.Equal(t, float64(1), v)
+	})
 }
 
 // iterativeFibProgram computes the nth Fibonacci number in a module-level
