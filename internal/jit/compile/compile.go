@@ -285,37 +285,48 @@ func newLowering(f *ssa.Function, m Machine, fn *types.Function, objects transfo
 // constant is rematerialized when f has a call and no loop block uses it: a
 // loop keeps its constants in registers.
 func (l *lowering) scan() {
-	f := l.f
-	dom := graph.NewDominance(f)
-	l.headers = graph.Headers(f, dom)
+	dom := graph.NewDominance(l.f)
+	l.scanLoops(dom)
+	looped, caller := l.scanUses()
+	if caller {
+		l.scanRemats(looped)
+	}
+}
+
+func (l *lowering) scanLoops(dom *graph.Dominance) {
+	l.headers = graph.Headers(l.f, dom)
 	l.loops = map[int]bool{}
 	for _, h := range l.headers {
-		maps.Copy(l.loops, graph.Body(f, dom, h))
+		maps.Copy(l.loops, graph.Body(l.f, dom, h))
 	}
 
-	entry := f.Entry().IP
+	entry := l.f.Entry().IP
 	l.gate = l.osr && entry == 0 && len(l.headers) > 0
 	if l.gate {
 		if bytecode, err := analysis.Headers(l.fn); err == nil && slices.Contains(bytecode, entry) {
 			l.gate = false
 		}
 	}
-	caller := false
+}
+
+func (l *lowering) scanUses() (map[ssa.Value]bool, bool) {
 	looped := map[ssa.Value]bool{}
-	for id := 0; id < f.Len(); id++ {
-		b := f.Block(id)
-		mark := func(args []ssa.Value) {
-			for _, v := range args {
-				l.uses[v]++
-				if l.loops[id] {
-					looped[v] = true
-				}
+	caller := false
+	mark := func(block int, args []ssa.Value) {
+		for _, v := range args {
+			l.uses[v]++
+			if l.loops[block] {
+				looped[v] = true
 			}
 		}
+	}
+
+	for id := 0; id < l.f.Len(); id++ {
+		b := l.f.Block(id)
 		for _, op := range b.Operations {
 			caller = caller || op.Op == ssa.OpExec && op.Code == instr.CALL
 			l.upvals = l.upvals || (op.Op == ssa.OpLoad || op.Op == ssa.OpStore) && op.Slot.Space == ssa.SpaceUpval
-			mark(op.Args)
+			mark(id, op.Args)
 			for _, frame := range op.Frames {
 				for _, o := range frame.Stack {
 					l.uses[o.Value]++
@@ -325,20 +336,21 @@ func (l *lowering) scan() {
 				}
 			}
 		}
-		mark(b.Terminator.Args)
+		mark(id, b.Terminator.Args)
 		for _, e := range b.Terminator.Edges {
-			mark(e.Args)
+			mark(id, e.Args)
 		}
 	}
-	if !caller {
-		return
-	}
-	for id := 0; id < f.Len(); id++ {
-		for _, op := range f.Block(id).Operations {
+	return looped, caller
+}
+
+func (l *lowering) scanRemats(looped map[ssa.Value]bool) {
+	for id := 0; id < l.f.Len(); id++ {
+		for _, op := range l.f.Block(id).Operations {
 			if op.Op != ssa.OpConst || looped[op.Results[0]] {
 				continue
 			}
-			switch f.Type(op.Results[0]) {
+			switch l.f.Type(op.Results[0]) {
 			case ssa.TypeF32, ssa.TypeF64:
 			default:
 				l.remats[op.Results[0]] = true
