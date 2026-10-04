@@ -51,7 +51,7 @@ clean-cache:
 sync:
 	@go work sync
 
-check: check-generated check-tidy check-fmt vet check-inline test check-arm64
+check: check-generated check-tidy check-fmt lint check-inline test check-arm64
 	@go build ./...
 
 check-generated:
@@ -181,10 +181,12 @@ benchmark-compare:
 	done
 
 lint: fmt vet
+	@go run ./internal/cmd/check ./...
 
 fmt:
 	@command -v $(GOIMPORTS) >/dev/null
 	@$(GOIMPORTS) -w .
+	@status=0; go run ./internal/cmd/check -fix ./... || status=$$?; test $$status -le 1
 
 vet:
 	@go vet ./...
