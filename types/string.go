@@ -17,7 +17,8 @@ type StringIterator struct {
 
 type stringType struct{}
 
-var TypeString = stringType{}
+// TypeString is the VM string type.
+var TypeString Type = stringType{}
 
 var _ Value = String("")
 

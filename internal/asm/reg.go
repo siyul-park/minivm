@@ -55,10 +55,11 @@ func NewVReg(id int32, typ RegType, w RegWidth) VReg {
 // ID returns the register identifier.
 func (r PReg) ID() uint8 { return r.id }
 
-func (r PReg) Width() RegWidth { return r.width }
-
 // ID returns the register identifier.
 func (r VReg) ID() int32 { return r.id }
+
+// Width returns the register width.
+func (r PReg) Width() RegWidth { return r.width }
 
 // Width returns the register width.
 func (r VReg) Width() RegWidth { return r.width }

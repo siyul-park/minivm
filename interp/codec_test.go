@@ -734,6 +734,19 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 }
 
+func (v marshalCustom) MarshalVM(*interp.Encoder) (types.Value, error) {
+	return types.I32(v), nil
+}
+
+func (v *marshalCustom) UnmarshalVM(_ *interp.Decoder, value types.Value) error {
+	n, ok := value.(types.I32)
+	if !ok {
+		return interp.ErrTypeMismatch
+	}
+	*v = marshalCustom(n)
+	return nil
+}
+
 func TestRegistry_Unmarshal(t *testing.T) {
 	t.Run("converts VM values to Go values", func(t *testing.T) {
 		var i32 int32
@@ -1018,19 +1031,6 @@ func (*marshalHostFields) Context(ctx context.Context) int32 {
 		return 7
 	}
 	return 0
-}
-
-func (v marshalCustom) MarshalVM(*interp.Encoder) (types.Value, error) {
-	return types.I32(v), nil
-}
-
-func (v *marshalCustom) UnmarshalVM(_ *interp.Decoder, value types.Value) error {
-	n, ok := value.(types.I32)
-	if !ok {
-		return interp.ErrTypeMismatch
-	}
-	*v = marshalCustom(n)
-	return nil
 }
 
 func (h *codecHeld) Tag() int32 { return h.tag }

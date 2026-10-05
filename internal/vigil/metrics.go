@@ -8,19 +8,18 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-type functionMetric struct {
+type metric struct {
 	fn         *ast.FuncDecl
 	fanIn      int
 	fanOut     int
-	level      int
 	cyclomatic int
 	statements int
 	nesting    int
 }
 
-func checkComplexity(pass *analysis.Pass) {
-	for _, metric := range collectMetrics(pass) {
-		if isDispatcher(metric.fn.Body) {
+func complexity(pass *analysis.Pass) {
+	for _, metric := range metrics(pass) {
+		if dispatcher(metric.fn.Body) {
 			continue
 		}
 		if metric.cyclomatic >= 15 && metric.statements >= 30 {
@@ -37,34 +36,42 @@ func checkComplexity(pass *analysis.Pass) {
 	}
 }
 
-func checkFanout(pass *analysis.Pass) {
-	for _, metric := range collectMetrics(pass) {
-		if isDispatcher(metric.fn.Body) {
+func fanout(pass *analysis.Pass) {
+	for _, metric := range metrics(pass) {
+		if dispatcher(metric.fn.Body) {
 			continue
 		}
 		if metric.fanIn >= 8 && metric.fanOut >= 6 && metric.statements >= 20 {
 			report(pass, metric.fn.Name.Pos(),
-				"function %s is a dependency hub: fan-in=%d fan-out=%d level=%d",
-				metric.fn.Name.Name, metric.fanIn, metric.fanOut, metric.level)
+				"function %s is a dependency hub: fan-in=%d fan-out=%d",
+				metric.fn.Name.Name, metric.fanIn, metric.fanOut)
 			continue
 		}
 		if metric.fanOut >= 12 && metric.fanIn <= 1 && metric.statements >= 15 {
 			report(pass, metric.fn.Name.Pos(),
-				"function %s is a high fan-out coordinator: fan-in=%d fan-out=%d level=%d",
-				metric.fn.Name.Name, metric.fanIn, metric.fanOut, metric.level)
+				"function %s is a high fan-out coordinator: fan-in=%d fan-out=%d",
+				metric.fn.Name.Name, metric.fanIn, metric.fanOut)
 		}
 	}
 }
 
-func isDispatcher(body *ast.BlockStmt) bool {
+func dispatcher(body *ast.BlockStmt) bool {
 	if body == nil || len(body.List) != 1 {
 		return false
 	}
-	switchStmt, ok := body.List[0].(*ast.SwitchStmt)
-	if !ok || switchStmt.Body == nil || len(switchStmt.Body.List) == 0 {
+	var list *ast.BlockStmt
+	switch stmt := body.List[0].(type) {
+	case *ast.SwitchStmt:
+		list = stmt.Body
+	case *ast.TypeSwitchStmt:
+		list = stmt.Body
+	default:
 		return false
 	}
-	for _, stmt := range switchStmt.Body.List {
+	if list == nil || len(list.List) == 0 {
+		return false
+	}
+	for _, stmt := range list.List {
 		clause, ok := stmt.(*ast.CaseClause)
 		if !ok || len(clause.Body) != 1 {
 			return false
@@ -76,38 +83,35 @@ func isDispatcher(body *ast.BlockStmt) bool {
 	return true
 }
 
-func collectMetrics(pass *analysis.Pass) []*functionMetric {
-	set := collectFunctions(pass)
-	metrics := make(map[types.Object]*functionMetric, len(set.defs))
-	for obj, fn := range set.defs {
-		cyclomatic, statements, nesting := measureComplexity(fn.Body)
-		metrics[obj] = &functionMetric{
+func metrics(pass *analysis.Pass) []*metric {
+	graph := collectGraph(pass)
+	items := make(map[types.Object]*metric, len(graph.functions))
+	for obj, fn := range graph.functions {
+		cyclomatic, statements, nesting := measure(fn.Body)
+		items[obj] = &metric{
 			fn:         fn,
 			cyclomatic: cyclomatic,
 			statements: statements,
 			nesting:    nesting,
 		}
 	}
-	for caller, dependencies := range set.calls {
-		metric := metrics[caller]
+	for caller, dependencies := range graph.calls {
+		metric := items[caller]
 		metric.fanOut = len(dependencies)
 		for dependency := range dependencies {
-			if metrics[dependency] != nil {
-				metrics[dependency].fanIn++
+			if items[dependency] != nil {
+				items[dependency].fanIn++
 			}
 		}
 	}
-	for obj, metric := range metrics {
-		metric.level = dependencyLevel(set.calls, obj)
-	}
-	out := make([]*functionMetric, 0, len(metrics))
-	for _, metric := range metrics {
+	out := make([]*metric, 0, len(items))
+	for _, metric := range items {
 		out = append(out, metric)
 	}
 	return out
 }
 
-func measureComplexity(body *ast.BlockStmt) (cyclomatic, statements, nesting int) {
+func measure(body *ast.BlockStmt) (cyclomatic, statements, nesting int) {
 	cyclomatic = 1
 	var walkStmt func(ast.Stmt, int)
 	var walkBlock func(*ast.BlockStmt, int)
@@ -205,31 +209,4 @@ func measureComplexity(body *ast.BlockStmt) (cyclomatic, statements, nesting int
 
 	walkBlock(body, 1)
 	return cyclomatic, statements, nesting
-}
-
-func dependencyLevel(graph map[types.Object]map[types.Object]bool, start types.Object) int {
-	visiting := make(map[types.Object]bool)
-	var visit func(types.Object) int
-	visit = func(obj types.Object) int {
-		if visiting[obj] {
-			return -1
-		}
-		dependencies := graph[obj]
-		if len(dependencies) == 0 {
-			return 0
-		}
-		visiting[obj] = true
-		level := 0
-		for dependency := range dependencies {
-			depth := visit(dependency)
-			if depth < 0 {
-				delete(visiting, obj)
-				return -1
-			}
-			level = max(level, depth+1)
-		}
-		delete(visiting, obj)
-		return level
-	}
-	return visit(start)
 }

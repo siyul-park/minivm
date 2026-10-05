@@ -1863,23 +1863,6 @@ var runTests = []struct {
 	},
 }
 
-func (v *trackedValue) Close() error {
-	v.closed++
-	return nil
-}
-
-func (h *structGetHostFields) Bump(n int32) int32 {
-	h.Count += n
-	h.hidden++
-	return h.Count
-}
-
-func (v *marshalBenchMethods) Bump(n int32) int32 {
-	v.Count += n
-	v.hidden++
-	return v.Count
-}
-
 func (v *trackedValue) Kind() types.Kind { return types.KindRef }
 
 func (v *trackedValue) Type() types.Type { return types.TypeAny }
@@ -1909,6 +1892,23 @@ func (upperCodec) Unmarshal(_ *interp.Interpreter, v types.Value, dst any) error
 	}
 	*p = strings.ToLower(string(s))
 	return nil
+}
+
+func (v *trackedValue) Close() error {
+	v.closed++
+	return nil
+}
+
+func (h *structGetHostFields) Bump(n int32) int32 {
+	h.Count += n
+	h.hidden++
+	return h.Count
+}
+
+func (v *marshalBenchMethods) Bump(n int32) int32 {
+	v.Count += n
+	v.hidden++
+	return v.Count
 }
 
 // zeroFunction returns its locals, one of each zeroTypes, unwritten.

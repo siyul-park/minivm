@@ -124,7 +124,7 @@ func (s *Store) Publish(c *Code) bool {
 				published = old.Tier
 			}
 			if installed = c.Tier > published; installed {
-				atomic.StoreUintptr(&s.natives[c.Address], c.native)
+				atomic.StoreUintptr(&s.natives[c.Address], c.Native())
 				s.codes[c.Address].Store(c)
 				if old != nil {
 					s.retire(old)
@@ -179,8 +179,7 @@ func (s *Store) RetireAt(address, ip int) {
 func (s *Store) Attach() *Reader {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r := &Reader{store: s}
-	r.seen.Store(s.epoch.Load())
+	r := newReader(s, s.currentEpoch())
 	s.readers = append(s.readers, r)
 	return r
 }
@@ -197,10 +196,10 @@ func (s *Store) Reclaim() error {
 	s.mu.Lock()
 	floor := s.epoch.Load()
 	for _, r := range s.readers {
-		floor = min(floor, r.seen.Load())
+		floor = min(floor, r.seenEpoch())
 	}
 	n := 0
-	for n < len(s.retired) && s.retired[n].retired.Load() <= floor {
+	for n < len(s.retired) && s.retired[n].retiredAt() <= floor {
 		n++
 	}
 	freed := slices.Clone(s.retired[:n])
@@ -250,28 +249,43 @@ func (s *Store) Close() error {
 // code's Retired after it. It stores only when the epoch moved, so a
 // steady quiescent point issues no store.
 func (r *Reader) Quiesce() {
-	if e := r.store.epoch.Load(); r.seen.Load() != e {
+	e := r.store.currentEpoch()
+	if r.seenEpoch() != e {
 		r.seen.Store(e)
 	}
 }
 
 // Detach unregisters r; its interpreter must hold no code from then on.
 func (r *Reader) Detach() {
-	s := r.store
+	r.store.detach(r)
+}
+
+func (s *Store) retire(c *Code) {
+	e := s.currentEpoch() + 1
+	c.retire(e)
+	s.epoch.Store(e)
+	s.retired = append(s.retired, c)
+	s.pending.Add(1)
+}
+
+func newReader(store *Store, epoch uint64) *Reader {
+	r := &Reader{store: store}
+	r.seen.Store(epoch)
+	return r
+}
+
+func (s *Store) currentEpoch() uint64 {
+	return s.epoch.Load()
+}
+
+func (r *Reader) seenEpoch() uint64 {
+	return r.seen.Load()
+}
+
+func (s *Store) detach(r *Reader) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if k := slices.Index(s.readers, r); k >= 0 {
 		s.readers = slices.Delete(s.readers, k, k+1)
 	}
-}
-
-// retire stamps c with the next epoch and queues it for Reclaim; the caller
-// holds mu. The stamp precedes the epoch store, so a Reader that observes
-// the epoch also observes c as retired.
-func (s *Store) retire(c *Code) {
-	e := s.epoch.Load() + 1
-	c.retired.Store(e)
-	s.epoch.Store(e)
-	s.retired = append(s.retired, c)
-	s.pending.Add(1)
 }

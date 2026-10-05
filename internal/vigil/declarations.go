@@ -11,14 +11,17 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-func checkDocs(pass *analysis.Pass, file *ast.File) {
+func docs(pass *analysis.Pass, file *ast.File) {
 	if strings.HasSuffix(pass.Fset.File(file.Pos()).Name(), "_test.go") {
 		return
 	}
 	for _, decl := range file.Decls {
 		switch decl := decl.(type) {
 		case *ast.FuncDecl:
-			if isTestFunction(decl.Name.Name) || !decl.Name.IsExported() || decl.Doc != nil {
+			if test(decl.Name.Name) || !decl.Name.IsExported() || decl.Doc != nil {
+				continue
+			}
+			if decl.Recv != nil && !ast.IsExported(receiver(decl.Recv)) {
 				continue
 			}
 			report(pass, decl.Name.Pos(), "exported symbol %s must have a doc comment", decl.Name.Name)
@@ -45,29 +48,30 @@ func checkDocs(pass *analysis.Pass, file *ast.File) {
 	}
 }
 
-func checkDeclarations(pass *analysis.Pass, file *ast.File) {
+func declarations(pass *analysis.Pass, file *ast.File) {
 	last := -1
 	var lastDecl ast.Decl
 	for _, decl := range file.Decls {
-		group := declarationGroup(decl)
+		group := declarationGroup(pass, decl)
 		if group < 0 {
 			continue
 		}
 		if group < last {
 			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "init" {
 				report(pass, decl.Pos(), "init must appear immediately after package-level declarations")
-				continue
+			} else {
+				report(pass, decl.Pos(), "declaration %s follows %s in the wrong file-order group", name(decl), name(lastDecl))
 			}
-			report(pass, decl.Pos(), "declaration %s follows %s in the wrong file-order group", declarationName(decl), declarationName(lastDecl))
+			continue
 		}
 		last = group
 		lastDecl = decl
 	}
 }
 
-func declarationGroup(decl ast.Decl) int {
+func declarationGroup(pass *analysis.Pass, decl ast.Decl) int {
 	if fn, ok := decl.(*ast.FuncDecl); ok {
-		return functionGroup(fn)
+		return functionGroup(pass, fn)
 	}
 	gen, ok := decl.(*ast.GenDecl)
 	if !ok {
@@ -75,12 +79,12 @@ func declarationGroup(decl ast.Decl) int {
 	}
 	switch gen.Tok {
 	case token.TYPE:
-		if allSpecsUnexportedType(gen.Specs) {
+		if unexportedTypes(gen.Specs) {
 			return 1
 		}
 		return 0
 	case token.CONST:
-		if allSpecsUnexported(gen.Specs) {
+		if unexported(gen.Specs) {
 			return 3
 		}
 		return 2
@@ -91,18 +95,18 @@ func declarationGroup(decl ast.Decl) int {
 	}
 }
 
-func functionGroup(fn *ast.FuncDecl) int {
-	if isTestFunction(fn.Name.Name) {
+func functionGroup(pass *analysis.Pass, fn *ast.FuncDecl) int {
+	if test(fn.Name.Name) {
 		return -1
 	}
 	if fn.Recv != nil {
-		if !fn.Name.IsExported() {
-			return 11
-		}
-		if isHook(fn.Name.Name) {
+		if hook(fn.Name.Name) || interfaceHook(pass, fn) {
 			return 10
 		}
-		if isConstructor(fn.Name.Name) {
+		if !ast.IsExported(receiver(fn.Recv)) || !fn.Name.IsExported() {
+			return 11
+		}
+		if constructor(fn.Name.Name) {
 			return 8
 		}
 		return 9
@@ -113,13 +117,13 @@ func functionGroup(fn *ast.FuncDecl) int {
 	if !fn.Name.IsExported() {
 		return 11
 	}
-	if isConstructor(fn.Name.Name) {
+	if constructor(fn.Name.Name) {
 		return 8
 	}
 	return 7
 }
 
-func allSpecsUnexportedType(specs []ast.Spec) bool {
+func unexportedTypes(specs []ast.Spec) bool {
 	for _, spec := range specs {
 		typ, ok := spec.(*ast.TypeSpec)
 		if !ok || typ.Name.IsExported() {
@@ -129,11 +133,11 @@ func allSpecsUnexportedType(specs []ast.Spec) bool {
 	return true
 }
 
-func isConstructor(name string) bool {
+func constructor(name string) bool {
 	return name == "New" || strings.HasPrefix(name, "New")
 }
 
-func isHook(name string) bool {
+func hook(name string) bool {
 	switch name {
 	case "Cast", "Equals", "Kind", "Type", "String", "Refs", "Marshal", "Unmarshal", "Error", "Unwrap":
 		return true
@@ -142,7 +146,59 @@ func isHook(name string) bool {
 	}
 }
 
-func allSpecsUnexported(specs []ast.Spec) bool {
+func interfaceHook(pass *analysis.Pass, fn *ast.FuncDecl) bool {
+	obj, ok := pass.TypesInfo.ObjectOf(fn.Name).(*types.Func)
+	if !ok {
+		return false
+	}
+	sig, ok := obj.Type().(*types.Signature)
+	if !ok || sig.Recv() == nil {
+		return false
+	}
+	for _, iface := range interfaces(pass) {
+		if !implements(sig.Recv().Type(), iface) {
+			continue
+		}
+		for i := 0; i < iface.NumMethods(); i++ {
+			if iface.Method(i).Name() == obj.Name() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func interfaces(pass *analysis.Pass) []*types.Interface {
+	var out []*types.Interface
+	add := func(scope *types.Scope) {
+		for _, name := range scope.Names() {
+			obj := scope.Lookup(name)
+			typeName, ok := obj.(*types.TypeName)
+			if !ok {
+				continue
+			}
+			named, ok := typeName.Type().(*types.Named)
+			if !ok {
+				continue
+			}
+			iface, ok := named.Underlying().(*types.Interface)
+			if ok {
+				out = append(out, iface)
+			}
+		}
+	}
+	add(pass.Pkg.Scope())
+	for _, pkg := range pass.Pkg.Imports() {
+		add(pkg.Scope())
+	}
+	return out
+}
+
+func implements(typ types.Type, iface *types.Interface) bool {
+	return types.Implements(typ, iface)
+}
+
+func unexported(specs []ast.Spec) bool {
 	for _, spec := range specs {
 		vs, ok := spec.(*ast.ValueSpec)
 		if !ok || len(vs.Names) == 0 {
@@ -157,7 +213,7 @@ func allSpecsUnexported(specs []ast.Spec) bool {
 	return true
 }
 
-func declarationName(decl ast.Decl) string {
+func name(decl ast.Decl) string {
 	switch decl := decl.(type) {
 	case *ast.FuncDecl:
 		return decl.Name.Name
@@ -168,7 +224,7 @@ func declarationName(decl ast.Decl) string {
 	}
 }
 
-func checkDependencyOrder(pass *analysis.Pass, file *ast.File) {
+func dependencyOrder(pass *analysis.Pass, file *ast.File) {
 	decls := make(map[types.Object]*ast.FuncDecl)
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -197,16 +253,16 @@ func checkDependencyOrder(pass *analysis.Pass, file *ast.File) {
 			case *ast.Ident:
 				dependency = pass.TypesInfo.Uses[node]
 			case *ast.SelectorExpr:
-				dependency = selectorObject(pass, node)
+				dependency = object(pass, node)
 			default:
 				return true
 			}
 			dependencyDecl := decls[dependency]
 			if dependencyDecl == nil || dependency == caller ||
-				declarationGroup(fn) != declarationGroup(dependencyDecl) {
+				declarationGroup(pass, fn) != declarationGroup(pass, dependencyDecl) {
 				return true
 			}
-			deps[caller] = appendUnique(deps[caller], dependency)
+			deps[caller] = unique(deps[caller], dependency)
 			return true
 		})
 	}
@@ -246,53 +302,92 @@ func reaches(graph map[types.Object][]types.Object, start, target types.Object) 
 	return visit(start)
 }
 
-func checkHelpers(pass *analysis.Pass) {
-	set := collectFunctions(pass)
+func privateWrappers(pass *analysis.Pass) {
+	set := collectGraph(pass)
 	for ident, obj := range pass.TypesInfo.Defs {
 		fn, ok := obj.(*types.Func)
 		if !ok || fn.Exported() {
 			continue
 		}
-		decl := set.defs[obj]
+		decl := set.functions[obj]
 		if decl == nil || decl.Doc != nil || len(set.callers[obj]) != 1 {
 			continue
 		}
-		if inlineableWrapper(pass, set.callers, decl.Body) {
+		if privateForwarder(pass, set, obj, decl.Body) {
 			report(pass, ident.Pos(),
 				"private helper %s is a single-use forwarding wrapper; inline it",
 				ident.Name)
 		}
 	}
 }
-func checkContext(pass *analysis.Pass, file *ast.File) {
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Type.Params == nil || len(fn.Type.Params.List) < 2 {
-			continue
-		}
-		for _, field := range fn.Type.Params.List[1:] {
-			if isContext(pass, field.Type) {
-				report(pass, field.Pos(), "context.Context must be the first parameter of %s", fn.Name.Name)
-				break
-			}
-		}
-	}
-}
-
-func isContext(pass *analysis.Pass, expr ast.Expr) bool {
-	typ := pass.TypesInfo.TypeOf(expr)
-	if typ == nil {
+func privateForwarder(pass *analysis.Pass, graph graph, current types.Object, body *ast.BlockStmt) bool {
+	call := call(body)
+	if call == nil {
 		return false
 	}
-	named, ok := typ.(*types.Named)
+	target := object(pass, call.Fun)
+	if target == nil || target.Exported() || len(graph.callers[target]) != 1 {
+		return false
+	}
+	currentFunc, ok := current.(*types.Func)
 	if !ok {
 		return false
 	}
-	obj := named.Obj()
-	return obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == "context" && obj.Name() == "Context"
+	targetFunc, ok := target.(*types.Func)
+	if !ok || !forwarded(pass, currentFunc, targetFunc, call) {
+		return false
+	}
+	seen := make(map[types.Object]bool)
+	var visit func(types.Object) bool
+	visit = func(obj types.Object) bool {
+		if obj == current {
+			return true
+		}
+		if seen[obj] {
+			return false
+		}
+		seen[obj] = true
+		for dependency := range graph.calls[obj] {
+			if visit(dependency) {
+				return true
+			}
+		}
+		return false
+	}
+	return !visit(target)
 }
 
-func checkErrors(pass *analysis.Pass, file *ast.File) {
+func forwarded(pass *analysis.Pass, current, target *types.Func, call *ast.CallExpr) bool {
+	currentSig, ok := current.Type().(*types.Signature)
+	if !ok {
+		return false
+	}
+	targetSig, ok := target.Type().(*types.Signature)
+	if !ok || targetSig.Params().Len() != currentSig.Params().Len() || len(call.Args) != currentSig.Params().Len() {
+		return false
+	}
+	if currentSig.Recv() != nil {
+		selection, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || pass.TypesInfo.Selections[selection] == nil || targetSig.Recv() == nil {
+			return false
+		}
+		receiver, ok := selection.X.(*ast.Ident)
+		if !ok || pass.TypesInfo.Uses[receiver] != currentSig.Recv() {
+			return false
+		}
+	} else if targetSig.Recv() != nil {
+		return false
+	}
+	for i, arg := range call.Args {
+		ident, ok := arg.(*ast.Ident)
+		if !ok || pass.TypesInfo.Uses[ident] != currentSig.Params().At(i) {
+			return false
+		}
+	}
+	return true
+}
+
+func errors(pass *analysis.Pass, file *ast.File) {
 	if strings.HasSuffix(pass.Fset.File(file.Pos()).Name(), "_test.go") {
 		return
 	}
@@ -306,7 +401,7 @@ func checkErrors(pass *analysis.Pass, file *ast.File) {
 			if !ok {
 				return true
 			}
-			target, ok := calledObject(pass, call).(*types.Func)
+			target, ok := object(pass, call.Fun).(*types.Func)
 			if !ok || target.Pkg() == nil || target.Pkg().Path() != "fmt" || target.Name() != "Errorf" || len(call.Args) < 2 {
 				return true
 			}
@@ -315,7 +410,7 @@ func checkErrors(pass *analysis.Pass, file *ast.File) {
 				return true
 			}
 			format := constant.StringVal(value)
-			if !hasVerb(format, 'v') || hasVerb(format, 'w') {
+			if !verb(format, 'v') || verb(format, 'w') {
 				return true
 			}
 			errorType := types.Universe.Lookup("error").Type()
@@ -331,7 +426,7 @@ func checkErrors(pass *analysis.Pass, file *ast.File) {
 	}
 }
 
-func hasVerb(format string, want byte) bool {
+func verb(format string, want byte) bool {
 	for i := 0; i < len(format); i++ {
 		if format[i] != '%' || i+1 >= len(format) {
 			continue
@@ -350,76 +445,160 @@ func hasVerb(format string, want byte) bool {
 	return false
 }
 
-func checkConstructors(pass *analysis.Pass) {
+func api(pass *analysis.Pass) {
 	for _, file := range pass.Files {
+		if strings.HasSuffix(pass.Fset.File(file.Pos()).Name(), "_test.go") {
+			continue
+		}
 		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || !fn.Name.IsExported() || !strings.HasPrefix(fn.Name.Name, "New") {
-				continue
-			}
-			object, ok := pass.TypesInfo.ObjectOf(fn.Name).(*types.Func)
-			if !ok {
-				continue
-			}
-			sig, ok := object.Type().(*types.Signature)
-			if !ok || sig.Results() == nil || returnsMultipleConcreteTypes(pass, fn) {
-				continue
-			}
-			for i := 0; i < sig.Results().Len(); i++ {
-				typ := sig.Results().At(i).Type()
-				if isErrorType(typ) {
-					continue
-				}
-				if _, ok := typ.Underlying().(*types.Interface); ok {
-					report(pass, fn.Name.Pos(),
-						"constructor %s returns an interface; constructors must return concrete types",
-						object.Name())
-					break
-				}
+			declaration(pass, decl)
+		}
+	}
+}
+
+func declaration(pass *analysis.Pass, decl ast.Decl) {
+	switch decl := decl.(type) {
+	case *ast.FuncDecl:
+		fn, ok := pass.TypesInfo.ObjectOf(decl.Name).(*types.Func)
+		if ok && fn.Exported() {
+			function(pass, fn, decl)
+		}
+	case *ast.GenDecl:
+		for _, spec := range decl.Specs {
+			switch spec := spec.(type) {
+			case *ast.TypeSpec:
+				specification(pass, spec)
+			case *ast.ValueSpec:
+				value(pass, spec)
 			}
 		}
 	}
 }
 
-func returnsMultipleConcreteTypes(pass *analysis.Pass, fn *ast.FuncDecl) bool {
-	var returned []types.Type
-	found := false
-	ast.Inspect(fn.Body, func(node ast.Node) bool {
-		if _, ok := node.(*ast.FuncLit); ok {
-			return false
+func specification(pass *analysis.Pass, spec ast.Spec) {
+	typ, ok := spec.(*ast.TypeSpec)
+	if !ok || !typ.Name.IsExported() {
+		return
+	}
+	obj := pass.TypesInfo.ObjectOf(typ.Name)
+	if obj == nil {
+		return
+	}
+	switch obj.Type().Underlying().(type) {
+	case *types.Struct, *types.Interface:
+		if private := privateType(pass, obj.Type().Underlying()); private != nil {
+			report(pass, typ.Name.Pos(), "public symbol %s exposes private type %s", obj.Name(), private.Obj().Name())
 		}
-		ret, ok := node.(*ast.ReturnStmt)
-		if !ok {
-			return true
+	case *types.Signature:
+		// Public named function types intentionally hide their private option state.
+	}
+}
+
+func value(pass *analysis.Pass, spec *ast.ValueSpec) {
+	for _, name := range spec.Names {
+		if !name.IsExported() {
+			continue
 		}
-		for _, result := range ret.Results {
-			typ := pass.TypesInfo.TypeOf(result)
-			if typ == nil || isErrorType(typ) {
-				continue
+		obj := pass.TypesInfo.ObjectOf(name)
+		if obj == nil {
+			continue
+		}
+		if private := privateType(pass, obj.Type()); private != nil {
+			report(pass, name.Pos(), "public symbol %s exposes private type %s", obj.Name(), private.Obj().Name())
+		}
+	}
+}
+
+func function(pass *analysis.Pass, fn *types.Func, decl *ast.FuncDecl) {
+	sig, ok := fn.Type().(*types.Signature)
+	if !ok {
+		return
+	}
+	for i := 0; i < sig.Params().Len(); i++ {
+		if private := privateType(pass, sig.Params().At(i).Type()); private != nil {
+			report(pass, decl.Name.Pos(), "public symbol %s exposes private parameter type %s", fn.Name(), private.Obj().Name())
+			return
+		}
+	}
+	for i := 0; i < sig.Results().Len(); i++ {
+		if private := privateType(pass, sig.Results().At(i).Type()); private != nil {
+			report(pass, decl.Name.Pos(), "public symbol %s exposes private result type %s", fn.Name(), private.Obj().Name())
+			return
+		}
+	}
+}
+
+func privateType(pass *analysis.Pass, typ types.Type) *types.Named {
+	seen := make(map[types.Type]bool)
+	var visit func(types.Type) *types.Named
+	visit = func(typ types.Type) *types.Named {
+		typ = types.Unalias(typ)
+		if seen[typ] {
+			return nil
+		}
+		seen[typ] = true
+		switch typ := typ.(type) {
+		case *types.Named:
+			obj := typ.Obj()
+			if obj.Pkg() == pass.Pkg && !obj.Exported() {
+				return typ
 			}
-			if _, ok := typ.Underlying().(*types.Interface); ok {
-				continue
+			if obj.Exported() {
+				return nil
 			}
-			for _, existing := range returned {
-				if types.Identical(existing, typ) {
-					continue
+			return visit(typ.Underlying())
+		case *types.Pointer:
+			return visit(typ.Elem())
+		case *types.Slice:
+			return visit(typ.Elem())
+		case *types.Array:
+			return visit(typ.Elem())
+		case *types.Map:
+			if key := visit(typ.Key()); key != nil {
+				return key
+			}
+			return visit(typ.Elem())
+		case *types.Chan:
+			return visit(typ.Elem())
+		case *types.Signature:
+			if found := tuple(visit, typ.Params()); found != nil {
+				return found
+			}
+			return tuple(visit, typ.Results())
+		case *types.Struct:
+			for i := 0; i < typ.NumFields(); i++ {
+				field := typ.Field(i)
+				if field.Exported() {
+					if found := visit(field.Type()); found != nil {
+						return found
+					}
 				}
-				found = true
-				return false
 			}
-			returned = append(returned, typ)
+		case *types.Interface:
+			for i := 0; i < typ.NumMethods(); i++ {
+				method := typ.Method(i)
+				if method.Exported() {
+					if found := visit(method.Type()); found != nil {
+						return found
+					}
+				}
+			}
 		}
-		return true
-	})
-	return found
+		return nil
+	}
+	return visit(typ)
 }
 
-func isErrorType(typ types.Type) bool {
-	err := types.Universe.Lookup("error")
-	return err != nil && types.Identical(typ, err.Type())
+func tuple(visit func(types.Type) *types.Named, tuple *types.Tuple) *types.Named {
+	for i := 0; i < tuple.Len(); i++ {
+		if found := visit(tuple.At(i).Type()); found != nil {
+			return found
+		}
+	}
+	return nil
 }
 
-func checkCohesion(pass *analysis.Pass) {
+func cohesion(pass *analysis.Pass) {
 	files := make(map[string]map[string]token.Pos)
 	for _, file := range pass.Files {
 		name := pass.Fset.File(file.Pos()).Name()
@@ -428,7 +607,7 @@ func checkCohesion(pass *analysis.Pass) {
 			if !ok || fn.Recv == nil {
 				continue
 			}
-			recv := receiverName(fn.Recv)
+			recv := receiver(fn.Recv)
 			if recv == "" {
 				continue
 			}

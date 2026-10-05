@@ -85,24 +85,8 @@ const (
 	mapIteratorGeneric
 )
 
-var _ Value = (*MapLiteral)(nil)
-
-// Kind reports the reference kind.
-func (m *MapLiteral) Kind() Kind { return KindRef }
-
-// String returns the canonical map literal.
-func (m *MapLiteral) String() string {
-	parts := make([]string, len(m.Keys))
-	for i := range m.Keys {
-		parts[i] = fmt.Sprintf("%s: %s", m.Keys[i].String(), m.Values[i].String())
-	}
-	return formatMap(m.Type(), parts)
-}
-
-// Type returns the map literal type.
-func (m *MapLiteral) Type() Type { return m.Typ }
-
 var (
+	_ Value     = (*MapLiteral)(nil)
 	_ Traceable = (*Map)(nil)
 	_ Traceable = (*TypedMap[int8])(nil)
 	_ Traceable = (*TypedMap[bool])(nil)
@@ -115,10 +99,6 @@ var (
 	_ Iterator  = (*MapIterator)(nil)
 	_ Type      = (*MapType)(nil)
 )
-
-func NewMap(typ *MapType) *Map {
-	return NewMapWithCapacity(typ, 0)
-}
 
 func NewMapForType(typ *MapType, capacity int) Value {
 	switch typ.KeyKind {
@@ -141,6 +121,11 @@ func NewMapForType(typ *MapType, capacity int) Value {
 		}
 	}
 	return NewMapWithCapacity(typ, capacity)
+}
+
+// NewMap returns an empty generic map.
+func NewMap(typ *MapType) *Map {
+	return NewMapWithCapacity(typ, 0)
 }
 
 // NewTypedMap creates a typed map.
@@ -274,6 +259,30 @@ func (m *Map) Range(fn func(MapKey, MapEntry)) {
 	}
 }
 
+// Value reports the key this entry is indexed by, from the entry's own key
+// when it holds one and from the index otherwise.
+func (k MapKey) Value(entry MapEntry) Value {
+	if entry.Key != 0 {
+		return entry.Key
+	}
+	switch k.Kind {
+	case KindI32:
+		return I32(int32(k.Bits))
+	case KindI64:
+		return I64(int64(k.Bits))
+	case KindF32:
+		return F32(math.Float32frombits(uint32(k.Bits)))
+	case KindF64:
+		return F64(math.Float64frombits(k.Bits))
+	case KindRef:
+		return Ref(int32(k.Bits))
+	case KindText:
+		return String(k.Text)
+	default:
+		return BoxedNull
+	}
+}
+
 func (it *MapIterator) Next() bool {
 	if it.started && it.done {
 		it.current = BoxedNull
@@ -316,30 +325,6 @@ func (it *MapIterator) Next() bool {
 func (it *MapIterator) Current() Value { return it.current }
 
 func (it *MapIterator) Done() bool { return it.done }
-
-// Value reports the key this entry is indexed by, from the entry's own key
-// when it holds one and from the index otherwise.
-func (k MapKey) Value(entry MapEntry) Value {
-	if entry.Key != 0 {
-		return entry.Key
-	}
-	switch k.Kind {
-	case KindI32:
-		return I32(int32(k.Bits))
-	case KindI64:
-		return I64(int64(k.Bits))
-	case KindF32:
-		return F32(math.Float32frombits(uint32(k.Bits)))
-	case KindF64:
-		return F64(math.Float64frombits(k.Bits))
-	case KindRef:
-		return Ref(int32(k.Bits))
-	case KindText:
-		return String(k.Text)
-	default:
-		return BoxedNull
-	}
-}
 
 // Kind returns the value kind.
 func (m *TypedMap[K]) Kind() Kind { return KindRef }
@@ -465,6 +450,21 @@ func (t *MapType) Equals(other Type) bool {
 	}
 	return t.Key.Equals(o.Key) && t.Elem.Equals(o.Elem)
 }
+
+// Kind reports the reference kind.
+func (m *MapLiteral) Kind() Kind { return KindRef }
+
+// String returns the canonical map literal.
+func (m *MapLiteral) String() string {
+	parts := make([]string, len(m.Keys))
+	for i := range m.Keys {
+		parts[i] = fmt.Sprintf("%s: %s", m.Keys[i].String(), m.Values[i].String())
+	}
+	return formatMap(m.Type(), parts)
+}
+
+// Type returns the map literal type.
+func (m *MapLiteral) Type() Type { return m.Typ }
 
 func formatMap(typ Type, parts []string) string {
 	sort.Strings(parts)

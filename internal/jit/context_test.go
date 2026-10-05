@@ -75,7 +75,7 @@ func TestContext_Read(t *testing.T) {
 		buffer, err := asm.NewBuffer(len(code))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, buffer.Free()) })
-		address, err := asm.Link(buffer, code)
+		address, err := buffer.Link(code)
 		require.NoError(t, err)
 
 		require.True(t, asm.Enter(address, &ctx.State))
@@ -112,7 +112,7 @@ func TestContext_Read(t *testing.T) {
 		buffer, err := asm.NewBuffer(len(code))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, buffer.Free()) })
-		address, err := asm.Link(buffer, code)
+		address, err := buffer.Link(code)
 		require.NoError(t, err)
 		ctx.Depth = 1
 

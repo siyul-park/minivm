@@ -2,6 +2,7 @@ package types
 
 import "fmt"
 
+// I32, I64, F32, and F64 are scalar VM values.
 type I32 int32
 
 type I64 int64
@@ -17,6 +18,7 @@ type I1 bool
 // representation but keeps its own kind/type.
 type I8 int8
 
+// Ref is a heap reference value.
 type Ref int32
 
 type i1Type struct{}
@@ -33,20 +35,22 @@ type f64Type struct{}
 // report KindRef too, and none of them is any.
 type anyType struct{}
 
+// Null, False, and True are the canonical scalar constants.
 var (
 	Null  = Ref(0)
 	False = I32(0)
 	True  = I32(1)
 )
 
+// TypeI1 through TypeAny are the canonical VM type values.
 var (
-	TypeI1  = i1Type{}
-	TypeI8  = i8Type{}
-	TypeI32 = i32Type{}
-	TypeI64 = i64Type{}
-	TypeF32 = f32Type{}
-	TypeF64 = f64Type{}
-	TypeAny = anyType{}
+	TypeI1  Type = i1Type{}
+	TypeI8  Type = i8Type{}
+	TypeI32 Type = i32Type{}
+	TypeI64 Type = i64Type{}
+	TypeF32 Type = f32Type{}
+	TypeF64 Type = f64Type{}
+	TypeAny Type = anyType{}
 )
 
 var _ Value = I1(false)

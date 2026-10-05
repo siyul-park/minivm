@@ -33,7 +33,8 @@ const (
 	ErrorCodeUserBase ErrorCode = 1 << 20
 )
 
-var TypeError = errorType{}
+// TypeError is the VM error type.
+var TypeError Type = errorType{}
 
 var (
 	_ Traceable = (*Error)(nil)
@@ -48,7 +49,9 @@ func WrapError(code ErrorCode, err error) *Error {
 	if err == nil {
 		return nil
 	}
-	return &Error{cause: err, code: code, message: err.Error(), value: BoxedNull}
+	e := NewError(code, err.Error(), BoxedNull)
+	e.wrap(err)
+	return e
 }
 
 // NewError builds an exception with a numeric code, message, and payload. Pass
@@ -108,4 +111,8 @@ func (errorType) Cast(other Type) bool {
 
 func (errorType) Equals(other Type) bool {
 	return other == TypeError
+}
+
+func (e *Error) wrap(err error) {
+	e.cause = err
 }

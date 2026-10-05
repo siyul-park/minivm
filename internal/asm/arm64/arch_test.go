@@ -9,8 +9,22 @@ import (
 	"github.com/siyul-park/minivm/internal/asm/arm64"
 )
 
-func TestFrame_Flow(t *testing.T) {
-	var frame asm.Frame = arm64.New()
+func TestArch(t *testing.T) {
+	var _ asm.Arch = arm64.Arch{}
+	var _ asm.Frame = arm64.Arch{}
+	var _ asm.Relaxer = arm64.Arch{}
+}
+
+func TestArch_New(t *testing.T) {
+	require.Equal(t, arm64.Arch{}, arm64.New())
+}
+
+func TestArch_Encoder(t *testing.T) {
+	require.IsType(t, arm64.Encoder{}, arm64.Arch{}.Encoder())
+}
+
+func TestArch_Flow(t *testing.T) {
+	frame := arm64.Arch{}
 	tests := []struct {
 		name string
 		inst asm.Instruction
@@ -40,8 +54,8 @@ func TestFrame_Flow(t *testing.T) {
 	}
 }
 
-func TestFrame_Writes(t *testing.T) {
-	var frame asm.Frame = arm64.New()
+func TestArch_Writes(t *testing.T) {
+	frame := arm64.Arch{}
 	tests := []struct {
 		name string
 		inst asm.Instruction
@@ -75,8 +89,8 @@ func TestFrame_Writes(t *testing.T) {
 	}
 }
 
-func TestFrame_Registers(t *testing.T) {
-	var frame asm.Frame = arm64.New()
+func TestArch_Registers(t *testing.T) {
+	frame := arm64.Arch{}
 	require.Equal(t, []asm.PReg{
 		arm64.X0, arm64.X1, arm64.X2, arm64.X3, arm64.X4, arm64.X5, arm64.X6, arm64.X7,
 		arm64.X8, arm64.X9, arm64.X10, arm64.X11, arm64.X12, arm64.X13, arm64.X14, arm64.X15,
@@ -93,8 +107,8 @@ func TestFrame_Registers(t *testing.T) {
 	require.Equal(t, arm64.X0, frame.Registers(asm.RegTypeInt)[0])
 }
 
-func TestFrame_Spill(t *testing.T) {
-	var frame asm.Frame = arm64.New()
+func TestArch_Spill(t *testing.T) {
+	frame := arm64.Arch{}
 	tests := []struct {
 		name string
 		reg  asm.Reg
@@ -114,8 +128,8 @@ func TestFrame_Spill(t *testing.T) {
 	}
 }
 
-func TestFrame_Reload(t *testing.T) {
-	var frame asm.Frame = arm64.New()
+func TestArch_Reload(t *testing.T) {
+	frame := arm64.Arch{}
 	tests := []struct {
 		name string
 		reg  asm.Reg
@@ -140,8 +154,8 @@ func TestFrame_Reload(t *testing.T) {
 // are rewritten into an inverted skip branch plus an in-range unconditional
 // B to the original label, TBZ/TBNZ are never relaxed, and a replacement B
 // that cannot reach the target is rejected.
-func TestRelaxer_Relax(t *testing.T) {
-	relaxer := arm64.New()
+func TestArch_Relax(t *testing.T) {
+	relaxer := arm64.Arch{}
 
 	label := asm.Label(7)
 	target := asm.LabelOperand{ID: label}

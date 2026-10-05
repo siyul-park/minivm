@@ -25,21 +25,6 @@ func (f *Function) Name() string {
 	return f.name
 }
 
-// Len returns the block count.
-func (f *Function) Len() int {
-	return len(f.blocks)
-}
-
-// Succ returns block successors in edge order.
-func (f *Function) Succ(block int) []int {
-	return f.succs[block]
-}
-
-// Pred returns blocks that reach block.
-func (f *Function) Pred(block int) []int {
-	return f.preds[block]
-}
-
 // Block returns the block at id.
 func (f *Function) Block(id int) Block {
 	return f.blocks[id]
@@ -61,6 +46,21 @@ func (f *Function) Type(v Value) Type {
 		return 0
 	}
 	return f.types[v]
+}
+
+// Len returns the block count.
+func (f *Function) Len() int {
+	return len(f.blocks)
+}
+
+// Succ returns block successors in edge order.
+func (f *Function) Succ(block int) []int {
+	return f.succs[block]
+}
+
+// Pred returns blocks that reach block.
+func (f *Function) Pred(block int) []int {
+	return f.preds[block]
 }
 
 func newFunction(name string, types []Type, blocks []Block, entry Frame) *Function {

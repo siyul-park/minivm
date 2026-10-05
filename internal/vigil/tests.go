@@ -8,7 +8,27 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-func checkTestHelpers(pass *analysis.Pass) {
+type subtestVisitor struct {
+	depth int
+	found *bool
+}
+
+func (v subtestVisitor) Visit(node ast.Node) ast.Visitor {
+	if node == nil || *v.found {
+		return nil
+	}
+	call, ok := node.(*ast.CallExpr)
+	if !ok || !subtest(call) {
+		return v
+	}
+	if v.depth > 0 {
+		*v.found = true
+		return nil
+	}
+	return subtestVisitor{depth: v.depth + 1, found: v.found}
+}
+
+func testWrappers(pass *analysis.Pass) {
 	callers := make(map[types.Object]map[types.Object]bool)
 	functions := make(map[types.Object]*ast.FuncDecl)
 	for _, file := range pass.Files {
@@ -24,7 +44,7 @@ func checkTestHelpers(pass *analysis.Pass) {
 			if obj == nil {
 				continue
 			}
-			if !isTestFunction(fn.Name.Name) {
+			if !test(fn.Name.Name) {
 				functions[obj] = fn
 			}
 			ast.Inspect(fn.Body, func(node ast.Node) bool {
@@ -32,7 +52,7 @@ func checkTestHelpers(pass *analysis.Pass) {
 				if !ok {
 					return true
 				}
-				target := calledObject(pass, call)
+				target := object(pass, call.Fun)
 				if target == nil || target.Exported() || target == obj {
 					return true
 				}
@@ -45,19 +65,19 @@ func checkTestHelpers(pass *analysis.Pass) {
 		}
 	}
 	for obj, fn := range functions {
-		if len(callers[obj]) != 1 || !isTestForwarder(pass, fn) {
+		if len(callers[obj]) != 1 || !testForwarder(pass, fn) {
 			continue
 		}
 		report(pass, fn.Name.Pos(), "test helper %s is a single-use forwarding wrapper; call the target public symbol directly", fn.Name.Name)
 	}
 }
 
-func isTestForwarder(pass *analysis.Pass, fn *ast.FuncDecl) bool {
-	call := wrapperCall(fn.Body)
+func testForwarder(pass *analysis.Pass, fn *ast.FuncDecl) bool {
+	call := call(fn.Body)
 	if call == nil {
 		return false
 	}
-	target := calledObject(pass, call)
+	target := object(pass, call.Fun)
 	if target == nil || !target.Exported() || target.Pkg() == nil {
 		return false
 	}
@@ -95,24 +115,15 @@ func isTestForwarder(pass *analysis.Pass, fn *ast.FuncDecl) bool {
 	return true
 }
 
-func inlineableWrapper(pass *analysis.Pass, callers map[types.Object]map[types.Object]bool, body *ast.BlockStmt) bool {
-	call := wrapperCall(body)
-	if call == nil {
-		return false
-	}
-	target := calledObject(pass, call)
-	return target != nil && !target.Exported() && len(callers[target]) == 1
-}
-
-func checkTestNesting(pass *analysis.Pass, file *ast.File) {
+func nesting(pass *analysis.Pass, file *ast.File) {
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Recv != nil || !isTestFunction(fn.Name.Name) || fn.Body == nil {
+		if !ok || fn.Recv != nil || !test(fn.Name.Name) || fn.Body == nil {
 			continue
 		}
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
 			call, ok := node.(*ast.CallExpr)
-			if ok && isTestRun(call) && nestedRun(call) {
+			if ok && subtest(call) && nested(call) {
 				report(pass, call.Pos(), "t.Run cases must not nest beyond one level")
 			}
 			return true
@@ -120,27 +131,27 @@ func checkTestNesting(pass *analysis.Pass, file *ast.File) {
 	}
 }
 
-func checkTestPolling(pass *analysis.Pass, file *ast.File) {
+func polling(pass *analysis.Pass, file *ast.File) {
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Recv != nil || !isTestFunction(fn.Name.Name) || fn.Body == nil {
+		if !ok || fn.Recv != nil || !test(fn.Name.Name) || fn.Body == nil {
 			continue
 		}
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
 			call, ok := node.(*ast.CallExpr)
-			if ok && isEventually(call) && eventuallyClosesResource(pass, fn, call) {
-				report(pass, call.Pos(), "Eventually must not poll a resource that the case closes; use the package poll helper on the test goroutine")
+			if ok && eventually(call) && closes(pass, fn, call) {
+				report(pass, call.Pos(), "readiness polling must not outlive a resource it observes")
 			}
 			return true
 		})
 	}
 }
 
-func checkTestPrivate(pass *analysis.Pass, file *ast.File) {
+func private(pass *analysis.Pass, file *ast.File) {
 	ast.Inspect(file, func(node ast.Node) bool {
 		ident, ok := node.(*ast.Ident)
 		if ok {
-			if obj := pass.TypesInfo.Uses[ident]; obj != nil && isPrivateTarget(pass, obj) {
+			if obj := pass.TypesInfo.Uses[ident]; obj != nil && privateTarget(pass, obj) {
 				report(pass, ident.Pos(), "tests must use the public target-package interface; private symbol %s is referenced", obj.Name())
 			}
 		}
@@ -148,7 +159,7 @@ func checkTestPrivate(pass *analysis.Pass, file *ast.File) {
 	})
 }
 
-func eventuallyClosesResource(pass *analysis.Pass, fn *ast.FuncDecl, call *ast.CallExpr) bool {
+func closes(pass *analysis.Pass, fn *ast.FuncDecl, call *ast.CallExpr) bool {
 	var condition *ast.FuncLit
 	for _, arg := range call.Args {
 		if literal, ok := arg.(*ast.FuncLit); ok {
@@ -194,15 +205,7 @@ func eventuallyClosesResource(pass *analysis.Pass, fn *ast.FuncDecl, call *ast.C
 	return closed
 }
 
-func isPrivateTarget(pass *analysis.Pass, obj types.Object) bool {
-	if obj.Pkg() == nil || obj.Pkg() != pass.Pkg || obj.Exported() {
-		return false
-	}
-	file := pass.Fset.File(obj.Pos())
-	return file != nil && !strings.HasSuffix(file.Name(), "_test.go")
-}
-
-func isTestRun(call *ast.CallExpr) bool {
+func subtest(call *ast.CallExpr) bool {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok || sel.Sel.Name != "Run" {
 		return false
@@ -211,26 +214,22 @@ func isTestRun(call *ast.CallExpr) bool {
 	return ok && id.Name == "t"
 }
 
-func nestedRun(root *ast.CallExpr) bool {
-	depth := 0
+func nested(root *ast.CallExpr) bool {
 	found := false
-	ast.Inspect(root, func(node ast.Node) bool {
-		if found {
-			return false
-		}
-		if call, ok := node.(*ast.CallExpr); ok && isTestRun(call) {
-			depth++
-			if depth > 1 {
-				found = true
-				return false
-			}
-		}
-		return true
-	})
+	visitor := subtestVisitor{found: &found}
+	ast.Walk(visitor, root)
 	return found
 }
 
-func isEventually(call *ast.CallExpr) bool {
+func privateTarget(pass *analysis.Pass, obj types.Object) bool {
+	if obj.Pkg() == nil || obj.Pkg() != pass.Pkg || obj.Exported() {
+		return false
+	}
+	file := pass.Fset.File(obj.Pos())
+	return file != nil && !strings.HasSuffix(file.Name(), "_test.go")
+}
+
+func eventually(call *ast.CallExpr) bool {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok || sel.Sel.Name != "Eventually" {
 		return false

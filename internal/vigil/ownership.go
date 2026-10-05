@@ -9,8 +9,14 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-func checkPrivateBoundary(pass *analysis.Pass) {
-	fields := privateFields(pass)
+func boundary(pass *analysis.Pass) {
+	fields := fields(pass)
+	owners := make(map[*types.Named]types.Object)
+	for field, owner := range fields {
+		if _, ok := owners[owner]; !ok {
+			owners[owner] = field
+		}
+	}
 	for _, file := range pass.Files {
 		if strings.HasSuffix(pass.Fset.File(file.Pos()).Name(), "_test.go") {
 			continue
@@ -21,15 +27,26 @@ func checkPrivateBoundary(pass *analysis.Pass) {
 				continue
 			}
 			current, _ := pass.TypesInfo.ObjectOf(fn.Name).(*types.Func)
-			currentOwner := receiverNamed(current)
+			receiver := receiverType(current)
 			ast.Inspect(fn.Body, func(node ast.Node) bool {
 				switch node := node.(type) {
 				case *ast.SelectorExpr:
-					checkPrivateAccess(pass, fields, current, currentOwner, selectorObject(pass, node), node.Sel.Pos())
+					access(pass, fields, owners, current, receiver, object(pass, node), node.Sel.Pos())
 				case *ast.KeyValueExpr:
 					ident, ok := node.Key.(*ast.Ident)
 					if ok {
-						checkPrivateAccess(pass, fields, current, currentOwner, pass.TypesInfo.Uses[ident], ident.Pos())
+						access(pass, fields, owners, current, receiver, pass.TypesInfo.Uses[ident], ident.Pos())
+					}
+				case *ast.CompositeLit:
+					if len(node.Elts) == 0 {
+						return true
+					}
+					if _, ok := node.Elts[0].(*ast.KeyValueExpr); ok {
+						return true
+					}
+					named, ok := pass.TypesInfo.TypeOf(node).(*types.Named)
+					if ok {
+						access(pass, fields, owners, current, receiver, owners[named], node.Pos())
 					}
 				}
 				return true
@@ -38,44 +55,41 @@ func checkPrivateBoundary(pass *analysis.Pass) {
 	}
 }
 
-func checkPrivateAccess(pass *analysis.Pass, fields map[types.Object]*types.Named, current *types.Func, currentOwner *types.Named, obj types.Object, pos token.Pos) {
+func access(pass *analysis.Pass, fields map[types.Object]*types.Named, owners map[*types.Named]types.Object, current *types.Func, receiver *types.Named, obj types.Object, pos token.Pos) {
 	if obj == nil || obj.Exported() || obj.Pkg() != pass.Pkg {
 		return
 	}
 	owner := fields[obj]
 	if owner == nil {
-		if fnObj, ok := obj.(*types.Func); ok {
-			owner = receiverNamed(fnObj)
+		return
+	}
+	if receiver == nil {
+		if !constructor(current.Name()) {
+			return
 		}
-	}
-	if owner == nil || !owner.Obj().Exported() {
-		return
-	}
-	if currentOwner != nil && types.Identical(currentOwner, owner) {
-		return
-	}
-	if currentOwner != nil && !currentOwner.Obj().Exported() && current != nil && !current.Exported() {
-		return
-	}
-	if currentOwner == nil && current != nil && strings.HasPrefix(current.Name(), "New") {
 		sig, ok := current.Type().(*types.Signature)
-		if ok && sig.Results() != nil {
-			for index := 0; index < sig.Results().Len(); index++ {
-				result := sig.Results().At(index).Type()
-				if ptr, ok := result.(*types.Pointer); ok {
-					result = ptr.Elem()
-				}
-				named, ok := result.(*types.Named)
-				if ok && types.Identical(named, owner) {
-					return
-				}
+		if !ok || sig.Results() == nil {
+			return
+		}
+		for i := 0; i < sig.Results().Len(); i++ {
+			result := sig.Results().At(i).Type()
+			if pointer, ok := result.(*types.Pointer); ok {
+				result = pointer.Elem()
+			}
+			named, ok := result.(*types.Named)
+			if ok && types.Identical(named, owner) {
+				return
 			}
 		}
+		return
+	}
+	if !current.Exported() || types.Identical(receiver, owner) {
+		return
 	}
 	report(pass, pos, "private member %s of public owner %s must be accessed through its owner", obj.Name(), owner.Obj().Name())
 }
 
-func privateFields(pass *analysis.Pass) map[types.Object]*types.Named {
+func fields(pass *analysis.Pass) map[types.Object]*types.Named {
 	out := make(map[types.Object]*types.Named)
 	for _, obj := range pass.TypesInfo.Defs {
 		typeName, ok := obj.(*types.TypeName)

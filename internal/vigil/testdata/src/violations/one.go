@@ -12,14 +12,44 @@ type PublicState struct {
 	value int
 }
 
-type privateThing struct{}
+// OtherState is a distinct owner for boundary tests.
+type OtherState struct{}
 
+// PublicFactory is the public contract for factory results.
+type PublicFactory interface {
+	Name() string
+}
+
+// PublicOption hides private option state behind a public functional option type.
+type PublicOption func(*privateState)
+
+// PublicContainer exposes a private field type through a public struct field.
+type PublicContainer struct { // want "CP004"
+	Value map[string]privateState
+}
+
+// PublicContract exposes a private method parameter through a public interface.
+type PublicContract interface { // want "CP004"
+	Use(privateState)
+}
+
+type privateThing struct{}
+type privateFactory struct{}
 type privateState struct{}
 type orderThing struct{}
 
-func Use(value int, ctx context.Context) {} // want "CP001" "CP003"
+func Use(value int, ctx context.Context) {} // want "CP001"
 
-func NewThing() interface{} { return Thing{} } // want "CP001" "CP004"
+// UseHelperA exercises a cross-group dependency that file ordering does not constrain.
+func UseHelperA() { helperValue() }
+
+// UseHelperB exercises the same shared lower-level helper.
+func UseHelperB() { helperValue() }
+
+// UsePrivate exercises a public parameter that directly exposes private state.
+func UsePrivate(values []privateState) {} // want "CP004"
+
+func NewThing() interface{} { return Thing{} } // want "CP001"
 
 func NewFactory(useOther bool) interface{} { // want "CP001"
 	if useOther {
@@ -28,10 +58,15 @@ func NewFactory(useOther bool) interface{} { // want "CP001"
 	return Thing{}
 }
 
-func NewClosure() interface{} { // want "CP001" "CP004"
+func NewClosure() interface{} { // want "CP001"
 	closure := func() interface{} { return privateThing{} }
 	_ = closure
 	return Thing{}
+}
+
+// NewFactory returns a private implementation through its public contract.
+func NewFactoryContract() PublicFactory {
+	return privateFactory{}
 }
 
 // NewState initializes PublicState through its constructor boundary.
@@ -41,13 +76,24 @@ func NewState(value int) PublicState {
 
 type laterThing struct{} // want "CP002"
 
-// UseHelperA exercises a cross-group dependency that file ordering does not constrain.
-func UseHelperA() { helperValue() }
+func (OtherState) BoundaryRead(state PublicState) int { // want "CP001"
+	return state.value // want "CP012"
+}
 
-// UseHelperB exercises the same shared lower-level helper.
-func UseHelperB() { helperValue() }
+func (OtherState) BoundaryConstruct() PublicState { // want "CP001"
+	return PublicState{value: 1} // want "CP012"
+}
+
+func (OtherState) BoundaryUnkeyed() PublicState { // want "CP001"
+	return PublicState{1} // want "CP012"
+}
 
 func (Thing) First() {} // want "CP001"
+
+func (Thing) Second() {} // want "CP001" "receiver Thing has methods in multiple files"
+
+// Name returns the public factory name.
+func (privateFactory) Name() string { return "factory" }
 
 // LaterMethod provides the method dependency target.
 func (orderThing) LaterMethod() {}
@@ -57,8 +103,6 @@ func (orderThing) CallsLaterMethod() { // want "CP006.*dependent CallsLaterMetho
 	orderThing{}.LaterMethod()
 }
 
-func (Thing) Second() {} // want "CP001" "receiver Thing has methods in multiple files"
-
 func laterFunction() {}
 
 func useLaterFunction() func() { // want "CP006.*dependent useLaterFunction follows dependency laterFunction"
@@ -67,14 +111,6 @@ func useLaterFunction() func() { // want "CP006.*dependent useLaterFunction foll
 
 // helperValue is shared by two higher-level functions.
 func helperValue() {}
-
-func boundaryRead(state PublicState) int {
-	return state.value // want "CP012"
-}
-
-func boundaryConstruct() PublicState {
-	return PublicState{value: 1} // want "CP012"
-}
 
 func (privateState) read(state PublicState) int {
 	return state.value

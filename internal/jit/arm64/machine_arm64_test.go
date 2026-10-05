@@ -313,7 +313,7 @@ func TestNew(t *testing.T) {
 		buffer, err := asm.NewBuffer(len(bytes))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, buffer.Free()) })
-		code, err := asm.Link(buffer, bytes)
+		code, err := buffer.Link(bytes)
 		require.NoError(t, err)
 
 		natives := []uintptr{0, 0, code}
@@ -470,7 +470,7 @@ func TestNew(t *testing.T) {
 		calleeBuffer, err := asm.NewBuffer(len(calleeCode))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, calleeBuffer.Free()) })
-		calleeBody, err := asm.Link(calleeBuffer, calleeCode)
+		calleeBody, err := calleeBuffer.Link(calleeCode)
 		require.NoError(t, err)
 
 		// exit() reads the caller's own bytecode to find the CALL's width
@@ -1084,7 +1084,7 @@ func lower(t *testing.T, m compile.Machine, f *ssa.Function, fn *types.Function,
 	buffer, err := asm.NewBuffer(len(code))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
-	body, err := asm.Link(buffer, code)
+	body, err := buffer.Link(code)
 	require.NoError(t, err)
 	return body + uintptr(stub), exits
 }

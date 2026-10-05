@@ -19,7 +19,7 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-type result struct {
+type finding struct {
 	pkg        *packages.Package
 	diagnostic analysis.Diagnostic
 }
@@ -30,24 +30,24 @@ type position struct {
 	column int
 }
 
-type changedLines map[string]map[int]bool
+type lines map[string]map[int]bool
 
-type packageRule struct {
+type rule struct {
 	id          string
 	description string
 	severity    string
-	run         func([]*packages.Package, *[]result)
+	run         func([]*packages.Package, *[]finding)
 }
 
 var diffHunk = regexp.MustCompile(`@@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,([0-9]+))? @@`)
 
-var packageRules = []packageRule{
-	{id: "TP001", description: "feature tests use an external test package", severity: "error", run: checkExternalTestPackages},
-	{id: "TP005", description: "one semantic owner test per public symbol", severity: "mixed", run: checkOwnerTests},
+var checks = []rule{
+	{id: "TP001", description: "feature tests use an external test package", severity: "error", run: external},
+	{id: "TP005", description: "one semantic owner test per public symbol", severity: "mixed", run: ownership},
 }
 
 func main() {
-	fix := flag.Bool("fix", false, "apply suggested fixes and recheck")
+	applyFlag := flag.Bool("fix", false, "apply suggested fixes and recheck")
 	diffOnly := flag.Bool("diff", false, "report diagnostics in changes from main")
 	jsonOutput := flag.Bool("json", false, "write one diagnostic object per line")
 	listRules := flag.Bool("list-rules", false, "list rule IDs and exit")
@@ -56,50 +56,44 @@ func main() {
 	flag.Parse()
 
 	if *listRules {
-		listRulesOutput()
+		list()
 		return
 	}
 
-	rules, err := parseRules(*ruleList)
+	rules, err := selectRules(*ruleList)
 	if err != nil {
 		fail(err)
 	}
 
-	pkgs, err := load(flag.Args())
-	if err != nil {
-		fail(err)
-	}
+	apply := *applyFlag
+	var findings []finding
+	for {
+		pkgs, err := load(flag.Args())
+		if err != nil {
+			fail(err)
+		}
 
-	results := analyze(pkgs)
-	if *diffOnly {
-		results, err = filterDiff(results)
-		if err != nil {
-			fail(err)
-		}
-	}
-	results = filterRules(results, rules)
-	if *fix {
-		if err := applyFixes(results); err != nil {
-			fail(err)
-		}
-		pkgs, err = load(flag.Args())
-		if err != nil {
-			fail(err)
-		}
-		results = analyze(pkgs)
+		findings = analyze(pkgs)
 		if *diffOnly {
-			results, err = filterDiff(results)
+			findings, err = diff(findings)
 			if err != nil {
 				fail(err)
 			}
 		}
-		results = filterRules(results, rules)
+		findings = filter(findings, rules)
+		if !apply {
+			break
+		}
+		if err := fix(findings); err != nil {
+			fail(err)
+		}
+		apply = false
 	}
 
-	if err := writeDiagnostics(results, *jsonOutput); err != nil {
+	if err := write(findings, *jsonOutput); err != nil {
 		fail(err)
 	}
-	errors, warnings := countSeverity(results)
+	errors, warnings := count(findings)
 	if errors != 0 || (*strict && warnings != 0) {
 		os.Exit(1)
 	}
@@ -110,7 +104,7 @@ func fail(err error) {
 	os.Exit(2)
 }
 
-func parseRules(value string) (map[string]bool, error) {
+func selectRules(value string) (map[string]bool, error) {
 	if value == "" {
 		return nil, nil
 	}
@@ -118,8 +112,8 @@ func parseRules(value string) (map[string]bool, error) {
 	for _, text := range vigil.Rules() {
 		known[strings.Fields(text)[0]] = true
 	}
-	for _, rule := range packageRules {
-		known[rule.id] = true
+	for _, check := range checks {
+		known[check.id] = true
 	}
 	selected := make(map[string]bool)
 	for _, id := range strings.Split(value, ",") {
@@ -132,21 +126,21 @@ func parseRules(value string) (map[string]bool, error) {
 	return selected, nil
 }
 
-func filterRules(results []result, selected map[string]bool) []result {
+func filter(findings []finding, selected map[string]bool) []finding {
 	if len(selected) == 0 {
-		return results
+		return findings
 	}
-	out := results[:0]
-	for _, result := range results {
-		if selected[ruleOf(result.diagnostic.Message)] {
-			out = append(out, result)
+	out := findings[:0]
+	for _, finding := range findings {
+		if selected[id(finding.diagnostic.Message)] {
+			out = append(out, finding)
 		}
 	}
 	return out
 }
 
-func filterDiff(results []result) ([]result, error) {
-	lines, files, err := changedFiles()
+func diff(findings []finding) ([]finding, error) {
+	lines, err := changed()
 	if err != nil {
 		return nil, err
 	}
@@ -154,23 +148,24 @@ func filterDiff(results []result) ([]result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get working directory: %w", err)
 	}
-	filtered := results[:0]
-	for _, result := range results {
-		pos := result.position()
+	filtered := findings[:0]
+	for _, finding := range findings {
+		pos := finding.position()
 		rel, err := filepath.Rel(wd, filepath.Clean(pos.file))
 		if err != nil {
 			continue
 		}
 		rel = filepath.ToSlash(rel)
-		rule := ruleOf(result.diagnostic.Message)
-		if files[rel] && diffFileRule(rule) || lines[rel][pos.line] {
-			filtered = append(filtered, result)
+		check := id(finding.diagnostic.Message)
+		_, changedFile := lines[rel]
+		if changedFile && file(check) || lines[rel][pos.line] {
+			filtered = append(filtered, finding)
 		}
 	}
 	return filtered, nil
 }
 
-func diffFileRule(rule string) bool {
+func file(rule string) bool {
 	switch rule {
 	case "CP008", "CP009", "CP010", "CP011":
 		return true
@@ -179,24 +174,25 @@ func diffFileRule(rule string) bool {
 	}
 }
 
-func changedFiles() (changedLines, map[string]bool, error) {
+func changed() (lines, error) {
 	cmd := exec.Command("git", "diff", "--unified=0", "main", "--", "*.go")
 	out, err := cmd.Output()
 	if err != nil {
 		if exit, ok := err.(*exec.ExitError); ok {
-			return nil, nil, fmt.Errorf("git diff: %s", exit.Stderr)
+			return nil, fmt.Errorf("git diff: %s", exit.Stderr)
 		}
-		return nil, nil, fmt.Errorf("git diff: %w", err)
+		return nil, fmt.Errorf("git diff: %w", err)
 	}
-	lines := make(changedLines)
-	files := make(map[string]bool)
+	lines := make(lines)
 	var file string
 	var start, count int
 	for _, raw := range strings.Split(string(out), "\n") {
 		switch {
 		case strings.HasPrefix(raw, "+++ b/"):
 			file = filepath.ToSlash(strings.TrimPrefix(raw, "+++ b/"))
-			files[file] = true
+			if lines[file] == nil {
+				lines[file] = make(map[int]bool)
+			}
 		case strings.HasPrefix(raw, "@@ "):
 			match := diffHunk.FindStringSubmatch(raw)
 			if match == nil {
@@ -219,7 +215,7 @@ func changedFiles() (changedLines, map[string]bool, error) {
 			file = ""
 		}
 	}
-	return lines, files, nil
+	return lines, nil
 }
 
 func atoi(s string) int {
@@ -256,8 +252,8 @@ func load(patterns []string) ([]*packages.Package, error) {
 	return pkgs, nil
 }
 
-func analyze(pkgs []*packages.Package) []result {
-	var results []result
+func analyze(pkgs []*packages.Package) []finding {
+	var findings []finding
 	for _, pkg := range pkgs {
 		pass := &analysis.Pass{
 			Analyzer:   vigil.Analyzer,
@@ -267,11 +263,11 @@ func analyze(pkgs []*packages.Package) []result {
 			TypesInfo:  pkg.TypesInfo,
 			TypesSizes: pkg.TypesSizes,
 			Report: func(d analysis.Diagnostic) {
-				results = append(results, result{pkg: pkg, diagnostic: d})
+				findings = append(findings, finding{pkg: pkg, diagnostic: d})
 			},
 		}
 		if _, err := vigil.Analyzer.Run(pass); err != nil {
-			results = append(results, result{
+			findings = append(findings, finding{
 				pkg: pkg,
 				diagnostic: analysis.Diagnostic{
 					Pos:     token.Pos(1),
@@ -280,10 +276,10 @@ func analyze(pkgs []*packages.Package) []result {
 			})
 		}
 	}
-	runPackageRules(pkgs, &results)
-	sort.Slice(results, func(i, j int) bool {
-		a := results[i].position()
-		b := results[j].position()
+	rules(pkgs, &findings)
+	sort.Slice(findings, func(i, j int) bool {
+		a := findings[i].position()
+		b := findings[j].position()
 		if a.file != b.file {
 			return a.file < b.file
 		}
@@ -293,39 +289,39 @@ func analyze(pkgs []*packages.Package) []result {
 		if a.column != b.column {
 			return a.column < b.column
 		}
-		return results[i].diagnostic.Message < results[j].diagnostic.Message
+		return findings[i].diagnostic.Message < findings[j].diagnostic.Message
 	})
-	unique := results[:0]
-	for _, result := range results {
+	unique := findings[:0]
+	for _, finding := range findings {
 		if len(unique) != 0 {
 			last := unique[len(unique)-1]
 			a := last.position()
-			b := result.position()
+			b := finding.position()
 			if a.file == b.file && a.line == b.line && a.column == b.column &&
-				last.diagnostic.Message == result.diagnostic.Message {
+				last.diagnostic.Message == finding.diagnostic.Message {
 				continue
 			}
 		}
-		unique = append(unique, result)
+		unique = append(unique, finding)
 	}
 	return unique
 }
 
-func runPackageRules(pkgs []*packages.Package, results *[]result) {
-	for _, rule := range packageRules {
-		start := len(*results)
-		rule.run(pkgs, results)
-		for i := start; i < len(*results); i++ {
-			diagnostic := &(*results)[i].diagnostic
-			diagnostic.Message = "[" + rule.id + "] " + diagnostic.Message
+func rules(pkgs []*packages.Package, findings *[]finding) {
+	for _, check := range checks {
+		start := len(*findings)
+		check.run(pkgs, findings)
+		for i := start; i < len(*findings); i++ {
+			diagnostic := &(*findings)[i].diagnostic
+			diagnostic.Message = "[" + check.id + "] " + diagnostic.Message
 			if diagnostic.Category == "" {
-				diagnostic.Category = rule.severity
+				diagnostic.Category = check.severity
 			}
 		}
 	}
 }
 
-func checkExternalTestPackages(pkgs []*packages.Package, results *[]result) {
+func external(pkgs []*packages.Package, findings *[]finding) {
 	paths := make(map[string]bool)
 	for _, pkg := range pkgs {
 		if pkg.ID == pkg.PkgPath {
@@ -341,7 +337,7 @@ func checkExternalTestPackages(pkgs []*packages.Package, results *[]result) {
 			if !strings.HasSuffix(name, "_test.go") || strings.HasSuffix(file.Name.Name, "_test") {
 				continue
 			}
-			*results = append(*results, result{
+			*findings = append(*findings, finding{
 				pkg: pkg,
 				diagnostic: analysis.Diagnostic{
 					Pos:     file.Name.Pos(),
@@ -352,39 +348,38 @@ func checkExternalTestPackages(pkgs []*packages.Package, results *[]result) {
 	}
 }
 
-func checkOwnerTests(pkgs []*packages.Package, results *[]result) {
+func ownership(pkgs []*packages.Package, findings *[]finding) {
 	for _, pkg := range pkgs {
 		if pkg.ID != pkg.PkgPath {
 			continue
 		}
-		testPkg := findTestPackage(pkgs, pkg.PkgPath)
+		testPkg := tests(pkgs, pkg.PkgPath)
 		for ident, obj := range pkg.TypesInfo.Defs {
 			switch obj := obj.(type) {
 			case *types.Func:
 				if obj.Exported() {
-					reportOwnerTest(pkg, ident.Pos(), obj, semanticOwnerTests(testPkg, obj), results)
+					report(pkg, ident.Pos(), obj, owners(testPkg, obj), findings)
 				}
 			case *types.TypeName:
 				if _, ok := obj.Type().(*types.TypeParam); ok {
 					continue
 				}
 				if obj.Exported() {
-					reportOwnerTest(pkg, ident.Pos(), obj, semanticOwnerTests(testPkg, obj), results)
+					report(pkg, ident.Pos(), obj, owners(testPkg, obj), findings)
 				}
 			}
 		}
 	}
 }
 
-func semanticOwnerTests(testPkg *packages.Package, target types.Object) []string {
+func owners(testPkg *packages.Package, target types.Object) []string {
 	if testPkg == nil {
 		return nil
 	}
-	expected := ownerTestName(target)
+	expected := expected(target)
 	allowPrefix := false
-	if fn, ok := target.(*types.Func); ok {
-		sig, ok := fn.Type().(*types.Signature)
-		allowPrefix = ok && sig.Recv() == nil
+	if _, ok := target.(*types.Func); ok {
+		allowPrefix = true
 	}
 	var named, used []string
 	for _, file := range testPkg.Syntax {
@@ -432,7 +427,38 @@ func semanticOwnerTests(testPkg *packages.Package, target types.Object) []string
 	return nil
 }
 
-func ownerTestName(obj types.Object) string {
+func tests(pkgs []*packages.Package, path string) *packages.Package {
+	for _, pkg := range pkgs {
+		if pkg.PkgPath != path+"_test" && !(pkg.PkgPath == path && pkg.ID != path) {
+			continue
+		}
+		for _, file := range pkg.Syntax {
+			if strings.HasSuffix(pkg.Fset.File(file.Pos()).Name(), "_test.go") {
+				return pkg
+			}
+		}
+	}
+	return nil
+}
+
+func report(pkg *packages.Package, pos token.Pos, obj types.Object, owners []string, findings *[]finding) {
+	if expected(obj) == "" || len(owners) == 1 {
+		return
+	}
+	category := "warning"
+	message := fmt.Sprintf("public symbol %s has no semantic owner test", obj.Name())
+	if len(owners) > 1 {
+		category = "error"
+		message = fmt.Sprintf("public symbol %s is exercised by multiple top-level tests: %s", obj.Name(), strings.Join(owners, ", "))
+	}
+	*findings = append(*findings, finding{pkg: pkg, diagnostic: analysis.Diagnostic{
+		Pos:      pos,
+		Category: category,
+		Message:  message,
+	}})
+}
+
+func expected(obj types.Object) string {
 	switch obj := obj.(type) {
 	case *types.Func:
 		sig, ok := obj.Type().(*types.Signature)
@@ -448,6 +474,9 @@ func ownerTestName(obj types.Object) string {
 			if !ok || !named.Obj().Exported() {
 				return ""
 			}
+			if _, ok := named.Underlying().(*types.Interface); ok {
+				return ""
+			}
 			return "Test" + named.Obj().Name() + "_" + obj.Name()
 		}
 		return "Test" + obj.Name()
@@ -458,57 +487,26 @@ func ownerTestName(obj types.Object) string {
 	}
 }
 
-func findTestPackage(pkgs []*packages.Package, path string) *packages.Package {
-	for _, pkg := range pkgs {
-		if pkg.PkgPath != path+"_test" && !(pkg.PkgPath == path && pkg.ID != path) {
-			continue
-		}
-		for _, file := range pkg.Syntax {
-			if strings.HasSuffix(pkg.Fset.File(file.Pos()).Name(), "_test.go") {
-				return pkg
-			}
-		}
-	}
-	return nil
-}
-
-func reportOwnerTest(pkg *packages.Package, pos token.Pos, obj types.Object, owners []string, results *[]result) {
-	if len(owners) == 1 {
-		return
-	}
-	category := "warning"
-	message := fmt.Sprintf("public symbol %s has no semantic owner test", obj.Name())
-	if len(owners) > 1 {
-		category = "error"
-		message = fmt.Sprintf("public symbol %s is exercised by multiple top-level tests: %s", obj.Name(), strings.Join(owners, ", "))
-	}
-	*results = append(*results, result{pkg: pkg, diagnostic: analysis.Diagnostic{
-		Pos:      pos,
-		Category: category,
-		Message:  message,
-	}})
-}
-
-func applyFixes(results []result) error {
+func fix(findings []finding) error {
 	type edit struct {
 		start int
 		end   int
 		text  []byte
 	}
 	edits := make(map[string][]edit)
-	for _, result := range results {
-		if len(result.diagnostic.SuggestedFixes) == 0 {
+	for _, finding := range findings {
+		if len(finding.diagnostic.SuggestedFixes) == 0 {
 			continue
 		}
-		for _, change := range result.diagnostic.SuggestedFixes[0].TextEdits {
-			pos := result.pkg.Fset.PositionFor(change.Pos, false)
-			end := result.pkg.Fset.PositionFor(change.End, false)
+		for _, change := range finding.diagnostic.SuggestedFixes[0].TextEdits {
+			pos := finding.pkg.Fset.PositionFor(change.Pos, false)
+			end := finding.pkg.Fset.PositionFor(change.End, false)
 			if pos.Filename == "" || end.Filename == "" || pos.Filename != end.Filename {
-				return fmt.Errorf("invalid suggested fix for %s", result.diagnostic.Message)
+				return fmt.Errorf("invalid suggested fix for %s", finding.diagnostic.Message)
 			}
-			file := result.pkg.Fset.File(change.Pos)
+			file := finding.pkg.Fset.File(change.Pos)
 			if file == nil {
-				return fmt.Errorf("invalid suggested fix position for %s", result.diagnostic.Message)
+				return fmt.Errorf("invalid suggested fix position for %s", finding.diagnostic.Message)
 			}
 			edits[pos.Filename] = append(edits[pos.Filename], edit{
 				start: file.Offset(change.Pos),
@@ -541,15 +539,15 @@ func applyFixes(results []result) error {
 	return nil
 }
 
-func writeDiagnostics(results []result, jsonOutput bool) error {
+func write(findings []finding, jsonOutput bool) error {
 	if jsonOutput {
 		encoder := json.NewEncoder(os.Stdout)
-		for _, result := range results {
-			pos := result.position()
+		for _, finding := range findings {
+			pos := finding.position()
 			value := map[string]any{
-				"rule":     ruleOf(result.diagnostic.Message),
-				"severity": severityOf(result.diagnostic),
-				"message":  result.diagnostic.Message,
+				"rule":     id(finding.diagnostic.Message),
+				"severity": severity(finding.diagnostic),
+				"message":  finding.diagnostic.Message,
 				"file":     pos.file,
 				"line":     pos.line,
 				"column":   pos.column,
@@ -560,22 +558,22 @@ func writeDiagnostics(results []result, jsonOutput bool) error {
 		}
 		return nil
 	}
-	for _, result := range results {
-		pos := result.position()
+	for _, finding := range findings {
+		pos := finding.position()
 		fmt.Fprintf(os.Stderr, "%s:%d:%d: %s: %s\n",
-			pos.file, pos.line, pos.column, severityOf(result.diagnostic), result.diagnostic.Message)
+			pos.file, pos.line, pos.column, severity(finding.diagnostic), finding.diagnostic.Message)
 	}
 	return nil
 }
 
-func (r result) position() position {
+func (r finding) position() position {
 	pos := r.pkg.Fset.Position(r.diagnostic.Pos)
 	return position{file: pos.Filename, line: pos.Line, column: pos.Column}
 }
 
-func countSeverity(results []result) (errors, warnings int) {
-	for _, result := range results {
-		if severityOf(result.diagnostic) == "warning" {
+func count(findings []finding) (errors, warnings int) {
+	for _, finding := range findings {
+		if severity(finding.diagnostic) == "warning" {
 			warnings++
 		} else {
 			errors++
@@ -584,14 +582,14 @@ func countSeverity(results []result) (errors, warnings int) {
 	return errors, warnings
 }
 
-func severityOf(diagnostic analysis.Diagnostic) string {
+func severity(diagnostic analysis.Diagnostic) string {
 	if diagnostic.Category == "warning" {
 		return "warning"
 	}
 	return "error"
 }
 
-func ruleOf(message string) string {
+func id(message string) string {
 	if len(message) > 1 && message[0] == '[' {
 		if end := strings.IndexByte(message, ']'); end > 1 {
 			return message[1:end]
@@ -600,22 +598,22 @@ func ruleOf(message string) string {
 	return "internal"
 }
 
-func listRulesOutput() {
+func list() {
 	for _, text := range vigil.Rules() {
 		fmt.Fprintln(os.Stdout, text)
 	}
-	for _, rule := range packageRules {
-		fmt.Fprintln(os.Stdout, formatRule(rule))
+	for _, check := range checks {
+		fmt.Fprintln(os.Stdout, format(check))
 	}
 }
 
-func formatRule(rule packageRule) string {
+func format(check rule) string {
 	suffix := ""
-	switch rule.severity {
+	switch check.severity {
 	case "warning":
 		suffix = " [warning]"
 	case "mixed":
 		suffix = " [warning if missing, error if split]"
 	}
-	return rule.id + " " + rule.description + suffix
+	return check.id + " " + check.description + suffix
 }

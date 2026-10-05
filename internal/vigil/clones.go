@@ -11,31 +11,30 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-type cloneMetric struct {
+type candidate struct {
 	fn        *ast.FuncDecl
-	index     int
 	owner     string
 	signature string
 	shape     []string
 }
 
-func checkClones(pass *analysis.Pass, separated bool) {
-	funcs := cloneMetrics(pass)
-	genericPrefixes := genericPrefixes(funcs)
-	for i, left := range funcs {
+func clones(pass *analysis.Pass, separated bool) {
+	candidates := candidates(pass)
+	prefixes := prefixes(candidates)
+	for i, left := range candidates {
 		if len(left.shape) < 20 {
 			continue
 		}
-		for _, right := range funcs[i+1:] {
+		for j, right := range candidates[i+1:] {
 			if len(right.shape) < 20 || left.owner != right.owner || left.signature != right.signature {
 				continue
 			}
-			similarity := shapeSimilarity(left.shape, right.shape)
+			similarity := similarity(left.shape, right.shape)
 			sameFile := pass.Fset.File(left.fn.Pos()).Name() == pass.Fset.File(right.fn.Pos()).Name()
-			gap := right.index - left.index - 1
-			symmetric := symmetricNames(left.fn.Name.Name, right.fn.Name.Name, genericPrefixes)
+			gap := j
+			related := related(left.fn.Name.Name, right.fn.Name.Name, prefixes)
 			if separated {
-				if !sameFile || gap < 4 || similarity < 0.72 || !symmetric {
+				if !sameFile || gap < 4 || similarity < 0.72 || !related {
 					continue
 				}
 				report(pass, left.fn.Name.Pos(),
@@ -47,8 +46,8 @@ func checkClones(pass *analysis.Pass, separated bool) {
 			if !sameFile {
 				threshold = 0.95
 			}
-			related := symmetric || sharedName(nameParts(left.fn.Name.Name), nameParts(right.fn.Name.Name))
-			if (sameFile && gap <= 0) || (sameFile && gap >= 4 && similarity >= 0.72 && symmetric) || similarity < threshold || !related {
+			same := related || shared(parts(left.fn.Name.Name), parts(right.fn.Name.Name))
+			if (sameFile && gap <= 0) || (sameFile && gap >= 4 && similarity >= 0.72 && related) || similarity < threshold || !same {
 				continue
 			}
 			report(pass, left.fn.Name.Pos(),
@@ -58,13 +57,13 @@ func checkClones(pass *analysis.Pass, separated bool) {
 	}
 }
 
-func cloneMetrics(pass *analysis.Pass) []*cloneMetric {
-	var funcs []*cloneMetric
-	for fileIndex, file := range pass.Files {
+func candidates(pass *analysis.Pass) []*candidate {
+	var funcs []*candidate
+	for _, file := range pass.Files {
 		if strings.HasSuffix(pass.Fset.File(file.Pos()).Name(), "_test.go") {
 			continue
 		}
-		for index, decl := range file.Decls {
+		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Body == nil {
 				continue
@@ -73,16 +72,15 @@ func cloneMetrics(pass *analysis.Pass) []*cloneMetric {
 			if obj == nil {
 				continue
 			}
-			signature, ok := obj.Type().(*types.Signature)
+			sig, ok := obj.Type().(*types.Signature)
 			if !ok {
 				continue
 			}
-			funcs = append(funcs, &cloneMetric{
+			funcs = append(funcs, &candidate{
 				fn:        fn,
-				index:     fileIndex*100000 + index,
-				owner:     receiverName(fn.Recv),
-				signature: signatureKey(signature),
-				shape:     normalizedShape(fn.Body),
+				owner:     receiver(fn.Recv),
+				signature: signature(sig),
+				shape:     shape(fn.Body),
 			})
 		}
 	}
@@ -94,19 +92,16 @@ func cloneMetrics(pass *analysis.Pass) []*cloneMetric {
 		}
 		return left.Offset < right.Offset
 	})
-	for index, fn := range funcs {
-		fn.index = index
-	}
 	return funcs
 }
 
-func signatureKey(signature *types.Signature) string {
-	params := signature.Params()
-	results := signature.Results()
-	return fmt.Sprintf("%d/%d/%t", params.Len(), results.Len(), signature.Variadic())
+func signature(sig *types.Signature) string {
+	params := sig.Params()
+	results := sig.Results()
+	return fmt.Sprintf("%d/%d/%t", params.Len(), results.Len(), sig.Variadic())
 }
 
-func normalizedShape(root ast.Node) []string {
+func shape(root ast.Node) []string {
 	var shape []string
 	ast.Inspect(root, func(node ast.Node) bool {
 		if node == nil {
@@ -138,7 +133,7 @@ func normalizedShape(root ast.Node) []string {
 	return shape
 }
 
-func shapeSimilarity(left, right []string) float64 {
+func similarity(left, right []string) float64 {
 	if len(left) < 5 || len(right) < 5 {
 		return 0
 	}
@@ -166,11 +161,11 @@ func shingles(tokens []string) map[string]bool {
 	return out
 }
 
-func genericPrefixes(funcs []*cloneMetric) map[string]bool {
+func prefixes(funcs []*candidate) map[string]bool {
 	counts := make(map[string]int)
 	signatures := make(map[string]map[string]bool)
 	for _, fn := range funcs {
-		parts := nameParts(fn.fn.Name.Name)
+		parts := parts(fn.fn.Name.Name)
 		if len(parts) <= 1 {
 			continue
 		}
@@ -190,16 +185,16 @@ func genericPrefixes(funcs []*cloneMetric) map[string]bool {
 	return out
 }
 
-func symmetricNames(left, right string, genericPrefixes map[string]bool) bool {
-	leftParts := nameParts(left)
-	rightParts := nameParts(right)
-	if namePrefix(leftParts, rightParts) || namePrefix(rightParts, leftParts) {
+func related(left, right string, prefixes map[string]bool) bool {
+	leftParts := parts(left)
+	rightParts := parts(right)
+	if prefix(leftParts, rightParts) || prefix(rightParts, leftParts) {
 		return true
 	}
 	if len(leftParts) >= 2 && len(rightParts) >= 2 &&
 		strings.EqualFold(leftParts[0], rightParts[0]) &&
-		!genericName(leftParts[0]) &&
-		!genericPrefixes[strings.ToLower(leftParts[0])] {
+		!generic(leftParts[0]) &&
+		!prefixes[strings.ToLower(leftParts[0])] {
 		return true
 	}
 	families := map[string]bool{
@@ -212,7 +207,7 @@ func symmetricNames(left, right string, genericPrefixes map[string]bool) bool {
 	return families[left] && families[right]
 }
 
-func namePrefix(left, right []string) bool {
+func prefix(left, right []string) bool {
 	if len(left) == 0 || len(left) > len(right) {
 		return false
 	}
@@ -224,9 +219,9 @@ func namePrefix(left, right []string) bool {
 	return true
 }
 
-func sharedName(left, right []string) bool {
+func shared(left, right []string) bool {
 	for _, a := range left {
-		if len(a) < 4 || genericName(a) {
+		if len(a) < 4 || generic(a) {
 			continue
 		}
 		for _, b := range right {
@@ -238,7 +233,7 @@ func sharedName(left, right []string) bool {
 	return false
 }
 
-func genericName(name string) bool {
+func generic(name string) bool {
 	switch strings.ToLower(name) {
 	case "build", "check", "decode", "encode", "parse", "run":
 		return true
@@ -247,7 +242,7 @@ func genericName(name string) bool {
 	}
 }
 
-func nameParts(name string) []string {
+func parts(name string) []string {
 	var parts []string
 	start := 0
 	for i := 1; i < len(name); i++ {

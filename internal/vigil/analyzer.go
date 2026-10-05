@@ -10,10 +10,10 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-type functionSet struct {
-	defs    map[types.Object]*ast.FuncDecl
-	calls   map[types.Object]map[types.Object]bool
-	callers map[types.Object]map[types.Object]bool
+type graph struct {
+	functions map[types.Object]*ast.FuncDecl
+	calls     map[types.Object]map[types.Object]bool
+	callers   map[types.Object]map[types.Object]bool
 }
 
 // Analyzer checks minivm coding and testing patterns.
@@ -37,11 +37,11 @@ func run(pass *analysis.Pass) (any, error) {
 	return nil, nil
 }
 
-func collectFunctions(pass *analysis.Pass) functionSet {
-	set := functionSet{
-		defs:    make(map[types.Object]*ast.FuncDecl),
-		calls:   make(map[types.Object]map[types.Object]bool),
-		callers: make(map[types.Object]map[types.Object]bool),
+func collectGraph(pass *analysis.Pass) graph {
+	set := graph{
+		functions: make(map[types.Object]*ast.FuncDecl),
+		calls:     make(map[types.Object]map[types.Object]bool),
+		callers:   make(map[types.Object]map[types.Object]bool),
 	}
 	for _, file := range pass.Files {
 		if strings.HasSuffix(pass.Fset.File(file.Pos()).Name(), "_test.go") {
@@ -56,8 +56,8 @@ func collectFunctions(pass *analysis.Pass) functionSet {
 			if obj == nil {
 				continue
 			}
-			set.defs[obj] = fn
-			for _, target := range callTargets(pass, fn.Body) {
+			set.functions[obj] = fn
+			for _, target := range targets(pass, fn.Body) {
 				if target == obj || target.Pkg() != pass.Pkg {
 					continue
 				}
@@ -75,7 +75,7 @@ func collectFunctions(pass *analysis.Pass) functionSet {
 	return set
 }
 
-func wrapperCall(body *ast.BlockStmt) *ast.CallExpr {
+func call(body *ast.BlockStmt) *ast.CallExpr {
 	if body == nil || len(body.List) != 1 {
 		return nil
 	}
@@ -94,21 +94,21 @@ func wrapperCall(body *ast.BlockStmt) *ast.CallExpr {
 	}
 }
 
-func calledObject(pass *analysis.Pass, call *ast.CallExpr) types.Object {
-	switch fun := call.Fun.(type) {
+func object(pass *analysis.Pass, expr ast.Expr) types.Object {
+	switch expr := expr.(type) {
 	case *ast.Ident:
-		return pass.TypesInfo.Uses[fun]
+		return pass.TypesInfo.Uses[expr]
 	case *ast.SelectorExpr:
-		if selection := pass.TypesInfo.Selections[fun]; selection != nil {
+		if selection := pass.TypesInfo.Selections[expr]; selection != nil {
 			return selection.Obj()
 		}
-		return pass.TypesInfo.Uses[fun.Sel]
+		return pass.TypesInfo.Uses[expr.Sel]
 	default:
 		return nil
 	}
 }
 
-func appendUnique(objects []types.Object, object types.Object) []types.Object {
+func unique(objects []types.Object, object types.Object) []types.Object {
 	for _, existing := range objects {
 		if existing == object {
 			return objects
@@ -117,7 +117,7 @@ func appendUnique(objects []types.Object, object types.Object) []types.Object {
 	return append(objects, object)
 }
 
-func callTargets(pass *analysis.Pass, body *ast.BlockStmt) []types.Object {
+func targets(pass *analysis.Pass, body *ast.BlockStmt) []types.Object {
 	var targets []types.Object
 	ast.Inspect(body, func(node ast.Node) bool {
 		if _, ok := node.(*ast.FuncLit); ok {
@@ -127,22 +127,15 @@ func callTargets(pass *analysis.Pass, body *ast.BlockStmt) []types.Object {
 		if !ok {
 			return true
 		}
-		if target := calledObject(pass, call); target != nil {
-			targets = appendUnique(targets, target)
+		if target := object(pass, call.Fun); target != nil {
+			targets = unique(targets, target)
 		}
 		return true
 	})
 	return targets
 }
 
-func selectorObject(pass *analysis.Pass, sel *ast.SelectorExpr) types.Object {
-	if selection := pass.TypesInfo.Selections[sel]; selection != nil {
-		return selection.Obj()
-	}
-	return pass.TypesInfo.Uses[sel.Sel]
-}
-
-func receiverNamed(fn *types.Func) *types.Named {
+func receiverType(fn *types.Func) *types.Named {
 	if fn == nil {
 		return nil
 	}
@@ -158,7 +151,7 @@ func receiverNamed(fn *types.Func) *types.Named {
 	return named
 }
 
-func receiverName(field *ast.FieldList) string {
+func receiver(field *ast.FieldList) string {
 	if field == nil || len(field.List) == 0 {
 		return ""
 	}
@@ -179,7 +172,7 @@ func receiverName(field *ast.FieldList) string {
 	}
 }
 
-func isTestFunction(name string) bool {
+func test(name string) bool {
 	for _, prefix := range []string{"Test", "Benchmark", "Fuzz", "Example"} {
 		if strings.HasPrefix(name, prefix) {
 			return true

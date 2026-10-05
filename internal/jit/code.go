@@ -67,7 +67,7 @@ func NewCode(address, ip int, osr bool, tier Tier, results int, registers, argum
 	if err != nil {
 		return nil, err
 	}
-	native, err := asm.Link(buffer, code)
+	native, err := buffer.Link(code)
 	if err != nil {
 		return nil, errors.Join(err, buffer.Free())
 	}
@@ -117,4 +117,12 @@ func (t Tier) String() string {
 // holds reports whether pc lies inside c's native code.
 func (c *Code) holds(pc uintptr) bool {
 	return pc >= c.native && pc < c.native+uintptr(c.size)
+}
+
+func (c *Code) retire(epoch uint64) {
+	c.retired.Store(epoch)
+}
+
+func (c *Code) retiredAt() uint64 {
+	return c.retired.Load()
 }

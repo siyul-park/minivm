@@ -43,7 +43,7 @@ func link(t *testing.T, insts ...asm.Instruction) uintptr {
 	buffer, err := asm.NewBuffer(len(code))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
-	addr, err := asm.Link(buffer, code)
+	addr, err := buffer.Link(code)
 	require.NoError(t, err)
 	return addr
 }

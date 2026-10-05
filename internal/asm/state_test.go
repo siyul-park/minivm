@@ -34,7 +34,7 @@ func linkExit(t *testing.T, body ...asm.Instruction) (uintptr, int) {
 	buffer, err := asm.NewBuffer(len(code))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
-	address, err := asm.Link(buffer, code)
+	address, err := buffer.Link(code)
 	require.NoError(t, err)
 	return address, len(code)
 }
@@ -83,7 +83,7 @@ func TestState_Slot(t *testing.T) {
 	buffer, err := asm.NewBuffer(len(code))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
-	address, err := asm.Link(buffer, code)
+	address, err := buffer.Link(code)
 	require.NoError(t, err)
 	s.SetReg(arm64.X0, 42)
 

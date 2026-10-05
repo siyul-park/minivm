@@ -33,7 +33,7 @@ func TestFunction_Len(t *testing.T) {
 	})
 }
 
-func TestFunction_Successors(t *testing.T) {
+func TestFunction_Succ(t *testing.T) {
 	t.Run("lists the blocks a terminator reaches in edge order", func(t *testing.T) {
 		b := ssa.New("f")
 		entry, left, right, join := b.Block(), b.Block(), b.Block(), b.Block()
@@ -51,7 +51,7 @@ func TestFunction_Successors(t *testing.T) {
 	})
 }
 
-func TestFunction_Predecessors(t *testing.T) {
+func TestFunction_Pred(t *testing.T) {
 	t.Run("names each incoming block once", func(t *testing.T) {
 		b := ssa.New("f")
 		entry, join := b.Block(), b.Block()

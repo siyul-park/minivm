@@ -10,11 +10,15 @@ func helper() { helperImpl() } // want "CP007"
 
 func helperImpl() {}
 
+func constantWrapper() { helperImplValue(1) }
+
+func helperImplValue(value int) {}
+
 func caller() { helper() } // want "CP006.*dependent caller follows dependency helper"
 
-func recursiveB() { recursiveA() } // want "CP007"
+func recursiveB() { recursiveA() }
 
-func recursiveA() { recursiveB() } // want "CP007"
+func recursiveA() { recursiveB() }
 
 // documentedHelper is a single-use policy mechanic and may remain named.
 func documentedHelper() {}

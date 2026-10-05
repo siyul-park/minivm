@@ -34,4 +34,7 @@ func TestRules(t *testing.T) {
 	if !seen["CP009"] {
 		t.Fatal("CP009 must be registered")
 	}
+	if seen["CP003"] {
+		t.Fatal("CP003 must not be registered")
+	}
 }

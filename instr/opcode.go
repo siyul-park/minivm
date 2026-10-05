@@ -1,7 +1,9 @@
 package instr
 
+// Opcode identifies one VM instruction.
 type Opcode byte
 
+// Opcodes identify VM instructions in stable append-only order.
 const (
 	NOP Opcode = iota
 	UNREACHABLE

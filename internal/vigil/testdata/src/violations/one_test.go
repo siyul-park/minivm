@@ -8,11 +8,11 @@ type resource struct{}
 
 var require eventualer
 
+func (resource) Close() {}
+
 func (eventualer) Eventually(*testing.T, func() bool, ...int) {}
 
 func (resource) Ready() bool { return true }
-
-func (resource) Close() {}
 
 func helperThing() { NewThing() } // want "TP007"
 
@@ -30,4 +30,15 @@ func TestPollingWithoutClose(t *testing.T) {
 	r := resource{}
 	require.Eventually(t, func() bool { return r.Ready() }, 1)
 	_ = r
+}
+
+func TestSiblingCases(t *testing.T) {
+	t.Run("first", func(t *testing.T) {})
+	t.Run("second", func(t *testing.T) {})
+}
+
+func TestNestedCases(t *testing.T) {
+	t.Run("first", func(t *testing.T) { // want "TP002"
+		t.Run("nested", func(t *testing.T) {})
+	})
 }

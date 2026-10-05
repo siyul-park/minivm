@@ -273,7 +273,7 @@ func (r *Registry) Marshal(i *Interpreter, v any) (types.Value, error) {
 	holder.Elem().Set(rv)
 	defer runtime.KeepAlive(holder)
 
-	e := &Encoder{interp: i, registry: r}
+	e := i.encoder(r)
 	val, err := c.value(e, holder.UnsafePointer())
 	if err != nil {
 		e.discard()
@@ -300,7 +300,7 @@ func (r *Registry) Unmarshal(i *Interpreter, val types.Value, dst any) error {
 	if err != nil {
 		return fmt.Errorf("unmarshal %T into %s: %w", val, elem, err)
 	}
-	if err := c.set(&Decoder{interp: i, registry: r}, value, rv.UnsafePointer()); err != nil {
+	if err := c.set(i.decoder(r), value, rv.UnsafePointer()); err != nil {
 		return fmt.Errorf("unmarshal %T into %s: %w", val, elem, err)
 	}
 	return nil

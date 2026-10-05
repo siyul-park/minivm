@@ -10,6 +10,8 @@ type State struct {
 	value int
 }
 
+type privateVisitor struct{}
+
 var errSentinel = errors.New("sentinel")
 
 // NewState constructs State.
@@ -37,3 +39,5 @@ func readValue() int {
 func makeValue() int {
 	return 1
 }
+
+func (privateVisitor) Visit() {}

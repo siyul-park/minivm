@@ -1,49 +1,67 @@
 # Testing
 
-Owns test contracts, structure, methodology, reachability, completeness, and validation. This document is normative; analysis and lint tooling MAY enforce these rules but MUST NOT define additional test requirements.
+Tests are the executable specification of a feature. They define the contracts, structure, evidence, and validation required to establish correct behavior.
 
-`coding-patterns.md` owns general code design and style; topic docs own behavior; `AGENTS.md` owns repository gates.
+`coding-patterns.md` owns general code design and style; topic docs own behavior; `AGENTS.md` owns repository workflow and validation gates.
 
 ## Contract
 
-Tests are the executable specification of a feature. A test `MUST` show public usage and promised behavior; structure serves that contract, not implementation shape or coverage.
+Tests are the executable specification of a feature: they should show what the public contract promises, not how the implementation happens to work.
+
+- A test MUST show public usage and promised behavior.
+- Test structure MUST serve the contract rather than implementation shape or coverage.
+- A test MUST expose the target, input, operation, and expected result in the case.
+- A case MUST represent behavior, not a branch or implementation path.
 
 ### Public Boundary
 
-Feature contract tests `MUST` use only target-package public symbols and `MUST` live in `package <target>_test`. Wrappers that hide target API usage `MUST NOT` be added merely for reuse; setup helpers `MAY` exist only when they keep the specified behavior visible.
+Contract tests should prove behavior through the same public boundary available to callers.
+
+- Feature contract tests MUST use only target-package public symbols and MUST live in `package <target>_test`.
+- Wrappers that hide target API usage MUST NOT be added merely for reuse.
+- Setup helpers MAY exist only when the specified behavior remains visible.
+- Private-symbol testing MUST be resolved at the public boundary rather than by exposing internals solely for tests.
 
 ### Readability
 
-A test is the smallest specification of its target: it `MUST` show the target and state the behavior the target must have, with input, operation, and expected result visible in the case. A case represents behavior, not a branch or implementation path.
+A readable test is a small, direct specification whose behavior can be understood without following test infrastructure.
 
-Tests `MUST NOT` hide the behavior behind abstractions (wrappers, builders, or helpers that obscure the call under test) and `MUST NOT` mix different writing styles at one level.
+- The target and its behavior MUST remain visible.
+- Wrappers, builders, or helpers MUST NOT hide the call or result being specified.
+- Tests MUST NOT mix different writing styles or abstraction levels at one level.
+- Table data and generation code MUST remain simple enough to read as specification.
+- A case MUST contain the behavior it claims to specify.
 
 ### Organization
 
+Test structure should provide one obvious owner for each public contract and keep case structure shallow.
+
 | Rule | Requirement |
-|---|---|
-| Owner | Each public symbol `MUST` have exactly one top-level test function. |
-| Depth | At most two levels: the test function and its `t.Run` cases. |
-| Same behavior, many inputs | An inline anonymous struct slice of named inputs and expected outputs; each entry runs as one `t.Run` case. |
-| Different scenarios | One `t.Run` case per scenario, named for the behavior it states. |
-| Similar cases | `MUST` be merged into one case or one table. |
-| Style | A test function uses either a table or scenario cases, never both, and never mixes abstraction levels. |
+| --- | --- |
+| Owner | Each public symbol SHOULD have one top-level test function; a missing owner test is a warning, and multiple semantic owner tests are an error. |
+| Depth | At most two levels: the test function and its direct cases. |
+| Same behavior, many inputs | Use an inline anonymous struct table of named inputs and expected outputs; each entry is one case. |
+| Different scenarios | Use one case per scenario, named for the behavior it states. |
+| Similar cases | Merge cases that specify the same behavior into one case or one table. |
+| Style | A test function uses either table cases or scenario cases, never both. |
 
-A test `SHOULD` use one case style per level. Assertions around `t.Run` `SHOULD` describe setup, preconditions, or test-wide invariants, not case behavior.
-
-Readiness polling `MUST` use the package `poll` helper on the test goroutine; its hang guard bounds teardown. `require.Eventually` `MUST NOT` poll resources the case closes, because its condition may outlive teardown. Poll conditions `MUST` only capture results/errors and return readiness; assertions belong after polling.
-
-Table data and generation code `MUST` remain simple enough to read as specification.
-
-Tests `MUST` use only the code under test's public interface. A private-symbol reference `MUST` be resolved at the public boundary, not by exposing internals solely for testing.
+- A test SHOULD use one case style per level.
+- Assertions outside cases SHOULD describe setup, preconditions, or test-wide invariants, not case behavior.
+- Readiness polling MUST NOT outlive teardown or retain resources after the case closes them.
+- Polling conditions MUST return readiness and observed results/errors only; assertions belong after readiness is established.
 
 ### F.I.R.S.T.
 
-Tests `MUST` be **Fast, Independent, Repeatable, Self-validating, and Timely**. They `MUST NOT` depend on other tests, uncontrolled mutable state, manual inspection, or unnecessary setup.
+F.I.R.S.T. keeps tests reliable evidence rather than intermittent diagnostics.
+
+- Tests MUST be **Fast, Independent, Repeatable, Self-validating, and Timely**.
+- Tests MUST NOT depend on other tests, uncontrolled mutable state, manual inspection, or unnecessary setup.
 
 ## TDD
 
-For each behavior change, the agent `MUST`:
+TDD separates the required behavior from its implementation by making the smallest missing contract fail before the implementation is generalized.
+
+For each behavior change, the agent MUST:
 
 1. state the contract and invariants;
 2. write the narrowest falsifying test;
@@ -51,75 +69,72 @@ For each behavior change, the agent `MUST`:
 4. implement the smallest owning change;
 5. run focused checks, then applicable structural and repository gates.
 
-Tests `MUST` cover applicable success, failure, boundaries, ownership/lifecycle, compatibility, parity, and architecture contracts. The agent `MUST` use the lowest test layer that proves the contract.
+- Tests MUST cover applicable success, failure, boundaries, ownership/lifecycle, compatibility, parity, and architecture contracts.
+- The lowest test layer that proves the contract MUST be used.
+- Structure-only tests MUST NOT be added merely to exercise implementation details.
 
 ## Evidence
 
-Coverage proves reachability, not quality. When no red phase is available, `MUST` use coverage to prove execution and `MUST NOT` alter production behavior to manufacture failure.
+Different test layers prove different facts; evidence is complete only when each required fact has an appropriate proof.
+
+- Coverage proves reachability, not quality or completeness.
+- When no red phase is available, coverage SHOULD prove execution without changing production behavior to manufacture failure.
 
 | Layer | Proves |
-|---|---|
+| --- | --- |
 | Public | exported behavior, errors, lifecycle |
 | Runtime | opcode behavior, traps, ownership |
-| Parity | threaded vs optimized/fused/native behavior where present |
-| Frontend | acceptance, plan/SSA shape, `ssa.Verify` |
-| Backend | layout, bindings, moves, metadata, bridge/deopt points |
-| Golden | exact native instruction stream for a specified input shape |
-| Async | publication, shutdown, race behavior |
+| Parity | equivalent public behavior across distinct execution paths |
+| Frontend | acceptance and intermediate-representation contracts |
+| Backend | machine layout, bindings, moves, metadata, and bridge/deopt contracts |
+| Golden | exact low-level output for a specified input shape |
+| Async | publication, shutdown, and race behavior |
 | Fuzz | bounded trust-boundary or differential properties |
 | Integration | public end-to-end behavior |
 
 ## Native / JIT
 
-Frontend tests `MUST` prove frontend contracts. Backend tests `MUST` prove machine layout, bindings, moves, metadata, and bridge/deopt points when a native backend exists. Interpreter tests `MUST` prove threaded parity through public results, errors, ownership, and execution; native parity applies wherever the native tier can enter.
+Native execution adds low-level contracts, but tests should still separate local backend evidence from final public behavior.
 
-Current proof layers for the native tier:
-
-| Layer | Owner |
-|---|---|
-| Backend goldens | `internal/jit/arm64` |
-| Compile maps | `internal/jit/compile` |
-| Runtime e2e | `internal/jit` |
-| Interpreter parity | `interp` `TestWithThreshold`, `benchmarks` `TestKernels/*/jit` |
-
-ARM64 goldens are the native instruction specification. The expected stream `MUST` be authored independently, with explicit input shape, complete instruction output, and required metadata checked.
+- Frontend tests MUST prove frontend contracts.
+- Backend tests MUST prove machine layout, bindings, moves, metadata, and bridge/deopt contracts where applicable.
+- Interpreter tests MUST prove public results, errors, ownership, and execution behavior.
+- Parity MUST be tested wherever multiple execution paths are required to implement the same public contract.
+- Golden tests MUST define expected low-level output independently of the implementation that produced it, with the required complete output and metadata checks.
 
 ## Validation
 
-The agent `MUST` run the smallest falsifying command first, then applicable package, race, coverage, architecture, and repository checks. It `MUST` skip only inapplicable checks and `MUST` report each skip.
+Validation should start with the smallest useful falsification and expand only as far as the affected contract requires.
 
-Typical package checks:
-
-```bash
-go test ./...
-go test -race ./...
-go test -coverprofile=coverage.out ./<affected-package>
-```
+- Run the smallest falsifying check first.
+- Apply package, race, coverage, architecture, and repository checks when relevant.
+- Skip only genuinely inapplicable checks, and state the reason.
 
 ## Completeness
 
-A complete change `MUST` provide:
+A complete change has evidence for every contract that the change affects, including cross-layer and architecture-specific obligations.
 
-- metadata and runtime coverage for every opcode;
-- verifier policy coverage for every opcode;
-- backend status matching `instruction-set.md`;
-- owner tests for exported contracts;
-- architecture-specific evidence for architecture-specific contracts.
-
-Generated output and documentation index freshness are repository gates, not test-completeness rules.
+- Repeated execution units MUST have the required metadata and runtime coverage.
+- Verification policy MUST be covered at its defined boundaries.
+- Backend support status MUST match the implemented contract.
+- Exported contracts MUST have an owning test.
+- Architecture-specific contracts MUST have architecture-specific evidence.
+- Generated output and documentation freshness are repository gates, not test-completeness rules.
 
 ## Ownership
 
+Test contracts and structure have one owner and should remain independent of incidental implementation details.
+
 | Concern | Owner |
-|---|---|
+| --- | --- |
 | Test contracts and structure | `testing.md` |
 | General test code style | `coding-patterns.md` |
-| Opcode metadata | `instr/type.go`, `TestValid` |
-| Verification | `program/verify.go`, verifier tests |
-| Runtime opcode corpus | `interp/interp_test.go` |
-| Backend status | `instruction-set.md` |
-| JIT contracts | `jit-internals.md` |
-| Performance evidence | `benchmarks.md` |
+| Opcode metadata | opcode definitions and their contract tests |
+| Verification | verifier and verifier tests |
+| Runtime opcode behavior | interpreter/runtime contract tests |
+| Backend status | backend instruction contract |
+| JIT contracts | JIT contract documentation and tests |
+| Performance evidence | benchmark documentation and benchmarks |
 
 ## Related
 

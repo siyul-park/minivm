@@ -34,9 +34,19 @@ var (
 	ErrMunmapFailed   = errors.New("munmap failed")
 )
 
+// NewBuffer allocates an executable buffer with the given initial mapping
+// capacity, rounded up to a page boundary.
+func NewBuffer(size int) (*Buffer, error) {
+	mem, err := allocMemory(size)
+	if err != nil {
+		return nil, err
+	}
+	return &Buffer{mem: mem, size: len(mem)}, nil
+}
+
 // Link publishes code into b in an immutable executable mapping and returns
 // its entry address.
-func Link(b *Buffer, code []byte) (uintptr, error) {
+func (b *Buffer) Link(code []byte) (uintptr, error) {
 	if b == nil {
 		return 0, fmt.Errorf("%w: nil buffer", ErrInvalidArgs)
 	}
@@ -81,16 +91,6 @@ func Link(b *Buffer, code []byte) (uintptr, error) {
 	}
 	b.sealed = true
 	return uintptr(unsafe.Pointer(&mem[0])), nil
-}
-
-// NewBuffer allocates an executable buffer with the given initial mapping
-// capacity, rounded up to a page boundary.
-func NewBuffer(size int) (*Buffer, error) {
-	mem, err := allocMemory(size)
-	if err != nil {
-		return nil, err
-	}
-	return &Buffer{mem: mem, size: len(mem)}, nil
 }
 
 // Free releases every mapping. Repeated calls are no-ops; a freed Buffer

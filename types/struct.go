@@ -64,17 +64,6 @@ func NewStructField(typ Type, opts ...func(field *StructField)) StructField {
 	return s
 }
 
-// Kind reports the reference kind.
-func (s *StructLiteral) Kind() Kind { return KindRef }
-
-// String returns the canonical struct literal.
-func (s *StructLiteral) String() string {
-	return formatSlice(s.Type(), len(s.Fields), func(i int) string { return s.Fields[i].String() })
-}
-
-// Type returns the struct literal type.
-func (s *StructLiteral) Type() Type { return s.Typ }
-
 // Reset prepares s for reuse by an interpreter-owned struct pool. Small structs
 // keep their data inline, so reinitialization does not allocate.
 func (s *Struct) Reset(typ *StructType) {
@@ -161,6 +150,17 @@ func (t *StructType) FieldIndex(name string) int {
 	}
 	return -1
 }
+
+// Kind reports the reference kind.
+func (s *StructLiteral) Kind() Kind { return KindRef }
+
+// String returns the canonical struct literal.
+func (s *StructLiteral) String() string {
+	return formatSlice(s.Type(), len(s.Fields), func(i int) string { return s.Fields[i].String() })
+}
+
+// Type returns the struct literal type.
+func (s *StructLiteral) Type() Type { return s.Typ }
 
 func (s *Struct) Kind() Kind {
 	return KindRef

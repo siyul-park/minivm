@@ -722,22 +722,6 @@ func (i *Interpreter) Flush() {
 	i.flush()
 }
 
-// Close releases interpreter-owned resources and is idempotent.
-func (i *Interpreter) Close() error {
-	if i.closed {
-		return nil
-	}
-	i.flush()
-	i.Reset()
-	i.arrays.clear()
-	i.structs.clear()
-	i.closed = true
-	if i.native == nil {
-		return nil
-	}
-	return i.native.close()
-}
-
 // Reset restores the initial interpreter state.
 func (i *Interpreter) Reset() {
 
@@ -812,6 +796,22 @@ func (i *Interpreter) Marshal(v any) (val types.Value, err error) {
 // Unmarshal converts a VM value to a host value.
 func (i *Interpreter) Unmarshal(v types.Value, dst any) error {
 	return i.codec.Unmarshal(i, v, dst)
+}
+
+// Close releases interpreter-owned resources and is idempotent.
+func (i *Interpreter) Close() error {
+	if i.closed {
+		return nil
+	}
+	i.flush()
+	i.Reset()
+	i.arrays.clear()
+	i.structs.clear()
+	i.closed = true
+	if i.native == nil {
+		return nil
+	}
+	return i.native.close()
 }
 
 // text is the string a UTF-32 array spells.

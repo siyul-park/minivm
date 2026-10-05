@@ -27,9 +27,9 @@ func TestBuffer_Free(t *testing.T) {
 	require.NoError(t, buffer.Free())
 }
 
-func TestLink(t *testing.T) {
+func TestBuffer_Link(t *testing.T) {
 	t.Run("nil buffer", func(t *testing.T) {
-		_, err := asm.Link(nil, []byte{0})
+		_, err := (*asm.Buffer)(nil).Link([]byte{0})
 		require.ErrorIs(t, err, asm.ErrInvalidArgs)
 	})
 
@@ -38,7 +38,7 @@ func TestLink(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, buffer.Free()) })
 
-		_, err = asm.Link(buffer, nil)
+		_, err = buffer.Link(nil)
 		require.ErrorIs(t, err, asm.ErrInvalidArgs)
 	})
 
@@ -47,7 +47,7 @@ func TestLink(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, buffer.Free()) })
 
-		addr, err := asm.Link(buffer, []byte{0})
+		addr, err := buffer.Link([]byte{0})
 		require.NoError(t, err)
 		require.NotZero(t, addr)
 	})

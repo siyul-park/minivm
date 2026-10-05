@@ -6,7 +6,8 @@ import (
 	"github.com/siyul-park/minivm/internal/asm"
 )
 
-type arch struct{}
+// Arch is the ARM64 assembler architecture.
+type Arch struct{}
 
 // skipDisp skips the single 4-byte B after the inverted conditional branch.
 const skipDisp = 8
@@ -36,24 +37,24 @@ var invertOp = map[Op]Op{
 	OpBGT: OpBLE, OpBLE: OpBGT,
 }
 
-var _ asm.Arch = arch{}
+var _ asm.Arch = Arch{}
 
-var _ asm.Frame = arch{}
+var _ asm.Frame = Arch{}
 
-var _ asm.Relaxer = arch{}
+var _ asm.Relaxer = Arch{}
 
 // New returns the ARM64 assembler architecture.
-func New() arch {
-	return arch{}
+func New() Arch {
+	return Arch{}
 }
 
 // Encoder returns the target instruction encoder.
-func (a arch) Encoder() asm.Encoder {
+func (a Arch) Encoder() asm.Encoder {
 	return Encoder{}
 }
 
 // Writes reports which instruction operands are written.
-func (a arch) Writes(inst asm.Instruction) [4]bool {
+func (a Arch) Writes(inst asm.Instruction) [4]bool {
 	switch Op(inst.Op) {
 	case OpSTR, OpSTRB, OpSTRH, OpSTRW, OpSTRR, OpSTRBR, OpSTRWR, OpSTP,
 		OpCMP, OpCMPI, OpCMN, OpCMNI, OpTST, OpTSTI, OpCCMP, OpCCMPI, OpFCMP, OpFCMPE:
@@ -66,7 +67,7 @@ func (a arch) Writes(inst asm.Instruction) [4]bool {
 }
 
 // Flow reports how control leaves an instruction.
-func (a arch) Flow(inst asm.Instruction) asm.Flow {
+func (a Arch) Flow(inst asm.Instruction) asm.Flow {
 	switch Op(inst.Op) {
 	case OpB:
 		return asm.FlowJump
@@ -83,7 +84,7 @@ func (a arch) Flow(inst asm.Instruction) asm.Flow {
 }
 
 // Registers lists the allocatable registers in preference order.
-func (a arch) Registers(typ asm.RegType) []asm.PReg {
+func (a Arch) Registers(typ asm.RegType) []asm.PReg {
 	if typ == asm.RegTypeFloat {
 		return slices.Clone(floats)
 	}
@@ -91,7 +92,7 @@ func (a arch) Registers(typ asm.RegType) []asm.PReg {
 }
 
 // Spill stores r into spill slot n.
-func (a arch) Spill(r asm.Reg, slot int) asm.Instruction {
+func (a Arch) Spill(r asm.Reg, slot int) asm.Instruction {
 	if r.Type() == asm.RegTypeInt && r.Width() == asm.Width32 {
 		return STRW(r, SP, int16(8*slot))
 	}
@@ -101,13 +102,13 @@ func (a arch) Spill(r asm.Reg, slot int) asm.Instruction {
 // Reload loads r from spill slot n. A 32-bit spill still reloads through
 // the register's own width: a W load zero-extends the stored low word, so
 // the stale high half of the 8-byte slot is never read.
-func (a arch) Reload(r asm.Reg, slot int) asm.Instruction {
+func (a Arch) Reload(r asm.Reg, slot int) asm.Instruction {
 	return LDR(r, SP, int16(8*slot))
 }
 
 // Relax implements asm.Relaxer for ARM64 conditional label branches.
 // Out-of-range branches become an inverted skip plus an unconditional B.
-func (a arch) Relax(inst asm.Instruction, disp int64) ([]asm.Instruction, bool) {
+func (a Arch) Relax(inst asm.Instruction, disp int64) ([]asm.Instruction, bool) {
 	op := Op(inst.Op)
 	inv, ok := invertOp[op]
 	if !ok {
