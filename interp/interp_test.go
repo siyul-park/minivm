@@ -2327,6 +2327,31 @@ func structGetHostLoop(repeats int32) *program.Program {
 }
 
 func TestInterpreter_Run(t *testing.T) {
+	t.Run("runs struct and map constants", func(t *testing.T) {
+		structType := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeString))
+		first := &types.StructLiteral{Typ: structType, Fields: []types.Value{types.I32(10), types.String("ten")}}
+		second := &types.StructLiteral{Typ: structType, Fields: []types.Value{types.I32(20), types.String("twenty")}}
+		mapType := types.NewMapType(types.TypeI32, structType)
+		value := &types.MapLiteral{
+			Typ:    mapType,
+			Keys:   []types.Value{types.I32(1), types.I32(2)},
+			Values: []types.Value{first, second},
+		}
+
+		b := program.NewBuilder()
+		b.ConstGet(value).Emit(instr.I32_CONST, 2).Emit(instr.MAP_GET).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+
+		vm := interp.New(prog, interp.WithThreshold(-1))
+		defer vm.Close()
+		require.NoError(t, vm.Run(context.Background()))
+		got, err := vm.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(20), got)
+	})
+
 	t.Run("runs nested array constants", func(t *testing.T) {
 		typ := types.NewArrayType(types.TypeI32)
 		value := &types.ArrayLiteral{

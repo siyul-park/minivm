@@ -68,6 +68,20 @@ func TestParse(t *testing.T) {
 		require.Equal(t, prog.Constants, roundTrip.Constants)
 	})
 
+	t.Run("round trip preserves struct and map constants", func(t *testing.T) {
+		structType := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeString))
+		first := &types.StructLiteral{Typ: structType, Fields: []types.Value{types.I32(1), types.String("one")}}
+		second := &types.StructLiteral{Typ: structType, Fields: []types.Value{types.I32(2), types.String("two")}}
+		mapType := types.NewMapType(types.TypeI32, structType)
+		p0 := program.New(nil, program.WithConstants(
+			first,
+			&types.MapLiteral{Typ: mapType, Keys: []types.Value{types.I32(1), types.I32(2)}, Values: []types.Value{first, second}},
+		))
+		p1, err := program.Parse(strings.NewReader(p0.String()))
+		require.NoError(t, err)
+		require.Equal(t, p0.Constants, p1.Constants)
+	})
+
 	t.Run("round trip preserves types", func(t *testing.T) {
 		p0 := program.New(
 			nil,

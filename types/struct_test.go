@@ -7,6 +7,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestStructLiteral(t *testing.T) {
+	value := &types.StructLiteral{Typ: types.NewStructType(types.NewStructField(types.TypeI32)), Fields: []types.Value{types.I32(1)}}
+	require.Len(t, value.Fields, 1)
+}
+
+func TestStructLiteral_Kind(t *testing.T) {
+	value := &types.StructLiteral{Typ: types.NewStructType(types.NewStructField(types.TypeI32))}
+	require.Equal(t, types.KindRef, value.Kind())
+}
+
+func TestStructLiteral_String(t *testing.T) {
+	typ := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeString))
+	value := &types.StructLiteral{Typ: typ, Fields: []types.Value{types.I32(1), types.String("x")}}
+	require.Equal(t, `struct {i32; string}{1, "x"}`, value.String())
+}
+
+func TestStructLiteral_Type(t *testing.T) {
+	typ := types.NewStructType(types.NewStructField(types.TypeI32))
+	require.Same(t, typ, (&types.StructLiteral{Typ: typ}).Type())
+}
+
 func TestNewStruct(t *testing.T) {
 	t.Run("initial fields", func(t *testing.T) {
 		typ := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeAny))

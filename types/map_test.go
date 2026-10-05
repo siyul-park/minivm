@@ -8,6 +8,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestMapLiteral(t *testing.T) {
+	value := &types.MapLiteral{Typ: types.NewMapType(types.TypeI32, types.TypeString), Keys: []types.Value{types.I32(1)}, Values: []types.Value{types.String("a")}}
+	require.Len(t, value.Keys, 1)
+	require.Len(t, value.Values, 1)
+}
+
+func TestMapLiteral_Kind(t *testing.T) {
+	value := &types.MapLiteral{Typ: types.NewMapType(types.TypeI32, types.TypeString)}
+	require.Equal(t, types.KindRef, value.Kind())
+}
+
+func TestMapLiteral_String(t *testing.T) {
+	typ := types.NewMapType(types.TypeI32, types.TypeString)
+	value := &types.MapLiteral{Typ: typ, Keys: []types.Value{types.I32(2), types.I32(1)}, Values: []types.Value{types.String("b"), types.String("a")}}
+	require.Equal(t, `map[i32]string{1: "a", 2: "b"}`, value.String())
+}
+
+func TestMapLiteral_Type(t *testing.T) {
+	typ := types.NewMapType(types.TypeI32, types.TypeString)
+	require.Same(t, typ, (&types.MapLiteral{Typ: typ}).Type())
+}
+
 func TestNewTypedMap(t *testing.T) {
 	typ := types.NewMapType(types.TypeI32, types.TypeAny)
 	m := types.NewTypedMap[int32](typ, 4)

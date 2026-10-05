@@ -20,6 +20,13 @@ type Map struct {
 	entries map[MapKey]MapEntry
 }
 
+// MapLiteral is an unmaterialized map constant.
+type MapLiteral struct {
+	Typ    *MapType
+	Keys   []Value
+	Values []Value
+}
+
 // MapKey indexes one entry of a generic Map. A scalar key is held in Bits, a
 // string key in Text under KindText so equal strings index one entry however
 // each was published, and any other reference key in Bits as its heap address.
@@ -77,6 +84,23 @@ const (
 	mapIteratorString
 	mapIteratorGeneric
 )
+
+var _ Value = (*MapLiteral)(nil)
+
+// Kind reports the reference kind.
+func (m *MapLiteral) Kind() Kind { return KindRef }
+
+// String returns the canonical map literal.
+func (m *MapLiteral) String() string {
+	parts := make([]string, len(m.Keys))
+	for i := range m.Keys {
+		parts[i] = fmt.Sprintf("%s: %s", m.Keys[i].String(), m.Values[i].String())
+	}
+	return formatMap(m.Type(), parts)
+}
+
+// Type returns the map literal type.
+func (m *MapLiteral) Type() Type { return m.Typ }
 
 var (
 	_ Traceable = (*Map)(nil)
@@ -329,8 +353,7 @@ func (m *TypedMap[K]) String() string {
 	m.Range(func(key K, value Boxed) {
 		parts = append(parts, fmt.Sprintf("%s: %s", formatKey(any(key)), value.String()))
 	})
-	sort.Strings(parts)
-	return fmt.Sprintf("%s{%s}", m.Typ, strings.Join(parts, ", "))
+	return formatMap(m.Typ, parts)
 }
 
 // Refs returns the referenced values.
@@ -358,8 +381,7 @@ func (m *Map) String() string {
 	m.Range(func(key MapKey, entry MapEntry) {
 		parts = append(parts, fmt.Sprintf("%s: %s", key.String(), entry.Value.String()))
 	})
-	sort.Strings(parts)
-	return fmt.Sprintf("%s{%s}", m.Typ, strings.Join(parts, ", "))
+	return formatMap(m.Typ, parts)
 }
 
 // Refs returns the referenced values.
@@ -442,6 +464,11 @@ func (t *MapType) Equals(other Type) bool {
 		return false
 	}
 	return t.Key.Equals(o.Key) && t.Elem.Equals(o.Elem)
+}
+
+func formatMap(typ Type, parts []string) string {
+	sort.Strings(parts)
+	return fmt.Sprintf("%s{%s}", typ, strings.Join(parts, ", "))
 }
 
 // formatKey renders a native map key through its boxed value's String form.

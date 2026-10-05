@@ -7,16 +7,15 @@ import (
 
 type TypedArray[T int8 | int32 | int64 | float32 | float64 | bool] []T
 
-// ArrayLiteral is a recursive array value used by program constants before the
-// interpreter materializes it as a heap Array.
-type ArrayLiteral struct {
-	Typ   *ArrayType
-	Elems []Value
-}
-
 type Array struct {
 	Typ   *ArrayType
 	Elems []Boxed
+}
+
+// ArrayLiteral is an unmaterialized recursive array constant.
+type ArrayLiteral struct {
+	Typ   *ArrayType
+	Elems []Value
 }
 
 type ArrayType struct {
@@ -59,6 +58,17 @@ func NewArrayType(elem Type) *ArrayType {
 	return &ArrayType{Elem: elem, ElemKind: elem.Kind()}
 }
 
+// Kind reports the reference kind.
+func (a *ArrayLiteral) Kind() Kind { return KindRef }
+
+// String returns the canonical array literal.
+func (a *ArrayLiteral) String() string {
+	return formatSlice(a.Type(), len(a.Elems), func(i int) string { return a.Elems[i].String() })
+}
+
+// Type returns the array literal type.
+func (a *ArrayLiteral) Type() Type { return a.Typ }
+
 func (a TypedArray[T]) Kind() Kind { return KindRef }
 
 func (a TypedArray[T]) String() string {
@@ -82,17 +92,6 @@ func (a TypedArray[T]) Type() Type {
 		return TypeF64Array
 	}
 }
-
-// ArrayLiteral is an unmaterialized recursive array constant.
-func (a *ArrayLiteral) Kind() Kind { return KindRef }
-
-// String returns the canonical array literal.
-func (a *ArrayLiteral) String() string {
-	return formatSlice(a.Type(), len(a.Elems), func(i int) string { return a.Elems[i].String() })
-}
-
-// Type returns the array literal type.
-func (a *ArrayLiteral) Type() Type { return a.Typ }
 
 func (a *Array) Kind() Kind { return KindRef }
 

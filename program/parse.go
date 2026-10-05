@@ -233,20 +233,41 @@ func (c *canon) program(prog *Program) {
 	for i, t := range prog.Globals {
 		prog.Globals[i] = c.typ(t)
 	}
-	for _, v := range prog.Constants {
-		switch tv := v.(type) {
-		case *types.Function:
-			tv.Typ, _ = c.typ(tv.Typ).(*types.FunctionType)
-			for i, t := range tv.Locals {
-				tv.Locals[i] = c.typ(t)
-			}
-			for i, t := range tv.Captures {
-				tv.Captures[i] = c.typ(t)
-			}
-		case *types.Struct:
-			tv.Typ, _ = c.typ(tv.Typ).(*types.StructType)
-		}
+	for i, v := range prog.Constants {
+		prog.Constants[i] = c.value(v)
 	}
+}
+
+func (c *canon) value(v types.Value) types.Value {
+	switch v := v.(type) {
+	case *types.Function:
+		v.Typ, _ = c.typ(v.Typ).(*types.FunctionType)
+		for i, t := range v.Locals {
+			v.Locals[i] = c.typ(t)
+		}
+		for i, t := range v.Captures {
+			v.Captures[i] = c.typ(t)
+		}
+	case *types.ArrayLiteral:
+		v.Typ, _ = c.typ(v.Typ).(*types.ArrayType)
+		for i, elem := range v.Elems {
+			v.Elems[i] = c.value(elem)
+		}
+	case *types.MapLiteral:
+		v.Typ, _ = c.typ(v.Typ).(*types.MapType)
+		for i, key := range v.Keys {
+			v.Keys[i] = c.value(key)
+			v.Values[i] = c.value(v.Values[i])
+		}
+	case *types.StructLiteral:
+		v.Typ, _ = c.typ(v.Typ).(*types.StructType)
+		for i, field := range v.Fields {
+			v.Fields[i] = c.value(field)
+		}
+	case *types.Struct:
+		v.Typ, _ = c.typ(v.Typ).(*types.StructType)
+	}
+	return v
 }
 
 // typ canonicalizes t and every struct type nested inside it, returning the
@@ -400,27 +421,34 @@ func parseHandlers(lines []string) ([]instr.Handler, error) {
 }
 
 func parseLiteral(s string) (types.Value, error) {
-	idx := strings.IndexAny(s, " \t")
-	if idx < 0 {
-		return nil, fmt.Errorf("expected typed literal (e.g., \"i32 42\"), got %q", s)
+	for index, r := range s {
+		if r != ' ' && r != '\t' {
+			continue
+		}
+		typ, err := types.Parse(s[:index])
+		if err != nil {
+			continue
+		}
+		value := strings.TrimSpace(s[index:])
+		if value == "" {
+			return nil, fmt.Errorf("expected literal value, got %q", s)
+		}
+		return parseValue(typ, value)
 	}
-	typeName := s[:idx]
-	value := strings.TrimSpace(s[idx+1:])
-	if value == "" {
-		return nil, fmt.Errorf("expected typed literal (e.g., \"i32 42\"), got %q", s)
-	}
-	typ, err := types.Parse(typeName)
-	if err != nil {
-		return nil, fmt.Errorf("unknown constant type %q: %w", typeName, err)
-	}
-	return parseValue(typ, value)
+	return nil, fmt.Errorf("expected typed literal (e.g., \"i32 42\"), got %q", s)
 }
 
 func parseValue(typ types.Type, literal string) (types.Value, error) {
-	if array, ok := typ.(*types.ArrayType); ok {
-		return parseArray(array, literal)
+	switch typ := typ.(type) {
+	case *types.ArrayType:
+		return parseArrayLiteral(typ, literal)
+	case *types.StructType:
+		return parseStructLiteral(typ, literal)
+	case *types.MapType:
+		return parseMapLiteral(typ, literal)
+	default:
+		return parseScalar(typ, literal)
 	}
-	return parseScalar(typ, literal)
 }
 
 func parseScalar(typ types.Type, value string) (types.Value, error) {
@@ -481,16 +509,11 @@ func parseScalar(typ types.Type, value string) (types.Value, error) {
 	}
 }
 
-func parseArray(typ *types.ArrayType, literal string) (types.Value, error) {
-	prefix := typ.String() + "{"
-	if !strings.HasPrefix(literal, prefix) || !strings.HasSuffix(literal, "}") {
-		return nil, fmt.Errorf("invalid %s literal %q", typ, literal)
-	}
-	parts, err := arrayElements(strings.TrimSuffix(strings.TrimPrefix(literal, prefix), "}"))
+func parseArrayLiteral(typ *types.ArrayType, literal string) (types.Value, error) {
+	parts, err := literalBody(typ, literal)
 	if err != nil {
 		return nil, err
 	}
-
 	switch typ.Elem.String() {
 	case "i1":
 		return parseTypedArray(parts, func(value string) (bool, error) {
@@ -539,6 +562,60 @@ func parseArray(typ *types.ArrayType, literal string) (types.Value, error) {
 	return &types.ArrayLiteral{Typ: typ, Elems: elems}, nil
 }
 
+func parseStructLiteral(typ *types.StructType, literal string) (types.Value, error) {
+	parts, err := literalBody(typ, literal)
+	if err != nil {
+		return nil, err
+	}
+	if len(parts) != len(typ.Fields) {
+		return nil, fmt.Errorf("expected %d struct fields, got %d", len(typ.Fields), len(parts))
+	}
+	fields := make([]types.Value, len(parts))
+	for index, part := range parts {
+		value, err := parseValue(typ.Fields[index].Type, strings.TrimSpace(part))
+		if err != nil {
+			return nil, fmt.Errorf("field %d: %w", index, err)
+		}
+		fields[index] = value
+	}
+	return &types.StructLiteral{Typ: typ, Fields: fields}, nil
+}
+
+func parseMapLiteral(typ *types.MapType, literal string) (types.Value, error) {
+	parts, err := literalBody(typ, literal)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]types.Value, len(parts))
+	values := make([]types.Value, len(parts))
+	for index, part := range parts {
+		entry, err := splitLiteral(strings.TrimSpace(part), ':')
+		if err != nil {
+			return nil, fmt.Errorf("entry %d: %w", index, err)
+		}
+		if len(entry) != 2 {
+			return nil, fmt.Errorf("entry %d is missing ':'", index)
+		}
+		keys[index], err = parseValue(typ.Key, strings.TrimSpace(entry[0]))
+		if err != nil {
+			return nil, fmt.Errorf("key %d: %w", index, err)
+		}
+		values[index], err = parseValue(typ.Elem, strings.TrimSpace(entry[1]))
+		if err != nil {
+			return nil, fmt.Errorf("value %d: %w", index, err)
+		}
+	}
+	return &types.MapLiteral{Typ: typ, Keys: keys, Values: values}, nil
+}
+
+func literalBody(typ types.Type, literal string) ([]string, error) {
+	prefix := typ.String() + "{"
+	if !strings.HasPrefix(literal, prefix) || !strings.HasSuffix(literal, "}") {
+		return nil, fmt.Errorf("invalid %s literal %q", typ, literal)
+	}
+	return splitLiteral(strings.TrimSuffix(strings.TrimPrefix(literal, prefix), "}"), ',')
+}
+
 func parseTypedArray[T int8 | int32 | int64 | float32 | float64 | bool](parts []string, parse func(string) (T, error)) (types.TypedArray[T], error) {
 	if len(parts) == 0 {
 		return types.TypedArray[T]{}, nil
@@ -554,7 +631,7 @@ func parseTypedArray[T int8 | int32 | int64 | float32 | float64 | bool](parts []
 	return out, nil
 }
 
-func arrayElements(body string) ([]string, error) {
+func splitLiteral(body string, separator rune) ([]string, error) {
 	if strings.TrimSpace(body) == "" {
 		return nil, nil
 	}
@@ -584,23 +661,22 @@ func arrayElements(body string) ([]string, error) {
 		case '}':
 			depth--
 			if depth < 0 {
-				return nil, fmt.Errorf("unexpected } in array literal")
+				return nil, fmt.Errorf("unexpected } in literal")
 			}
-		case ',':
-			if depth == 0 {
+		default:
+			if r == separator && depth == 0 {
 				parts = append(parts, strings.TrimSpace(body[start:index]))
 				start = index + 1
 			}
 		}
 	}
 	if quoted {
-		return nil, fmt.Errorf("unterminated string in array literal")
+		return nil, fmt.Errorf("unterminated string in literal")
 	}
 	if depth != 0 {
-		return nil, fmt.Errorf("unbalanced array literal")
+		return nil, fmt.Errorf("unbalanced literal")
 	}
-	parts = append(parts, strings.TrimSpace(body[start:]))
-	return parts, nil
+	return append(parts, strings.TrimSpace(body[start:])), nil
 }
 
 // stripIndexPrefix removes the "NNNN:" listing index Format writes ahead of an

@@ -11,6 +11,12 @@ type Struct struct {
 	inline [4]uint64
 }
 
+// StructLiteral is an unmaterialized struct constant.
+type StructLiteral struct {
+	Typ    *StructType
+	Fields []Value
+}
+
 type StructType struct {
 	Fields []StructField
 }
@@ -20,6 +26,8 @@ type StructField struct {
 	Type Type
 	Kind Kind
 }
+
+var _ Value = (*StructLiteral)(nil)
 
 var _ Traceable = (*Struct)(nil)
 
@@ -55,6 +63,17 @@ func NewStructField(typ Type, opts ...func(field *StructField)) StructField {
 	}
 	return s
 }
+
+// Kind reports the reference kind.
+func (s *StructLiteral) Kind() Kind { return KindRef }
+
+// String returns the canonical struct literal.
+func (s *StructLiteral) String() string {
+	return formatSlice(s.Type(), len(s.Fields), func(i int) string { return s.Fields[i].String() })
+}
+
+// Type returns the struct literal type.
+func (s *StructLiteral) Type() Type { return s.Typ }
 
 // Reset prepares s for reuse by an interpreter-owned struct pool. Small structs
 // keep their data inline, so reinitialization does not allocate.

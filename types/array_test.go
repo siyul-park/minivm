@@ -9,10 +9,7 @@ import (
 )
 
 func TestArrayLiteral(t *testing.T) {
-	typ := types.NewArrayType(types.TypeI32)
-	value := types.ArrayLiteral{Typ: typ, Elems: []types.Value{types.I32(1)}}
-
-	require.Same(t, typ, value.Typ)
+	value := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeI32), Elems: []types.Value{types.I32(1)}}
 	require.Len(t, value.Elems, 1)
 }
 
@@ -22,17 +19,13 @@ func TestArrayLiteral_Kind(t *testing.T) {
 }
 
 func TestArrayLiteral_String(t *testing.T) {
-	value := &types.ArrayLiteral{
-		Typ:   types.NewArrayType(types.TypeI32),
-		Elems: []types.Value{types.I32(1), types.I32(2)},
-	}
+	value := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeI32), Elems: []types.Value{types.I32(1), types.I32(2)}}
 	require.Equal(t, "[]i32{1, 2}", value.String())
 }
 
 func TestArrayLiteral_Type(t *testing.T) {
 	typ := types.NewArrayType(types.TypeI32)
-	value := &types.ArrayLiteral{Typ: typ}
-	require.Same(t, typ, value.Type())
+	require.Same(t, typ, (&types.ArrayLiteral{Typ: typ}).Type())
 }
 
 func TestNewArray(t *testing.T) {

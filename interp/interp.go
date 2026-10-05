@@ -270,15 +270,18 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	i.alloc(types.Null)
 
 	queue := append([]types.Value(nil), prog.Constants...)
-	slots := make([]*types.Boxed, len(queue))
+	slots := make([]func(types.Boxed), len(queue))
 	for index := range queue {
-		slots[index] = &i.constants[index]
+		slots[index] = func(value types.Boxed) {
+			i.constants[index] = value
+		}
 	}
 
 	dedup := make(map[string]types.Ref)
 	for head := 0; head < len(queue); head++ {
 		value := queue[head]
 		slot := slots[head]
+		var boxed types.Boxed
 		switch value := value.(type) {
 		case types.String:
 			ref, seen := dedup[string(value)]
@@ -286,19 +289,50 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 				ref = types.Ref(i.alloc(value))
 				dedup[string(value)] = ref
 			}
-			*slot = types.BoxRef(int(ref))
+			boxed = types.BoxRef(int(ref))
 		case *types.ArrayLiteral:
 			array := types.NewArray(value.Typ, make([]types.Boxed, len(value.Elems))...)
-			*slot = types.BoxRef(i.alloc(array))
+			boxed = types.BoxRef(i.alloc(array))
 			for index, elem := range value.Elems {
 				queue = append(queue, elem)
-				slots = append(slots, &array.Elems[index])
+				slots = append(slots, func(value types.Boxed) {
+					array.Elems[index] = value
+				})
+			}
+		case *types.MapLiteral:
+			m := types.NewMap(value.Typ)
+			boxed = types.BoxRef(i.alloc(m))
+			for index, key := range value.Keys {
+				var mapKey types.MapKey
+				var storedKey types.Boxed
+				queue = append(queue, key)
+				slots = append(slots, func(value types.Boxed) {
+					mapKey, storedKey = i.mapKey(value)
+				})
+				queue = append(queue, value.Values[index])
+				slots = append(slots, func(value types.Boxed) {
+					old, replaced := m.Set(mapKey, types.MapEntry{Key: storedKey, Value: value})
+					if replaced {
+						i.releaseBox(old.Key)
+						i.releaseBox(old.Value)
+					}
+				})
+			}
+		case *types.StructLiteral:
+			structure := types.NewStruct(value.Typ)
+			boxed = types.BoxRef(i.alloc(structure))
+			for index, elem := range value.Fields {
+				queue = append(queue, elem)
+				slots = append(slots, func(value types.Boxed) {
+					structure.SetField(index, value)
+				})
 			}
 		default:
-			*slot = i.box(value)
+			boxed = i.box(value)
 		}
+		slot(boxed)
 		if fn, ok := value.(*types.Function); ok {
-			addr := slot.Ref()
+			addr := boxed.Ref()
 			i.instrs[addr] = fn.Code
 			i.handlers[addr] = fn.Handlers
 			i.coros[addr] = i.yields(fn.Code)
