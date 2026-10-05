@@ -2,8 +2,8 @@ package vigil
 
 import (
 	"go/ast"
+	"go/token"
 	"go/types"
-	"strings"
 
 	"golang.org/x/tools/go/analysis"
 )
@@ -77,69 +77,29 @@ func isDispatcher(body *ast.BlockStmt) bool {
 }
 
 func collectMetrics(pass *analysis.Pass) []*functionMetric {
-	defs := make(map[types.Object]*ast.FuncDecl)
-	metrics := make(map[types.Object]*functionMetric)
-
-	for _, file := range pass.Files {
-		if strings.HasSuffix(pass.Fset.File(file.Pos()).Name(), "_test.go") {
-			continue
-		}
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Body == nil {
-				continue
-			}
-			obj := pass.TypesInfo.ObjectOf(fn.Name)
-			if obj == nil {
-				continue
-			}
-			defs[obj] = fn
-			cyclomatic, statements, nesting := measureComplexity(fn.Body)
-			metrics[obj] = &functionMetric{
-				fn:         fn,
-				cyclomatic: cyclomatic,
-				statements: statements,
-				nesting:    nesting,
-			}
+	set := collectFunctions(pass)
+	metrics := make(map[types.Object]*functionMetric, len(set.defs))
+	for obj, fn := range set.defs {
+		cyclomatic, statements, nesting := measureComplexity(fn.Body)
+		metrics[obj] = &functionMetric{
+			fn:         fn,
+			cyclomatic: cyclomatic,
+			statements: statements,
+			nesting:    nesting,
 		}
 	}
-
-	deps := make(map[types.Object]map[types.Object]bool)
-	for obj, metric := range metrics {
-		ast.Inspect(metric.fn.Body, func(node ast.Node) bool {
-			if _, ok := node.(*ast.FuncLit); ok {
-				return false
-			}
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			target := calledObject(pass, call)
-			if target == nil || target == obj || defs[target] == nil {
-				return true
-			}
-			if deps[obj] == nil {
-				deps[obj] = make(map[types.Object]bool)
-			}
-			deps[obj][target] = true
-			return true
-		})
-	}
-
-	reverse := make(map[types.Object]int)
-	for caller, dependencies := range deps {
-		metrics[caller].fanOut = len(dependencies)
+	for caller, dependencies := range set.calls {
+		metric := metrics[caller]
+		metric.fanOut = len(dependencies)
 		for dependency := range dependencies {
-			reverse[dependency]++
+			if metrics[dependency] != nil {
+				metrics[dependency].fanIn++
+			}
 		}
 	}
-	for obj, count := range reverse {
-		metrics[obj].fanIn = count
-	}
 	for obj, metric := range metrics {
-		metric.level = dependencyLevel(deps, obj)
+		metric.level = dependencyLevel(set.calls, obj)
 	}
-
 	out := make([]*functionMetric, 0, len(metrics))
 	for _, metric := range metrics {
 		out = append(out, metric)
@@ -169,6 +129,13 @@ func measureComplexity(body *ast.BlockStmt) (cyclomatic, statements, nesting int
 			walkBlock(node, depth)
 		case *ast.IfStmt:
 			cyclomatic++
+			ast.Inspect(node.Cond, func(node ast.Node) bool {
+				binary, ok := node.(*ast.BinaryExpr)
+				if ok && (binary.Op == token.LAND || binary.Op == token.LOR) {
+					cyclomatic++
+				}
+				return true
+			})
 			nesting = max(nesting, depth+1)
 			walkBlock(node.Body, depth+1)
 			if node.Else != nil {

@@ -15,6 +15,7 @@ type PublicState struct {
 type privateThing struct{}
 
 type privateState struct{}
+type orderThing struct{}
 
 func Use(value int, ctx context.Context) {} // want "CP001" "CP003"
 
@@ -48,7 +49,21 @@ func UseHelperB() { helperValue() }
 
 func (Thing) First() {} // want "CP001"
 
+// LaterMethod provides the method dependency target.
+func (orderThing) LaterMethod() {}
+
+// CallsLaterMethod exercises method dependency ordering.
+func (orderThing) CallsLaterMethod() { // want "CP006.*dependent CallsLaterMethod follows dependency LaterMethod"
+	orderThing{}.LaterMethod()
+}
+
 func (Thing) Second() {} // want "CP001" "receiver Thing has methods in multiple files"
+
+func laterFunction() {}
+
+func useLaterFunction() func() { // want "CP006.*dependent useLaterFunction follows dependency laterFunction"
+	return laterFunction
+}
 
 // helperValue is shared by two higher-level functions.
 func helperValue() {}
@@ -75,6 +90,43 @@ func wrapError(err error) error {
 
 func wrapErrorPreserve(err error) error {
 	return fmt.Errorf("wrap: %w", err)
+}
+
+func metricBooleanComplexity(a, b int) int { // want "CP008"
+	if a > 0 && b > 0 {
+		a++
+		if a > 1 && b > 1 {
+			a++
+			if a > 2 && b > 2 {
+				a++
+				if a > 3 && b > 3 {
+					a++
+					if a > 4 && b > 4 {
+						a++
+						if a > 5 && b > 5 {
+							a++
+							if a > 6 && b > 6 {
+								a++
+								if a > 7 && b > 7 {
+									a++
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	a += 1
+	a += 1
+	a += 1
+	a += 1
+	a += 1
+	a += 1
+	a += 1
+	a += 1
+	a += 1
+	return a
 }
 
 func metricComplexity(n int) int { // want "CP008"

@@ -381,53 +381,55 @@ func semanticOwnerTests(testPkg *packages.Package, target types.Object) []string
 		return nil
 	}
 	expected := ownerTestName(target)
-	if expected == "" {
-		return nil
-	}
-	prefix := expected + "_"
 	allowPrefix := false
 	if fn, ok := target.(*types.Func); ok {
 		sig, ok := fn.Type().(*types.Signature)
 		allowPrefix = ok && sig.Recv() == nil
 	}
-	var owners []string
+	var named, used []string
 	for _, file := range testPkg.Syntax {
 		if !strings.HasSuffix(testPkg.Fset.File(file.Pos()).Name(), "_test.go") {
 			continue
 		}
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil || fn.Body == nil {
+			if !ok || fn.Recv != nil || fn.Body == nil || !strings.HasPrefix(fn.Name.Name, "Test") {
 				continue
 			}
-			if fn.Name.Name != expected && (!allowPrefix || !strings.HasPrefix(fn.Name.Name, prefix)) {
-				continue
-			}
+			matches := expected != "" && (fn.Name.Name == expected || allowPrefix && strings.HasPrefix(fn.Name.Name, expected+"_"))
 			found := false
 			ast.Inspect(fn.Body, func(node ast.Node) bool {
 				if found {
 					return false
 				}
-				if ident, ok := node.(*ast.Ident); ok && testPkg.TypesInfo.Uses[ident] == target {
-					found = true
-					return false
-				}
-				sel, ok := node.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				if selection := testPkg.TypesInfo.Selections[sel]; selection != nil && selection.Obj() == target {
-					found = true
+				switch node := node.(type) {
+				case *ast.Ident:
+					found = testPkg.TypesInfo.Uses[node] == target
+				case *ast.SelectorExpr:
+					if selection := testPkg.TypesInfo.Selections[node]; selection != nil {
+						found = selection.Obj() == target
+					} else {
+						found = testPkg.TypesInfo.Uses[node.Sel] == target
+					}
 				}
 				return !found
 			})
 			if found {
-				owners = append(owners, fn.Name.Name)
+				used = append(used, fn.Name.Name)
+				if matches {
+					named = append(named, fn.Name.Name)
+				}
 			}
 		}
 	}
-	sort.Strings(owners)
-	return owners
+	if len(named) != 0 {
+		sort.Strings(named)
+		return named
+	}
+	if len(used) == 1 {
+		return used
+	}
+	return nil
 }
 
 func ownerTestName(obj types.Object) string {
@@ -438,7 +440,11 @@ func ownerTestName(obj types.Object) string {
 			return ""
 		}
 		if recv := sig.Recv(); recv != nil {
-			named, ok := derefNamed(recv.Type())
+			typ := recv.Type()
+			if ptr, ok := typ.(*types.Pointer); ok {
+				typ = ptr.Elem()
+			}
+			named, ok := typ.(*types.Named)
 			if !ok || !named.Obj().Exported() {
 				return ""
 			}
@@ -464,14 +470,6 @@ func findTestPackage(pkgs []*packages.Package, path string) *packages.Package {
 		}
 	}
 	return nil
-}
-
-func derefNamed(typ types.Type) (*types.Named, bool) {
-	if ptr, ok := typ.(*types.Pointer); ok {
-		typ = ptr.Elem()
-	}
-	named, ok := typ.(*types.Named)
-	return named, ok && named.Obj() != nil
 }
 
 func reportOwnerTest(pkg *packages.Package, pos token.Pos, obj types.Object, owners []string, results *[]result) {

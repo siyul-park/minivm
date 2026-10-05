@@ -76,6 +76,24 @@ func TestCommand(t *testing.T) {
 		require.Contains(t, string(output), "warning: [TP005] public symbol Thing has no semantic owner test")
 	})
 
+	t.Run("named owner ignores incidental uses", func(t *testing.T) {
+		dir := namedOwnerWithIncidentalUseFixture(t)
+		command := exec.CommandContext(t.Context(), binary, "./...")
+		command.Dir = dir
+		output, err := command.CombinedOutput()
+		require.NoError(t, err, string(output))
+		require.NotContains(t, string(output), "[TP005] public symbol Thing")
+	})
+
+	t.Run("owner follows semantic use, not test name", func(t *testing.T) {
+		dir := differentlyNamedOwnerFixture(t)
+		command := exec.CommandContext(t.Context(), binary, "./...")
+		command.Dir = dir
+		output, err := command.CombinedOutput()
+		require.NoError(t, err, string(output))
+		require.NotContains(t, string(output), "[TP005] public symbol Thing")
+	})
+
 	t.Run("split owner tests fail", func(t *testing.T) {
 		dir := splitOwnerFixture(t)
 		command := exec.CommandContext(t.Context(), binary, "./...")
@@ -126,6 +144,24 @@ func missingTestFixture(t *testing.T) string {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/missing\n\ngo 1.26\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "thing.go"), []byte("package missing\n\n// Thing is the fixture symbol.\nfunc Thing() {}\n"), 0o644))
+	return dir
+}
+
+func namedOwnerWithIncidentalUseFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/nameduse\n\ngo 1.26\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "thing.go"), []byte("package nameduse\n\n// Thing is the fixture symbol.\nfunc Thing() {}\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "thing_test.go"), []byte("package nameduse_test\n\nimport (\n    \"testing\"\n    \"example.com/nameduse\"\n)\n\nfunc TestThing(t *testing.T) { nameduse.Thing() }\n\nfunc TestAggregate(t *testing.T) { nameduse.Thing() }\n"), 0o644))
+	return dir
+}
+
+func differentlyNamedOwnerFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/named\n\ngo 1.26\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "thing.go"), []byte("package named\n\n// Thing is the fixture symbol.\nfunc Thing() {}\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "thing_test.go"), []byte("package named_test\n\nimport (\n    \"testing\"\n    \"example.com/named\"\n)\n\nfunc TestBehavior(t *testing.T) { named.Thing() }\n"), 0o644))
 	return dir
 }
 

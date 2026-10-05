@@ -10,7 +10,12 @@ import (
 )
 
 func TestAnalyzer(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), vigil.Analyzer, "violations")
+	t.Run("violations", func(t *testing.T) {
+		analysistest.Run(t, analysistest.TestData(), vigil.Analyzer, "violations")
+	})
+	t.Run("clean", func(t *testing.T) {
+		analysistest.Run(t, analysistest.TestData(), vigil.Analyzer, "clean")
+	})
 }
 
 func TestRules(t *testing.T) {

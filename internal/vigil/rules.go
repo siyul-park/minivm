@@ -52,20 +52,6 @@ func Rules() []string {
 	return out
 }
 
-func runRules(pass *analysis.Pass) {
-	report := pass.Report
-	for _, rule := range rules {
-		current := rule
-		pass.Report = func(d analysis.Diagnostic) {
-			d.Category = string(current.severity)
-			d.Message = "[" + current.id + "] " + d.Message
-			report(d)
-		}
-		current.run(pass)
-	}
-	pass.Report = report
-}
-
 func fileRule(check func(*analysis.Pass, *ast.File)) func(*analysis.Pass) {
 	return func(pass *analysis.Pass) {
 		for _, file := range pass.Files {
