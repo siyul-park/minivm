@@ -38,6 +38,36 @@ func TestParse(t *testing.T) {
 		require.Equal(t, p0.Constants, p1.Constants)
 	})
 
+	t.Run("round trip preserves typed array constants", func(t *testing.T) {
+		p0 := program.New(
+			nil,
+			program.WithConstants(
+				types.TypedArray[bool]{true, false},
+				types.TypedArray[int8]{-1, 2},
+				types.TypedArray[int32]{-3, 4},
+				types.TypedArray[int64]{-5, 6},
+				types.TypedArray[float32]{1.25, -2.5},
+				types.TypedArray[float64]{3.75, -4.5},
+			),
+		)
+		p1, err := program.Parse(strings.NewReader(p0.String()))
+		require.NoError(t, err)
+		require.Equal(t, p0.Constants, p1.Constants)
+	})
+
+	t.Run("round trip preserves nested array constants", func(t *testing.T) {
+		input := ".code\nnop\n.constants\n0000:\t[][][]i32 [][][]i32{[][]i32{[]i32{1, 2}, []i32{3, 4}}, [][]i32{[]i32{5, 6}, []i32{7, 8}}}\n"
+		prog, err := program.Parse(strings.NewReader(input))
+		require.NoError(t, err)
+		require.Len(t, prog.Constants, 1)
+		require.Equal(t, "[][][]i32", prog.Constants[0].Type().String())
+		require.Equal(t, "[][][]i32{[][]i32{[]i32{1, 2}, []i32{3, 4}}, [][]i32{[]i32{5, 6}, []i32{7, 8}}}", prog.Constants[0].String())
+
+		roundTrip, err := program.Parse(strings.NewReader(prog.String()))
+		require.NoError(t, err)
+		require.Equal(t, prog.Constants, roundTrip.Constants)
+	})
+
 	t.Run("round trip preserves types", func(t *testing.T) {
 		p0 := program.New(
 			nil,

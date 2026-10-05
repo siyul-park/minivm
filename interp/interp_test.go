@@ -2327,6 +2327,30 @@ func structGetHostLoop(repeats int32) *program.Program {
 }
 
 func TestInterpreter_Run(t *testing.T) {
+	t.Run("runs nested array constants", func(t *testing.T) {
+		typ := types.NewArrayType(types.TypeI32)
+		value := &types.ArrayLiteral{
+			Typ: types.NewArrayType(typ),
+			Elems: []types.Value{
+				&types.ArrayLiteral{Typ: typ, Elems: []types.Value{types.I32(1), types.I32(2)}},
+				&types.ArrayLiteral{Typ: typ, Elems: []types.Value{types.I32(3), types.I32(4)}},
+			},
+		}
+
+		b := program.NewBuilder()
+		b.ConstGet(value).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_GET).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+
+		vm := interp.New(prog, interp.WithThreshold(-1))
+		defer vm.Close()
+		require.NoError(t, vm.Run(context.Background()))
+		got, err := vm.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(3), got)
+	})
+
 	t.Run("covers every runtime opcode", func(t *testing.T) {
 		covered := make(map[instr.Opcode]struct{})
 		names := make(map[string]int)

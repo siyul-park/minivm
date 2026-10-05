@@ -587,6 +587,21 @@ func checkPrivateAccess(pass *analysis.Pass, fields map[types.Object]*types.Name
 	if currentOwner != nil && !currentOwner.Obj().Exported() && current != nil && !current.Exported() {
 		return
 	}
+	if currentOwner == nil && current != nil && strings.HasPrefix(current.Name(), "New") {
+		sig, ok := current.Type().(*types.Signature)
+		if ok && sig.Results() != nil {
+			for index := 0; index < sig.Results().Len(); index++ {
+				result := sig.Results().At(index).Type()
+				if ptr, ok := result.(*types.Pointer); ok {
+					result = ptr.Elem()
+				}
+				named, ok := result.(*types.Named)
+				if ok && types.Identical(named, owner) {
+					return
+				}
+			}
+		}
+	}
 	report(pass, pos, "private member %s of public owner %s must be accessed through its owner", obj.Name(), owner.Obj().Name())
 }
 

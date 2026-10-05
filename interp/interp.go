@@ -269,44 +269,36 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	}
 	i.alloc(types.Null)
 
+	queue := append([]types.Value(nil), prog.Constants...)
+	slots := make([]*types.Boxed, len(queue))
+	for index := range queue {
+		slots[index] = &i.constants[index]
+	}
+
 	dedup := make(map[string]types.Ref)
-	for j, v := range prog.Constants {
-		var val types.Boxed
-		switch v := v.(type) {
-		case types.Boxed:
-			val = v
-			if val.Kind() == types.KindRef {
-				if addr := val.Ref(); i.alive(addr) {
-					i.retain(addr)
-				}
-			}
-		case types.I1, types.I8, types.I32, types.I64, types.F32, types.F64:
-			val = i.box(v)
-		case types.Ref:
-			val = types.BoxRef(int(v))
-			if addr := int(v); i.alive(addr) {
-				i.retain(addr)
-			}
+	for head := 0; head < len(queue); head++ {
+		value := queue[head]
+		slot := slots[head]
+		switch value := value.(type) {
 		case types.String:
-			ref, seen := dedup[string(v)]
-			if seen {
-				i.retain(int(ref))
-			} else {
-				ref = types.Ref(i.alloc(v))
-				dedup[string(v)] = ref
+			ref, seen := dedup[string(value)]
+			if !seen {
+				ref = types.Ref(i.alloc(value))
+				dedup[string(value)] = ref
 			}
-			val = types.BoxRef(int(ref))
+			*slot = types.BoxRef(int(ref))
+		case *types.ArrayLiteral:
+			array := types.NewArray(value.Typ, make([]types.Boxed, len(value.Elems))...)
+			*slot = types.BoxRef(i.alloc(array))
+			for index, elem := range value.Elems {
+				queue = append(queue, elem)
+				slots = append(slots, &array.Elems[index])
+			}
 		default:
-			val = types.BoxRef(i.alloc(v))
-			for _, ref := range i.refs(v) {
-				if addr := int(ref); i.alive(addr) {
-					i.retain(addr)
-				}
-			}
+			*slot = i.box(value)
 		}
-		i.constants[j] = val
-		if fn, ok := v.(*types.Function); ok {
-			addr := val.Ref()
+		if fn, ok := value.(*types.Function); ok {
+			addr := slot.Ref()
 			i.instrs[addr] = fn.Code
 			i.handlers[addr] = fn.Handlers
 			i.coros[addr] = i.yields(fn.Code)

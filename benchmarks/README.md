@@ -4,7 +4,7 @@ Owns the benchmark fixture contract, registry, runtime matrix, and measurement c
 
 ## Fixtures
 
-Each workload uses one flat, lower-kebab-case stem under `benchmarks/fixtures/`. Runtime source stays in its native language; Go registers the executable contract in `init()`, and the registry supplies source, expected result, native implementation, program factory, and Wazero metadata to the runners.
+Each workload uses one flat, lower-kebab-case stem under `benchmarks/fixtures/`. Runtime source stays in its native language; Go registers the executable contract in `init()`, and the registry supplies source, expected result, native implementation, and Wazero metadata to the runners.
 
 | Artifact | Purpose |
 |---|---|
@@ -14,8 +14,6 @@ Each workload uses one flat, lower-kebab-case stem under `benchmarks/fixtures/`.
 | `.lua` | GopherLua fixture |
 | `.js` | Goja fixture |
 | `.py` | gpython and CPython fixture |
-
-`typed-array-sum` uses a registry `Program` factory because its typed-array constant cannot currently be represented by the `.mvm` text format. `wasm.go` owns the shared Wazero bytecode encoder helpers.
 
 ## Registry
 

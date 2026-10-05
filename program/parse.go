@@ -405,66 +405,202 @@ func parseLiteral(s string) (types.Value, error) {
 		return nil, fmt.Errorf("expected typed literal (e.g., \"i32 42\"), got %q", s)
 	}
 	typeName := s[:idx]
-	valueStr := strings.TrimSpace(s[idx+1:])
-	if valueStr == "" {
+	value := strings.TrimSpace(s[idx+1:])
+	if value == "" {
 		return nil, fmt.Errorf("expected typed literal (e.g., \"i32 42\"), got %q", s)
 	}
+	typ, err := types.Parse(typeName)
+	if err != nil {
+		return nil, fmt.Errorf("unknown constant type %q: %w", typeName, err)
+	}
+	return parseValue(typ, value)
+}
 
-	switch typeName {
+func parseValue(typ types.Type, literal string) (types.Value, error) {
+	if array, ok := typ.(*types.ArrayType); ok {
+		return parseArray(array, literal)
+	}
+	return parseScalar(typ, literal)
+}
+
+func parseScalar(typ types.Type, value string) (types.Value, error) {
+	switch typ.String() {
 	case "i32":
-		v, err := strconv.ParseInt(valueStr, 10, 32)
+		v, err := strconv.ParseInt(value, 10, 32)
 		if err != nil {
-			return nil, fmt.Errorf("invalid i32 literal %q", valueStr)
+			return nil, fmt.Errorf("invalid i32 literal %q", value)
 		}
 		return types.I32(v), nil
 	case "i64":
-		v, err := strconv.ParseInt(valueStr, 10, 64)
+		v, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("invalid i64 literal %q", valueStr)
+			return nil, fmt.Errorf("invalid i64 literal %q", value)
 		}
 		return types.I64(v), nil
 	case "f32":
-		v, err := strconv.ParseFloat(valueStr, 32)
+		v, err := strconv.ParseFloat(value, 32)
 		if err != nil {
-			return nil, fmt.Errorf("invalid f32 literal %q", valueStr)
+			return nil, fmt.Errorf("invalid f32 literal %q", value)
 		}
 		return types.F32(v), nil
 	case "f64":
-		v, err := strconv.ParseFloat(valueStr, 64)
+		v, err := strconv.ParseFloat(value, 64)
 		if err != nil {
-			return nil, fmt.Errorf("invalid f64 literal %q", valueStr)
+			return nil, fmt.Errorf("invalid f64 literal %q", value)
 		}
 		return types.F64(v), nil
 	case "i1":
-		switch valueStr {
+		switch value {
 		case "true":
 			return types.I1(true), nil
 		case "false":
 			return types.I1(false), nil
 		default:
-			return nil, fmt.Errorf("invalid i1 literal %q (expected true/false)", valueStr)
+			return nil, fmt.Errorf("invalid i1 literal %q (expected true/false)", value)
 		}
 	case "i8":
-		v, err := strconv.ParseInt(valueStr, 10, 8)
+		v, err := strconv.ParseInt(value, 10, 8)
 		if err != nil {
-			return nil, fmt.Errorf("invalid i8 literal %q", valueStr)
+			return nil, fmt.Errorf("invalid i8 literal %q", value)
 		}
 		return types.I8(v), nil
 	case "any":
-		v, err := strconv.ParseInt(valueStr, 10, 32)
+		v, err := strconv.ParseInt(value, 10, 32)
 		if err != nil {
-			return nil, fmt.Errorf("invalid any literal %q", valueStr)
+			return nil, fmt.Errorf("invalid any literal %q", value)
 		}
 		return types.Ref(v), nil
 	case "string":
-		v, err := strconv.Unquote(valueStr)
+		v, err := strconv.Unquote(value)
 		if err != nil {
-			return nil, fmt.Errorf("invalid string literal %q: %w", valueStr, err)
+			return nil, fmt.Errorf("invalid string literal %q: %w", value, err)
 		}
 		return types.String(v), nil
 	default:
-		return nil, fmt.Errorf("unknown constant type %q", typeName)
+		return nil, fmt.Errorf("unknown constant type %q", typ.String())
 	}
+}
+
+func parseArray(typ *types.ArrayType, literal string) (types.Value, error) {
+	prefix := typ.String() + "{"
+	if !strings.HasPrefix(literal, prefix) || !strings.HasSuffix(literal, "}") {
+		return nil, fmt.Errorf("invalid %s literal %q", typ, literal)
+	}
+	parts, err := arrayElements(strings.TrimSuffix(strings.TrimPrefix(literal, prefix), "}"))
+	if err != nil {
+		return nil, err
+	}
+
+	switch typ.Elem.String() {
+	case "i1":
+		return parseTypedArray(parts, func(value string) (bool, error) {
+			switch strings.TrimSpace(value) {
+			case "true":
+				return true, nil
+			case "false":
+				return false, nil
+			default:
+				return false, fmt.Errorf("invalid i1 literal %q", value)
+			}
+		})
+	case "i8":
+		return parseTypedArray(parts, func(value string) (int8, error) {
+			parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 8)
+			return int8(parsed), err
+		})
+	case "i32":
+		return parseTypedArray(parts, func(value string) (int32, error) {
+			parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 32)
+			return int32(parsed), err
+		})
+	case "i64":
+		return parseTypedArray(parts, func(value string) (int64, error) {
+			return strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		})
+	case "f32":
+		return parseTypedArray(parts, func(value string) (float32, error) {
+			parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 32)
+			return float32(parsed), err
+		})
+	case "f64":
+		return parseTypedArray(parts, func(value string) (float64, error) {
+			return strconv.ParseFloat(strings.TrimSpace(value), 64)
+		})
+	}
+
+	elems := make([]types.Value, len(parts))
+	for index, part := range parts {
+		value, err := parseValue(typ.Elem, strings.TrimSpace(part))
+		if err != nil {
+			return nil, fmt.Errorf("element %d: %w", index, err)
+		}
+		elems[index] = value
+	}
+	return &types.ArrayLiteral{Typ: typ, Elems: elems}, nil
+}
+
+func parseTypedArray[T int8 | int32 | int64 | float32 | float64 | bool](parts []string, parse func(string) (T, error)) (types.TypedArray[T], error) {
+	if len(parts) == 0 {
+		return types.TypedArray[T]{}, nil
+	}
+	out := make(types.TypedArray[T], len(parts))
+	for index, part := range parts {
+		value, err := parse(part)
+		if err != nil {
+			return nil, err
+		}
+		out[index] = value
+	}
+	return out, nil
+}
+
+func arrayElements(body string) ([]string, error) {
+	if strings.TrimSpace(body) == "" {
+		return nil, nil
+	}
+	var parts []string
+	start, depth := 0, 0
+	quoted := false
+	escaped := false
+	for index, r := range body {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if quoted && r == '\\' {
+			escaped = true
+			continue
+		}
+		if r == '"' {
+			quoted = !quoted
+			continue
+		}
+		if quoted {
+			continue
+		}
+		switch r {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth < 0 {
+				return nil, fmt.Errorf("unexpected } in array literal")
+			}
+		case ',':
+			if depth == 0 {
+				parts = append(parts, strings.TrimSpace(body[start:index]))
+				start = index + 1
+			}
+		}
+	}
+	if quoted {
+		return nil, fmt.Errorf("unterminated string in array literal")
+	}
+	if depth != 0 {
+		return nil, fmt.Errorf("unbalanced array literal")
+	}
+	parts = append(parts, strings.TrimSpace(body[start:]))
+	return parts, nil
 }
 
 // stripIndexPrefix removes the "NNNN:" listing index Format writes ahead of an

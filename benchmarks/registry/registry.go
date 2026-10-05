@@ -5,7 +5,6 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
 
@@ -35,12 +34,11 @@ type Source struct {
 
 // Spec is the complete executable contract for one benchmark.
 type Spec struct {
-	Name    string
-	Result  func() types.Value
-	Source  Source
-	Program func() *program.Program
-	Native  Native
-	Wazero  *Wazero
+	Name   string
+	Result func() types.Value
+	Source Source
+	Native Native
+	Wazero *Wazero
 }
 
 var (

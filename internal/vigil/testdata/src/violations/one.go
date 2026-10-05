@@ -33,6 +33,11 @@ func NewClosure() interface{} { // want "CP001" "CP004"
 	return Thing{}
 }
 
+// NewState initializes PublicState through its constructor boundary.
+func NewState(value int) PublicState {
+	return PublicState{value: value}
+}
+
 type laterThing struct{} // want "CP002"
 
 // UseHelperA exercises a cross-group dependency that file ordering does not constrain.

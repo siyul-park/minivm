@@ -64,17 +64,11 @@ func BenchmarkKernels(b *testing.B) {
 }
 
 func readProgram(spec registry.Spec) *program.Program {
-	if spec.Source.MVM != "" {
-		prog, err := program.Parse(strings.NewReader(spec.Source.MVM))
-		if err != nil {
-			panic("parse fixture " + spec.Name + ".mvm: " + err.Error())
-		}
-		return prog
+	prog, err := program.Parse(strings.NewReader(spec.Source.MVM))
+	if err != nil {
+		panic("parse fixture " + spec.Name + ".mvm: " + err.Error())
 	}
-	if spec.Program == nil {
-		panic("missing minivm fixture for " + spec.Name)
-	}
-	return spec.Program()
+	return prog
 }
 
 func benchmarkVM(b *testing.B, prog *program.Program, want types.Value) {

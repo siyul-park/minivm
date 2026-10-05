@@ -20,8 +20,6 @@ import (
 	"github.com/go-python/gpython/py"
 	_ "github.com/go-python/gpython/stdlib"
 	"github.com/siyul-park/minivm/benchmarks/registry"
-	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 	"github.com/tetratelabs/wazero"
@@ -514,27 +512,6 @@ func interpExports(register func(registry.Spec)) yaegi.Exports {
 			"I64":        reflect.Zero(reflect.TypeOf((*types.I64)(nil))),
 			"TypeI32":    reflect.ValueOf(types.TypeI32),
 			"TypedArray": reflect.Zero(reflect.TypeOf((*types.TypedArray[int32])(nil))),
-		},
-		"github.com/siyul-park/minivm/program/program": {
-			"Program":    reflect.Zero(reflect.TypeOf((*program.Program)(nil))),
-			"Builder":    reflect.Zero(reflect.TypeOf((*program.Builder)(nil))),
-			"NewBuilder": reflect.ValueOf(program.NewBuilder),
-		},
-		"github.com/siyul-park/minivm/instr/instr": {
-			"I32_ADD":     reflect.ValueOf(instr.I32_ADD),
-			"I32_CONST":   reflect.ValueOf(instr.I32_CONST),
-			"I32_GE_S":    reflect.ValueOf(instr.I32_GE_S),
-			"LOCAL_GET":   reflect.ValueOf(instr.LOCAL_GET),
-			"LOCAL_SET":   reflect.ValueOf(instr.LOCAL_SET),
-			"CONST_GET":   reflect.ValueOf(instr.CONST_GET),
-			"ARRAY_GET":   reflect.ValueOf(instr.ARRAY_GET),
-			"Builder":     reflect.Zero(reflect.TypeOf((*instr.Builder)(nil))),
-			"Handler":     reflect.Zero(reflect.TypeOf((*instr.Handler)(nil))),
-			"Instruction": reflect.Zero(reflect.TypeOf((*instr.Instruction)(nil))),
-			"Label":       reflect.Zero(reflect.TypeOf((*instr.Label)(nil))),
-			"Opcode":      reflect.Zero(reflect.TypeOf((*instr.Opcode)(nil))),
-			"NewBuilder":  reflect.ValueOf(instr.NewBuilder),
-			"Marshal":     reflect.ValueOf(instr.Marshal),
 		},
 	}
 }
