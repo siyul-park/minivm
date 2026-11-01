@@ -22,31 +22,6 @@ func exit(id int64, trap jit.Trap) []asm.Instruction {
 	}
 }
 
-// link publishes body inside the frame any exiting activation owns.
-func link(t *testing.T, body ...asm.Instruction) uintptr {
-	t.Helper()
-	insts := []asm.Instruction{
-		arm64.SUBI(arm64.SP, arm64.SP, 16),
-		arm64.STR(arm64.LR, arm64.SP, 8),
-	}
-	insts = append(insts, body...)
-	insts = append(insts,
-		arm64.LDR(arm64.LR, arm64.SP, 8),
-		arm64.ADDI(arm64.SP, arm64.SP, 16),
-		arm64.RET(),
-	)
-	a := asm.New(arm64.New())
-	a.Emit(insts...)
-	code, err := a.Build()
-	require.NoError(t, err)
-	buffer, err := asm.NewBuffer(len(code))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
-	addr, err := buffer.Link(code)
-	require.NoError(t, err)
-	return addr
-}
-
 func TestEnter(t *testing.T) {
 	t.Run("returns when the code returns", func(t *testing.T) {
 		ctx, err := jit.NewContext(4096)
@@ -94,4 +69,29 @@ func TestContext_Trap(t *testing.T) {
 
 	require.Equal(t, jit.TrapBridge, jit.Enter(link(t, exit(1, jit.TrapBridge)...), ctx))
 	require.Equal(t, jit.TrapBridge, ctx.Trap())
+}
+
+// link publishes body inside the frame any exiting activation owns.
+func link(t *testing.T, body ...asm.Instruction) uintptr {
+	t.Helper()
+	insts := []asm.Instruction{
+		arm64.SUBI(arm64.SP, arm64.SP, 16),
+		arm64.STR(arm64.LR, arm64.SP, 8),
+	}
+	insts = append(insts, body...)
+	insts = append(insts,
+		arm64.LDR(arm64.LR, arm64.SP, 8),
+		arm64.ADDI(arm64.SP, arm64.SP, 16),
+		arm64.RET(),
+	)
+	a := asm.New(arm64.New())
+	a.Emit(insts...)
+	code, err := a.Build()
+	require.NoError(t, err)
+	buffer, err := asm.NewBuffer(len(code))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
+	addr, err := buffer.Link(code)
+	require.NoError(t, err)
+	return addr
 }

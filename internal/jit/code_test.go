@@ -20,7 +20,7 @@ func TestNewCode(t *testing.T) {
 		registers := []types.Kind{types.KindI32}
 		arguments := []types.Kind{types.KindRef}
 		exits := []jit.Exit{{Kind: jit.ExitDeopt}}
-		c, err := jit.NewCode(3, 0, false, jit.Baseline, 1, registers, arguments, ret(), exits, 0)
+		c, err := jit.NewCode(3, 0, false, jit.Baseline, 1, registers, arguments, jit.Assembly{Bytes: ret(), Exits: exits})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, c.Free()) })
 
@@ -45,7 +45,7 @@ func TestNewCode(t *testing.T) {
 
 	t.Run("places the entry stub at a byte offset from the body", func(t *testing.T) {
 		code := append(ret(), ret()...)
-		c, err := jit.NewCode(3, 0, false, jit.Baseline, 0, nil, nil, code, nil, 4)
+		c, err := jit.NewCode(3, 0, false, jit.Baseline, 0, nil, nil, jit.Assembly{Bytes: code, Entry: 4})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, c.Free()) })
 
@@ -53,7 +53,7 @@ func TestNewCode(t *testing.T) {
 	})
 
 	t.Run("keeps an OSR unit's entry IP", func(t *testing.T) {
-		c, err := jit.NewCode(3, 12, true, jit.Optimized, 0, nil, nil, ret(), nil, 0)
+		c, err := jit.NewCode(3, 12, true, jit.Optimized, 0, nil, nil, jit.Assembly{Bytes: ret()})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, c.Free()) })
 
@@ -62,7 +62,7 @@ func TestNewCode(t *testing.T) {
 	})
 
 	t.Run("keeps OSR true at IP 0: OSR is its own field, never inferred from IP", func(t *testing.T) {
-		c, err := jit.NewCode(3, 0, true, jit.Baseline, 0, nil, nil, ret(), nil, 0)
+		c, err := jit.NewCode(3, 0, true, jit.Baseline, 0, nil, nil, jit.Assembly{Bytes: ret()})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, c.Free()) })
 
@@ -71,21 +71,14 @@ func TestNewCode(t *testing.T) {
 	})
 
 	t.Run("rejects empty code", func(t *testing.T) {
-		_, err := jit.NewCode(0, 0, false, jit.Baseline, 0, nil, nil, nil, nil, 0)
+		_, err := jit.NewCode(0, 0, false, jit.Baseline, 0, nil, nil, jit.Assembly{})
 		require.Error(t, err)
 	})
 
 	t.Run("rejects an entry stub offset outside the code", func(t *testing.T) {
-		_, err := jit.NewCode(0, 0, false, jit.Baseline, 0, nil, nil, ret(), nil, len(ret())+1)
+		_, err := jit.NewCode(0, 0, false, jit.Baseline, 0, nil, nil, jit.Assembly{Bytes: ret(), Entry: len(ret()) + 1})
 		require.Error(t, err)
 	})
-}
-
-func TestCode_Free(t *testing.T) {
-	c, err := jit.NewCode(0, 0, false, jit.Baseline, 0, nil, nil, ret(), nil, 0)
-	require.NoError(t, err)
-
-	require.NoError(t, c.Free())
 }
 
 func TestCode_Retired(t *testing.T) {
@@ -127,6 +120,13 @@ func TestCode_Retired(t *testing.T) {
 		s.RetireAt(0, 12)
 		require.True(t, c.Retired())
 	})
+}
+
+func TestCode_Free(t *testing.T) {
+	c, err := jit.NewCode(0, 0, false, jit.Baseline, 0, nil, nil, jit.Assembly{Bytes: ret()})
+	require.NoError(t, err)
+
+	require.NoError(t, c.Free())
 }
 
 func TestTier_String(t *testing.T) {

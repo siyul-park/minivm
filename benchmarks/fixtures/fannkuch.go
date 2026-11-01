@@ -13,6 +13,16 @@ func init() {
 		Native: registry.Native{I32: run},
 	})
 }
+
+func fannkuch(n int32) int32 {
+	a := make([]int32, n)
+	for i := range a {
+		a[i] = int32(i)
+	}
+	_, checksum, maxflips := fannkuchPermute(a, n, 0, 0, 0)
+	return checksum*1000 + maxflips
+}
+
 func fannkuchPermute(a []int32, k, permcount, checksum, maxflips int32) (int32, int32, int32) {
 	if k == 1 {
 		flips := fannkuchCountFlips(a)
@@ -52,13 +62,4 @@ func fannkuchCountFlips(perm []int32) int32 {
 		k = a[0]
 	}
 	return flips
-}
-
-func fannkuch(n int32) int32 {
-	a := make([]int32, n)
-	for i := range a {
-		a[i] = int32(i)
-	}
-	_, checksum, maxflips := fannkuchPermute(a, n, 0, 0, 0)
-	return checksum*1000 + maxflips
 }

@@ -2,6 +2,7 @@ package interp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -101,20 +102,6 @@ type Interpreter struct {
 // reaching the unexported state they configure.
 type Option func(*option)
 
-type option struct {
-	hook     func(*Interpreter) error
-	codec    Codec
-	profiler *prof.Profiler
-
-	frame     int
-	stack     int
-	heap      int
-	maxHeap   int
-	tick      int
-	fuel      uint64
-	threshold int
-}
-
 type frame struct {
 	addr    int
 	returns int
@@ -131,7 +118,19 @@ type frame struct {
 	bp int
 }
 
-const heapRunway = 64
+type option struct {
+	hook     func(*Interpreter) error
+	codec    Codec
+	profiler *prof.Profiler
+
+	frame     int
+	stack     int
+	heap      int
+	maxHeap   int
+	tick      int
+	fuel      uint64
+	threshold int
+}
 
 // park is the ip a frame waits at while the JIT wakes: past any code.
 const park = math.MaxInt
@@ -142,6 +141,8 @@ const (
 	negZeroF32 = uint32(1) << 31
 	negZeroF64 = uint64(1) << 63
 )
+
+const heapRunway = 64
 
 // WithHook installs an execution hook.
 func WithHook(fn func(*Interpreter) error) Option {
@@ -216,18 +217,11 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		o(&opt)
 	}
 
-	if opt.frame <= 0 {
-		opt.frame = 1
-	}
-	if opt.stack <= 0 {
-		opt.stack = 1
-	}
-	if opt.heap < 0 {
-		opt.heap = 0
-	}
-	if opt.tick <= 0 {
-		opt.tick = 1
-	}
+	// Raise each capacity below its minimum to that minimum.
+	opt.frame = max(opt.frame, 1)
+	opt.stack = max(opt.stack, 1)
+	opt.heap = max(opt.heap, 0)
+	opt.tick = max(opt.tick, 1)
 
 	activeCodec := opt.codec
 	if activeCodec == nil {
@@ -269,6 +263,8 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	}
 	i.alloc(types.Null)
 
+	// Constants load into the heap through a queue, so nested values are
+	// allocated before the slot that holds them is filled.
 	queue := append([]types.Value(nil), prog.Constants...)
 	slots := make([]func(types.Boxed), len(queue))
 	for index := range queue {
@@ -438,12 +434,12 @@ func (i *Interpreter) IP() int {
 }
 
 // Frame returns an active frame by depth.
-func (i *Interpreter) Frame(n int) (fn, ip, bp int, err error) {
+func (i *Interpreter) Frame(n int) (fn, ip int, err error) {
 	if n < 0 || n >= i.fp {
-		return 0, 0, 0, ErrFrameUnderflow
+		return 0, 0, ErrFrameUnderflow
 	}
 	f := i.frames[i.fp-1-n]
-	return f.addr, f.ip, f.bp, nil
+	return f.addr, f.ip, nil
 }
 
 // Const returns a constant by index.
@@ -751,6 +747,8 @@ func (i *Interpreter) Reset() {
 	}
 	i.structs.reset()
 	i.arrays.reset()
+	// Drop every frame above the module's and return it to its first
+	// instruction with its locals zeroed.
 	for i.fp > 1 {
 		i.fp--
 		i.frames[i.fp] = frame{}
@@ -812,6 +810,417 @@ func (i *Interpreter) Close() error {
 		return nil
 	}
 	return i.native.close()
+}
+
+func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []types.Boxed) (returns []types.Boxed, err error) {
+	if i.ctx != nil || i.fp != 1 {
+		return nil, ErrInterpreterBusy
+	}
+	target, ok := i.callable(val)
+	if !ok {
+		return nil, ErrTypeMismatch
+	}
+	base := i.sp
+	if base+len(params)+1 > len(i.stack) {
+		return nil, ErrStackOverflow
+	}
+	copy(i.stack[base:], params)
+	i.sp += len(params)
+
+	// Take a reference to the heap address val already names or target
+	// already owns, else to a new one.
+	var addr int
+	if boxed, ok := val.(types.Boxed); ok {
+		addr = boxed.Ref()
+		i.retain(addr)
+	} else if addr = i.owner(target); addr >= 0 {
+		i.retain(addr)
+	} else if addr, err = i.Alloc(target); err != nil {
+		i.sp = base
+		return nil, err
+	}
+	i.stack[i.sp] = types.BoxRef(addr)
+	i.sp++
+
+	saved := *i.fr
+	defer func() {
+		if err != nil {
+			for i.fp > 1 {
+				f := &i.frames[i.fp-1]
+				if f.release {
+					i.release(f.ref)
+				}
+				i.fp--
+			}
+			for _, value := range i.stack[base:i.sp] {
+				i.releaseBox(value)
+			}
+		}
+		i.sp = base
+		i.fr = &i.frames[0]
+		*i.fr = saved
+	}()
+
+	i.fr.code = []func(*Interpreter){threaded[instr.CALL](&threader{})}
+	i.fr.ip = 0
+	if err = i.Run(ctx); err != nil {
+		return nil, err
+	}
+	returns = append([]types.Boxed(nil), i.stack[base:i.sp]...)
+	return returns, nil
+}
+
+func (i *Interpreter) callable(val types.Value) (types.Value, bool) {
+	if boxed, ok := val.(types.Boxed); ok {
+		if boxed.Kind() != types.KindRef {
+			return nil, false
+		}
+		loaded, err := i.Load(boxed.Ref())
+		if err != nil {
+			return nil, false
+		}
+		val = loaded
+	}
+	switch val.(type) {
+	case *types.Function, *types.Closure, *HostFunction:
+		return val, true
+	default:
+		return nil, false
+	}
+}
+
+// dispatch runs the threaded loop until the frame ends, a safepoint stops it, or
+// a panic unwinds it. Its recover delivers a yield, lands a catchable throw/trap
+// on a guest handler (reported via caught so Run re-enters here), or wraps an
+// uncatchable failure as a RuntimeError. The loop body is the interpreter's hot
+// path and is intentionally kept identical regardless of exception support.
+func (i *Interpreter) dispatch() (caught bool, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if e, ok := r.(error); ok && errors.Is(e, errYield) {
+				err = ErrYield
+				return
+			}
+			if i.handle(r) {
+				caught = true
+				return
+			}
+			if i.floor > 0 {
+				panic(r)
+			}
+			err = i.fault(r)
+		}
+	}()
+
+	f := i.fr
+	code := f.code
+
+	if i.done == nil && !i.metered() {
+		for {
+			for f.ip < len(code) {
+				code[f.ip](i)
+				f = i.fr
+				code = f.code
+			}
+			if f.ip != park {
+				return false, nil
+			}
+			i.unpark()
+		}
+	}
+
+	tick := i.tick
+
+	for {
+		for f.ip < len(code) {
+			tick--
+			if tick == 0 {
+				tick = i.tick
+				if err := i.safepoint(); err != nil {
+					return false, err
+				}
+			}
+
+			code[f.ip](i)
+
+			f = i.fr
+			code = f.code
+		}
+		if f.ip != park {
+			return false, nil
+		}
+		if i.unpark() {
+			tick = 1
+		}
+	}
+}
+
+// metered reports whether a tick has work beyond cancellation: fuel, a hook,
+// or a profiler.
+func (i *Interpreter) metered() bool {
+	return i.gas >= 0 || i.hook != nil || i.profiler != nil
+}
+
+// safepoint runs per-tick interpreter coordination: context cancellation,
+// fuel metering, the user hook, and the profiler sample.
+func (i *Interpreter) safepoint() error {
+	if i.done != nil {
+		select {
+		case <-i.done:
+			return i.ctx.Err()
+		default:
+		}
+	}
+	if !i.burn() {
+		return ErrFuelExhausted
+	}
+	if i.hook != nil {
+		if err := i.hook(i); err != nil {
+			return err
+		}
+	}
+	i.sample(i.fr.addr, i.fr.ip)
+	return nil
+}
+
+// burn charges one tick of fuel and reports whether any remained; without
+// fuel it always does.
+func (i *Interpreter) burn() bool {
+	if i.gas < 0 {
+		return true
+	}
+	if i.gas == 0 {
+		return false
+	}
+	i.gas--
+	return true
+}
+
+// sample records the instruction at addr's ip with the profiler, if any.
+func (i *Interpreter) sample(addr, ip int) {
+	if i.profiler != nil {
+		i.samples.Add(addr, ip, i.instrs[addr][ip])
+	}
+}
+
+func (i *Interpreter) flush() {
+	if i.profiler != nil {
+		i.profiler.Flush(i.samples)
+	}
+}
+
+// function returns the *types.Function addr names: i.module for address 0,
+// the heap object at addr otherwise. native's frame and exact code lookups
+// share it, since deopt materialization can name address 0 once OSR can
+// enter native code from within module code.
+func (i *Interpreter) function(addr int) *types.Function {
+	if addr == 0 {
+		return i.module
+	}
+	return i.heap[addr].(*types.Function)
+}
+
+// upvals returns the upvals a frame running addr through ref reads: the
+// closure's own when ref is a closure over addr, none otherwise.
+func (i *Interpreter) upvals(ref, addr int) []types.Boxed {
+	if ref > 0 && ref < len(i.heap) {
+		if cl, ok := i.heap[ref].(*types.Closure); ok && int(cl.Fn) == addr {
+			return cl.Upvals
+		}
+	}
+	return nil
+}
+
+// retire finishes the current frame exactly as threaded RETURN does: results
+// at bp, sp, frame pop, and the frame's release of its callee ref. Generated
+// RETURN and native's own OSR return path share it so the two never diverge.
+// sweep, the codegen's own compile-time fact, skips releasing intermediate
+// operands a frame provably holds none of; always true is always correct.
+func (i *Interpreter) retire(sweep bool) {
+	f := i.fr
+	if i.sp < f.returns {
+		panic(ErrStackUnderflow)
+	}
+	if f.coro != 0 {
+		coAddr := f.coro
+		co, ok := i.heap[coAddr].(*coroutine)
+		if !ok {
+			panic(ErrTypeMismatch)
+		}
+		if f.returns > 0 {
+			for _, value := range i.stack[f.bp : i.sp-1] {
+				i.releaseBox(value)
+			}
+			co.value = i.stack[i.sp-1]
+		} else {
+			for _, value := range i.stack[f.bp:i.sp] {
+				i.releaseBox(value)
+			}
+			i.retain(0)
+			co.value = types.BoxedNull
+		}
+		co.done = true
+		co.image = co.image[:0]
+		co.upvals = nil
+		co.ref = 0
+		co.release = false
+		i.stack[f.bp] = types.BoxRef(coAddr)
+		f.upvals = nil
+		f.coro = 0
+		i.leave(f, f.bp+1)
+		return
+	}
+	if sweep {
+		for _, value := range i.stack[f.bp : i.sp-f.returns] {
+			i.releaseBox(value)
+		}
+	}
+	switch f.returns {
+	case 0:
+	case 1:
+		i.stack[f.bp] = i.stack[i.sp-1]
+	default:
+		copy(i.stack[f.bp:f.bp+f.returns], i.stack[i.sp-f.returns:i.sp])
+	}
+	i.leave(f, f.bp+f.returns)
+}
+
+// leave pops f once its results already sit at f.bp..sp and the rest of its
+// operand stack is accounted for, releasing the frame's own callee ref.
+// retire calls it after its copy; native's OSR return path, whose compiled
+// RETURN already writes results at f.bp itself, needs no copy and calls it
+// directly.
+func (i *Interpreter) leave(f *frame, sp int) {
+	i.sp = sp
+	if f.release {
+		i.release(f.ref)
+	}
+	f.code = nil
+	i.fp--
+	i.fr = &i.frames[i.fp-1]
+}
+
+// encoder and decoder hand out the interpreter's own scratch, reset for one
+// conversion. A conversion that can nest another owns one instead, which is why
+// Marshal and Unmarshal build their own.
+func (i *Interpreter) encoder(r *Registry) *Encoder {
+	e := &i.enc
+	*e = Encoder{interp: i, registry: r, owned: e.owned[:0]}
+	return e
+}
+
+func (i *Interpreter) decoder(r *Registry) *Decoder {
+	d := &i.dec
+	*d = Decoder{interp: i, registry: r}
+	return d
+}
+
+// recount rebuilds baseline counts from constant roots and heap edges after
+// construction or reset has removed all dynamic slots.
+func (i *Interpreter) recount() {
+	clear(i.rc)
+	i.rc[0] = 1
+	for _, val := range i.constants {
+		if val.Kind() != types.KindRef {
+			continue
+		}
+		addr := val.Ref()
+		if addr >= 0 && addr < len(i.rc) {
+			i.rc[addr]++
+		}
+	}
+	for addr := 1; addr < len(i.heap); addr++ {
+		for _, ref := range i.refs(i.heap[addr]) {
+			child := int(ref)
+			if child >= 0 && child < len(i.rc) {
+				i.rc[child]++
+			}
+		}
+	}
+}
+
+// seed restores each global from its declaration rather than its previous value.
+func (i *Interpreter) seed() {
+	for idx, typ := range i.globalTypes {
+
+		if typ.Kind() == types.KindRef {
+			i.retain(0)
+		}
+		i.globals[idx] = types.Zero(typ.Kind())
+	}
+}
+
+func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
+	n := addr + 1
+	if addr >= len(i.instrs) {
+		i.instrs = append(i.instrs, make([][]byte, n-len(i.instrs))...)
+	}
+	if addr >= len(i.code) {
+		i.code = append(i.code, make([][]func(*Interpreter), n-len(i.code))...)
+	}
+	if addr >= len(i.zeros) {
+		i.zeros = append(i.zeros, make([][]types.Boxed, n-len(i.zeros))...)
+	}
+	if addr >= len(i.handlers) {
+		i.handlers = append(i.handlers, make([][]instr.Handler, n-len(i.handlers))...)
+	}
+	if addr >= len(i.coros) {
+		i.coros = append(i.coros, make([]bool, n-len(i.coros))...)
+	}
+	if dynamic {
+		i.coros[addr] = i.yields(fn.Code)
+	}
+	i.instrs[addr] = fn.Code
+	i.handlers[addr] = fn.Handlers
+	i.code[addr] = i.compile(fn, i.tick == 1)
+	i.zeros[addr] = types.Zeros(fn.Locals)
+	if dynamic {
+		i.dynamic[addr] = true
+	}
+}
+
+func (i *Interpreter) yields(code []byte) bool {
+	for ip := 0; ip < len(code); {
+		if instr.Opcode(code[ip]) == instr.YIELD {
+			return true
+		}
+		w := instr.Instruction(code[ip:]).Width()
+		if w <= 0 {
+			break
+		}
+		ip += w
+	}
+	return false
+}
+
+// compile builds fn's threaded code: fused unless exact, which every
+// materialized native frame needs because a fusion leaves no handler at the
+// IPs it absorbs (interp/native.go's deopt resumes exactly there).
+func (i *Interpreter) compile(fn *types.Function, exact bool) []func(*Interpreter) {
+	c := &threader{
+		types:       i.types,
+		constants:   i.constants,
+		heap:        i.heap,
+		coros:       i.coros,
+		globals:     i.globalDecls(),
+		globalTypes: i.globalTypes,
+		exact:       exact,
+	}
+	return c.Compile(fn.Code, fn.Slots(), fn.Declared(), types.Kinds(fn.Captures), fn.Captures)
+}
+
+// globalDecls returns the declared kinds for threaded handler selection.
+// Dynamic globals stay unknown so their handlers inspect each boxed value.
+func (i *Interpreter) globalDecls() []types.Kind {
+	kinds := make([]types.Kind, len(i.globalTypes))
+	for idx, typ := range i.globalTypes {
+		if typ == types.TypeAny() {
+			kinds[idx] = instr.KindAny
+		} else {
+			kinds[idx] = typ.Kind()
+		}
+	}
+	return kinds
 }
 
 // text is the string a UTF-32 array spells.
@@ -1092,448 +1501,6 @@ func (i *Interpreter) errorMessage(v types.Boxed) string {
 	return types.Unbox(v).String()
 }
 
-func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []types.Boxed) (returns []types.Boxed, err error) {
-	if i.ctx != nil || i.fp != 1 {
-		return nil, ErrInterpreterBusy
-	}
-	target, ok := i.callable(val)
-	if !ok {
-		return nil, ErrTypeMismatch
-	}
-	base := i.sp
-	if base+len(params)+1 > len(i.stack) {
-		return nil, ErrStackOverflow
-	}
-	copy(i.stack[base:], params)
-	i.sp += len(params)
-
-	var addr int
-	switch v := val.(type) {
-	case types.Boxed:
-		addr = v.Ref()
-		i.retain(addr)
-	default:
-
-		if addr = i.owner(target); addr >= 0 {
-			i.retain(addr)
-			break
-		}
-		addr, err = i.Alloc(target)
-		if err != nil {
-			i.sp = base
-			return nil, err
-		}
-	}
-	i.stack[i.sp] = types.BoxRef(addr)
-	i.sp++
-
-	saved := *i.fr
-	defer func() {
-		if err != nil {
-			for i.fp > 1 {
-				f := &i.frames[i.fp-1]
-				if f.release {
-					i.release(f.ref)
-				}
-				i.fp--
-			}
-			for _, value := range i.stack[base:i.sp] {
-				i.releaseBox(value)
-			}
-		}
-		i.sp = base
-		i.fr = &i.frames[0]
-		*i.fr = saved
-	}()
-
-	i.fr.code = []func(*Interpreter){threaded[instr.CALL](&threader{})}
-	i.fr.ip = 0
-	if err = i.Run(ctx); err != nil {
-		return nil, err
-	}
-	returns = append([]types.Boxed(nil), i.stack[base:i.sp]...)
-	return returns, nil
-}
-
-func (i *Interpreter) callable(val types.Value) (types.Value, bool) {
-	if boxed, ok := val.(types.Boxed); ok {
-		if boxed.Kind() != types.KindRef {
-			return nil, false
-		}
-		loaded, err := i.Load(boxed.Ref())
-		if err != nil {
-			return nil, false
-		}
-		val = loaded
-	}
-	switch val.(type) {
-	case *types.Function, *types.Closure, *HostFunction:
-		return val, true
-	default:
-		return nil, false
-	}
-}
-
-// dispatch runs the threaded loop until the frame ends, a safepoint stops it, or
-// a panic unwinds it. Its recover delivers a yield, lands a catchable throw/trap
-// on a guest handler (reported via caught so Run re-enters here), or wraps an
-// uncatchable failure as a RuntimeError. The loop body is the interpreter's hot
-// path and is intentionally kept identical regardless of exception support.
-func (i *Interpreter) dispatch() (caught bool, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			if r == errYield {
-				err = ErrYield
-				return
-			}
-			if i.handle(r) {
-				caught = true
-				return
-			}
-			if i.floor > 0 {
-				panic(r)
-			}
-			err = i.fault(r)
-		}
-	}()
-
-	f := i.fr
-	code := f.code
-
-	if i.done == nil && !i.metered() {
-		for {
-			for f.ip < len(code) {
-				code[f.ip](i)
-				f = i.fr
-				code = f.code
-			}
-			if f.ip != park {
-				return false, nil
-			}
-			i.unpark()
-		}
-	}
-
-	tick := i.tick
-
-	for {
-		for f.ip < len(code) {
-			tick--
-			if tick == 0 {
-				tick = i.tick
-				if err := i.safepoint(); err != nil {
-					return false, err
-				}
-			}
-
-			code[f.ip](i)
-
-			f = i.fr
-			code = f.code
-		}
-		if f.ip != park {
-			return false, nil
-		}
-		if i.unpark() {
-			tick = 1
-		}
-	}
-}
-
-// metered reports whether a tick has work beyond cancellation: fuel, a hook,
-// or a profiler.
-func (i *Interpreter) metered() bool {
-	return i.gas >= 0 || i.hook != nil || i.profiler != nil
-}
-
-// safepoint runs per-tick interpreter coordination: context cancellation,
-// fuel metering, the user hook, and the profiler sample.
-func (i *Interpreter) safepoint() error {
-	if i.done != nil {
-		select {
-		case <-i.done:
-			return i.ctx.Err()
-		default:
-		}
-	}
-	if !i.burn() {
-		return ErrFuelExhausted
-	}
-	if i.hook != nil {
-		if err := i.hook(i); err != nil {
-			return err
-		}
-	}
-	i.sample(i.fr.addr, i.fr.ip)
-	return nil
-}
-
-// burn charges one tick of fuel and reports whether any remained; without
-// fuel it always does.
-func (i *Interpreter) burn() bool {
-	if i.gas < 0 {
-		return true
-	}
-	if i.gas == 0 {
-		return false
-	}
-	i.gas--
-	return true
-}
-
-// sample records the instruction at addr's ip with the profiler, if any.
-func (i *Interpreter) sample(addr, ip int) {
-	if i.profiler != nil {
-		i.samples.Add(addr, ip, i.instrs[addr][ip])
-	}
-}
-
-func (i *Interpreter) flush() {
-	if i.profiler != nil {
-		i.profiler.Flush(i.samples)
-	}
-}
-
-// attach returns i's JIT runtime, nil when the JIT is off, building it on
-// first use: an interpreter that never runs pays nothing for it.
-func (i *Interpreter) attach() *native {
-	if i.native == nil && i.threshold >= 0 {
-		i.native = newNative(i, i.threshold)
-	}
-	return i.native
-}
-
-// spend charges work against a dormant JIT's heat and wakes it once heat runs
-// out.
-func (i *Interpreter) spend(work int) {
-	if i.heat == 0 {
-		return
-	}
-	if i.heat -= work; i.heat <= 0 {
-		i.wake()
-	}
-}
-
-// unpark returns the parked frame to its ip and reports whether a tick is
-// due; otherwise heat ran out, and it wakes the JIT.
-func (i *Interpreter) unpark() bool {
-	i.fr.ip = i.parked
-	if i.due {
-		i.due = false
-		return true
-	}
-	i.wake()
-	return false
-}
-
-// wake makes the dormant JIT live, or turns it off for a program none of
-// whose code can repay a Go entry (native.wake).
-func (i *Interpreter) wake() {
-	i.heat = 0
-	if !i.native.wake(i) {
-		i.native, i.threshold = nil, -1
-	}
-}
-
-// recount rebuilds baseline counts from constant roots and heap edges after
-// construction or reset has removed all dynamic slots.
-func (i *Interpreter) recount() {
-	clear(i.rc)
-	i.rc[0] = 1
-	for _, val := range i.constants {
-		if val.Kind() != types.KindRef {
-			continue
-		}
-		addr := val.Ref()
-		if addr >= 0 && addr < len(i.rc) {
-			i.rc[addr]++
-		}
-	}
-	for addr := 1; addr < len(i.heap); addr++ {
-		for _, ref := range i.refs(i.heap[addr]) {
-			child := int(ref)
-			if child >= 0 && child < len(i.rc) {
-				i.rc[child]++
-			}
-		}
-	}
-}
-
-// seed restores each global from its declaration rather than its previous value.
-func (i *Interpreter) seed() {
-	for idx, typ := range i.globalTypes {
-
-		if typ.Kind() == types.KindRef {
-			i.retain(0)
-		}
-		i.globals[idx] = types.Zero(typ.Kind())
-	}
-}
-
-func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
-	n := addr + 1
-	if addr >= len(i.instrs) {
-		i.instrs = append(i.instrs, make([][]byte, n-len(i.instrs))...)
-	}
-	if addr >= len(i.code) {
-		i.code = append(i.code, make([][]func(*Interpreter), n-len(i.code))...)
-	}
-	if addr >= len(i.zeros) {
-		i.zeros = append(i.zeros, make([][]types.Boxed, n-len(i.zeros))...)
-	}
-	if addr >= len(i.handlers) {
-		i.handlers = append(i.handlers, make([][]instr.Handler, n-len(i.handlers))...)
-	}
-	if addr >= len(i.coros) {
-		i.coros = append(i.coros, make([]bool, n-len(i.coros))...)
-	}
-	if dynamic {
-		i.coros[addr] = i.yields(fn.Code)
-	}
-	i.instrs[addr] = fn.Code
-	i.handlers[addr] = fn.Handlers
-	i.code[addr] = i.compile(fn, i.tick == 1)
-	i.zeros[addr] = types.Zeros(fn.Locals)
-	if dynamic {
-		i.dynamic[addr] = true
-	}
-}
-
-func (i *Interpreter) yields(code []byte) bool {
-	for ip := 0; ip < len(code); {
-		if instr.Opcode(code[ip]) == instr.YIELD {
-			return true
-		}
-		w := instr.Instruction(code[ip:]).Width()
-		if w <= 0 {
-			break
-		}
-		ip += w
-	}
-	return false
-}
-
-// compile builds fn's threaded code: fused unless exact, which every
-// materialized native frame needs because a fusion leaves no handler at the
-// IPs it absorbs (interp/native.go's deopt resumes exactly there).
-func (i *Interpreter) compile(fn *types.Function, exact bool) []func(*Interpreter) {
-	c := &threader{
-		types:       i.types,
-		constants:   i.constants,
-		heap:        i.heap,
-		coros:       i.coros,
-		globals:     i.globalDecls(),
-		globalTypes: i.globalTypes,
-		exact:       exact,
-	}
-	return c.Compile(fn.Code, fn.Slots(), fn.Declared(), types.Kinds(fn.Captures), fn.Captures)
-}
-
-// globalDecls returns the declared kinds for threaded handler selection.
-// Dynamic globals stay unknown so their handlers inspect each boxed value.
-func (i *Interpreter) globalDecls() []types.Kind {
-	kinds := make([]types.Kind, len(i.globalTypes))
-	for idx, typ := range i.globalTypes {
-		if typ == types.TypeAny {
-			kinds[idx] = instr.KindAny
-		} else {
-			kinds[idx] = typ.Kind()
-		}
-	}
-	return kinds
-}
-
-// function returns the *types.Function addr names: i.module for address 0,
-// the heap object at addr otherwise. native's frame and exact code lookups
-// share it, since deopt materialization can name address 0 once OSR can
-// enter native code from within module code.
-func (i *Interpreter) function(addr int) *types.Function {
-	if addr == 0 {
-		return i.module
-	}
-	return i.heap[addr].(*types.Function)
-}
-
-// upvals returns the upvals a frame running addr through ref reads: the
-// closure's own when ref is a closure over addr, none otherwise.
-func (i *Interpreter) upvals(ref, addr int) []types.Boxed {
-	if ref > 0 && ref < len(i.heap) {
-		if cl, ok := i.heap[ref].(*types.Closure); ok && int(cl.Fn) == addr {
-			return cl.Upvals
-		}
-	}
-	return nil
-}
-
-// retire finishes the current frame exactly as threaded RETURN does: results
-// at bp, sp, frame pop, and the frame's release of its callee ref. Generated
-// RETURN and native's own OSR return path share it so the two never diverge.
-// sweep, the codegen's own compile-time fact, skips releasing intermediate
-// operands a frame provably holds none of; always true is always correct.
-func (i *Interpreter) retire(sweep bool) {
-	f := i.fr
-	if i.sp < f.returns {
-		panic(ErrStackUnderflow)
-	}
-	if f.coro != 0 {
-		coAddr := f.coro
-		co, ok := i.heap[coAddr].(*coroutine)
-		if !ok {
-			panic(ErrTypeMismatch)
-		}
-		if f.returns > 0 {
-			for _, value := range i.stack[f.bp : i.sp-1] {
-				i.releaseBox(value)
-			}
-			co.value = i.stack[i.sp-1]
-		} else {
-			for _, value := range i.stack[f.bp:i.sp] {
-				i.releaseBox(value)
-			}
-			i.retain(0)
-			co.value = types.BoxedNull
-		}
-		co.done = true
-		co.image = co.image[:0]
-		co.upvals = nil
-		co.ref = 0
-		co.release = false
-		i.stack[f.bp] = types.BoxRef(coAddr)
-		f.upvals = nil
-		f.coro = 0
-		i.leave(f, f.bp+1)
-		return
-	}
-	if sweep {
-		for _, value := range i.stack[f.bp : i.sp-f.returns] {
-			i.releaseBox(value)
-		}
-	}
-	switch f.returns {
-	case 0:
-	case 1:
-		i.stack[f.bp] = i.stack[i.sp-1]
-	default:
-		copy(i.stack[f.bp:f.bp+f.returns], i.stack[i.sp-f.returns:i.sp])
-	}
-	i.leave(f, f.bp+f.returns)
-}
-
-// leave pops f once its results already sit at f.bp..sp and the rest of its
-// operand stack is accounted for, releasing the frame's own callee ref.
-// retire calls it after its copy; native's OSR return path, whose compiled
-// RETURN already writes results at f.bp itself, needs no copy and calls it
-// directly.
-func (i *Interpreter) leave(f *frame, sp int) {
-	i.sp = sp
-	if f.release {
-		i.release(f.ref)
-	}
-	f.code = nil
-	i.fp--
-	i.fr = &i.frames[i.fp-1]
-}
-
 // handle attempts to deliver a recovered panic to a guest exception handler. An
 // escape is a throw that already failed its handler search, so it stays
 // terminal; any other Go error (a runtime trap or a host-function failure) is
@@ -1641,21 +1608,6 @@ func (i *Interpreter) cause(r any) error {
 	default:
 		return fmt.Errorf("%v", r)
 	}
-}
-
-// encoder and decoder hand out the interpreter's own scratch, reset for one
-// conversion. A conversion that can nest another owns one instead, which is why
-// Marshal and Unmarshal build their own.
-func (i *Interpreter) encoder(r *Registry) *Encoder {
-	e := &i.enc
-	*e = Encoder{interp: i, registry: r, owned: e.owned[:0]}
-	return e
-}
-
-func (i *Interpreter) decoder(r *Registry) *Decoder {
-	d := &i.dec
-	*d = Decoder{interp: i, registry: r}
-	return d
 }
 
 func (i *Interpreter) box(val types.Value) types.Boxed {
@@ -1997,6 +1949,55 @@ func (i *Interpreter) deref(val types.Value) (types.Value, error) {
 	return out, nil
 }
 
+// attach returns i's JIT runtime, nil when the JIT is off, building it on
+// first use: an interpreter that never runs pays nothing for it.
+func (i *Interpreter) attach() *native {
+	if i.native == nil && i.threshold >= 0 {
+		i.native = newNative(i, i.threshold)
+	}
+	return i.native
+}
+
+// spend charges work against a dormant JIT's heat and wakes it once heat runs
+// out.
+func (i *Interpreter) spend(work int) {
+	if i.heat == 0 {
+		return
+	}
+	if i.heat -= work; i.heat <= 0 {
+		i.wake()
+	}
+}
+
+// unpark returns the parked frame to its ip and reports whether a tick is
+// due; otherwise heat ran out, and it wakes the JIT.
+func (i *Interpreter) unpark() bool {
+	i.fr.ip = i.parked
+	if i.due {
+		i.due = false
+		return true
+	}
+	i.wake()
+	return false
+}
+
+// wake makes the dormant JIT live, or turns it off for a program none of
+// whose code can repay a Go entry (native.wake).
+func (i *Interpreter) wake() {
+	i.heat = 0
+	if !i.native.wake(i) {
+		i.native, i.threshold = nil, -1
+	}
+}
+
+// aliasable reports whether val is a pointer, the only shape two slots can
+// share. A pointer is stored directly in the interface word and is comparable,
+// so the interface itself keys the index.
+func aliasable(val types.Value) bool {
+	typ := reflect.TypeOf(val)
+	return typ != nil && typ.Kind() == reflect.Pointer
+}
+
 func unboxRef[T types.Value](i *Interpreter, val types.Boxed) T {
 	v := deref[T](i, val)
 	i.release(val.Ref())
@@ -2087,12 +2088,4 @@ func deref[T types.Value](i *Interpreter, val types.Boxed) T {
 		panic(ErrTypeMismatch)
 	}
 	return v
-}
-
-// aliasable reports whether val is a pointer, the only shape two slots can
-// share. A pointer is stored directly in the interface word and is comparable,
-// so the interface itself keys the index.
-func aliasable(val types.Value) bool {
-	typ := reflect.TypeOf(val)
-	return typ != nil && typ.Kind() == reflect.Pointer
 }

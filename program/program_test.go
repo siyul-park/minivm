@@ -17,22 +17,22 @@ func TestWithConstants(t *testing.T) {
 }
 
 func TestWithTypes(t *testing.T) {
-	prog := program.New(nil, program.WithTypes(types.TypeI32, types.TypeI64))
+	prog := program.New(nil, program.WithTypes(types.TypeI32(), types.TypeI64()))
 	require.Len(t, prog.Types, 2)
-	require.Equal(t, types.TypeI32, prog.Types[0])
-	require.Equal(t, types.TypeI64, prog.Types[1])
+	require.Equal(t, types.TypeI32(), prog.Types[0])
+	require.Equal(t, types.TypeI64(), prog.Types[1])
 }
 
 func TestWithLocals(t *testing.T) {
-	prog := program.New(nil, program.WithLocals(types.TypeI32, types.TypeI64))
+	prog := program.New(nil, program.WithLocals(types.TypeI32(), types.TypeI64()))
 	require.Len(t, prog.Locals, 2)
-	require.Equal(t, types.TypeI32, prog.Locals[0])
-	require.Equal(t, types.TypeI64, prog.Locals[1])
+	require.Equal(t, types.TypeI32(), prog.Locals[0])
+	require.Equal(t, types.TypeI64(), prog.Locals[1])
 }
 
 func TestWithGlobals(t *testing.T) {
-	prog := program.New(nil, program.WithGlobals(types.TypeI32, types.TypeAny))
-	require.Equal(t, []types.Type{types.TypeI32, types.TypeAny}, prog.Globals)
+	prog := program.New(nil, program.WithGlobals(types.TypeI32(), types.TypeAny()))
+	require.Equal(t, []types.Type{types.TypeI32(), types.TypeAny()}, prog.Globals)
 }
 
 func TestWithHandlers(t *testing.T) {
@@ -44,10 +44,10 @@ func TestWithHandlers(t *testing.T) {
 
 func TestNew(t *testing.T) {
 	body := []instr.Instruction{instr.New(instr.I32_CONST, 42), instr.New(instr.DROP)}
-	prog := program.New(body, program.WithLocals(types.TypeI32), program.WithGlobals(types.TypeAny))
+	prog := program.New(body, program.WithLocals(types.TypeI32()), program.WithGlobals(types.TypeAny()))
 	require.Equal(t, body, instr.Unmarshal(prog.Code))
-	require.Equal(t, []types.Type{types.TypeI32}, prog.Locals)
-	require.Equal(t, []types.Type{types.TypeAny}, prog.Globals)
+	require.Equal(t, []types.Type{types.TypeI32()}, prog.Locals)
+	require.Equal(t, []types.Type{types.TypeAny()}, prog.Globals)
 }
 
 func TestProgram_String(t *testing.T) {

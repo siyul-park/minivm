@@ -16,20 +16,6 @@ func init() {
 	})
 }
 
-func nBodyEnergy(nb int, x, y, z, vx, vy, vz, mass []float64) float64 {
-	var e float64
-	for i := 0; i < nb; i++ {
-		e += 0.5 * mass[i] * (vx[i]*vx[i] + vy[i]*vy[i] + vz[i]*vz[i])
-		for j := i + 1; j < nb; j++ {
-			dx := x[i] - x[j]
-			dy := y[i] - y[j]
-			dz := z[i] - z[j]
-			dist := math.Sqrt(dx*dx + dy*dy + dz*dz)
-			e -= (mass[i] * mass[j]) / dist
-		}
-	}
-	return e
-}
 func nBody(steps int32) int32 {
 	const pi = 3.141592653589793
 	solarMass := 4.0 * pi * pi
@@ -59,13 +45,31 @@ func nBody(steps int32) int32 {
 
 	const dt = 0.01
 	for s := int32(0); s < steps; s++ {
-		nBodyAdvance(nb, x, y, z, vx, vy, vz, mass, dt)
+		nBodyAdvance(x, y, z, vx, vy, vz, mass, dt)
 	}
 
-	e := nBodyEnergy(nb, x, y, z, vx, vy, vz, mass)
+	e := nBodyEnergy(x, y, z, vx, vy, vz, mass)
 	return int32(e * 1e9)
 }
-func nBodyAdvance(nb int, x, y, z, vx, vy, vz, mass []float64, dt float64) {
+
+func nBodyEnergy(x, y, z, vx, vy, vz, mass []float64) float64 {
+	nb := len(x)
+	var e float64
+	for i := 0; i < nb; i++ {
+		e += 0.5 * mass[i] * (vx[i]*vx[i] + vy[i]*vy[i] + vz[i]*vz[i])
+		for j := i + 1; j < nb; j++ {
+			dx := x[i] - x[j]
+			dy := y[i] - y[j]
+			dz := z[i] - z[j]
+			dist := math.Sqrt(dx*dx + dy*dy + dz*dz)
+			e -= (mass[i] * mass[j]) / dist
+		}
+	}
+	return e
+}
+
+func nBodyAdvance(x, y, z, vx, vy, vz, mass []float64, dt float64) {
+	nb := len(x)
 	for i := 0; i < nb; i++ {
 		for j := i + 1; j < nb; j++ {
 			dx := x[i] - x[j]

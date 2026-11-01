@@ -20,6 +20,52 @@ func TestFunction_Name(t *testing.T) {
 	})
 }
 
+func TestFunction_Block(t *testing.T) {
+	t.Run("returns the block at an id", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		param := b.Param(entry, ssa.TypeI32)
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{param}})
+
+		block := b.Build().Block(entry)
+		require.Equal(t, []ssa.Value{param}, block.Params)
+		require.Empty(t, block.Operations)
+		require.Equal(t, ssa.OpReturn, block.Terminator.Op)
+	})
+}
+
+func TestFunction_Values(t *testing.T) {
+	t.Run("bounds every value reserved", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		b.Param(entry, ssa.TypeI32)
+		v := b.Value(ssa.TypeF64)
+		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		require.Equal(t, int(v)+1, b.Build().Values())
+	})
+
+	t.Run("bounds no value before one is reserved", func(t *testing.T) {
+		require.Equal(t, int(ssa.NoValue)+1, ssa.New("f").Build().Values())
+	})
+}
+
+func TestFunction_Entry(t *testing.T) {
+	t.Run("returns the frame Builder.Entry set", func(t *testing.T) {
+		b := ssa.New("f")
+		b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
+		b.Entry(ssa.Frame{Address: 4, IP: 9, Returns: 1})
+
+		require.Equal(t, ssa.Frame{Address: 4, IP: 9, Returns: 1}, b.Build().Entry())
+	})
+
+	t.Run("is zero when Builder.Entry was never called", func(t *testing.T) {
+		b := ssa.New("f")
+		b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
+
+		require.Zero(t, b.Build().Entry())
+	})
+}
+
 func TestFunction_Len(t *testing.T) {
 	t.Run("counts the blocks built", func(t *testing.T) {
 		b := ssa.New("f")
@@ -82,20 +128,6 @@ func TestFunction_Pred(t *testing.T) {
 	})
 }
 
-func TestFunction_Block(t *testing.T) {
-	t.Run("returns the block at an id", func(t *testing.T) {
-		b := ssa.New("f")
-		entry := b.Block()
-		param := b.Param(entry, ssa.TypeI32)
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{param}})
-
-		block := b.Build().Block(entry)
-		require.Equal(t, []ssa.Value{param}, block.Params)
-		require.Empty(t, block.Operations)
-		require.Equal(t, ssa.OpReturn, block.Terminator.Op)
-	})
-}
-
 func TestFunction_Type(t *testing.T) {
 	t.Run("returns the type a value was reserved with", func(t *testing.T) {
 		b := ssa.New("f")
@@ -114,37 +146,5 @@ func TestFunction_Type(t *testing.T) {
 		f := b.Build()
 		require.Equal(t, "invalid", f.Type(ssa.NoValue).String())
 		require.Equal(t, "invalid", f.Type(ssa.Value(99)).String())
-	})
-}
-
-func TestFunction_Values(t *testing.T) {
-	t.Run("bounds every value reserved", func(t *testing.T) {
-		b := ssa.New("f")
-		entry := b.Block()
-		b.Param(entry, ssa.TypeI32)
-		v := b.Value(ssa.TypeF64)
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
-		require.Equal(t, int(v)+1, b.Build().Values())
-	})
-
-	t.Run("bounds no value before one is reserved", func(t *testing.T) {
-		require.Equal(t, int(ssa.NoValue)+1, ssa.New("f").Build().Values())
-	})
-}
-
-func TestFunction_Entry(t *testing.T) {
-	t.Run("returns the frame Builder.Entry set", func(t *testing.T) {
-		b := ssa.New("f")
-		b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
-		b.Entry(ssa.Frame{Address: 4, IP: 9, Returns: 1})
-
-		require.Equal(t, ssa.Frame{Address: 4, IP: 9, Returns: 1}, b.Build().Entry())
-	})
-
-	t.Run("is zero when Builder.Entry was never called", func(t *testing.T) {
-		b := ssa.New("f")
-		b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
-
-		require.Zero(t, b.Build().Entry())
 	})
 }

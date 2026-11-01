@@ -6,8 +6,10 @@ import (
 	"unsafe"
 )
 
+// Instruction is one encoded instruction: the opcode byte followed by its operands.
 type Instruction []byte
 
+// New encodes op with operands, or returns nil for an unknown opcode.
 func New(op Opcode, operands ...uint64) Instruction {
 	typ, ok := types[op]
 	if !ok {
@@ -60,6 +62,7 @@ func New(op Opcode, operands ...uint64) Instruction {
 	return code
 }
 
+// SetOperand writes value into the operand at index, ignoring an index out of range.
 func (i Instruction) SetOperand(index int, value uint64) {
 	typ := i.Type()
 
@@ -97,6 +100,7 @@ func (i Instruction) SetOperand(index int, value uint64) {
 	}
 }
 
+// Operand returns the operand at index, or 0 when out of range.
 func (i Instruction) Operand(index int) uint64 {
 	operands := i.Operands()
 	if index < 0 || index >= len(operands) {
@@ -105,6 +109,7 @@ func (i Instruction) Operand(index int) uint64 {
 	return operands[index]
 }
 
+// Width returns the encoded size in bytes.
 func (i Instruction) Width() int {
 	typ := i.Type()
 	offset := 1
@@ -119,6 +124,7 @@ func (i Instruction) Width() int {
 	return offset
 }
 
+// Operands decodes all operands, with a variable-width operand list flattened after its count.
 func (i Instruction) Operands() []uint64 {
 	typ := i.Type()
 
@@ -153,8 +159,14 @@ func (i Instruction) Operands() []uint64 {
 	return operands
 }
 
+// Opcode returns the leading opcode.
 func (i Instruction) Opcode() Opcode {
 	return Opcode(i[0])
+}
+
+// Type returns the value type.
+func (i Instruction) Type() Type {
+	return TypeOf(i.Opcode())
 }
 
 // String returns the textual representation.
@@ -181,9 +193,4 @@ func (i Instruction) String() string {
 		}
 	}
 	return sb.String()
-}
-
-// Type returns the value type.
-func (i Instruction) Type() Type {
-	return TypeOf(i.Opcode())
 }

@@ -34,18 +34,12 @@ func exit() []asm.Instruction {
 	}
 }
 
-func link(t *testing.T, insts ...asm.Instruction) uintptr {
-	t.Helper()
-	a := asm.New(arm64.New())
-	a.Emit(insts...)
-	code, err := a.Build()
-	require.NoError(t, err)
-	buffer, err := asm.NewBuffer(len(code))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
-	addr, err := buffer.Link(code)
-	require.NoError(t, err)
-	return addr
+func grow(n int) int {
+	var pad [64]byte
+	if n == 0 {
+		return int(pad[0])
+	}
+	return grow(n-1) + 1
 }
 
 func TestEnter(t *testing.T) {
@@ -187,10 +181,16 @@ func TestResume(t *testing.T) {
 	})
 }
 
-func grow(n int) int {
-	var pad [64]byte
-	if n == 0 {
-		return int(pad[0])
-	}
-	return grow(n-1) + 1
+func link(t *testing.T, insts ...asm.Instruction) uintptr {
+	t.Helper()
+	a := asm.New(arm64.New())
+	a.Emit(insts...)
+	code, err := a.Build()
+	require.NoError(t, err)
+	buffer, err := asm.NewBuffer(len(code))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
+	addr, err := buffer.Link(code)
+	require.NoError(t, err)
+	return addr
 }

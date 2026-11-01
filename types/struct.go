@@ -5,6 +5,7 @@ import (
 	"strings"
 )
 
+// Struct is a heap record whose fields are laid out by its StructType.
 type Struct struct {
 	Typ    *StructType
 	Data   []uint64
@@ -17,10 +18,12 @@ type StructLiteral struct {
 	Fields []Value
 }
 
+// StructType is the type of structs with the given fields.
 type StructType struct {
 	Fields []StructField
 }
 
+// StructField is one named, typed field of a StructType.
 type StructField struct {
 	Name string
 	Type Type
@@ -40,6 +43,7 @@ func FieldWithName(name string) func(*StructField) {
 	}
 }
 
+// NewStruct returns a struct of type typ with fields assigned in order.
 func NewStruct(typ *StructType, fields ...Boxed) *Struct {
 	s := &Struct{}
 	s.Reset(typ)
@@ -49,10 +53,12 @@ func NewStruct(typ *StructType, fields ...Boxed) *Struct {
 	return s
 }
 
+// NewStructType returns the struct type with fields.
 func NewStructType(fields ...StructField) *StructType {
 	return &StructType{Fields: fields}
 }
 
+// NewStructField returns a field of type typ configured by opts.
 func NewStructField(typ Type, opts ...func(field *StructField)) StructField {
 	s := StructField{
 		Type: typ,
@@ -76,10 +82,12 @@ func (s *Struct) Reset(typ *StructType) {
 	s.Data = make([]uint64, len(typ.Fields))
 }
 
+// FieldByName returns the named field, or 0 when it does not exist.
 func (s *Struct) FieldByName(name string) Boxed {
 	return s.Field(s.Typ.FieldIndex(name))
 }
 
+// Field returns field i, or 0 when out of range.
 func (s *Struct) Field(i int) Boxed {
 	if i < 0 || i >= len(s.Typ.Fields) {
 		return 0
@@ -87,6 +95,7 @@ func (s *Struct) Field(i int) Boxed {
 	return s.field(i, s.Typ.Fields[i])
 }
 
+// SetField stores val into field i, ignoring an index out of range.
 func (s *Struct) SetField(i int, val Boxed) {
 	if i < 0 || i >= len(s.Typ.Fields) {
 		return
@@ -151,29 +160,12 @@ func (t *StructType) FieldIndex(name string) int {
 	return -1
 }
 
-// Kind reports the reference kind.
-func (s *StructLiteral) Kind() Kind { return KindRef }
-
-// String returns the canonical struct literal.
-func (s *StructLiteral) String() string {
-	return formatSlice(s.Type(), len(s.Fields), func(i int) string { return s.Fields[i].String() })
-}
-
-// Type returns the struct literal type.
-func (s *StructLiteral) Type() Type { return s.Typ }
-
 func (s *Struct) Kind() Kind {
 	return KindRef
 }
 
 func (s *Struct) Type() Type {
 	return s.Typ
-}
-
-func (s *Struct) String() string {
-	return formatSlice(s.Typ, len(s.Typ.Fields), func(i int) string {
-		return s.field(i, s.Typ.Fields[i]).String()
-	})
 }
 
 func (s *Struct) Refs(dst []Ref) []Ref {
@@ -189,25 +181,29 @@ func (s *Struct) Refs(dst []Ref) []Ref {
 	return dst
 }
 
-func (t *StructType) Kind() Kind {
+func (s *Struct) String() string {
+	return formatSlice(s.Typ, len(s.Typ.Fields), func(i int) string {
+		return s.field(i, s.Typ.Fields[i]).String()
+	})
+}
+
+// Kind reports the reference kind.
+func (s *StructLiteral) Kind() Kind {
 	return KindRef
 }
 
-func (t *StructType) String() string {
-	var sb strings.Builder
-	sb.WriteString("struct {")
-	for i, f := range t.Fields {
-		if i > 0 {
-			sb.WriteString("; ")
-		}
-		if f.Name != "" {
-			sb.WriteString(f.Name)
-			sb.WriteString(": ")
-		}
-		sb.WriteString(f.Type.String())
-	}
-	sb.WriteString("}")
-	return sb.String()
+// Type returns the struct literal type.
+func (s *StructLiteral) Type() Type {
+	return s.Typ
+}
+
+// String returns the canonical struct literal.
+func (s *StructLiteral) String() string {
+	return formatSlice(s.Type(), len(s.Fields), func(i int) string { return s.Fields[i].String() })
+}
+
+func (t *StructType) Kind() Kind {
+	return KindRef
 }
 
 func (t *StructType) Cast(other Type) bool {
@@ -248,6 +244,23 @@ func (t *StructType) Equals(other Type) bool {
 		}
 	}
 	return true
+}
+
+func (t *StructType) String() string {
+	var sb strings.Builder
+	sb.WriteString("struct {")
+	for i, f := range t.Fields {
+		if i > 0 {
+			sb.WriteString("; ")
+		}
+		if f.Name != "" {
+			sb.WriteString(f.Name)
+			sb.WriteString(": ")
+		}
+		sb.WriteString(f.Type.String())
+	}
+	sb.WriteString("}")
+	return sb.String()
 }
 
 func (s *Struct) field(i int, f StructField) Boxed {

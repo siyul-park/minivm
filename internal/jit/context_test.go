@@ -11,19 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewContext(t *testing.T) {
-	t.Run("rejects an empty stack", func(t *testing.T) {
-		_, err := jit.NewContext(0)
-		require.ErrorIs(t, err, asm.ErrInvalidArgs)
-	})
-
-	t.Run("starts with no exit taken", func(t *testing.T) {
-		ctx, err := jit.NewContext(4096)
-		require.NoError(t, err)
-		require.Zero(t, ctx.Exit())
-	})
-}
-
 func TestContext_Layout(t *testing.T) {
 	tests := []struct {
 		name string
@@ -42,6 +29,19 @@ func TestContext_Layout(t *testing.T) {
 			require.Equal(t, tt.want, tt.off)
 		})
 	}
+}
+
+func TestNewContext(t *testing.T) {
+	t.Run("rejects an empty stack", func(t *testing.T) {
+		_, err := jit.NewContext(0)
+		require.ErrorIs(t, err, asm.ErrInvalidArgs)
+	})
+
+	t.Run("starts with no exit taken", func(t *testing.T) {
+		ctx, err := jit.NewContext(4096)
+		require.NoError(t, err)
+		require.Zero(t, ctx.Exit())
+	})
 }
 
 func TestContext_Read(t *testing.T) {

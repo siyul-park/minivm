@@ -117,31 +117,22 @@ func TestBuilder_Const(t *testing.T) {
 	})
 }
 
-func TestBuilder_Type(t *testing.T) {
-	b := program.NewBuilder()
-
-	require.Equal(t, -1, b.Type(nil))
-	require.Equal(t, 0, b.Type(types.TypeI32))
-	require.Equal(t, 1, b.Type(types.NewArrayType(types.TypeI32)))
-	require.Equal(t, 0, b.Type(types.TypeI32))
-}
-
 func TestBuilder_Locals(t *testing.T) {
 	b := program.NewBuilder()
-	b.Locals(types.TypeI32, types.TypeI64).Emit(instr.LOCAL_GET, 0).Emit(instr.DROP)
+	b.Locals(types.TypeI32(), types.TypeI64()).Emit(instr.LOCAL_GET, 0).Emit(instr.DROP)
 
 	prog, err := b.Build()
 	require.NoError(t, err)
-	require.Equal(t, []types.Type{types.TypeI32, types.TypeI64}, prog.Locals)
+	require.Equal(t, []types.Type{types.TypeI32(), types.TypeI64()}, prog.Locals)
 }
 
 func TestBuilder_Globals(t *testing.T) {
 	b := program.NewBuilder()
-	b.Globals(types.TypeI32, types.NewArrayType(types.TypeF64)).Emit(instr.GLOBAL_GET, 0).Emit(instr.DROP)
+	b.Globals(types.TypeI32(), types.NewArrayType(types.TypeF64())).Emit(instr.GLOBAL_GET, 0).Emit(instr.DROP)
 
 	prog, err := b.Build()
 	require.NoError(t, err)
-	require.Equal(t, []types.Type{types.TypeI32, types.NewArrayType(types.TypeF64)}, prog.Globals)
+	require.Equal(t, []types.Type{types.TypeI32(), types.NewArrayType(types.TypeF64())}, prog.Globals)
 }
 
 func TestBuilder_Build(t *testing.T) {
@@ -168,4 +159,13 @@ func TestBuilder_Build(t *testing.T) {
 		_, err := b.Build()
 		require.ErrorIs(t, err, instr.ErrUnboundLabel)
 	})
+}
+
+func TestBuilder_Type(t *testing.T) {
+	b := program.NewBuilder()
+
+	require.Equal(t, -1, b.Type(nil))
+	require.Equal(t, 0, b.Type(types.TypeI32()))
+	require.Equal(t, 1, b.Type(types.NewArrayType(types.TypeI32())))
+	require.Equal(t, 0, b.Type(types.TypeI32()))
 }

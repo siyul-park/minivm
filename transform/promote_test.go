@@ -12,6 +12,120 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+func slotFunction() *ssa.Function {
+	b := ssa.New("f")
+	entry, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
+
+	zero := b.Value(ssa.TypeI32)
+	b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{zero}})
+	state := b.Value(ssa.TypeState)
+	b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 1}}, Results: []ssa.Value{state}})
+	b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Index: 0}, Args: []ssa.Value{zero}, State: state})
+	b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+
+	held := b.Value(ssa.TypeI32)
+	b.Add(header, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
+	bound := b.Value(ssa.TypeI32)
+	b.Add(header, ssa.Operation{Op: ssa.OpConst, Const: 10, Results: []ssa.Value{bound}})
+	cond := b.Value(ssa.TypeI1)
+	b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{held, bound}, State: deoptState(b, entry), Results: []ssa.Value{cond}})
+	b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
+
+	counter := b.Value(ssa.TypeI32)
+	b.Add(body, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{counter}})
+	one := b.Value(ssa.TypeI32)
+	b.Add(body, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
+	next := b.Value(ssa.TypeI32)
+	b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{counter, one}, State: deoptState(b, entry), Results: []ssa.Value{next}})
+	advanced := b.Value(ssa.TypeState)
+	b.Add(body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 9}}, Results: []ssa.Value{advanced}})
+	b.Add(body, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Index: 0}, Args: []ssa.Value{next}, State: advanced})
+	b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+
+	b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
+	return b.Build()
+}
+
+// i64SlotFunction mirrors slotFunction's shape (an entry that stores once, a
+// header that loads/checks/branches, a body that loads/updates/stores) but
+// with an i64 local: FNV-shaped, one read and one rewrite of the same
+// accumulator per iteration, each load guarded exactly as translate's own
+// frontend produces it, ahead of promotion.
+func i64SlotFunction() *ssa.Function {
+	b := ssa.New("f")
+	entry, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
+	b.Entry(ssa.Frame{Address: 1, IP: 0, Returns: 1})
+
+	basis := b.Value(ssa.TypeI64)
+	b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(1234), Results: []ssa.Value{basis}})
+	state := b.Value(ssa.TypeState)
+	b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 1}}, Results: []ssa.Value{state}})
+	b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Index: 0}, Args: []ssa.Value{basis}, State: state})
+	b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+
+	held := b.Value(ssa.TypeI64)
+	b.Add(header, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
+	guarded := b.Value(ssa.TypeI64)
+	b.Add(header, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{held}, State: deoptState(b, entry), Results: []ssa.Value{guarded}})
+	bound := b.Value(ssa.TypeI64)
+	b.Add(header, ssa.Operation{Op: ssa.OpConst, Const: uint64(10), Results: []ssa.Value{bound}})
+	cond := b.Value(ssa.TypeI1)
+	b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I64_LT_S, Args: []ssa.Value{guarded, bound}, State: deoptState(b, entry), Results: []ssa.Value{cond}})
+	b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
+
+	counter := b.Value(ssa.TypeI64)
+	b.Add(body, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{counter}})
+	guardedCounter := b.Value(ssa.TypeI64)
+	b.Add(body, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{counter}, State: deoptState(b, entry), Results: []ssa.Value{guardedCounter}})
+	one := b.Value(ssa.TypeI64)
+	b.Add(body, ssa.Operation{Op: ssa.OpConst, Const: uint64(1), Results: []ssa.Value{one}})
+	next := b.Value(ssa.TypeI64)
+	b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I64_XOR, Args: []ssa.Value{guardedCounter, one}, State: deoptState(b, entry), Results: []ssa.Value{next}})
+	advanced := b.Value(ssa.TypeState)
+	b.Add(body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 9}}, Results: []ssa.Value{advanced}})
+	b.Add(body, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Index: 0}, Args: []ssa.Value{next}, State: advanced})
+	b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+
+	b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
+	return b.Build()
+}
+
+func addStore(b *ssa.Builder, block int, slot ssa.Slot, held ssa.Value) {
+	state := b.Value(ssa.TypeState)
+	b.Add(block, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 1}}, Results: []ssa.Value{state}})
+	b.Add(block, ssa.Operation{Op: ssa.OpStore, Slot: slot, Args: []ssa.Value{held}, State: state})
+}
+
+func findBlock(function *ssa.Function, predicate func(ssa.Block) bool) (int, ssa.Block) {
+	for id := range function.Len() {
+		if blk := function.Block(id); predicate(blk) {
+			return id, blk
+		}
+	}
+	return -1, ssa.Block{}
+}
+
+func deoptStateOf(block ssa.Block) (ssa.Operation, bool) {
+	for _, op := range block.Operations {
+		if op.Op == ssa.OpState {
+			return op, true
+		}
+	}
+	return ssa.Operation{}, false
+}
+
+func countOperations(function *ssa.Function, want ssa.Op) int {
+	n := 0
+	for id := range function.Len() {
+		for _, op := range function.Block(id).Operations {
+			if op.Op == want {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 func TestNewPromotePass(t *testing.T) {
 	t.Run("returns a pass over ssa.Function", func(t *testing.T) {
 		var p pass.Pass[*ssa.Function] = transform.NewPromotePass()
@@ -255,118 +369,4 @@ blk3: () <-- (blk1)
 		require.Equal(t, before, ssa.Format(fn))
 	})
 
-}
-
-func slotFunction() *ssa.Function {
-	b := ssa.New("f")
-	entry, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
-
-	zero := b.Value(ssa.TypeI32)
-	b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{zero}})
-	state := b.Value(ssa.TypeState)
-	b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 1}}, Results: []ssa.Value{state}})
-	b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Index: 0}, Args: []ssa.Value{zero}, State: state})
-	b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
-
-	held := b.Value(ssa.TypeI32)
-	b.Add(header, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
-	bound := b.Value(ssa.TypeI32)
-	b.Add(header, ssa.Operation{Op: ssa.OpConst, Const: 10, Results: []ssa.Value{bound}})
-	cond := b.Value(ssa.TypeI1)
-	b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{held, bound}, State: deoptState(b, entry), Results: []ssa.Value{cond}})
-	b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
-
-	counter := b.Value(ssa.TypeI32)
-	b.Add(body, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{counter}})
-	one := b.Value(ssa.TypeI32)
-	b.Add(body, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
-	next := b.Value(ssa.TypeI32)
-	b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{counter, one}, State: deoptState(b, entry), Results: []ssa.Value{next}})
-	advanced := b.Value(ssa.TypeState)
-	b.Add(body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 9}}, Results: []ssa.Value{advanced}})
-	b.Add(body, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Index: 0}, Args: []ssa.Value{next}, State: advanced})
-	b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
-
-	b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
-	return b.Build()
-}
-
-// i64SlotFunction mirrors slotFunction's shape (an entry that stores once, a
-// header that loads/checks/branches, a body that loads/updates/stores) but
-// with an i64 local: FNV-shaped, one read and one rewrite of the same
-// accumulator per iteration, each load guarded exactly as translate's own
-// frontend produces it, ahead of promotion.
-func i64SlotFunction() *ssa.Function {
-	b := ssa.New("f")
-	entry, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
-	b.Entry(ssa.Frame{Address: 1, IP: 0, Returns: 1})
-
-	basis := b.Value(ssa.TypeI64)
-	b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(1234), Results: []ssa.Value{basis}})
-	state := b.Value(ssa.TypeState)
-	b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 1}}, Results: []ssa.Value{state}})
-	b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Index: 0}, Args: []ssa.Value{basis}, State: state})
-	b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
-
-	held := b.Value(ssa.TypeI64)
-	b.Add(header, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
-	guarded := b.Value(ssa.TypeI64)
-	b.Add(header, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{held}, State: deoptState(b, entry), Results: []ssa.Value{guarded}})
-	bound := b.Value(ssa.TypeI64)
-	b.Add(header, ssa.Operation{Op: ssa.OpConst, Const: uint64(10), Results: []ssa.Value{bound}})
-	cond := b.Value(ssa.TypeI1)
-	b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I64_LT_S, Args: []ssa.Value{guarded, bound}, State: deoptState(b, entry), Results: []ssa.Value{cond}})
-	b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
-
-	counter := b.Value(ssa.TypeI64)
-	b.Add(body, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{counter}})
-	guardedCounter := b.Value(ssa.TypeI64)
-	b.Add(body, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{counter}, State: deoptState(b, entry), Results: []ssa.Value{guardedCounter}})
-	one := b.Value(ssa.TypeI64)
-	b.Add(body, ssa.Operation{Op: ssa.OpConst, Const: uint64(1), Results: []ssa.Value{one}})
-	next := b.Value(ssa.TypeI64)
-	b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I64_XOR, Args: []ssa.Value{guardedCounter, one}, State: deoptState(b, entry), Results: []ssa.Value{next}})
-	advanced := b.Value(ssa.TypeState)
-	b.Add(body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 9}}, Results: []ssa.Value{advanced}})
-	b.Add(body, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Index: 0}, Args: []ssa.Value{next}, State: advanced})
-	b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
-
-	b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
-	return b.Build()
-}
-
-func addStore(b *ssa.Builder, block int, slot ssa.Slot, held ssa.Value) {
-	state := b.Value(ssa.TypeState)
-	b.Add(block, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 1}}, Results: []ssa.Value{state}})
-	b.Add(block, ssa.Operation{Op: ssa.OpStore, Slot: slot, Args: []ssa.Value{held}, State: state})
-}
-
-func findBlock(function *ssa.Function, predicate func(ssa.Block) bool) (int, ssa.Block) {
-	for id := range function.Len() {
-		if blk := function.Block(id); predicate(blk) {
-			return id, blk
-		}
-	}
-	return -1, ssa.Block{}
-}
-
-func deoptStateOf(block ssa.Block) (ssa.Operation, bool) {
-	for _, op := range block.Operations {
-		if op.Op == ssa.OpState {
-			return op, true
-		}
-	}
-	return ssa.Operation{}, false
-}
-
-func countOperations(function *ssa.Function, want ssa.Op) int {
-	n := 0
-	for id := range function.Len() {
-		for _, op := range function.Block(id).Operations {
-			if op.Op == want {
-				n++
-			}
-		}
-	}
-	return n
 }

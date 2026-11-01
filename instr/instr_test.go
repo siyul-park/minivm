@@ -79,17 +79,6 @@ func TestInstruction_Width(t *testing.T) {
 	})
 }
 
-func TestInstruction_String(t *testing.T) {
-	t.Run("static", func(t *testing.T) {
-		instruction := instr.New(instr.NOP)
-		require.Equal(t, "nop", instruction.String())
-	})
-	t.Run("dynamic", func(t *testing.T) {
-		instruction := instr.New(instr.BR_TABLE, 2, 0, 1, 0)
-		require.Equal(t, "br_table 0x02 0x0000 0x0001 0x0000", instruction.String())
-	})
-}
-
 func TestInstruction_Operands(t *testing.T) {
 	t.Run("static", func(t *testing.T) {
 		instruction := instr.New(instr.NOP)
@@ -101,6 +90,11 @@ func TestInstruction_Operands(t *testing.T) {
 	})
 }
 
+func TestInstruction_Opcode(t *testing.T) {
+	instruction := instr.New(instr.NOP)
+	require.Equal(t, instr.NOP, instruction.Opcode())
+}
+
 func TestInstruction_Type(t *testing.T) {
 	instruction := instr.New(instr.I32_CONST, 42)
 	require.Equal(t, instr.Type{
@@ -110,7 +104,13 @@ func TestInstruction_Type(t *testing.T) {
 	}, instruction.Type())
 }
 
-func TestInstruction_Opcode(t *testing.T) {
-	instruction := instr.New(instr.NOP)
-	require.Equal(t, instr.NOP, instruction.Opcode())
+func TestInstruction_String(t *testing.T) {
+	t.Run("static", func(t *testing.T) {
+		instruction := instr.New(instr.NOP)
+		require.Equal(t, "nop", instruction.String())
+	})
+	t.Run("dynamic", func(t *testing.T) {
+		instruction := instr.New(instr.BR_TABLE, 2, 0, 1, 0)
+		require.Equal(t, "br_table 0x02 0x0000 0x0001 0x0000", instruction.String())
+	})
 }

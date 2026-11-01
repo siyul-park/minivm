@@ -17,6 +17,7 @@ func init() {
 		Wazero: &registry.Wazero{Module: indirectRecursiveFibModule, Export: "indirect_recursive_fib", Args: []uint64{20}},
 	})
 }
+
 func indirectRecursiveFib(n int32) int32 {
 	var fib func(int32) int32
 	fib = func(value int32) int32 {
@@ -26,6 +27,24 @@ func indirectRecursiveFib(n int32) int32 {
 		return fib(value-1) + fib(value-2)
 	}
 	return fib(n)
+}
+
+func indirectRecursiveFibModule() []byte {
+	index := wasm.Index(0)
+	module := &wasm.Module{
+		TypeSection:     []*wasm.FunctionType{{Params: []wasm.ValueType{wasm.ValueTypeI32}, Results: []wasm.ValueType{wasm.ValueTypeI32}}},
+		FunctionSection: []wasm.Index{0},
+		CodeSection:     []*wasm.Code{{Body: indirectRecursiveFibWasm()}},
+		TableSection:    []*wasm.Table{{Min: 1, Type: wasm.RefTypeFuncref}},
+		ElementSection: []*wasm.ElementSegment{{
+			OffsetExpr: &wasm.ConstantExpression{Opcode: wasm.OpcodeI32Const, Data: leb128.EncodeInt32(0)},
+			Init:       []*wasm.Index{&index},
+			Type:       wasm.RefTypeFuncref,
+			Mode:       wasm.ElementModeActive,
+		}},
+		ExportSection: []*wasm.Export{{Name: "indirect_recursive_fib", Type: wasm.ExternTypeFunc, Index: 0}},
+	}
+	return binary.EncodeModule(module)
 }
 
 func indirectRecursiveFibWasm() []byte {
@@ -50,22 +69,4 @@ func indirectRecursiveFibWasm() []byte {
 	code.op(wasm.OpcodeEnd)
 	code.op(wasm.OpcodeEnd)
 	return code
-}
-
-func indirectRecursiveFibModule() []byte {
-	index := wasm.Index(0)
-	module := &wasm.Module{
-		TypeSection:     []*wasm.FunctionType{{Params: []wasm.ValueType{wasm.ValueTypeI32}, Results: []wasm.ValueType{wasm.ValueTypeI32}}},
-		FunctionSection: []wasm.Index{0},
-		CodeSection:     []*wasm.Code{{Body: indirectRecursiveFibWasm()}},
-		TableSection:    []*wasm.Table{{Min: 1, Type: wasm.RefTypeFuncref}},
-		ElementSection: []*wasm.ElementSegment{{
-			OffsetExpr: &wasm.ConstantExpression{Opcode: wasm.OpcodeI32Const, Data: leb128.EncodeInt32(0)},
-			Init:       []*wasm.Index{&index},
-			Type:       wasm.RefTypeFuncref,
-			Mode:       wasm.ElementModeActive,
-		}},
-		ExportSection: []*wasm.Export{{Name: "indirect_recursive_fib", Type: wasm.ExternTypeFunc, Index: 0}},
-	}
-	return binary.EncodeModule(module)
 }

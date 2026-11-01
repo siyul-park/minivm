@@ -9,16 +9,6 @@ import (
 	"github.com/siyul-park/minivm/internal/asm"
 )
 
-// Record identifies one native activation.
-type Record struct {
-	FB uintptr
-	// SP is the spill base used by values live across a native call.
-	SP uintptr
-	// PC is the caller return address.
-	PC   uintptr
-	Exit uint64
-}
-
 // Context is the runtime state shared by native code and the interpreter.
 // asm.State leads the layout; the remaining fields are native exit state.
 type Context struct {
@@ -49,6 +39,16 @@ type Context struct {
 	Budget  int64
 	Results [Convention]uint64
 	Records [256]Record
+}
+
+// Record identifies one native activation.
+type Record struct {
+	FB uintptr
+	// SP is the spill base used by values live across a native call.
+	SP uintptr
+	// PC is the caller return address.
+	PC   uintptr
+	Exit uint64
 }
 
 // Trap is how native code last left.

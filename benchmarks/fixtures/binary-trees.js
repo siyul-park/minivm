@@ -29,11 +29,7 @@ function run() {
 
     for (let depth = minDepth; depth <= maxDepth; depth += 2) {
         let iterations = 1;
-        for (
-            let shift = 0;
-            shift < maxDepth - depth + minDepth;
-            shift++
-        ) {
+        for (let shift = 0; shift < maxDepth - depth + minDepth; shift++) {
             iterations *= 2;
         }
 

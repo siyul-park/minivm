@@ -20,9 +20,44 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// fibonacciOf is fibonacci's own result for n, computed in Go.
+func fibonacciOf(n int32) int32 {
+	if n < 2 {
+		return n
+	}
+	return fibonacciOf(n-1) + fibonacciOf(n-2)
+}
+
+// frame is a function without code whose slots are params then locals.
+func frame(params, locals []types.Type) *types.Function {
+	return &types.Function{Typ: &types.FunctionType{Params: params}, Locals: locals}
+}
+
+func state(b *ssa.Builder, block int, stack ...ssa.Operand) ssa.Value {
+	v := b.Value(ssa.TypeState)
+	b.Add(block, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Returns: 1, Stack: stack}}, Results: []ssa.Value{v}})
+	return v
+}
+
+func operands(ctx *jit.Context, f jit.Frame) []uint64 {
+	var out []uint64
+	for _, o := range f.Stack {
+		out = append(out, read(ctx, o.Value))
+	}
+	return out
+}
+
+// read is the raw native value v names in the suspended activation.
+func read(ctx *jit.Context, v jit.Value) uint64 {
+	if v.Loc.Spilled {
+		return ctx.Slot(v.Loc.Slot)
+	}
+	return ctx.Reg(v.Loc.Reg)
+}
+
 func TestNew(t *testing.T) {
 	t.Run("runs a translated function over the VM stack", func(t *testing.T) {
-		fn := function(t, []types.Type{types.TypeI32, types.TypeI32}, nil, func(b *instr.Builder) {
+		fn := function(t, []types.Type{types.TypeI32(), types.TypeI32()}, nil, func(b *instr.Builder) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_MUL)
 			b.Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.RETURN)
 		})
@@ -38,7 +73,7 @@ func TestNew(t *testing.T) {
 	t.Run("suspends at the loop safepoint until the budget is refilled", func(t *testing.T) {
 		stack := []types.Boxed{types.BoxI32(10), types.BoxI32(99), types.BoxI32(99)}
 		// sum(n) = 0 + 1 + ... + n-1 over one parameter and two locals.
-		fn := function(t, []types.Type{types.TypeI32}, []types.Type{types.TypeI32, types.TypeI32}, func(b *instr.Builder) {
+		fn := function(t, []types.Type{types.TypeI32()}, []types.Type{types.TypeI32(), types.TypeI32()}, func(b *instr.Builder) {
 			loop, done := b.Label(), b.Label()
 			b.Bind(loop)
 			b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_GE_S).BrIf(done)
@@ -63,7 +98,7 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("deopts a division by zero with the operands of its instruction", func(t *testing.T) {
-		fn := function(t, []types.Type{types.TypeI32, types.TypeI32}, nil, func(b *instr.Builder) {
+		fn := function(t, []types.Type{types.TypeI32(), types.TypeI32()}, nil, func(b *instr.Builder) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_DIV_S).Emit(instr.RETURN)
 		})
 		stack := []types.Boxed{types.BoxI32(6), types.BoxI32(0)}
@@ -96,7 +131,7 @@ func TestNew(t *testing.T) {
 		// reference, so it takes its own resumable ExitRelease.
 		rc := []int{0, 0, 0, 1}
 		stack := []types.Boxed{0}
-		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI64}), nil, 0, false)
+		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI64()}), nil, 0, false)
 		ctx := enter(t, stack)
 		ctx.RC = address(t, rc)
 
@@ -128,7 +163,7 @@ func TestNew(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{wide}, State: ret})
 
 		stack := []types.Boxed{0}
-		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI32}), nil, 0, false)
+		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI32()}), nil, 0, false)
 		ctx := enter(t, stack)
 
 		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
@@ -141,7 +176,7 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("releases an i64 slot's old occupant on store, as threaded LOCAL_SET does", func(t *testing.T) {
-		fn := function(t, []types.Type{types.TypeI64}, nil, func(b *instr.Builder) {
+		fn := function(t, []types.Type{types.TypeI64()}, nil, func(b *instr.Builder) {
 			b.Emit(instr.I64_CONST, 5).Emit(instr.LOCAL_SET, 0)
 			b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN)
 		})
@@ -169,10 +204,10 @@ func TestNew(t *testing.T) {
 		// (compile.arguments admits at most two), so slot 0's LOCAL_GET
 		// reaches guard.kind's own heap-unbox logic instead of a register
 		// capture's raw move.
-		fn := function(t, []types.Type{types.TypeI64, types.TypeI32, types.TypeI32}, nil, func(b *instr.Builder) {
+		fn := function(t, []types.Type{types.TypeI64(), types.TypeI32(), types.TypeI32()}, nil, func(b *instr.Builder) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I64_CONST, 1).Emit(instr.I64_ADD).Emit(instr.RETURN)
 		})
-		fn.Typ.Returns = []types.Type{types.TypeI64}
+		fn.Typ.Returns = []types.Type{types.TypeI64()}
 		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
 
 		// A register-convention i64 result reaches the slot raw.
@@ -218,7 +253,7 @@ func TestNew(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		stack := []types.Boxed{0}
-		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI32}), nil, 0, false)
+		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI32()}), nil, 0, false)
 		ctx := enter(t, stack)
 
 		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
@@ -247,7 +282,7 @@ func TestNew(t *testing.T) {
 
 		rc := []int{0, 0, 2}
 		stack := []types.Boxed{types.BoxRef(2)}
-		code, exits := lower(t, arm64.New(), b.Build(), frame([]types.Type{types.TypeString}, nil), nil, 0, false)
+		code, exits := lower(t, arm64.New(), b.Build(), frame([]types.Type{types.TypeString()}, nil), nil, 0, false)
 		ctx := enter(t, stack)
 		ctx.RC = address(t, rc)
 
@@ -263,7 +298,7 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("releases and clears the references its slots hold on return", func(t *testing.T) {
-		fn := function(t, []types.Type{types.TypeString}, nil, func(b *instr.Builder) {
+		fn := function(t, []types.Type{types.TypeString()}, nil, func(b *instr.Builder) {
 			b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN)
 		})
 		code, exits := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
@@ -308,12 +343,12 @@ func TestNew(t *testing.T) {
 		fib, module := fibonacci(t)
 		f, err := transform.Translate(module, 2, fib, 0)
 		require.NoError(t, err)
-		bytes, exits, stub, err := compile.Lower(f, arm64.New(), fib, module.Objects, 0, false, true)
+		assembly, err := compile.Lower(f, arm64.New(), fib, module.Objects, 0, false, true)
 		require.NoError(t, err)
-		buffer, err := asm.NewBuffer(len(bytes))
+		buffer, err := asm.NewBuffer(len(assembly.Bytes))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, buffer.Free()) })
-		code, err := buffer.Link(bytes)
+		code, err := buffer.Link(assembly.Bytes)
 		require.NoError(t, err)
 
 		natives := []uintptr{0, 0, code}
@@ -325,11 +360,11 @@ func TestNew(t *testing.T) {
 		ctx.RC = address(t, rc)
 		ctx.Limit = 2
 
-		require.Equal(t, jit.TrapBridge, jit.Enter(code+uintptr(stub), ctx))
-		require.Equal(t, jit.ExitCall, exits[ctx.Exit()].Kind)
+		require.Equal(t, jit.TrapBridge, jit.Enter(code+uintptr(assembly.Entry), ctx))
+		require.Equal(t, jit.ExitCall, assembly.Exits[ctx.Exit()].Kind)
 		require.Equal(t, uint64(2), ctx.Depth)
 		require.GreaterOrEqual(t, ctx.Records[1].PC, code)
-		require.Less(t, ctx.Records[1].PC, code+uintptr(len(bytes)))
+		require.Less(t, ctx.Records[1].PC, code+uintptr(len(assembly.Bytes)))
 	})
 
 	t.Run("resumes a call to a function without native code with the result the interpreter places", func(t *testing.T) {
@@ -408,7 +443,7 @@ func TestNew(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: args, State: at})
 
 		stack := make([]types.Boxed, len(consts))
-		code, _ := lower(t, arm64.New(), b.Build(), frame(nil, slices.Repeat([]types.Type{types.TypeI32}, len(consts))), nil, 0, false)
+		code, _ := lower(t, arm64.New(), b.Build(), frame(nil, slices.Repeat([]types.Type{types.TypeI32()}, len(consts))), nil, 0, false)
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, stack)))
 		require.Equal(t, consts, stack)
 	})
@@ -418,8 +453,8 @@ func TestNew(t *testing.T) {
 			word types.Boxed
 			typ  types.Type
 		}{
-			{types.BoxI1(true), types.TypeI1}, {types.BoxI8(-1), types.TypeI8}, {types.BoxI32(-7), types.TypeI32},
-			{types.BoxF32(-2), types.TypeF32}, {types.BoxF64(1.5), types.TypeF64}, {types.BoxRef(4), types.TypeString},
+			{types.BoxI1(true), types.TypeI1()}, {types.BoxI8(-1), types.TypeI8()}, {types.BoxI32(-7), types.TypeI32()},
+			{types.BoxF32(-2), types.TypeF32()}, {types.BoxF64(1.5), types.TypeF64()}, {types.BoxRef(4), types.TypeString()},
 		} {
 			b := ssa.New("f")
 			entry := b.Block()
@@ -446,7 +481,7 @@ func TestNew(t *testing.T) {
 		at := state(b, entry)
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{x, y}, State: at})
 
-		fn := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeF64, types.TypeString}}}
+		fn := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeF64(), types.TypeString()}}}
 		stack := make([]types.Boxed, 2)
 		code, _ := lower(t, arm64.New(), b.Build(), fn, nil, 0, false)
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, enter(t, stack)))
@@ -457,7 +492,7 @@ func TestNew(t *testing.T) {
 		// The callee address (7) differs from the caller's lowering address
 		// (0), so Call reaches it through the natives table, exercising
 		// Call's DEF/MOV read after a real BLR, not the self-call branch.
-		callee := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}}
+		callee := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32()}}}
 		b := ssa.New("callee")
 		entry := b.Block()
 		v := b.Value(ssa.TypeI32)
@@ -465,19 +500,19 @@ func TestNew(t *testing.T) {
 		at := state(b, entry)
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{v}, State: at})
 		// natives[address] holds the body, not the Go entry stub.
-		calleeCode, _, _, err := compile.Lower(b.Build(), arm64.New(), callee, nil, 7, false, true)
+		calleeAssembly, err := compile.Lower(b.Build(), arm64.New(), callee, nil, 7, false, true)
 		require.NoError(t, err)
-		calleeBuffer, err := asm.NewBuffer(len(calleeCode))
+		calleeBuffer, err := asm.NewBuffer(len(calleeAssembly.Bytes))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, calleeBuffer.Free()) })
-		calleeBody, err := calleeBuffer.Link(calleeCode)
+		calleeBody, err := calleeBuffer.Link(calleeAssembly.Bytes)
 		require.NoError(t, err)
 
 		// exit() reads the caller's own bytecode to find the CALL's width
 		// for the exit map's IP, even though the CALL op below is built
 		// directly as SSA: Code must hold a real CALL at IP 0.
 		caller := &types.Function{
-			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32()}},
 			Code: instr.Marshal([]instr.Instruction{instr.New(instr.CALL)}),
 		}
 		cb := ssa.New("caller")
@@ -510,10 +545,10 @@ func TestNew(t *testing.T) {
 
 	t.Run("lowers each function afresh on one machine", func(t *testing.T) {
 		m := arm64.New()
-		first := function(t, []types.Type{types.TypeI32, types.TypeI32}, nil, func(b *instr.Builder) {
+		first := function(t, []types.Type{types.TypeI32(), types.TypeI32()}, nil, func(b *instr.Builder) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_DIV_S).Emit(instr.RETURN)
 		})
-		second := function(t, []types.Type{types.TypeI32}, nil, func(b *instr.Builder) {
+		second := function(t, []types.Type{types.TypeI32()}, nil, func(b *instr.Builder) {
 			other := b.Label()
 			b.Emit(instr.LOCAL_GET, 0).BrIf(other)
 			b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN)
@@ -528,7 +563,7 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("sums a typed i32 array through a guarded loop", func(t *testing.T) {
-		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32)}, []types.Type{types.TypeI32, types.TypeI32}, func(b *instr.Builder) {
+		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32())}, []types.Type{types.TypeI32(), types.TypeI32()}, func(b *instr.Builder) {
 			header, done := b.Label(), b.Label()
 			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
 			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
@@ -563,7 +598,7 @@ func TestNew(t *testing.T) {
 	t.Run("reads a sliced array across bridge and safepoint resumes that relocate Context.Heap", func(t *testing.T) {
 		// sum(a[i] + len(m)) over i < len(a): the bridged map.len keeps the
 		// loop quiet, so the hoist pass slices a.
-		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32), types.NewMapType(types.TypeI32, types.TypeI32)}, []types.Type{types.TypeI32, types.TypeI32}, func(b *instr.Builder) {
+		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32()), types.NewMapType(types.TypeI32(), types.TypeI32())}, []types.Type{types.TypeI32(), types.TypeI32()}, func(b *instr.Builder) {
 			header, done := b.Label(), b.Label()
 			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
 			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
@@ -587,7 +622,7 @@ func TestNew(t *testing.T) {
 		}
 		require.Contains(t, ssa.Format(f), "slice")
 
-		heap := []types.Value{nil, types.TypedArray[int32]{10, 20, 30, 40, 50, 60, 70}, types.NewMap(types.NewMapType(types.TypeI32, types.TypeI32))}
+		heap := []types.Value{nil, types.TypedArray[int32]{10, 20, 30, 40, 50, 60, 70}, types.NewMap(types.NewMapType(types.TypeI32(), types.TypeI32()))}
 		stack := []types.Boxed{types.BoxRef(1), types.BoxRef(2), 0, 0}
 		// RETURN releases both reference params; counts above one keep
 		// those releases from reaching the last reference.
@@ -624,7 +659,7 @@ func TestNew(t *testing.T) {
 
 	t.Run("sums a string's length in a loop with no exit", func(t *testing.T) {
 		// n × len(s) over a string parameter s and a count n.
-		fn := function(t, []types.Type{types.TypeString, types.TypeI32}, []types.Type{types.TypeI32, types.TypeI32}, func(b *instr.Builder) {
+		fn := function(t, []types.Type{types.TypeString(), types.TypeI32()}, []types.Type{types.TypeI32(), types.TypeI32()}, func(b *instr.Builder) {
 			header, done := b.Label(), b.Label()
 			b.Bind(header)
 			b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_GE_S).BrIf(done)
@@ -650,7 +685,7 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("deopts string.len of a non-string as the operation's own trap", func(t *testing.T) {
-		fn := function(t, []types.Type{types.TypeString}, nil, func(b *instr.Builder) {
+		fn := function(t, []types.Type{types.TypeString()}, nil, func(b *instr.Builder) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.STRING_LEN).Emit(instr.RETURN)
 		})
 		heap := []types.Value{nil, types.TypedArray[int32]{1}}
@@ -673,11 +708,11 @@ func TestNew(t *testing.T) {
 		insts, err := b.Assemble()
 		require.NoError(t, err)
 		fn := &types.Function{
-			Typ:  &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeAny)}, Returns: []types.Type{types.TypeAny}},
+			Typ:  &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeAny())}, Returns: []types.Type{types.TypeAny()}},
 			Code: instr.Marshal(insts),
 		}
 
-		array := &types.Array{Typ: types.NewArrayType(types.TypeAny), Elems: []types.Boxed{types.BoxRef(2)}}
+		array := &types.Array{Typ: types.NewArrayType(types.TypeAny()), Elems: []types.Boxed{types.BoxRef(2)}}
 		heap := []types.Value{nil, array, nil}
 		rc := []int{0, 2, 1}
 		stack := []types.Boxed{types.BoxRef(1)}
@@ -692,7 +727,7 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("reads and writes a struct field through its resolved record", func(t *testing.T) {
-		record := types.NewStructType(types.NewStructField(types.TypeI32, types.FieldWithName("x")))
+		record := types.NewStructType(types.NewStructField(types.TypeI32(), types.FieldWithName("x")))
 		b := instr.NewBuilder()
 		b.Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).
 			Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).
@@ -703,7 +738,7 @@ func TestNew(t *testing.T) {
 		insts, err := b.Assemble()
 		require.NoError(t, err)
 		fn := &types.Function{
-			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32()}},
 			Code: instr.Marshal(insts),
 		}
 		m := transform.Module{
@@ -730,7 +765,7 @@ func TestNew(t *testing.T) {
 		// uint64(uint32(int32(val.I8()))): sign-extend to 32 bits, then
 		// zero-extend to 64. A raw 64-bit sign extension (SBFX into a
 		// 64-bit destination) diverges for any negative int8.
-		record := types.NewStructType(types.NewStructField(types.TypeI8, types.FieldWithName("x")))
+		record := types.NewStructType(types.NewStructField(types.TypeI8(), types.FieldWithName("x")))
 		b := ssa.New("f")
 		entry := b.Block()
 		ref := b.Value(ssa.TypeRef)
@@ -760,7 +795,7 @@ func TestNew(t *testing.T) {
 
 	t.Run("deopts a struct.set whose value kind differs from the field's declared kind", func(t *testing.T) {
 		// Threaded SetField converts by the declared kind: i32 2 into an i1 field stores 1.
-		record := types.NewStructType(types.NewStructField(types.TypeI1, types.FieldWithName("x")))
+		record := types.NewStructType(types.NewStructField(types.TypeI1(), types.FieldWithName("x")))
 		b := ssa.New("f")
 		entry := b.Block()
 		ref := b.Value(ssa.TypeRef)
@@ -823,8 +858,8 @@ func TestNew(t *testing.T) {
 		insts, err := b.Assemble()
 		require.NoError(t, err)
 		fn := &types.Function{
-			Typ:    &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}},
-			Locals: []types.Type{types.TypeI32, types.TypeI32, types.TypeI32},
+			Typ:    &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32())}},
+			Locals: []types.Type{types.TypeI32(), types.TypeI32(), types.TypeI32()},
 			Code:   instr.Marshal(insts),
 		}
 
@@ -841,7 +876,7 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("array.set stores a 4-byte i32 element without clobbering its neighbor", func(t *testing.T) {
-		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32)}, nil, func(b *instr.Builder) {
+		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32())}, nil, func(b *instr.Builder) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, uint64(0xFFFFFFFF)).Emit(instr.ARRAY_SET)
 			b.Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
 		})
@@ -859,7 +894,7 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("array.set stores a 4-byte f32 element without clobbering its neighbor", func(t *testing.T) {
-		fn := function(t, []types.Type{types.NewArrayType(types.TypeF32)}, nil, func(b *instr.Builder) {
+		fn := function(t, []types.Type{types.NewArrayType(types.TypeF32())}, nil, func(b *instr.Builder) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.F32_CONST, uint64(math.Float32bits(-1.5))).Emit(instr.ARRAY_SET)
 			b.Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
 		})
@@ -883,7 +918,7 @@ func TestNew(t *testing.T) {
 		insts, err := b.Assemble()
 		require.NoError(t, err)
 		fn := &types.Function{
-			Typ:  &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI1)}, Returns: []types.Type{types.TypeI1}},
+			Typ:  &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI1())}, Returns: []types.Type{types.TypeI1()}},
 			Code: instr.Marshal(insts),
 		}
 
@@ -900,7 +935,7 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("deopts an out-of-bounds array.get, matching threaded ErrIndexOutOfRange", func(t *testing.T) {
-		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32)}, nil, func(b *instr.Builder) {
+		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32())}, nil, func(b *instr.Builder) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 10).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
 		})
 
@@ -918,7 +953,7 @@ func TestNew(t *testing.T) {
 		// acc lives on the operand stack across the header (never stored to
 		// a local), n and bonus are locals: n is this function's own
 		// parameter, bonus an ordinary local an entry-0 prologue would clear.
-		fn := function(t, []types.Type{types.TypeI32}, []types.Type{types.TypeI32, types.TypeI32}, func(b *instr.Builder) {
+		fn := function(t, []types.Type{types.TypeI32()}, []types.Type{types.TypeI32(), types.TypeI32()}, func(b *instr.Builder) {
 			header, done := b.Label(), b.Label()
 			b.Emit(instr.I32_CONST, 0)
 			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
@@ -947,7 +982,7 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("deopts an OSR entry's own body with the right IP and values, locals left as the interpreter set them", func(t *testing.T) {
-		fn := function(t, []types.Type{types.TypeI32}, []types.Type{types.TypeI32}, func(b *instr.Builder) {
+		fn := function(t, []types.Type{types.TypeI32()}, []types.Type{types.TypeI32()}, func(b *instr.Builder) {
 			join := b.Label()
 			b.Emit(instr.LOCAL_GET, 0).BrIf(join)
 			b.Bind(join)
@@ -997,7 +1032,7 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("counts an entry at an address beyond the load/store imm12 range", func(t *testing.T) {
-		fn := function(t, []types.Type{types.TypeI32, types.TypeI32}, nil, func(b *instr.Builder) {
+		fn := function(t, []types.Type{types.TypeI32(), types.TypeI32()}, nil, func(b *instr.Builder) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.RETURN)
 		})
 		stack := []types.Boxed{types.BoxI32(1), types.BoxI32(2)}
@@ -1022,7 +1057,7 @@ func TestNew(t *testing.T) {
 // fibonacci is fib(n) = n < 2 ? n : fib(n-1) + fib(n-2) at function
 // address 2, calling itself through constant 0.
 func fibonacci(t *testing.T) (*types.Function, transform.Module) {
-	fib := function(t, []types.Type{types.TypeI32}, nil, func(b *instr.Builder) {
+	fib := function(t, []types.Type{types.TypeI32()}, nil, func(b *instr.Builder) {
 		small := b.Label()
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.I32_LT_S).BrIf(small)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
@@ -1033,19 +1068,6 @@ func fibonacci(t *testing.T) (*types.Function, transform.Module) {
 	return fib, transform.Module{Constants: []types.Boxed{types.BoxRef(2)}, Objects: transform.Objects{2: {Function: fib}}}
 }
 
-// fibonacciOf is fibonacci's own result for n, computed in Go.
-func fibonacciOf(n int32) int32 {
-	if n < 2 {
-		return n
-	}
-	return fibonacciOf(n-1) + fibonacciOf(n-2)
-}
-
-// frame is a function without code whose slots are params then locals.
-func frame(params, locals []types.Type) *types.Function {
-	return &types.Function{Typ: &types.FunctionType{Params: params}, Locals: locals}
-}
-
 func function(t *testing.T, params, locals []types.Type, emit func(*instr.Builder)) *types.Function {
 	t.Helper()
 	b := instr.NewBuilder()
@@ -1053,7 +1075,7 @@ func function(t *testing.T, params, locals []types.Type, emit func(*instr.Builde
 	code, err := b.Assemble()
 	require.NoError(t, err)
 	return &types.Function{
-		Typ:    &types.FunctionType{Params: params, Returns: []types.Type{types.TypeI32}},
+		Typ:    &types.FunctionType{Params: params, Returns: []types.Type{types.TypeI32()}},
 		Locals: locals,
 		Code:   instr.Marshal(code),
 	}
@@ -1066,12 +1088,6 @@ func translate(t *testing.T, fn *types.Function) *ssa.Function {
 	return f
 }
 
-func state(b *ssa.Builder, block int, stack ...ssa.Operand) ssa.Value {
-	v := b.Value(ssa.TypeState)
-	b.Add(block, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Returns: 1, Stack: stack}}, Results: []ssa.Value{v}})
-	return v
-}
-
 // lower builds f, the translation of fn at address (an OSR unit when osr),
 // with m and publishes it. It returns the Go entry stub's address: what a
 // fresh jit.Enter crosses into native code through, not the body's own
@@ -1079,14 +1095,14 @@ func state(b *ssa.Builder, block int, stack ...ssa.Operand) ssa.Value {
 // call: see the "records a nested native call" case, which links directly).
 func lower(t *testing.T, m compile.Machine, f *ssa.Function, fn *types.Function, objects transform.Objects, address int, osr bool) (uintptr, []jit.Exit) {
 	t.Helper()
-	code, exits, stub, err := compile.Lower(f, m, fn, objects, address, osr, !osr)
+	assembly, err := compile.Lower(f, m, fn, objects, address, osr, !osr)
 	require.NoError(t, err)
-	buffer, err := asm.NewBuffer(len(code))
+	buffer, err := asm.NewBuffer(len(assembly.Bytes))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
-	body, err := buffer.Link(code)
+	body, err := buffer.Link(assembly.Bytes)
 	require.NoError(t, err)
-	return body + uintptr(stub), exits
+	return body + uintptr(assembly.Entry), assembly.Exits
 }
 
 // enter is a context whose next activation has its frame at stack[0].
@@ -1103,22 +1119,6 @@ func enter(t *testing.T, stack []types.Boxed) *jit.Context {
 	entries := make([]int64, 8)
 	ctx.Entries = address(t, entries)
 	return ctx
-}
-
-func operands(ctx *jit.Context, f jit.Frame) []uint64 {
-	var out []uint64
-	for _, o := range f.Stack {
-		out = append(out, read(ctx, o.Value))
-	}
-	return out
-}
-
-// read is the raw native value v names in the suspended activation.
-func read(ctx *jit.Context, v jit.Value) uint64 {
-	if v.Loc.Spilled {
-		return ctx.Slot(v.Loc.Slot)
-	}
-	return ctx.Reg(v.Loc.Reg)
 }
 
 // address is the base of s kept on the heap for the test's life: native code

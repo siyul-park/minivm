@@ -34,6 +34,16 @@ func TestAssembler_Emit(t *testing.T) {
 	require.NotEmpty(t, code)
 }
 
+func TestAssembler_Rows(t *testing.T) {
+	a := asm.New(arm64.New())
+	want := []asm.Instruction{arm64.MOVI(arm64.X0, 1), arm64.MOVI(arm64.X1, 2), arm64.ADD(arm64.X2, arm64.X0, arm64.X1)}
+	a.Emit(want...)
+	require.Equal(t, want, a.Rows())
+	_, err := a.Build()
+	require.NoError(t, err)
+	require.Equal(t, want, a.Rows())
+}
+
 func TestAssembler_Build(t *testing.T) {
 	t.Run("unresolved label", func(t *testing.T) {
 		assembler := asm.New(arm64.New())

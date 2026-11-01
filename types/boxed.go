@@ -5,27 +5,40 @@ import (
 	"math"
 )
 
+// Boxed is a value packed into one 64-bit word: an f64 as itself, any other kind as a NaN carrying a kind tag and payload.
 type Boxed uint64
 
 const (
+	// TBits is the width of the kind tag in a boxed NaN.
 	TBits = 3
+	// TMask selects the kind tag after shifting it down.
 	TMask = (1 << TBits) - 1
+	// VBits is the width of the payload in a boxed NaN.
 	VBits = 52 - TBits
+	// VMask selects the payload bits.
 	VMask = (1 << VBits) - 1
 )
 
-var (
-	BoxedNull  = BoxRef(0)
-	BoxedFalse = Box(0, KindI1)
-	BoxedTrue  = Box(1, KindI1)
+const (
+	// BoxedNull is the null reference.
+	BoxedNull = Boxed(exponent | uint64(KindRef)<<VBits)
+	// BoxedFalse is the i1 false.
+	BoxedFalse = Boxed(exponent | uint64(KindI1)<<VBits)
+	// BoxedTrue is the i1 true.
+	BoxedTrue = Boxed(exponent | uint64(KindI1)<<VBits | 1)
 )
+
+// exponent is the all-ones float64 exponent that marks a boxed non-f64 value.
+const exponent = 0x7FF << 52
 
 var _ Value = Boxed(0)
 
+// Tag returns the NaN bit pattern, without payload, that marks a boxed value of kind.
 func Tag(kind Kind) uint64 {
-	return uint64(0x7FF)<<52 | uint64(kind)<<VBits
+	return exponent | uint64(kind)<<VBits
 }
 
+// IsBoxable reports whether v fits the inline i64 payload.
 func IsBoxable(v int64) bool {
 	const (
 		minI64 = -1 << (VBits - 1)
@@ -66,6 +79,7 @@ func BoxWord(kind Kind, word uint64) Boxed {
 	}
 }
 
+// BoxI32 boxes an i32 value.
 func BoxI32(v int32) Boxed {
 	return Box(uint64(uint32(v)), KindI32)
 }
@@ -86,20 +100,24 @@ func BoxI1(b bool) Boxed {
 	return BoxedFalse
 }
 
+// BoxI64 boxes an i64 value; v must satisfy IsBoxable.
 func BoxI64(v int64) Boxed {
 	return Box(uint64(v)&VMask, KindI64)
 }
 
+// BoxF32 boxes an f32 value.
 func BoxF32(v float32) Boxed {
 	return Box(uint64(math.Float32bits(v)), KindF32)
 }
 
+// Box packs payload v with kind into a boxed value.
 func Box(v uint64, kind Kind) Boxed {
 	m := (uint64(kind) << VBits) | v
-	u := (uint64(0x7FF) << 52) | m
+	u := exponent | m
 	return Boxed(u)
 }
 
+// Unbox decodes v into the Value of its kind.
 func Unbox(v Boxed) Value {
 	switch v.Kind() {
 	case KindI32:
@@ -184,22 +202,30 @@ func (v Boxed) Bool() bool {
 func (v Boxed) Type() Type {
 	switch v.Kind() {
 	case KindI32:
-		return TypeI32
+		return TypeI32()
 	case KindI8:
-		return TypeI8
+		return TypeI8()
 	case KindI1:
-		return TypeI1
+		return TypeI1()
 	case KindI64:
-		return TypeI64
+		return TypeI64()
 	case KindF32:
-		return TypeF32
+		return TypeF32()
 	case KindF64:
-		return TypeF64
+		return TypeF64()
 	case KindRef:
-		return TypeAny
+		return TypeAny()
 	default:
 		return nil
 	}
+}
+
+func (v Boxed) Kind() Kind {
+	u := uint64(v)
+	if u>>52 == 0x7FF && u&0x000FFFFFFFFFFFFF != 0 {
+		return Kind((u >> VBits) & TMask)
+	}
+	return KindF64
 }
 
 func (v Boxed) String() string {
@@ -222,12 +248,4 @@ func (v Boxed) String() string {
 	default:
 		return "<invalid>"
 	}
-}
-
-func (v Boxed) Kind() Kind {
-	u := uint64(v)
-	if u>>52 == 0x7FF && u&0x000FFFFFFFFFFFFF != 0 {
-		return Kind((u >> VBits) & TMask)
-	}
-	return KindF64
 }

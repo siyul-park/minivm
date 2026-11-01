@@ -294,7 +294,7 @@ func TestPool_Get(t *testing.T) {
 		b.Bind(done)
 		code, err := b.Assemble()
 		require.NoError(t, err)
-		prog := program.New(code, program.WithLocals(types.TypeI32))
+		prog := program.New(code, program.WithLocals(types.TypeI32()))
 
 		const threshold = 8
 		profiler := prof.New()
@@ -526,6 +526,6 @@ func applyGlobalProgram(t *testing.T, calls int) *program.Program {
 	b.Bind(done).Emit(instr.LOCAL_GET, 1)
 	code, err := b.Assemble()
 	require.NoError(t, err)
-	return program.New(code, program.WithLocals(types.TypeI32, types.TypeI32), program.WithGlobals(types.TypeAny, types.TypeI32),
+	return program.New(code, program.WithLocals(types.TypeI32(), types.TypeI32()), program.WithGlobals(types.TypeAny(), types.TypeI32()),
 		program.WithConstants(applyFunction(), incFunction(), decFunction()))
 }

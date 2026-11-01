@@ -585,12 +585,6 @@ func (w *walker) call() ([]bool, ssa.Shape) {
 	return borrows, shape
 }
 
-// closure is the Shape of a closure over target, the function at ref, as
-// CLOSURE_NEW builds it: of target's type, holding its captures.
-func closure(ref int, target *types.Function) ssa.Shape {
-	return ssa.Shape{Function: ref, Type: uintptr(unsafe.Pointer(target.Typ)), Captures: len(target.Captures)}
-}
-
 // lent reports whether stack entry i's own backing survives a call unaided:
 // a local slot the caller owns, or a constant, neither of which the call can
 // change or free out from under it.
@@ -840,6 +834,12 @@ func (w *walker) deopt() ssa.Value {
 		Results: []ssa.Value{w.state},
 	})
 	return w.state
+}
+
+// closure is the Shape of a closure over target, the function at ref, as
+// CLOSURE_NEW builds it: of target's type, holding its captures.
+func closure(ref int, target *types.Function) ssa.Shape {
+	return ssa.Shape{Function: ref, Type: uintptr(unsafe.Pointer(target.Typ)), Captures: len(target.Captures)}
 }
 
 func values(stack []operand) []ssa.Value {

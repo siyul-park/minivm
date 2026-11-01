@@ -58,6 +58,27 @@ func (p *SSAPass) Run(_ *pass.Manager, prog *program.Program) (bool, error) {
 	return !changed, nil
 }
 
+func newPool(prog *program.Program) *pool {
+	p := &pool{
+		prog:    prog,
+		boxed:   make([]types.Boxed, len(prog.Constants)),
+		objects: Objects{},
+		at:      map[types.Boxed]int{},
+	}
+	for i, v := range prog.Constants {
+		boxed, ok := box(v)
+		if !ok {
+			boxed = types.BoxRef(i + 1)
+			p.objects[i+1] = resolved(v)
+		}
+		p.boxed[i] = boxed
+		if _, seen := p.at[boxed]; !seen {
+			p.at[boxed] = i
+		}
+	}
+	return p
+}
+
 func (p *SSAPass) roundtrip(manager *pass.Manager, constants *pool, address int, function *types.Function) (bool, error) {
 	if !expressible(function) {
 		return false, nil
@@ -78,27 +99,6 @@ func (p *SSAPass) roundtrip(manager *pass.Manager, constants *pool, address int,
 		function.Locals = append(slices.Clone(function.Locals), locals...)
 	}
 	return true, nil
-}
-
-func newPool(prog *program.Program) *pool {
-	p := &pool{
-		prog:    prog,
-		boxed:   make([]types.Boxed, len(prog.Constants)),
-		objects: Objects{},
-		at:      map[types.Boxed]int{},
-	}
-	for i, v := range prog.Constants {
-		boxed, ok := box(v)
-		if !ok {
-			boxed = types.BoxRef(i + 1)
-			p.objects[i+1] = resolved(v)
-		}
-		p.boxed[i] = boxed
-		if _, seen := p.at[boxed]; !seen {
-			p.at[boxed] = i
-		}
-	}
-	return p
 }
 
 func (p *pool) module() Module {

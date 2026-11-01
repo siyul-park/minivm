@@ -1,37 +1,37 @@
 import math
 
 
-def eval_a(i, j):
+def _eval_a(i, j):
     return 1.0 / float((i + j) * (i + j + 1) // 2 + i + 1)
 
 
-def eval_a_times_u(n, u, out):
+def _eval_a_times_u(n, u, out):
     i = 0
     while i < n:
         s = 0.0
         j = 0
         while j < n:
-            s = s + eval_a(i, j) * u[j]
+            s = s + _eval_a(i, j) * u[j]
             j = j + 1
         out[i] = s
         i = i + 1
 
 
-def eval_at_times_u(n, u, out):
+def _eval_at_times_u(n, u, out):
     i = 0
     while i < n:
         s = 0.0
         j = 0
         while j < n:
-            s = s + eval_a(j, i) * u[j]
+            s = s + _eval_a(j, i) * u[j]
             j = j + 1
         out[i] = s
         i = i + 1
 
 
-def eval_ata_times_u(n, u, out, tmp):
-    eval_a_times_u(n, u, tmp)
-    eval_at_times_u(n, tmp, out)
+def _eval_ata_times_u(n, u, out, tmp):
+    _eval_a_times_u(n, u, tmp)
+    _eval_at_times_u(n, tmp, out)
 
 
 def run():
@@ -42,8 +42,8 @@ def run():
 
     it = 0
     while it < 2:
-        eval_ata_times_u(n, u, v, tmp)
-        eval_ata_times_u(n, v, u, tmp)
+        _eval_ata_times_u(n, u, v, tmp)
+        _eval_ata_times_u(n, v, u, tmp)
         it = it + 1
 
     vbv = 0.0

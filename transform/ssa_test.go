@@ -18,6 +18,39 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type run[U, R any] func(*pass.Manager, U) (R, error)
+
+func pipeline() *pass.Pipeline[*ssa.Function] {
+	pipeline := pass.NewPipeline[*ssa.Function]()
+	pipeline.Add(transform.NewFoldPass())
+	pipeline.Add(transform.NewPromotePass())
+	pipeline.Add(transform.NewCSEPass())
+	pipeline.Add(transform.NewGuardPass())
+	pipeline.Add(transform.NewHoistPass())
+	pipeline.Add(transform.NewDCEPass())
+	return pipeline
+}
+
+func duplicateConstants(input *program.Program) *program.Program {
+	out := *input
+	out.Code = append([]byte(nil), input.Code...)
+	out.Locals = append([]types.Type(nil), input.Locals...)
+	out.Handlers = append([]instr.Handler(nil), input.Handlers...)
+	out.Constants = append([]types.Value(nil), input.Constants...)
+	for i, v := range out.Constants {
+		fn, ok := v.(*types.Function)
+		if !ok {
+			continue
+		}
+		copied := *fn
+		copied.Code = append([]byte(nil), fn.Code...)
+		copied.Locals = append([]types.Type(nil), fn.Locals...)
+		copied.Handlers = append([]instr.Handler(nil), fn.Handlers...)
+		out.Constants[i] = &copied
+	}
+	return &out
+}
+
 func TestNewSSAPass(t *testing.T) {
 	require.NotNil(t, transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()))
 }
@@ -32,14 +65,14 @@ func TestSSAPass_Run(t *testing.T) {
 			return prog
 		}
 		sum := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI32, types.TypeI32},
-			Returns: []types.Type{types.TypeI32}}).Emit(
+			Params:  []types.Type{types.TypeI32(), types.TypeI32()},
+			Returns: []types.Type{types.TypeI32()}}).Emit(
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD),
 			instr.New(instr.RETURN)).MustBuild()
 
 		fib := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI32},
-			Returns: []types.Type{types.TypeI32}})
+			Params:  []types.Type{types.TypeI32()},
+			Returns: []types.Type{types.TypeI32()}})
 		base := fib.Label()
 		fib.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S))
 		fib.BrIf(base)
@@ -52,8 +85,8 @@ func TestSSAPass_Run(t *testing.T) {
 		fib.Bind(base).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
 
 		total := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.NewArrayType(types.TypeI32)},
-			Returns: []types.Type{types.TypeI32}}).Locals(types.TypeI32, types.TypeI32)
+			Params:  []types.Type{types.NewArrayType(types.TypeI32())},
+			Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32(), types.TypeI32())
 		header, done := total.Label(), total.Label()
 		total.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1))
 		total.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 2))
@@ -78,10 +111,10 @@ func TestSSAPass_Run(t *testing.T) {
 				instr.New(instr.I32_CONST, 0), instr.New(instr.SELECT)}),
 			"globals": program.New([]instr.Instruction{
 				instr.New(instr.I32_CONST, 5), instr.New(instr.GLOBAL_SET, 0),
-				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_ADD)}, program.WithGlobals(types.TypeI32)),
+				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_ADD)}, program.WithGlobals(types.TypeI32())),
 			"locals": program.New([]instr.Instruction{
 				instr.New(instr.I32_CONST, 5), instr.New(instr.LOCAL_TEE, 0),
-				instr.New(instr.LOCAL_SET, 0), instr.New(instr.LOCAL_GET, 0)}, program.WithLocals(types.TypeI32)),
+				instr.New(instr.LOCAL_SET, 0), instr.New(instr.LOCAL_GET, 0)}, program.WithLocals(types.TypeI32())),
 			"constantFunction array": program.New([]instr.Instruction{
 				instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET)}, program.WithConstants(types.TypedArray[int32]{10, 20, 30})),
 			"constantFunction string": program.New([]instr.Instruction{
@@ -102,7 +135,7 @@ func TestSSAPass_Run(t *testing.T) {
 			}),
 			"branch table": assemble(func(b *program.Builder) {
 				one, two, done := b.Label(), b.Label(), b.Label()
-				b.Locals(types.TypeI32)
+				b.Locals(types.TypeI32())
 				b.Emit(instr.I32_CONST, 1).BrTable(done, one, two)
 				b.Bind(one).Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_SET, 0).Br(done)
 				b.Bind(two).Emit(instr.I32_CONST, 2).Emit(instr.LOCAL_SET, 0)
@@ -110,7 +143,7 @@ func TestSSAPass_Run(t *testing.T) {
 			}),
 			"loop": assemble(func(b *program.Builder) {
 				header, done := b.Label(), b.Label()
-				b.Locals(types.TypeI32)
+				b.Locals(types.TypeI32())
 				b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
 				b.Bind(header)
 				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 10).Emit(instr.I32_GE_S).BrIf(done)
@@ -120,7 +153,7 @@ func TestSSAPass_Run(t *testing.T) {
 			}),
 			"branch past the end": assemble(func(b *program.Builder) {
 				done := b.Label()
-				b.Locals(types.TypeI32)
+				b.Locals(types.TypeI32())
 				b.Emit(instr.I32_CONST, 1).BrIf(done)
 				b.Emit(instr.I32_CONST, 2).Emit(instr.LOCAL_SET, 0)
 				b.Bind(done)
@@ -325,7 +358,7 @@ func TestSSAPass_Run(t *testing.T) {
 	t.Run("drops a block nothing reaches", func(t *testing.T) {
 		pipeline := pass.NewPipeline[*ssa.Function]()
 		pipeline.Add(transform.NewDCEPass())
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}})
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}})
 		done := fn.Label()
 		fn.Emit(instr.New(instr.I32_CONST, 1))
 		fn.Br(done)
@@ -354,14 +387,14 @@ func TestSSAPass_Run(t *testing.T) {
 		pipeline.Add(transform.NewDCEPass())
 
 		reloaded := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI32, types.TypeI32},
-			Returns: []types.Type{types.TypeI32}}).Emit(
+			Params:  []types.Type{types.TypeI32(), types.TypeI32()},
+			Returns: []types.Type{types.TypeI32()}}).Emit(
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD),
 			instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild()
 		shared := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI32},
-			Returns: []types.Type{types.TypeI32}}).Emit(
+			Params:  []types.Type{types.TypeI32()},
+			Returns: []types.Type{types.TypeI32()}}).Emit(
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_MUL),
 			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_MUL),
 			instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild()
@@ -397,8 +430,8 @@ func TestSSAPass_Run(t *testing.T) {
 		pipeline.Add(transform.NewDCEPass())
 
 		counting := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI32},
-			Returns: []types.Type{types.TypeI32}}).Locals(types.TypeI32)
+			Params:  []types.Type{types.TypeI32()},
+			Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32())
 		header, done := counting.Label(), counting.Label()
 		counting.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1))
 		counting.Bind(header)
@@ -436,8 +469,8 @@ func TestSSAPass_Run(t *testing.T) {
 		pipeline.Add(transform.NewDCEPass())
 
 		total := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.NewArrayType(types.TypeI32)},
-			Returns: []types.Type{types.TypeI32}}).Locals(types.TypeI32, types.TypeI32)
+			Params:  []types.Type{types.NewArrayType(types.TypeI32())},
+			Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32(), types.TypeI32())
 		header, done := total.Label(), total.Label()
 		total.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1))
 		total.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 2))
@@ -479,7 +512,7 @@ func TestSSAPass_Run(t *testing.T) {
 			{name: "out of reach", pad: 32751, expects: true}} {
 			require.Zero(t, tc.pad%3)
 
-			fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Locals(types.TypeI32)
+			fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32())
 			done := fn.Label()
 			fn.Emit(instr.New(instr.I32_CONST, 1))
 			fn.BrIf(done)
@@ -536,10 +569,10 @@ func TestSSAPass_Run(t *testing.T) {
 
 	t.Run("leaves a function it cannot express unchanged", func(t *testing.T) {
 		body := func(is ...instr.Instruction) *types.Function {
-			return types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			return types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 				Emit(is...).MustBuild()
 		}
-		guarded := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}})
+		guarded := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}})
 		start, end, catch := guarded.Label(), guarded.Label(), guarded.Label()
 		guarded.Bind(start).Emit(instr.New(instr.I32_CONST, 1))
 		guarded.Bind(end).Emit(instr.New(instr.RETURN))
@@ -552,7 +585,7 @@ func TestSSAPass_Run(t *testing.T) {
 			"an opcode with an immediate operand": program.New([]instr.Instruction{
 				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(body(
 				instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-				instr.New(instr.ARRAY_LEN), instr.New(instr.RETURN))), program.WithTypes(types.NewArrayType(types.TypeI32))),
+				instr.New(instr.ARRAY_LEN), instr.New(instr.RETURN))), program.WithTypes(types.NewArrayType(types.TypeI32()))),
 			"a tail call": program.New([]instr.Instruction{
 				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(body(
 				instr.New(instr.CONST_GET, 0), instr.New(instr.RETURN_CALL)))),
@@ -571,21 +604,8 @@ func TestSSAPass_Run(t *testing.T) {
 	})
 }
 
-type run[U, R any] func(*pass.Manager, U) (R, error)
-
 func (r run[U, R]) Run(m *pass.Manager, unit U) (R, error) {
 	return r(m, unit)
-}
-
-func pipeline() *pass.Pipeline[*ssa.Function] {
-	pipeline := pass.NewPipeline[*ssa.Function]()
-	pipeline.Add(transform.NewFoldPass())
-	pipeline.Add(transform.NewPromotePass())
-	pipeline.Add(transform.NewCSEPass())
-	pipeline.Add(transform.NewGuardPass())
-	pipeline.Add(transform.NewHoistPass())
-	pipeline.Add(transform.NewDCEPass())
-	return pipeline
 }
 
 func generatedProgram(t *testing.T, random *rand.Rand) *program.Program {
@@ -687,17 +707,17 @@ func generatedProgram(t *testing.T, random *rand.Rand) *program.Program {
 	}
 
 	body := &types.Function{
-		Typ:    &types.FunctionType{Returns: []types.Type{types.TypeI32}},
-		Locals: []types.Type{types.TypeI32, types.TypeAny},
+		Typ:    &types.FunctionType{Returns: []types.Type{types.TypeI32()}},
+		Locals: []types.Type{types.TypeI32(), types.TypeAny()},
 		Code:   instr.Marshal(code)}
-	leaf := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+	leaf := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 		Emit(instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
 
 	return program.New(
 		[]instr.Instruction{instr.New(instr.CONST_GET, 4), instr.New(instr.CALL)},
 		program.WithConstants(leaf, types.TypedArray[int32]{1, 2, 3}, types.I32(7), types.String("ab"), body),
-		program.WithGlobals(types.TypeI32, types.TypeAny),
-		program.WithTypes(types.NewArrayType(types.TypeI32)))
+		program.WithGlobals(types.TypeI32(), types.TypeAny()),
+		program.WithTypes(types.NewArrayType(types.TypeI32())))
 }
 
 func executionResult(t *testing.T, input *program.Program) ([]types.Value, string) {
@@ -717,24 +737,4 @@ func executionResult(t *testing.T, input *program.Program) ([]types.Value, strin
 		values = append(values, value)
 	}
 	return values, message
-}
-
-func duplicateConstants(input *program.Program) *program.Program {
-	out := *input
-	out.Code = append([]byte(nil), input.Code...)
-	out.Locals = append([]types.Type(nil), input.Locals...)
-	out.Handlers = append([]instr.Handler(nil), input.Handlers...)
-	out.Constants = append([]types.Value(nil), input.Constants...)
-	for i, v := range out.Constants {
-		fn, ok := v.(*types.Function)
-		if !ok {
-			continue
-		}
-		copied := *fn
-		copied.Code = append([]byte(nil), fn.Code...)
-		copied.Locals = append([]types.Type(nil), fn.Locals...)
-		copied.Handlers = append([]instr.Handler(nil), fn.Handlers...)
-		out.Constants[i] = &copied
-	}
-	return &out
 }

@@ -63,7 +63,7 @@ type codecSecond struct{ Shared codecShared }
 
 func TestWithMarshaler(t *testing.T) {
 	millis := interp.WithMarshaler(
-		reflect.TypeFor[codecMillis](), types.TypeI64,
+		reflect.TypeFor[codecMillis](), types.TypeI64(),
 		interp.MarshalerFunc(func(e *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
 			ms := int64(*(*codecMillis)(p)) / int64(time.Millisecond)
 			return e.Encode(reflect.TypeFor[int64](), unsafe.Pointer(&ms))
@@ -88,7 +88,7 @@ func TestWithMarshaler(t *testing.T) {
 		require.NoError(t, err)
 		st, ok := value.(*types.Struct)
 		require.True(t, ok)
-		require.Equal(t, types.TypeI64, st.Typ.Fields[st.Typ.FieldIndex("Delay")].Type)
+		require.Equal(t, types.TypeI64(), st.Typ.Fields[st.Typ.FieldIndex("Delay")].Type)
 		require.Equal(t, types.I64(3000), types.Unbox(st.Field(st.Typ.FieldIndex("Delay"))))
 	})
 
@@ -122,8 +122,8 @@ func TestWithUnmarshaler(t *testing.T) {
 		defer i.Close()
 		src := types.NewStruct(
 			types.NewStructType(
-				types.NewStructField(types.TypeI64, types.FieldWithName("Delay")),
-				types.NewStructField(types.TypeI32, types.FieldWithName("Count"))),
+				types.NewStructField(types.TypeI64(), types.FieldWithName("Delay")),
+				types.NewStructField(types.TypeI32(), types.FieldWithName("Count"))),
 			types.BoxI64(3000), types.BoxI32(4))
 
 		var dst codecPair
@@ -134,7 +134,7 @@ func TestWithUnmarshaler(t *testing.T) {
 	t.Run("unregistered direction is unsupported", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry(interp.WithMarshaler(
-			reflect.TypeFor[codecMillis](), types.TypeI64,
+			reflect.TypeFor[codecMillis](), types.TypeI64(),
 			interp.MarshalerFunc(func(_ *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
 				return types.I64(*(*codecMillis)(p)), nil
 			})))
@@ -159,7 +159,7 @@ func TestNewRegistry(t *testing.T) {
 	t.Run("registration replaces a default", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry(interp.WithMarshaler(
-			reflect.TypeFor[time.Time](), types.TypeI64,
+			reflect.TypeFor[time.Time](), types.TypeI64(),
 			interp.MarshalerFunc(func(_ *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
 				return types.I64((*(*time.Time)(p)).Unix()), nil
 			})))
@@ -517,7 +517,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	t.Run("a map key that converts one way only cannot be looked up", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry(interp.WithMarshaler(
-			reflect.TypeFor[codecWide](), types.TypeI32,
+			reflect.TypeFor[codecWide](), types.TypeI32(),
 			interp.MarshalerFunc(func(*interp.Encoder, unsafe.Pointer) (types.Value, error) {
 				return types.I64(math.MaxInt32 + 1), nil
 			})))
@@ -575,7 +575,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	t.Run("a registered marshaler wins over the host rule", func(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry(interp.WithMarshaler(
-			reflect.TypeFor[codecHeld](), types.TypeI32,
+			reflect.TypeFor[codecHeld](), types.TypeI32(),
 			interp.MarshalerFunc(func(_ *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
 				return types.I32((*codecHeld)(p).Count), nil
 			})))
@@ -595,7 +595,7 @@ func TestRegistry_Marshal(t *testing.T) {
 
 		// Not a host value: the receiver decodes into a fresh Go struct, so the
 		// call still runs and the mutation stays on that copy.
-		typ := types.NewStructType(types.NewStructField(types.TypeI32, types.FieldWithName("Count")))
+		typ := types.NewStructType(types.NewStructField(types.TypeI32(), types.FieldWithName("Count")))
 		recv, err := i.Alloc(types.NewStruct(typ, types.BoxI32(5)))
 		require.NoError(t, err)
 
@@ -734,19 +734,6 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 }
 
-func (v marshalCustom) MarshalVM(*interp.Encoder) (types.Value, error) {
-	return types.I32(v), nil
-}
-
-func (v *marshalCustom) UnmarshalVM(_ *interp.Decoder, value types.Value) error {
-	n, ok := value.(types.I32)
-	if !ok {
-		return interp.ErrTypeMismatch
-	}
-	*v = marshalCustom(n)
-	return nil
-}
-
 func TestRegistry_Unmarshal(t *testing.T) {
 	t.Run("converts VM values to Go values", func(t *testing.T) {
 		var i32 int32
@@ -799,7 +786,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
 			instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
 		addr, err := i.Alloc(fn)
 		require.NoError(t, err)
@@ -815,7 +802,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		r := interp.NewRegistry()
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild()
+			Params: []types.Type{types.TypeI32(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild()
 
 		var add func(int32, int32) (int32, error)
 		require.NoError(t, r.Unmarshal(i, fn, &add))
@@ -838,7 +825,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		}))
 		defer i.Close()
 		r := interp.NewRegistry()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
 			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
 		addr, err := i.Alloc(fn)
 		require.NoError(t, err)
@@ -876,7 +863,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		defer i.Close()
 		r := interp.NewRegistry()
 		body := []instr.Instruction{instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)}
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(body...).MustBuild()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(body...).MustBuild()
 
 		var call func() (int32, error)
 		require.NoError(t, r.Unmarshal(i, fn, &call))
@@ -892,7 +879,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		i := interp.New(program.New(nil), interp.WithTick(1))
 		r := interp.NewRegistry()
 		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
 			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
 
 		var call func(context.Context) (int32, error)
@@ -911,7 +898,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		// the host side wherever it sits, so a method expression whose receiver
 		// comes first is no different from a plain leading context.
 		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).MustBuild()
+			Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).MustBuild()
 
 		var call func(int32, context.Context) (int32, error)
 		require.NoError(t, r.Unmarshal(i, fn, &call))
@@ -924,7 +911,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
 			instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
 		fnAddr, err := i.Alloc(fn)
 		require.NoError(t, err)
@@ -943,7 +930,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
 			instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
 		addr, err := i.Alloc(fn)
 		require.NoError(t, err)
@@ -958,7 +945,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_DIV_S), instr.New(instr.RETURN)).MustBuild()
 
 		var call func() (int32, error)
@@ -976,7 +963,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).MustBuild()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).MustBuild()
 
 		var call func() int64
 		require.ErrorIs(t, r.Unmarshal(i, fn, &call), interp.ErrTypeMismatch)
@@ -1021,6 +1008,20 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		}
 	})
 }
+
+func (v marshalCustom) MarshalVM(*interp.Encoder) (types.Value, error) {
+	return types.I32(v), nil
+}
+
+func (v *marshalCustom) UnmarshalVM(_ *interp.Decoder, value types.Value) error {
+	n, ok := value.(types.I32)
+	if !ok {
+		return interp.ErrTypeMismatch
+	}
+	*v = marshalCustom(n)
+	return nil
+}
+
 func (v *marshalHostFields) Bump(n int32) int32 {
 	v.Count += n
 	return v.Count

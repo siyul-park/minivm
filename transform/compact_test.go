@@ -51,14 +51,14 @@ func TestCompactPass_Run(t *testing.T) {
 					instr.New(instr.STRUCT_NEW_DEFAULT, 0),
 					instr.New(instr.STRUCT_NEW_DEFAULT, 1)},
 				program.WithTypes(
-					types.NewStructType(types.NewStructField(types.TypeF64)),
-					types.NewStructType(types.NewStructField(types.TypeF64)))),
+					types.NewStructType(types.NewStructField(types.TypeF64())),
+					types.NewStructType(types.NewStructField(types.TypeF64())))),
 			expected: program.New(
 				[]instr.Instruction{
 					instr.Marshal([]instr.Instruction{
 						instr.New(instr.STRUCT_NEW_DEFAULT, 0),
 						instr.New(instr.STRUCT_NEW_DEFAULT, 0)})},
-				program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF64))))},
+				program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF64()))))},
 		{
 			name: "all type operands",
 			program: program.New(
@@ -66,13 +66,13 @@ func TestCompactPass_Run(t *testing.T) {
 					instr.New(instr.REF_TEST, 0),
 					instr.New(instr.REF_CAST, 1),
 					instr.New(instr.MAP_NEW_DEFAULT, 2)},
-				program.WithTypes(types.TypeString, types.TypeError, types.NewMapType(types.TypeI32, types.TypeI32))),
+				program.WithTypes(types.TypeString(), types.TypeError(), types.NewMapType(types.TypeI32(), types.TypeI32()))),
 			expected: program.New(
 				[]instr.Instruction{
 					instr.New(instr.REF_TEST, 0),
 					instr.New(instr.REF_CAST, 1),
 					instr.New(instr.MAP_NEW_DEFAULT, 2)},
-				program.WithTypes(types.TypeString, types.TypeError, types.NewMapType(types.TypeI32, types.TypeI32))),
+				program.WithTypes(types.TypeString(), types.TypeError(), types.NewMapType(types.TypeI32(), types.TypeI32()))),
 			preserved: true,
 		},
 		{

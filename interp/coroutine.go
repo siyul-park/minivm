@@ -27,17 +27,15 @@ type coroutine struct {
 
 var _ types.Traceable = (*coroutine)(nil)
 
-func (c *coroutine) Kind() types.Kind { return types.KindRef }
+func (c *coroutine) Kind() types.Kind {
+	return types.KindRef
+}
 
 func (c *coroutine) Type() types.Type {
 	if c.typ == nil {
 		return &types.FunctionType{}
 	}
 	return c.typ
-}
-
-func (c *coroutine) String() string {
-	return "coroutine"
 }
 
 func (c *coroutine) Refs(dst []types.Ref) []types.Ref {
@@ -53,4 +51,8 @@ func (c *coroutine) Refs(dst []types.Ref) []types.Ref {
 		dst = append(dst, types.Ref(c.value.Ref()))
 	}
 	return dst
+}
+
+func (c *coroutine) String() string {
+	return "coroutine"
 }

@@ -16,6 +16,7 @@ func init() {
 		Wazero: &registry.Wazero{Module: branchTreeModule, Export: "branch_tree", Args: []uint64{37, 96}},
 	})
 }
+
 func branchTree(input, nodes int32) int32 {
 	var total int32
 	for index := int32(0); index < nodes; index++ {
@@ -27,6 +28,16 @@ func branchTree(input, nodes int32) int32 {
 		}
 	}
 	return total
+}
+
+func branchTreeModule() []byte {
+	module := &wasm.Module{
+		TypeSection:     []*wasm.FunctionType{{Params: []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI32}, Results: []wasm.ValueType{wasm.ValueTypeI32}}},
+		FunctionSection: []wasm.Index{0},
+		CodeSection:     []*wasm.Code{{LocalTypes: []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI32, wasm.ValueTypeI32, wasm.ValueTypeI32, wasm.ValueTypeI32}, Body: branchTreeWasm()}},
+		ExportSection:   []*wasm.Export{{Name: "branch_tree", Type: wasm.ExternTypeFunc, Index: 0}},
+	}
+	return binary.EncodeModule(module)
 }
 
 func branchTreeWasm() []byte {
@@ -88,14 +99,4 @@ func branchTreeWasm() []byte {
 	code.local(wasm.OpcodeLocalGet, 3)
 	code.op(wasm.OpcodeEnd)
 	return code
-}
-
-func branchTreeModule() []byte {
-	module := &wasm.Module{
-		TypeSection:     []*wasm.FunctionType{{Params: []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI32}, Results: []wasm.ValueType{wasm.ValueTypeI32}}},
-		FunctionSection: []wasm.Index{0},
-		CodeSection:     []*wasm.Code{{LocalTypes: []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI32, wasm.ValueTypeI32, wasm.ValueTypeI32, wasm.ValueTypeI32}, Body: branchTreeWasm()}},
-		ExportSection:   []*wasm.Export{{Name: "branch_tree", Type: wasm.ExternTypeFunc, Index: 0}},
-	}
-	return binary.EncodeModule(module)
 }

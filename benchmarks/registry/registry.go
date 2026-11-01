@@ -8,6 +8,15 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// Spec is the complete executable contract for one benchmark.
+type Spec struct {
+	Name   string
+	Result func() types.Value
+	Source Source
+	Native Native
+	Wazero *Wazero
+}
+
 // Native contains the direct Go implementation of a benchmark.
 type Native struct {
 	I32 func() int32
@@ -30,15 +39,6 @@ type Source struct {
 	Lua     string
 	JS      string
 	Python  string
-}
-
-// Spec is the complete executable contract for one benchmark.
-type Spec struct {
-	Name   string
-	Result func() types.Value
-	Source Source
-	Native Native
-	Wazero *Wazero
 }
 
 var (

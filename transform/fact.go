@@ -1,14 +1,11 @@
 package transform
 
 import (
-	"fmt"
 	"slices"
 
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/types"
 )
-
-type backing uint8
 
 type activation struct {
 	function *types.Function
@@ -40,6 +37,8 @@ type fact struct {
 	valueKnown     bool
 }
 
+type backing uint8
+
 type operand struct {
 	value ssa.Value
 	fact
@@ -52,109 +51,6 @@ const (
 	backingGlobal                // deferred to a global slot
 	backingUpval                 // deferred to a closure upval slot
 )
-
-// analyze returns the facts live at each span's entry and which spans are
-// reached from root; nothing flows past a span that ends in an exit. A
-// reached span's stack is nil, not just absent, when nothing is live there
-// (e.g. an empty operand stack at a loop header): seen is what tells reached
-// apart from never visited.
-func (m Module) analyze(act activation, spans []span, root int, in frame) ([]frame, []bool, bool) {
-	states := make([]frame, len(spans))
-	seen := make([]bool, len(spans))
-	seen[root] = true
-	states[root] = in
-	work := []int{root}
-	for len(work) > 0 {
-		id := work[len(work)-1]
-		work = work[:len(work)-1]
-		exit, leaves, ok := m.transfer(act, spans[id], states[id])
-		if !ok {
-			return nil, nil, false
-		}
-		if leaves {
-			continue
-		}
-		for _, succ := range spans[id].flow {
-			if !seen[succ] {
-				seen[succ] = true
-				states[succ] = frame{stack: slices.Clone(exit.stack), closures: slices.Clone(exit.closures)}
-				work = append(work, succ)
-				continue
-			}
-			changed, ok := states[succ].merge(exit)
-			if !ok {
-				return nil, nil, false
-			}
-			if changed {
-				work = append(work, succ)
-			}
-		}
-	}
-	return states, seen, true
-}
-
-// transfer returns the facts at s's end and whether s leaves native code
-// there, which no span follows.
-func (m Module) transfer(act activation, s span, in frame) (frame, bool, bool) {
-	b := ssa.New("")
-	block := b.Block()
-	w, ok := newWalker(m, b, block, act, in)
-	if !ok {
-		return frame{}, false, false
-	}
-	term, ok := w.translate(s)
-	if !ok {
-		return frame{}, false, false
-	}
-	out := make([]fact, len(w.stack))
-	for i, o := range w.stack {
-		out[i] = o.fact
-	}
-	return frame{stack: out, closures: w.closures}, term.Op == ssa.OpExit, true
-}
-
-// build emits the spans analyze reached, in the order a walk from root over
-// their successors visits them.
-func (m Module) build(act activation, spans []span, states []frame, seen []bool, root int) *ssa.Function {
-	queued := make([]bool, len(spans))
-	queued[root] = true
-	order := []int{root}
-	for n := 0; n < len(order); n++ {
-		for _, successor := range spans[order[n]].succs {
-			if seen[successor] && !queued[successor] {
-				queued[successor] = true
-				order = append(order, successor)
-			}
-		}
-	}
-	ids := make([]int, len(spans))
-	for i := range ids {
-		ids[i] = -1
-	}
-	b := ssa.New(fmt.Sprintf("%d:%d", act.address, spans[root].start))
-	b.Entry(ssa.Frame{Address: act.address, IP: spans[root].start, Returns: act.returns()})
-	for _, id := range order {
-		ids[id] = b.Block()
-	}
-
-	for _, id := range order {
-		w, ok := newWalker(m, b, ids[id], act, states[id])
-		if !ok {
-			return nil
-		}
-		term, ok := w.translate(spans[id])
-		if !ok {
-			return nil
-		}
-		if term.Op != ssa.OpExit {
-			if term.Edges, ok = w.edges(spans[id], states, ids); !ok {
-				return nil
-			}
-		}
-		b.Term(ids[id], term)
-	}
-	return b.Build()
-}
 
 func (a activation) returns() int {
 	if a.function.Typ == nil {

@@ -39,10 +39,13 @@ type handlerFixup struct {
 }
 
 var (
+	// ErrUnboundLabel reports a branch to a label that was never bound.
 	ErrUnboundLabel = errors.New("unbound label")
-	ErrOffsetRange  = errors.New("branch offset out of range")
+	// ErrOffsetRange reports a branch whose offset does not fit its operand width.
+	ErrOffsetRange = errors.New("branch offset out of range")
 )
 
+// NewBuilder returns an empty instruction builder.
 func NewBuilder() *Builder {
 	return &Builder{}
 }

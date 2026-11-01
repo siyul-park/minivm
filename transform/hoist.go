@@ -198,59 +198,6 @@ func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	return false, nil
 }
 
-// inlet is the deopt state at loop header's entry, as seen from preheader:
-// the state of header's first operation that has one, with header's params
-// replaced by preheader's edge arguments. It fails when an effect precedes
-// that operation in header or the state names a value invariant rejects.
-func inlet(function *ssa.Function, sites map[ssa.Value]site, header, preheader int, invariant func(ssa.Value) bool) ([]ssa.Frame, bool) {
-	block := function.Block(header)
-	args := map[ssa.Value]ssa.Value{}
-	for i, param := range block.Params {
-		args[param] = function.Block(preheader).Terminator.Edges[0].Args[i]
-	}
-	at := ssa.NoValue
-	for _, operation := range block.Operations {
-		if operation.State != ssa.NoValue {
-			at = operation.State
-			break
-		}
-		if operation.Op != ssa.OpConst && operation.Op != ssa.OpLoad && operation.Op != ssa.OpState {
-			return nil, false
-		}
-	}
-	s, ok := sites[at]
-	if !ok {
-		return nil, false
-	}
-	state := function.Block(s.block).Operations[s.index]
-	substitute := func(v ssa.Value) (ssa.Value, bool) {
-		if arg, ok := args[v]; ok {
-			return arg, true
-		}
-		return v, invariant(v)
-	}
-	frames := make([]ssa.Frame, len(state.Frames))
-	for i, frame := range state.Frames {
-		stack := make([]ssa.Operand, len(frame.Stack))
-		for j, operand := range frame.Stack {
-			if stack[j].Value, ok = substitute(operand.Value); !ok {
-				return nil, false
-			}
-			stack[j].Owned = operand.Owned
-		}
-		locals := make([]ssa.Local, len(frame.Locals))
-		for j, local := range frame.Locals {
-			if locals[j].Value, ok = substitute(local.Value); !ok {
-				return nil, false
-			}
-			locals[j].Index = local.Index
-		}
-		frame.Stack, frame.Locals = stack, locals
-		frames[i] = frame
-	}
-	return frames, true
-}
-
 // quiet reports whether operation runs no code outside the unit and
 // allocates, releases, resizes, and replaces nothing: no call, allocation
 // (a boxed i64 included), or reference drop. Host code, reachable only
@@ -318,4 +265,57 @@ func hoistable(operation ssa.Operation) bool {
 	default:
 		return false
 	}
+}
+
+// inlet is the deopt state at loop header's entry, as seen from preheader:
+// the state of header's first operation that has one, with header's params
+// replaced by preheader's edge arguments. It fails when an effect precedes
+// that operation in header or the state names a value invariant rejects.
+func inlet(function *ssa.Function, sites map[ssa.Value]site, header, preheader int, invariant func(ssa.Value) bool) ([]ssa.Frame, bool) {
+	block := function.Block(header)
+	args := map[ssa.Value]ssa.Value{}
+	for i, param := range block.Params {
+		args[param] = function.Block(preheader).Terminator.Edges[0].Args[i]
+	}
+	at := ssa.NoValue
+	for _, operation := range block.Operations {
+		if operation.State != ssa.NoValue {
+			at = operation.State
+			break
+		}
+		if operation.Op != ssa.OpConst && operation.Op != ssa.OpLoad && operation.Op != ssa.OpState {
+			return nil, false
+		}
+	}
+	s, ok := sites[at]
+	if !ok {
+		return nil, false
+	}
+	state := function.Block(s.block).Operations[s.index]
+	substitute := func(v ssa.Value) (ssa.Value, bool) {
+		if arg, ok := args[v]; ok {
+			return arg, true
+		}
+		return v, invariant(v)
+	}
+	frames := make([]ssa.Frame, len(state.Frames))
+	for i, frame := range state.Frames {
+		stack := make([]ssa.Operand, len(frame.Stack))
+		for j, operand := range frame.Stack {
+			if stack[j].Value, ok = substitute(operand.Value); !ok {
+				return nil, false
+			}
+			stack[j].Owned = operand.Owned
+		}
+		locals := make([]ssa.Local, len(frame.Locals))
+		for j, local := range frame.Locals {
+			if locals[j].Value, ok = substitute(local.Value); !ok {
+				return nil, false
+			}
+			locals[j].Index = local.Index
+		}
+		frame.Stack, frame.Locals = stack, locals
+		frames[i] = frame
+	}
+	return frames, true
 }

@@ -59,134 +59,6 @@ func (stub) Move(*asm.Assembler, asm.VReg, asm.VReg) { panic("unused") }
 
 func (stub) Const(*asm.Assembler, asm.VReg, uint64) { panic("unused") }
 
-// noop is a function of one RETURN and no parameters: valid enough for
-// translation and verification to succeed.
-func noop(t *testing.T) *types.Function {
-	t.Helper()
-	b := instr.NewBuilder()
-	b.Emit(instr.RETURN)
-	code, err := b.Assemble()
-	require.NoError(t, err)
-	return &types.Function{Typ: &types.FunctionType{}, Code: instr.Marshal(code)}
-}
-
-// sum is sum(n) = 0 + 1 + ... + n-1 over one parameter and two locals.
-func sum(t *testing.T) *types.Function {
-	t.Helper()
-	b := instr.NewBuilder()
-	loop, done := b.Label(), b.Label()
-	b.Bind(loop)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_GE_S).BrIf(done)
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
-	b.Br(loop)
-	b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.RETURN)
-	code, err := b.Assemble()
-	require.NoError(t, err)
-	return &types.Function{
-		Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
-		Locals: []types.Type{types.TypeI32, types.TypeI32},
-		Code:   instr.Marshal(code),
-	}
-}
-
-// total sums the first four elements of its i32 array parameter.
-func total(t *testing.T) *types.Function {
-	t.Helper()
-	b := instr.NewBuilder()
-	loop, done := b.Label(), b.Label()
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
-	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
-	b.Bind(loop)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(done)
-	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
-	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
-	b.Br(loop)
-	b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.RETURN)
-	code, err := b.Assemble()
-	require.NoError(t, err)
-	return &types.Function{
-		Typ:    &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}, Returns: []types.Type{types.TypeI32}},
-		Locals: []types.Type{types.TypeI32, types.TypeI32},
-		Code:   instr.Marshal(code),
-	}
-}
-
-// context is a Context for one Go entry whose frame is stack, over heap;
-// every heap reference counts 2, so a return's release never drops the last.
-func context(t *testing.T, stack []types.Boxed, heap []types.Value) *jit.Context {
-	t.Helper()
-	ctx, err := jit.NewContext(4096)
-	require.NoError(t, err)
-	rc := make([]int, len(heap))
-	for i := range rc {
-		rc[i] = 2
-	}
-	ctx.FB = address(t, stack)
-	ctx.Top = ctx.FB + uintptr(len(stack))*unsafe.Sizeof(stack[0])
-	ctx.Limit = uint64(len(ctx.Records))
-	ctx.Budget = 1 << 20
-	ctx.Heap = address(t, heap)
-	ctx.RC = address(t, rc)
-	ctx.Entries = address(t, make([]int64, 2))
-	return ctx
-}
-
-// run compiles u and every callee with m, publishes them in a Store of
-// their own natives table, and runs u over stack.
-func run(t *testing.T, u compile.Unit, stack []types.Boxed, callees ...compile.Unit) (*jit.Context, jit.Trap) {
-	t.Helper()
-	size := u.Address + 1
-	for _, callee := range callees {
-		size = max(size, callee.Address+1)
-	}
-	store := jit.NewStore(size)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
-	var c *jit.Code
-	for _, unit := range append([]compile.Unit{u}, callees...) {
-		code, err := compile.Compile(unit, arm64.New())
-		require.NoError(t, err)
-		require.True(t, store.Publish(code))
-		if c == nil {
-			c = code
-		}
-	}
-
-	rc := make([]int, size)
-	for i := range rc {
-		rc[i] = 1
-	}
-
-	entries := make([]int64, size)
-
-	ctx, err := jit.NewContext(4096)
-	require.NoError(t, err)
-	ctx.FB = address(t, stack)
-	ctx.Top = ctx.FB + uintptr(len(stack))*unsafe.Sizeof(stack[0])
-	ctx.Limit = uint64(len(ctx.Records))
-	ctx.Budget = 1 << 20
-	ctx.Natives = store.Natives()
-	ctx.RC = address(t, rc)
-	ctx.Entries = address(t, entries)
-
-	trap := jit.Enter(c.Entry(), ctx)
-	return ctx, trap
-}
-
-// native skips a case that runs native code off arm64.
-func native(t *testing.T) {
-	if runtime.GOARCH != "arm64" {
-		t.Skip("native execution needs arm64")
-	}
-}
-
-// address is the base of s kept on the heap for the test's life: native code
-// holds it as a uintptr, which a copied goroutine stack would leave dangling.
-func address[T any](t *testing.T, s []T) uintptr {
-	t.Cleanup(func() { runtime.KeepAlive(s) })
-	return uintptr(unsafe.Pointer(&s[0]))
-}
-
 func TestCompile(t *testing.T) {
 	t.Run("counts Baseline function entries", func(t *testing.T) {
 		m := new(machine)
@@ -218,7 +90,7 @@ func TestCompile(t *testing.T) {
 		b.Emit(instr.I64_CONST, 5).Emit(instr.RETURN)
 		code, err := b.Assemble()
 		require.NoError(t, err)
-		wide := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}}, Code: instr.Marshal(code)}
+		wide := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64()}}, Code: instr.Marshal(code)}
 		c, err := compile.Compile(compile.Unit{Function: wide, Tier: jit.Baseline}, m)
 		require.NoError(t, err)
 		require.NoError(t, c.Free())
@@ -308,8 +180,8 @@ func TestCompile(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		fn := &types.Function{
-			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
-			Locals: []types.Type{types.TypeI32, types.TypeI32},
+			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
+			Locals: []types.Type{types.TypeI32(), types.TypeI32()},
 			Code:   instr.Marshal(code),
 		}
 		entry := instr.New(instr.I32_CONST, 0).Width()*2 + instr.New(instr.LOCAL_SET, 1).Width()
@@ -341,8 +213,8 @@ func TestCompile(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		fn := &types.Function{
-			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI64}},
-			Locals: []types.Type{types.TypeI32, types.TypeI64},
+			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI64()}},
+			Locals: []types.Type{types.TypeI32(), types.TypeI64()},
 			Code:   instr.Marshal(code),
 		}
 		entry := instr.New(instr.I32_CONST, 0).Width() + instr.New(instr.LOCAL_SET, 1).Width() +
@@ -392,7 +264,7 @@ func TestCompile(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		fib := &types.Function{
-			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}},
+			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeAny()}, Returns: []types.Type{types.TypeI32()}},
 			Code: instr.Marshal(code),
 		}
 		var ips []int
@@ -426,7 +298,7 @@ func TestCompile(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		fib := &types.Function{
-			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
 			Code: instr.Marshal(code),
 		}
 		module := transform.Module{Constants: []types.Boxed{types.BoxRef(2)}, Objects: transform.Objects{2: {Function: fib}}}
@@ -448,7 +320,7 @@ func TestCompile(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		ident := compile.Unit{Address: 2, Tier: jit.Baseline, Function: &types.Function{
-			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
 			Code: instr.Marshal(code),
 		}}
 		b = instr.NewBuilder()
@@ -457,7 +329,7 @@ func TestCompile(t *testing.T) {
 		code, err = b.Assemble()
 		require.NoError(t, err)
 		fn := &types.Function{
-			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
 			Code: instr.Marshal(code),
 		}
 		module := transform.Module{Constants: []types.Boxed{types.BoxRef(2)}, Objects: transform.Objects{2: {Function: ident.Function}}}
@@ -485,8 +357,8 @@ func TestCompile(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		fn := &types.Function{
-			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
-			Locals: []types.Type{types.TypeI32},
+			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
+			Locals: []types.Type{types.TypeI32()},
 			Code:   instr.Marshal(code),
 		}
 		for _, tier := range []jit.Tier{jit.Baseline, jit.Optimized} {
@@ -504,11 +376,11 @@ func TestCompile(t *testing.T) {
 			typ  types.Type
 			x, y types.Boxed
 		}{
-			{types.TypeI1, types.BoxI1(false), types.BoxI1(true)},
-			{types.TypeI8, types.BoxI8(3), types.BoxI8(-5)},
-			{types.TypeI32, types.BoxI32(3), types.BoxI32(-7)},
-			{types.TypeF32, types.BoxF32(1.5), types.BoxF32(-2.25)},
-			{types.TypeF64, types.BoxF64(1.5), types.BoxF64(-2.25)},
+			{types.TypeI1(), types.BoxI1(false), types.BoxI1(true)},
+			{types.TypeI8(), types.BoxI8(3), types.BoxI8(-5)},
+			{types.TypeI32(), types.BoxI32(3), types.BoxI32(-7)},
+			{types.TypeF32(), types.BoxF32(1.5), types.BoxF32(-2.25)},
+			{types.TypeF64(), types.BoxF64(1.5), types.BoxF64(-2.25)},
 		} {
 			typ := &types.FunctionType{Params: []types.Type{c.typ, c.typ}, Returns: []types.Type{c.typ}}
 
@@ -541,7 +413,7 @@ func TestCompile(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		fn := &types.Function{
-			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
 			Code: instr.Marshal(code),
 		}
 		for _, tier := range []jit.Tier{jit.Baseline, jit.Optimized} {
@@ -552,4 +424,132 @@ func TestCompile(t *testing.T) {
 			require.Zero(t, ctx.Depth)
 		}
 	})
+}
+
+// noop is a function of one RETURN and no parameters: valid enough for
+// translation and verification to succeed.
+func noop(t *testing.T) *types.Function {
+	t.Helper()
+	b := instr.NewBuilder()
+	b.Emit(instr.RETURN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return &types.Function{Typ: &types.FunctionType{}, Code: instr.Marshal(code)}
+}
+
+// sum is sum(n) = 0 + 1 + ... + n-1 over one parameter and two locals.
+func sum(t *testing.T) *types.Function {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.RETURN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return &types.Function{
+		Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
+		Locals: []types.Type{types.TypeI32(), types.TypeI32()},
+		Code:   instr.Marshal(code),
+	}
+}
+
+// total sums the first four elements of its i32 array parameter.
+func total(t *testing.T) *types.Function {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.RETURN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return &types.Function{
+		Typ:    &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32())}, Returns: []types.Type{types.TypeI32()}},
+		Locals: []types.Type{types.TypeI32(), types.TypeI32()},
+		Code:   instr.Marshal(code),
+	}
+}
+
+// context is a Context for one Go entry whose frame is stack, over heap;
+// every heap reference counts 2, so a return's release never drops the last.
+func context(t *testing.T, stack []types.Boxed, heap []types.Value) *jit.Context {
+	t.Helper()
+	ctx, err := jit.NewContext(4096)
+	require.NoError(t, err)
+	rc := make([]int, len(heap))
+	for i := range rc {
+		rc[i] = 2
+	}
+	ctx.FB = address(t, stack)
+	ctx.Top = ctx.FB + uintptr(len(stack))*unsafe.Sizeof(stack[0])
+	ctx.Limit = uint64(len(ctx.Records))
+	ctx.Budget = 1 << 20
+	ctx.Heap = address(t, heap)
+	ctx.RC = address(t, rc)
+	ctx.Entries = address(t, make([]int64, 2))
+	return ctx
+}
+
+// run compiles u and every callee with m, publishes them in a Store of
+// their own natives table, and runs u over stack.
+func run(t *testing.T, u compile.Unit, stack []types.Boxed, callees ...compile.Unit) (*jit.Context, jit.Trap) {
+	t.Helper()
+	size := u.Address + 1
+	for _, callee := range callees {
+		size = max(size, callee.Address+1)
+	}
+	store := jit.NewStore(size)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	var c *jit.Code
+	for _, unit := range append([]compile.Unit{u}, callees...) {
+		code, err := compile.Compile(unit, arm64.New())
+		require.NoError(t, err)
+		require.True(t, store.Publish(code))
+		if c == nil {
+			c = code
+		}
+	}
+
+	rc := make([]int, size)
+	for i := range rc {
+		rc[i] = 1
+	}
+
+	entries := make([]int64, size)
+
+	ctx, err := jit.NewContext(4096)
+	require.NoError(t, err)
+	ctx.FB = address(t, stack)
+	ctx.Top = ctx.FB + uintptr(len(stack))*unsafe.Sizeof(stack[0])
+	ctx.Limit = uint64(len(ctx.Records))
+	ctx.Budget = 1 << 20
+	ctx.Natives = store.Natives()
+	ctx.RC = address(t, rc)
+	ctx.Entries = address(t, entries)
+
+	trap := jit.Enter(c.Entry(), ctx)
+	return ctx, trap
+}
+
+// address is the base of s kept on the heap for the test's life: native code
+// holds it as a uintptr, which a copied goroutine stack would leave dangling.
+func address[T any](t *testing.T, s []T) uintptr {
+	t.Cleanup(func() { runtime.KeepAlive(s) })
+	return uintptr(unsafe.Pointer(&s[0]))
+}
+
+// native skips a case that runs native code off arm64.
+func native(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native execution needs arm64")
+	}
 }

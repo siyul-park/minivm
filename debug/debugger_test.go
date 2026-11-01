@@ -84,7 +84,7 @@ func TestDebugger_Continue(t *testing.T) {
 }
 
 func TestDebugger_Step(t *testing.T) {
-	callee := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+	callee := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
 		instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
 	prog := program.New([]instr.Instruction{
 		instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.DROP)}, program.WithConstants(callee))
@@ -103,7 +103,7 @@ func TestDebugger_Step(t *testing.T) {
 
 func TestDebugger_Next(t *testing.T) {
 	debug.NewDebugger().Next()
-	callee := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+	callee := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
 		instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
 	prog := program.New([]instr.Instruction{
 		instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.DROP)}, program.WithConstants(callee))
@@ -123,7 +123,7 @@ func TestDebugger_Next(t *testing.T) {
 
 func TestDebugger_Finish(t *testing.T) {
 	debug.NewDebugger().Finish()
-	callee := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+	callee := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
 		instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
 	prog := program.New([]instr.Instruction{
 		instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.DROP)}, program.WithConstants(callee))

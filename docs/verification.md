@@ -22,7 +22,7 @@ Static validation of untrusted bytecode.
 | Structure | Boundaries, widths, targets, handler ranges, and termination `MUST` be valid. |
 | Stack | Height and statically known kinds `MUST` be tracked conservatively. |
 | Dynamic effects | Resolve only from known operands/metadata; otherwise reject rather than guess. |
-| Runtime-dependent cases | Definite static mismatches `MUST` be rejected; remaining checks belong to runtime guards.
+| Runtime-dependent cases | Definite static mismatches `MUST` be rejected; remaining checks belong to runtime guards. |
 
 ## Checks
 

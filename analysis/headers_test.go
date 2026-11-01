@@ -21,7 +21,7 @@ func TestHeaders(t *testing.T) {
 		b.Bind(done).Emit(instr.RETURN)
 		code, err := b.Assemble()
 		require.NoError(t, err)
-		fn := &types.Function{Locals: []types.Type{types.TypeI32}, Code: instr.Marshal(code)}
+		fn := &types.Function{Locals: []types.Type{types.TypeI32()}, Code: instr.Marshal(code)}
 		headerOffset := instr.New(instr.I32_CONST, 0).Width() + instr.New(instr.LOCAL_SET, 0).Width()
 
 		got, err := analysis.Headers(fn)

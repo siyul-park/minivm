@@ -54,7 +54,7 @@ func Compile(u Unit, m Machine) (*jit.Code, error) {
 		return nil, fmt.Errorf("compile: verify: %w", err)
 	}
 
-	code, exits, entry, err := Lower(f, m, u.Function, u.Module.Objects, u.Address, u.OSR, u.Tier == jit.Baseline && !u.OSR)
+	assembly, err := Lower(f, m, u.Function, u.Module.Objects, u.Address, u.OSR, u.Tier == jit.Baseline && !u.OSR)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func Compile(u Unit, m Machine) (*jit.Code, error) {
 	}
 	c, err := jit.NewCode(
 		u.Address, u.IP, u.OSR, u.Tier, completion(f),
-		registers(u.Function), args, code, exits, entry,
+		registers(u.Function), args, assembly,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("compile: code: %w", err)

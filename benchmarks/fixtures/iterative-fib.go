@@ -16,6 +16,7 @@ func init() {
 		Wazero: &registry.Wazero{Module: iterativeFibModule, Export: "iterative_fib", Args: []uint64{30}},
 	})
 }
+
 func iterativeFib(n int32) int32 {
 	var current int32
 	next := int32(1)
@@ -25,6 +26,16 @@ func iterativeFib(n int32) int32 {
 		next = value
 	}
 	return current
+}
+
+func iterativeFibModule() []byte {
+	module := &wasm.Module{
+		TypeSection:     []*wasm.FunctionType{{Params: []wasm.ValueType{wasm.ValueTypeI32}, Results: []wasm.ValueType{wasm.ValueTypeI32}}},
+		FunctionSection: []wasm.Index{0},
+		CodeSection:     []*wasm.Code{{LocalTypes: []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI32, wasm.ValueTypeI32, wasm.ValueTypeI32}, Body: iterativeFibWasm()}},
+		ExportSection:   []*wasm.Export{{Name: "iterative_fib", Type: wasm.ExternTypeFunc, Index: 0}},
+	}
+	return binary.EncodeModule(module)
 }
 
 func iterativeFibWasm() []byte {
@@ -61,14 +72,4 @@ func iterativeFibWasm() []byte {
 	code.local(wasm.OpcodeLocalGet, 1)
 	code.op(wasm.OpcodeEnd)
 	return code
-}
-
-func iterativeFibModule() []byte {
-	module := &wasm.Module{
-		TypeSection:     []*wasm.FunctionType{{Params: []wasm.ValueType{wasm.ValueTypeI32}, Results: []wasm.ValueType{wasm.ValueTypeI32}}},
-		FunctionSection: []wasm.Index{0},
-		CodeSection:     []*wasm.Code{{LocalTypes: []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI32, wasm.ValueTypeI32, wasm.ValueTypeI32}, Body: iterativeFibWasm()}},
-		ExportSection:   []*wasm.Export{{Name: "iterative_fib", Type: wasm.ExternTypeFunc, Index: 0}},
-	}
-	return binary.EncodeModule(module)
 }

@@ -3,9 +3,16 @@ package ssa_test
 import (
 	"testing"
 
+	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOverflowsI64(t *testing.T) {
+	require.True(t, ssa.OverflowsI64(instr.I64_ADD))
+	require.True(t, ssa.OverflowsI64(instr.I64_DIV_U))
+	require.False(t, ssa.OverflowsI64(instr.I64_AND))
+}
 
 func TestOp_String(t *testing.T) {
 	for _, tt := range []struct {

@@ -13,6 +13,12 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+func deoptState(b *ssa.Builder, block int) ssa.Value {
+	state := b.Value(ssa.TypeState)
+	b.Add(block, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
+	return state
+}
+
 func TestPassOrder(t *testing.T) {
 	t.Run("folds, deduplicates, eliminates a redundant guard, and sweeps the dead code left behind", func(t *testing.T) {
 		b := ssa.New("f")
@@ -112,10 +118,4 @@ func TestPassOrder(t *testing.T) {
 		require.Equal(t, 2, strings.Count(got, "i32.add"))
 		require.Equal(t, 1, strings.Count(blockChunk(got, 0), "i32.add"))
 	})
-}
-
-func deoptState(b *ssa.Builder, block int) ssa.Value {
-	state := b.Value(ssa.TypeState)
-	b.Add(block, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
-	return state
 }

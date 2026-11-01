@@ -17,46 +17,46 @@ func TestParseFunction(t *testing.T) {
 	}{
 		{
 			name: "no locals",
-			want: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			want: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 				Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN)).
 				MustBuild(),
 		},
 		{
 			name: "with locals",
-			want: types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}).
-				Locals(types.TypeI32, types.TypeI64).
+			want: types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).
+				Locals(types.TypeI32(), types.TypeI64()).
 				Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
 				MustBuild(),
 		},
 		{
 			name: "with captures and locals",
-			want: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-				Captures(types.TypeI32, types.TypeAny).
-				Locals(types.TypeI64).
+			want: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
+				Captures(types.TypeI32(), types.TypeAny()).
+				Locals(types.TypeI64()).
 				Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
 				MustBuild(),
 		},
 		{
 			name:  "no offset prefix",
 			lines: []string{"func() i32", "i32.const 42", "return"},
-			want: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			want: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 				Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
 				MustBuild(),
 		},
 		{
 			name:  "no offset prefix with locals",
 			lines: []string{"func(i32) i32", "i32", "i64", "i32.const 42", "return"},
-			want: types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}).
-				Locals(types.TypeI32, types.TypeI64).
+			want: types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).
+				Locals(types.TypeI32(), types.TypeI64()).
 				Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
 				MustBuild(),
 		},
 		{
 			name:  "captures before locals",
 			lines: []string{"func() i32", "capture i32", "capture any", "i64", "i32.const 42", "return"},
-			want: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-				Captures(types.TypeI32, types.TypeAny).
-				Locals(types.TypeI64).
+			want: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
+				Captures(types.TypeI32(), types.TypeAny()).
+				Locals(types.TypeI64()).
 				Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
 				MustBuild(),
 		},
@@ -79,15 +79,15 @@ func TestParseFunction(t *testing.T) {
 func TestParse(t *testing.T) {
 	nested := types.NewStructType(
 		types.NewStructField(types.NewStructType(
-			types.NewStructField(types.TypeI32, types.FieldWithName("x")),
-			types.NewStructField(types.TypeI32, types.FieldWithName("y")),
+			types.NewStructField(types.TypeI32(), types.FieldWithName("x")),
+			types.NewStructField(types.TypeI32(), types.FieldWithName("y")),
 		), types.FieldWithName("a")),
-		types.NewStructField(types.TypeI32, types.FieldWithName("b")),
+		types.NewStructField(types.TypeI32(), types.FieldWithName("b")),
 	)
 	named := types.NewStructType(
-		types.NewStructField(types.TypeI64, types.FieldWithName("value")),
-		types.NewStructField(types.TypeAny, types.FieldWithName("left")),
-		types.NewStructField(types.TypeAny),
+		types.NewStructField(types.TypeI64(), types.FieldWithName("value")),
+		types.NewStructField(types.TypeAny(), types.FieldWithName("left")),
+		types.NewStructField(types.TypeAny()),
 	)
 
 	tests := []struct {
@@ -95,28 +95,28 @@ func TestParse(t *testing.T) {
 		want    types.Type
 		wantErr bool
 	}{
-		{"i1", types.TypeI1, false},
-		{"i8", types.TypeI8, false},
-		{"i32", types.TypeI32, false},
-		{"i64", types.TypeI64, false},
-		{"f32", types.TypeF32, false},
-		{"f64", types.TypeF64, false},
-		{"any", types.TypeAny, false},
-		{"string", types.TypeString, false},
-		{"[]i8", types.NewArrayType(types.TypeI8), false},
-		{"[]i32", types.NewArrayType(types.TypeI32), false},
-		{"[]f64", types.NewArrayType(types.TypeF64), false},
-		{"map[i32]string", types.NewMapType(types.TypeI32, types.TypeString), false},
-		{"map[string][]i32", types.NewMapType(types.TypeString, types.NewArrayType(types.TypeI32)), false},
-		{"map[[]i32]f64", types.NewMapType(types.NewArrayType(types.TypeI32), types.TypeF64), false},
-		{"iterator[i32]", types.NewIteratorType(types.TypeI32), false},
-		{"iterator[map[string]i32]", types.NewIteratorType(types.NewMapType(types.TypeString, types.TypeI32)), false},
+		{"i1", types.TypeI1(), false},
+		{"i8", types.TypeI8(), false},
+		{"i32", types.TypeI32(), false},
+		{"i64", types.TypeI64(), false},
+		{"f32", types.TypeF32(), false},
+		{"f64", types.TypeF64(), false},
+		{"any", types.TypeAny(), false},
+		{"string", types.TypeString(), false},
+		{"[]i8", types.NewArrayType(types.TypeI8()), false},
+		{"[]i32", types.NewArrayType(types.TypeI32()), false},
+		{"[]f64", types.NewArrayType(types.TypeF64()), false},
+		{"map[i32]string", types.NewMapType(types.TypeI32(), types.TypeString()), false},
+		{"map[string][]i32", types.NewMapType(types.TypeString(), types.NewArrayType(types.TypeI32())), false},
+		{"map[[]i32]f64", types.NewMapType(types.NewArrayType(types.TypeI32()), types.TypeF64()), false},
+		{"iterator[i32]", types.NewIteratorType(types.TypeI32()), false},
+		{"iterator[map[string]i32]", types.NewIteratorType(types.NewMapType(types.TypeString(), types.TypeI32())), false},
 		{"func()", &types.FunctionType{}, false},
-		{"func(i32) i64", &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI64}}, false},
-		{"func(i32, f64) i32", &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeF64}, Returns: []types.Type{types.TypeI32}}, false},
-		{"func(i32) (i32, i64)", &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32, types.TypeI64}}, false},
-		{"struct {i32; f64}", types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64)), false},
-		{"struct {value: i64; any}", types.NewStructType(types.NewStructField(types.TypeI64, types.FieldWithName("value")), types.NewStructField(types.TypeAny)), false},
+		{"func(i32) i64", &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI64()}}, false},
+		{"func(i32, f64) i32", &types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeF64()}, Returns: []types.Type{types.TypeI32()}}, false},
+		{"func(i32) (i32, i64)", &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32(), types.TypeI64()}}, false},
+		{"struct {i32; f64}", types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64())), false},
+		{"struct {value: i64; any}", types.NewStructType(types.NewStructField(types.TypeI64(), types.FieldWithName("value")), types.NewStructField(types.TypeAny())), false},
 		{"ref", nil, true},
 		{"map[]i32", nil, true},
 		{"map[i32]", nil, true},
@@ -143,4 +143,53 @@ func TestParse(t *testing.T) {
 			require.Equal(t, tt.want.String(), got.String())
 		})
 	}
+}
+
+func FuzzParseType(f *testing.F) {
+	for _, value := range []string{
+		"i32",
+		"[]ref",
+		"map[string][]i32",
+		"iterator[map[i64]f32]",
+		"func(i32, ref) (i64, f32)",
+		"struct {i32; []ref}",
+		"struct {value: i64; left: any; right: any}",
+		"invalid",
+	} {
+		f.Add(value)
+	}
+
+	f.Fuzz(func(t *testing.T, value string) {
+		if len(value) > 4096 {
+			t.Skip()
+		}
+		typ, err := types.Parse(value)
+		if err != nil {
+			return
+		}
+		roundTrip, err := types.Parse(typ.String())
+		require.NoError(t, err)
+		require.True(t, typ.Equals(roundTrip))
+	})
+}
+
+func FuzzParseFunction(f *testing.F) {
+	f.Add("func()\n")
+	f.Add("func() i32\n0000:\ti32.const 0x0000002A\n0005:\treturn\n")
+	f.Add("func(i32) i32\ni64\ni32.const 42\nreturn")
+	f.Add("invalid")
+
+	f.Fuzz(func(t *testing.T, value string) {
+		if len(value) > 4096 {
+			t.Skip()
+		}
+		lines := strings.Split(strings.TrimSuffix(value, "\n"), "\n")
+		fn, err := types.ParseFunction(lines)
+		if err != nil {
+			return
+		}
+		roundTrip, err := types.ParseFunction(strings.Split(strings.TrimSuffix(fn.String(), "\n"), "\n"))
+		require.NoError(t, err)
+		require.Equal(t, fn.String(), roundTrip.String())
+	})
 }

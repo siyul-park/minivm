@@ -21,7 +21,9 @@ var _ WriteFS = osFS{}
 
 // OS returns a WriteFS backed by the host filesystem. Names are
 // interpreted as paths on the local filesystem.
-func OS() WriteFS { return osFS{} }
+func OS() WriteFS {
+	return osFS{}
+}
 
 func (osFS) Open(name string) (fs.File, error) {
 	return os.Open(filepath.FromSlash(name))

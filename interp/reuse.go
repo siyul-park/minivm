@@ -46,13 +46,13 @@ func (p *recycler[T]) trim(dynamic int) int {
 	return keep
 }
 
-func (p *recycler[T]) reset() {
-	p.live = 0
-	p.peak = 0
-}
-
 func (p *recycler[T]) clear() {
 	clear(p.values)
 	p.values = nil
 	p.reset()
+}
+
+func (p *recycler[T]) reset() {
+	p.live = 0
+	p.peak = 0
 }

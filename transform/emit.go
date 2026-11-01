@@ -340,15 +340,6 @@ func (e *emitter) results(results []ssa.Value) bool {
 	return true
 }
 
-func uniform(edges []ssa.Edge) bool {
-	for _, edge := range edges[1:] {
-		if !slices.Equal(edge.Args, edges[0].Args) {
-			return false
-		}
-	}
-	return true
-}
-
 func (e *emitter) leave(id, next int) {
 	if next != id+1 {
 		e.branch(instr.BR, next)
@@ -448,22 +439,31 @@ func (e *emitter) resolve(v ssa.Value) ssa.Value {
 	}
 }
 
+func uniform(edges []ssa.Edge) bool {
+	for _, edge := range edges[1:] {
+		if !slices.Equal(edge.Args, edges[0].Args) {
+			return false
+		}
+	}
+	return true
+}
+
 func local(t ssa.Type) (types.Type, bool) {
 	switch t {
 	case ssa.TypeI1:
-		return types.TypeI1, true
+		return types.TypeI1(), true
 	case ssa.TypeI8:
-		return types.TypeI8, true
+		return types.TypeI8(), true
 	case ssa.TypeI32:
-		return types.TypeI32, true
+		return types.TypeI32(), true
 	case ssa.TypeI64:
-		return types.TypeI64, true
+		return types.TypeI64(), true
 	case ssa.TypeF32:
-		return types.TypeF32, true
+		return types.TypeF32(), true
 	case ssa.TypeF64:
-		return types.TypeF64, true
+		return types.TypeF64(), true
 	case ssa.TypeRef:
-		return types.TypeAny, true
+		return types.TypeAny(), true
 	default:
 		return nil, false
 	}

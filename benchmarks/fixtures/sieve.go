@@ -16,6 +16,7 @@ func init() {
 		Wazero: &registry.Wazero{Module: sieveModule, Export: "sieve", Args: []uint64{256}},
 	})
 }
+
 func sieve(size int32) int32 {
 	composite := make([]bool, size)
 	for value := int32(2); value*value < size; value++ {
@@ -30,6 +31,17 @@ func sieve(size int32) int32 {
 		}
 	}
 	return count
+}
+
+func sieveModule() []byte {
+	module := &wasm.Module{
+		TypeSection:     []*wasm.FunctionType{{Params: []wasm.ValueType{wasm.ValueTypeI32}, Results: []wasm.ValueType{wasm.ValueTypeI32}}},
+		FunctionSection: []wasm.Index{0},
+		CodeSection:     []*wasm.Code{{LocalTypes: []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI32, wasm.ValueTypeI32, wasm.ValueTypeI32}, Body: sieveWasm()}},
+		MemorySection:   &wasm.Memory{Min: 1},
+		ExportSection:   []*wasm.Export{{Name: "sieve", Type: wasm.ExternTypeFunc, Index: 0}},
+	}
+	return binary.EncodeModule(module)
 }
 
 func sieveWasm() []byte {
@@ -133,15 +145,4 @@ func sieveWasm() []byte {
 	code.local(wasm.OpcodeLocalGet, 3)
 	code.op(wasm.OpcodeEnd)
 	return code
-}
-
-func sieveModule() []byte {
-	module := &wasm.Module{
-		TypeSection:     []*wasm.FunctionType{{Params: []wasm.ValueType{wasm.ValueTypeI32}, Results: []wasm.ValueType{wasm.ValueTypeI32}}},
-		FunctionSection: []wasm.Index{0},
-		CodeSection:     []*wasm.Code{{LocalTypes: []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI32, wasm.ValueTypeI32, wasm.ValueTypeI32}, Body: sieveWasm()}},
-		MemorySection:   &wasm.Memory{Min: 1},
-		ExportSection:   []*wasm.Export{{Name: "sieve", Type: wasm.ExternTypeFunc, Index: 0}},
-	}
-	return binary.EncodeModule(module)
 }

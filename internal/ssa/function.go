@@ -40,14 +40,6 @@ func (f *Function) Entry() Frame {
 	return f.entry
 }
 
-// Type returns v's type or zero for an invalid value.
-func (f *Function) Type(v Value) Type {
-	if !v.valid(len(f.types)) {
-		return 0
-	}
-	return f.types[v]
-}
-
 // Len returns the block count.
 func (f *Function) Len() int {
 	return len(f.blocks)
@@ -61,6 +53,14 @@ func (f *Function) Succ(block int) []int {
 // Pred returns blocks that reach block.
 func (f *Function) Pred(block int) []int {
 	return f.preds[block]
+}
+
+// Type returns v's type or zero for an invalid value.
+func (f *Function) Type(v Value) Type {
+	if !v.valid(len(f.types)) {
+		return 0
+	}
+	return f.types[v]
 }
 
 func newFunction(name string, types []Type, blocks []Block, entry Frame) *Function {

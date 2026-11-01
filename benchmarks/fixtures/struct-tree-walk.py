@@ -1,11 +1,11 @@
-class Node:
+class _Node:
     def __init__(self):
         self.left = None
         self.right = None
 
 
 def build(depth):
-    node = Node()
+    node = _Node()
     if depth > 0:
         node.left = build(depth - 1)
         node.right = build(depth - 1)

@@ -5,8 +5,10 @@ import (
 	"strings"
 )
 
+// TypedArray is a dense array of a primitive element type.
 type TypedArray[T int8 | int32 | int64 | float32 | float64 | bool] []T
 
+// Array is a heap array of boxed elements of a ref or i64-wide element type.
 type Array struct {
 	Typ   *ArrayType
 	Elems []Boxed
@@ -18,18 +20,19 @@ type ArrayLiteral struct {
 	Elems []Value
 }
 
+// ArrayType is the type of arrays with elements of type Elem.
 type ArrayType struct {
 	Elem     Type
 	ElemKind Kind
 }
 
 var (
-	TypeI1Array  = NewArrayType(TypeI1)
-	TypeI8Array  = NewArrayType(TypeI8)
-	TypeI32Array = NewArrayType(TypeI32)
-	TypeI64Array = NewArrayType(TypeI64)
-	TypeF32Array = NewArrayType(TypeF32)
-	TypeF64Array = NewArrayType(TypeF64)
+	typeI1Array  = NewArrayType(TypeI1())
+	typeI8Array  = NewArrayType(TypeI8())
+	typeI32Array = NewArrayType(TypeI32())
+	typeI64Array = NewArrayType(TypeI64())
+	typeF32Array = NewArrayType(TypeF32())
+	typeF64Array = NewArrayType(TypeF64())
 )
 
 var _ Value = TypedArray[bool](nil)
@@ -50,56 +53,81 @@ var _ Traceable = (*Array)(nil)
 
 var _ Type = (*ArrayType)(nil)
 
+// TypeI1Array returns the array type with i1 elements.
+func TypeI1Array() *ArrayType {
+	return typeI1Array
+}
+
+// TypeI8Array returns the array type with i8 elements.
+func TypeI8Array() *ArrayType {
+	return typeI8Array
+}
+
+// TypeI32Array returns the array type with i32 elements.
+func TypeI32Array() *ArrayType {
+	return typeI32Array
+}
+
+// TypeI64Array returns the array type with i64 elements.
+func TypeI64Array() *ArrayType {
+	return typeI64Array
+}
+
+// TypeF32Array returns the array type with f32 elements.
+func TypeF32Array() *ArrayType {
+	return typeF32Array
+}
+
+// TypeF64Array returns the array type with f64 elements.
+func TypeF64Array() *ArrayType {
+	return typeF64Array
+}
+
+// NewArray returns an array of type typ holding elems.
 func NewArray(typ *ArrayType, elems ...Boxed) *Array {
 	return &Array{Typ: typ, Elems: elems}
 }
 
+// NewArrayType returns the array type with element type elem.
 func NewArrayType(elem Type) *ArrayType {
 	return &ArrayType{Elem: elem, ElemKind: elem.Kind()}
 }
 
-// Kind reports the reference kind.
-func (a *ArrayLiteral) Kind() Kind { return KindRef }
-
-// String returns the canonical array literal.
-func (a *ArrayLiteral) String() string {
-	return formatSlice(a.Type(), len(a.Elems), func(i int) string { return a.Elems[i].String() })
+// Kind returns KindRef.
+func (a TypedArray[T]) Kind() Kind {
+	return KindRef
 }
 
-// Type returns the array literal type.
-func (a *ArrayLiteral) Type() Type { return a.Typ }
-
-func (a TypedArray[T]) Kind() Kind { return KindRef }
+// Type returns the array type matching the element type.
+func (a TypedArray[T]) Type() Type {
+	var zero T
+	switch any(zero).(type) {
+	case bool:
+		return TypeI1Array()
+	case int8:
+		return TypeI8Array()
+	case int32:
+		return TypeI32Array()
+	case int64:
+		return TypeI64Array()
+	case float32:
+		return TypeF32Array()
+	default:
+		return TypeF64Array()
+	}
+}
 
 func (a TypedArray[T]) String() string {
 	return formatSlice(a.Type(), len(a), func(i int) string { return formatElem(a[i]) })
 }
 
-func (a TypedArray[T]) Type() Type {
-	var zero T
-	switch any(zero).(type) {
-	case bool:
-		return TypeI1Array
-	case int8:
-		return TypeI8Array
-	case int32:
-		return TypeI32Array
-	case int64:
-		return TypeI64Array
-	case float32:
-		return TypeF32Array
-	default:
-		return TypeF64Array
-	}
+func (a *Array) Kind() Kind {
+	return KindRef
 }
 
-func (a *Array) Kind() Kind { return KindRef }
-
-func (a *Array) String() string {
-	return formatSlice(a.Type(), len(a.Elems), func(i int) string { return a.Elems[i].String() })
+func (a *Array) Type() Type {
+	return a.Typ
 }
-
-func (a *Array) Type() Type { return a.Typ }
 
 func (a *Array) Refs(dst []Ref) []Ref {
 	for _, e := range a.Elems {
@@ -110,10 +138,27 @@ func (a *Array) Refs(dst []Ref) []Ref {
 	return dst
 }
 
-func (t *ArrayType) Kind() Kind { return KindRef }
+func (a *Array) String() string {
+	return formatSlice(a.Type(), len(a.Elems), func(i int) string { return a.Elems[i].String() })
+}
 
-func (t *ArrayType) String() string {
-	return "[]" + t.Elem.String()
+// Kind reports the reference kind.
+func (a *ArrayLiteral) Kind() Kind {
+	return KindRef
+}
+
+// Type returns the array literal type.
+func (a *ArrayLiteral) Type() Type {
+	return a.Typ
+}
+
+// String returns the canonical array literal.
+func (a *ArrayLiteral) String() string {
+	return formatSlice(a.Type(), len(a.Elems), func(i int) string { return a.Elems[i].String() })
+}
+
+func (t *ArrayType) Kind() Kind {
+	return KindRef
 }
 
 func (t *ArrayType) Cast(other Type) bool {
@@ -128,6 +173,10 @@ func (t *ArrayType) Equals(other Type) bool {
 		return t.Elem.Equals(o.Elem)
 	}
 	return false
+}
+
+func (t *ArrayType) String() string {
+	return "[]" + t.Elem.String()
 }
 
 func formatElem[T int8 | int32 | int64 | float32 | float64 | bool](v T) string {

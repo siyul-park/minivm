@@ -53,6 +53,95 @@ func Parse(r io.Reader) (*Program, error) {
 	return prog, nil
 }
 
+// program canonicalizes every type prog's parsed data reaches. .types is
+// walked first so its pointers become canonical; children are canonicalized
+// before their parent is compared.
+func (c *canon) program(prog *Program) {
+	for i, t := range prog.Types {
+		prog.Types[i] = c.typ(t)
+	}
+	for i, t := range prog.Locals {
+		prog.Locals[i] = c.typ(t)
+	}
+	for i, t := range prog.Globals {
+		prog.Globals[i] = c.typ(t)
+	}
+	for i, v := range prog.Constants {
+		prog.Constants[i] = c.value(v)
+	}
+}
+
+func (c *canon) value(v types.Value) types.Value {
+	switch v := v.(type) {
+	case *types.Function:
+		v.Typ, _ = c.typ(v.Typ).(*types.FunctionType)
+		for i, t := range v.Locals {
+			v.Locals[i] = c.typ(t)
+		}
+		for i, t := range v.Captures {
+			v.Captures[i] = c.typ(t)
+		}
+	case *types.ArrayLiteral:
+		v.Typ, _ = c.typ(v.Typ).(*types.ArrayType)
+		for i, elem := range v.Elems {
+			v.Elems[i] = c.value(elem)
+		}
+	case *types.MapLiteral:
+		v.Typ, _ = c.typ(v.Typ).(*types.MapType)
+		for i, key := range v.Keys {
+			v.Keys[i] = c.value(key)
+			v.Values[i] = c.value(v.Values[i])
+		}
+	case *types.StructLiteral:
+		v.Typ, _ = c.typ(v.Typ).(*types.StructType)
+		for i, field := range v.Fields {
+			v.Fields[i] = c.value(field)
+		}
+	case *types.Struct:
+		v.Typ, _ = c.typ(v.Typ).(*types.StructType)
+	}
+	return v
+}
+
+// typ canonicalizes t and every struct type nested inside it, returning the
+// canonical pointer when t is itself a struct type.
+func (c *canon) typ(t types.Type) types.Type {
+	switch v := t.(type) {
+	case *types.StructType:
+		for i := range v.Fields {
+			v.Fields[i].Type = c.typ(v.Fields[i].Type)
+		}
+		return c.intern(v)
+	case *types.ArrayType:
+		v.Elem = c.typ(v.Elem)
+	case *types.MapType:
+		v.Key = c.typ(v.Key)
+		v.Elem = c.typ(v.Elem)
+	case *types.IteratorType:
+		v.Elem = c.typ(v.Elem)
+	case *types.FunctionType:
+		for i := range v.Params {
+			v.Params[i] = c.typ(v.Params[i])
+		}
+		for i := range v.Returns {
+			v.Returns[i] = c.typ(v.Returns[i])
+		}
+	}
+	return t
+}
+
+// intern returns the first-seen pointer structurally equal to t, recording t
+// as canonical when none matches yet.
+func (c *canon) intern(t *types.StructType) *types.StructType {
+	for _, s := range c.seen {
+		if s.Equals(t) {
+			return s
+		}
+	}
+	c.seen = append(c.seen, t)
+	return t
+}
+
 func sections(text string) (*Program, error) {
 	lines := strings.Split(text, "\n")
 	prog := &Program{}
@@ -143,10 +232,7 @@ func legacy(text string) (*Program, error) {
 		codeLines = append(codeLines, line)
 	}
 	if err := scanner.Err(); err != nil {
-		if strings.Contains(err.Error(), "token too long") {
-			return nil, fmt.Errorf("line %d exceeds maximum allowed size of %d bytes", lineNum+1, maxParseLineBytes)
-		}
-		return nil, fmt.Errorf("line %d: %w", lineNum+1, err)
+		return nil, scanError(err, lineNum+1)
 	}
 
 	code, err := instr.ParseAll(strings.NewReader(strings.Join(codeLines, "\n")))
@@ -183,10 +269,7 @@ func legacy(text string) (*Program, error) {
 	}
 	flushBlock()
 	if err := scanner.Err(); err != nil {
-		if strings.Contains(err.Error(), "token too long") {
-			return nil, fmt.Errorf("line %d exceeds maximum allowed size of %d bytes", lineNum+1, maxParseLineBytes)
-		}
-		return nil, fmt.Errorf("line %d: %w", lineNum+1, err)
+		return nil, scanError(err, lineNum+1)
 	}
 
 	var constants []types.Value
@@ -220,93 +303,12 @@ func legacy(text string) (*Program, error) {
 	return New(code, opts...), nil
 }
 
-// program canonicalizes every type prog's parsed data reaches. .types is
-// walked first so its pointers become canonical; children are canonicalized
-// before their parent is compared.
-func (c *canon) program(prog *Program) {
-	for i, t := range prog.Types {
-		prog.Types[i] = c.typ(t)
+// scanError reports a scanner failure at line.
+func scanError(err error, line int) error {
+	if strings.Contains(err.Error(), "token too long") {
+		return fmt.Errorf("line %d exceeds maximum allowed size of %d bytes", line, maxParseLineBytes)
 	}
-	for i, t := range prog.Locals {
-		prog.Locals[i] = c.typ(t)
-	}
-	for i, t := range prog.Globals {
-		prog.Globals[i] = c.typ(t)
-	}
-	for i, v := range prog.Constants {
-		prog.Constants[i] = c.value(v)
-	}
-}
-
-func (c *canon) value(v types.Value) types.Value {
-	switch v := v.(type) {
-	case *types.Function:
-		v.Typ, _ = c.typ(v.Typ).(*types.FunctionType)
-		for i, t := range v.Locals {
-			v.Locals[i] = c.typ(t)
-		}
-		for i, t := range v.Captures {
-			v.Captures[i] = c.typ(t)
-		}
-	case *types.ArrayLiteral:
-		v.Typ, _ = c.typ(v.Typ).(*types.ArrayType)
-		for i, elem := range v.Elems {
-			v.Elems[i] = c.value(elem)
-		}
-	case *types.MapLiteral:
-		v.Typ, _ = c.typ(v.Typ).(*types.MapType)
-		for i, key := range v.Keys {
-			v.Keys[i] = c.value(key)
-			v.Values[i] = c.value(v.Values[i])
-		}
-	case *types.StructLiteral:
-		v.Typ, _ = c.typ(v.Typ).(*types.StructType)
-		for i, field := range v.Fields {
-			v.Fields[i] = c.value(field)
-		}
-	case *types.Struct:
-		v.Typ, _ = c.typ(v.Typ).(*types.StructType)
-	}
-	return v
-}
-
-// typ canonicalizes t and every struct type nested inside it, returning the
-// canonical pointer when t is itself a struct type.
-func (c *canon) typ(t types.Type) types.Type {
-	switch v := t.(type) {
-	case *types.StructType:
-		for i := range v.Fields {
-			v.Fields[i].Type = c.typ(v.Fields[i].Type)
-		}
-		return c.intern(v)
-	case *types.ArrayType:
-		v.Elem = c.typ(v.Elem)
-	case *types.MapType:
-		v.Key = c.typ(v.Key)
-		v.Elem = c.typ(v.Elem)
-	case *types.IteratorType:
-		v.Elem = c.typ(v.Elem)
-	case *types.FunctionType:
-		for i := range v.Params {
-			v.Params[i] = c.typ(v.Params[i])
-		}
-		for i := range v.Returns {
-			v.Returns[i] = c.typ(v.Returns[i])
-		}
-	}
-	return t
-}
-
-// intern returns the first-seen pointer structurally equal to t, recording t
-// as canonical when none matches yet.
-func (c *canon) intern(t *types.StructType) *types.StructType {
-	for _, s := range c.seen {
-		if s.Equals(t) {
-			return s
-		}
-	}
-	c.seen = append(c.seen, t)
-	return t
+	return fmt.Errorf("line %d: %w", line, err)
 }
 
 func parseTypes(lines []string) ([]types.Type, error) {
@@ -451,64 +453,6 @@ func parseValue(typ types.Type, literal string) (types.Value, error) {
 	}
 }
 
-func parseScalar(typ types.Type, value string) (types.Value, error) {
-	switch typ.String() {
-	case "i32":
-		v, err := strconv.ParseInt(value, 10, 32)
-		if err != nil {
-			return nil, fmt.Errorf("invalid i32 literal %q", value)
-		}
-		return types.I32(v), nil
-	case "i64":
-		v, err := strconv.ParseInt(value, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid i64 literal %q", value)
-		}
-		return types.I64(v), nil
-	case "f32":
-		v, err := strconv.ParseFloat(value, 32)
-		if err != nil {
-			return nil, fmt.Errorf("invalid f32 literal %q", value)
-		}
-		return types.F32(v), nil
-	case "f64":
-		v, err := strconv.ParseFloat(value, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid f64 literal %q", value)
-		}
-		return types.F64(v), nil
-	case "i1":
-		switch value {
-		case "true":
-			return types.I1(true), nil
-		case "false":
-			return types.I1(false), nil
-		default:
-			return nil, fmt.Errorf("invalid i1 literal %q (expected true/false)", value)
-		}
-	case "i8":
-		v, err := strconv.ParseInt(value, 10, 8)
-		if err != nil {
-			return nil, fmt.Errorf("invalid i8 literal %q", value)
-		}
-		return types.I8(v), nil
-	case "any":
-		v, err := strconv.ParseInt(value, 10, 32)
-		if err != nil {
-			return nil, fmt.Errorf("invalid any literal %q", value)
-		}
-		return types.Ref(v), nil
-	case "string":
-		v, err := strconv.Unquote(value)
-		if err != nil {
-			return nil, fmt.Errorf("invalid string literal %q: %w", value, err)
-		}
-		return types.String(v), nil
-	default:
-		return nil, fmt.Errorf("unknown constant type %q", typ.String())
-	}
-}
-
 func parseArrayLiteral(typ *types.ArrayType, literal string) (types.Value, error) {
 	parts, err := literalBody(typ, literal)
 	if err != nil {
@@ -606,6 +550,64 @@ func parseMapLiteral(typ *types.MapType, literal string) (types.Value, error) {
 		}
 	}
 	return &types.MapLiteral{Typ: typ, Keys: keys, Values: values}, nil
+}
+
+func parseScalar(typ types.Type, value string) (types.Value, error) {
+	switch typ.String() {
+	case "i32":
+		v, err := integer("i32", value, 32)
+		return types.I32(v), err
+	case "i64":
+		v, err := integer("i64", value, 64)
+		return types.I64(v), err
+	case "f32":
+		v, err := float("f32", value, 32)
+		return types.F32(v), err
+	case "f64":
+		v, err := float("f64", value, 64)
+		return types.F64(v), err
+	case "i1":
+		switch value {
+		case "true":
+			return types.I1(true), nil
+		case "false":
+			return types.I1(false), nil
+		default:
+			return nil, fmt.Errorf("invalid i1 literal %q (expected true/false)", value)
+		}
+	case "i8":
+		v, err := integer("i8", value, 8)
+		return types.I8(v), err
+	case "any":
+		v, err := integer("any", value, 32)
+		return types.Ref(v), err
+	case "string":
+		v, err := strconv.Unquote(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid string literal %q: %w", value, err)
+		}
+		return types.String(v), nil
+	default:
+		return nil, fmt.Errorf("unknown constant type %q", typ.String())
+	}
+}
+
+// integer parses a signed decimal literal of the named kind that fits bits.
+func integer(kind, value string, bits int) (int64, error) {
+	v, err := strconv.ParseInt(value, 10, bits)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s literal %q", kind, value)
+	}
+	return v, nil
+}
+
+// float parses a decimal literal of the named kind that fits bits.
+func float(kind, value string, bits int) (float64, error) {
+	v, err := strconv.ParseFloat(value, bits)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s literal %q", kind, value)
+	}
+	return v, nil
 }
 
 func literalBody(typ types.Type, literal string) ([]string, error) {

@@ -10,40 +10,6 @@ import (
 	arm64 "github.com/siyul-park/minivm/internal/asm/arm64"
 )
 
-func TestLDI(t *testing.T) {
-	tests := []struct {
-		val  uint64
-		want []asm.Instruction
-	}{
-		{
-			val:  0,
-			want: []asm.Instruction{arm64.MOVZ(arm64.X0, 0, 0)},
-		},
-		{
-			val:  0x1234,
-			want: []asm.Instruction{arm64.MOVZ(arm64.X0, 0x1234, 0)},
-		},
-		{
-			val:  0x7FF6000000000000,
-			want: []asm.Instruction{arm64.MOVZ(arm64.X0, 0x7FF6, 48)},
-		},
-		{
-			val:  0x1234000056780000,
-			want: []asm.Instruction{arm64.MOVZ(arm64.X0, 0x5678, 16), arm64.MOVK(arm64.X0, 0x1234, 48)},
-		},
-		{
-			val:  0x12345678,
-			want: []asm.Instruction{arm64.MOVZ(arm64.X0, 0x5678, 0), arm64.MOVK(arm64.X0, 0x1234, 16)},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("%#x", tt.val), func(t *testing.T) {
-			require.Equal(t, tt.want, arm64.LDI(arm64.X0, tt.val))
-		})
-	}
-}
-
 func TestADD(t *testing.T) {
 	inst := arm64.ADD(arm64.X0, arm64.X0, arm64.X0)
 	require.Equal(t, uint16(arm64.OpADD), inst.Op)
@@ -392,6 +358,40 @@ func TestMOVI(t *testing.T) {
 	require.NotEmpty(t, inst.String())
 }
 
+func TestLDI(t *testing.T) {
+	tests := []struct {
+		val  uint64
+		want []asm.Instruction
+	}{
+		{
+			val:  0,
+			want: []asm.Instruction{arm64.MOVZ(arm64.X0, 0, 0)},
+		},
+		{
+			val:  0x1234,
+			want: []asm.Instruction{arm64.MOVZ(arm64.X0, 0x1234, 0)},
+		},
+		{
+			val:  0x7FF6000000000000,
+			want: []asm.Instruction{arm64.MOVZ(arm64.X0, 0x7FF6, 48)},
+		},
+		{
+			val:  0x1234000056780000,
+			want: []asm.Instruction{arm64.MOVZ(arm64.X0, 0x5678, 16), arm64.MOVK(arm64.X0, 0x1234, 48)},
+		},
+		{
+			val:  0x12345678,
+			want: []asm.Instruction{arm64.MOVZ(arm64.X0, 0x5678, 0), arm64.MOVK(arm64.X0, 0x1234, 16)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%#x", tt.val), func(t *testing.T) {
+			require.Equal(t, tt.want, arm64.LDI(arm64.X0, tt.val))
+		})
+	}
+}
+
 func TestMOVZ(t *testing.T) {
 	inst := arm64.MOVZ(arm64.X0, 1, 1)
 	require.Equal(t, uint16(arm64.OpMOVZ), inst.Op)
@@ -512,12 +512,6 @@ func TestLDRR(t *testing.T) {
 	require.NotEmpty(t, inst.String())
 }
 
-func TestSTRR(t *testing.T) {
-	inst := arm64.STRR(arm64.X0, arm64.X0, arm64.X0)
-	require.Equal(t, uint16(arm64.OpSTRR), inst.Op)
-	require.NotEmpty(t, inst.String())
-}
-
 func TestLDRBR(t *testing.T) {
 	inst := arm64.LDRBR(arm64.X0, arm64.X0, arm64.X0)
 	require.Equal(t, uint16(arm64.OpLDRBR), inst.Op)
@@ -527,6 +521,12 @@ func TestLDRBR(t *testing.T) {
 func TestLDRSBR(t *testing.T) {
 	inst := arm64.LDRSBR(arm64.X0, arm64.X0, arm64.X0)
 	require.Equal(t, uint16(arm64.OpLDRSBR), inst.Op)
+	require.NotEmpty(t, inst.String())
+}
+
+func TestSTRR(t *testing.T) {
+	inst := arm64.STRR(arm64.X0, arm64.X0, arm64.X0)
+	require.Equal(t, uint16(arm64.OpSTRR), inst.Op)
 	require.NotEmpty(t, inst.String())
 }
 

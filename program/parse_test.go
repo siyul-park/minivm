@@ -28,7 +28,7 @@ func TestParse(t *testing.T) {
 		p0 := program.New(
 			[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
 			program.WithConstants(
-				types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+				types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 					Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
 					MustBuild(),
 			),
@@ -69,10 +69,10 @@ func TestParse(t *testing.T) {
 	})
 
 	t.Run("round trip preserves struct and map constants", func(t *testing.T) {
-		structType := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeString))
+		structType := types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeString()))
 		first := &types.StructLiteral{Typ: structType, Fields: []types.Value{types.I32(1), types.String("one")}}
 		second := &types.StructLiteral{Typ: structType, Fields: []types.Value{types.I32(2), types.String("two")}}
-		mapType := types.NewMapType(types.TypeI32, structType)
+		mapType := types.NewMapType(types.TypeI32(), structType)
 		p0 := program.New(nil, program.WithConstants(
 			first,
 			&types.MapLiteral{Typ: mapType, Keys: []types.Value{types.I32(1), types.I32(2)}, Values: []types.Value{first, second}},
@@ -85,9 +85,9 @@ func TestParse(t *testing.T) {
 	t.Run("round trip preserves types", func(t *testing.T) {
 		p0 := program.New(
 			nil,
-			program.WithTypes(types.NewArrayType(types.TypeI32), types.NewStructType(
-				types.NewStructField(types.TypeI32),
-				types.NewStructField(types.TypeF64),
+			program.WithTypes(types.NewArrayType(types.TypeI32()), types.NewStructType(
+				types.NewStructField(types.TypeI32()),
+				types.NewStructField(types.TypeF64()),
 			)),
 		)
 		p1, err := program.Parse(strings.NewReader(p0.String()))
@@ -120,9 +120,9 @@ func TestParse(t *testing.T) {
 		p0 := program.New(
 			nil,
 			program.WithTypes(types.NewStructType(
-				types.NewStructField(types.TypeI64, types.FieldWithName("value")),
-				types.NewStructField(types.TypeAny, types.FieldWithName("left")),
-				types.NewStructField(types.TypeAny),
+				types.NewStructField(types.TypeI64(), types.FieldWithName("value")),
+				types.NewStructField(types.TypeAny(), types.FieldWithName("left")),
+				types.NewStructField(types.TypeAny()),
 			)),
 		)
 		p1, err := program.Parse(strings.NewReader(p0.String()))
@@ -148,18 +148,18 @@ func TestParse(t *testing.T) {
 	t.Run("round trip preserves all sections", func(t *testing.T) {
 		p0 := program.New(
 			[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
-			program.WithLocals(types.TypeI32),
-			program.WithGlobals(types.TypeAny),
+			program.WithLocals(types.TypeI32()),
+			program.WithGlobals(types.TypeAny()),
 			program.WithConstants(
 				types.NewFunctionBuilder(&types.FunctionType{
-					Params:  []types.Type{types.TypeI32},
-					Returns: []types.Type{types.TypeI64},
+					Params:  []types.Type{types.TypeI32()},
+					Returns: []types.Type{types.TypeI64()},
 				}).
-					Locals(types.TypeI32).
+					Locals(types.TypeI32()).
 					Emit(instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).
 					MustBuild(),
 			),
-			program.WithTypes(types.NewArrayType(types.TypeI32)),
+			program.WithTypes(types.NewArrayType(types.TypeI32())),
 			program.WithHandlers(instr.Handler{Start: 0, End: 10, Catch: 20, Depth: 1}),
 		)
 		p1, err := program.Parse(strings.NewReader(p0.String()))
@@ -175,10 +175,10 @@ func TestParse(t *testing.T) {
 	t.Run("canonical section order", func(t *testing.T) {
 		p0 := program.New(
 			[]instr.Instruction{instr.New(instr.NOP)},
-			program.WithLocals(types.TypeI32),
-			program.WithGlobals(types.TypeAny),
+			program.WithLocals(types.TypeI32()),
+			program.WithGlobals(types.TypeAny()),
 			program.WithConstants(types.I32(42)),
-			program.WithTypes(types.TypeI64),
+			program.WithTypes(types.TypeI64()),
 			program.WithHandlers(instr.Handler{Start: 0, End: 5, Catch: 10, Depth: 0}),
 		)
 		output := p0.String()
@@ -251,14 +251,14 @@ func TestParse(t *testing.T) {
 
 	t.Run("canonicalizes structurally equal struct types", func(t *testing.T) {
 		fnType := &types.FunctionType{
-			Params:  []types.Type{types.NewStructType(types.NewStructField(types.TypeI64))},
-			Returns: []types.Type{types.NewStructType(types.NewStructField(types.TypeI64))},
+			Params:  []types.Type{types.NewStructType(types.NewStructField(types.TypeI64()))},
+			Returns: []types.Type{types.NewStructType(types.NewStructField(types.TypeI64()))},
 		}
 		p0 := program.New(
 			nil,
 			program.WithTypes(
-				types.NewStructType(types.NewStructField(types.TypeI64)),
-				types.NewArrayType(types.NewStructType(types.NewStructField(types.TypeI64))),
+				types.NewStructType(types.NewStructField(types.TypeI64())),
+				types.NewArrayType(types.NewStructType(types.NewStructField(types.TypeI64()))),
 			),
 			program.WithConstants(
 				types.NewFunctionBuilder(fnType).Emit(instr.New(instr.NOP)).MustBuild(),
@@ -282,5 +282,34 @@ func TestParse(t *testing.T) {
 		_, err := program.Parse(strings.NewReader(line))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "exceeds maximum allowed size")
+	})
+}
+
+func FuzzParseProgram(f *testing.F) {
+	f.Add(program.New([]instr.Instruction{instr.New(instr.NOP)}).String())
+	f.Add(program.New(
+		[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.DROP)}, program.WithConstants(types.String("value")), program.WithLocals(types.TypeI32()), program.WithGlobals(types.TypeAny()), program.WithTypes(types.NewArrayType(types.TypeI32())),
+	).String())
+	f.Add(program.New(
+		[]instr.Instruction{instr.New(instr.NOP)},
+		program.WithConstants(types.String("has  spaces, \"quotes\", and a \t tab")),
+		program.WithTypes(types.NewStructType(
+			types.NewStructField(types.TypeI64(), types.FieldWithName("value")),
+			types.NewStructField(types.TypeAny(), types.FieldWithName("left")),
+		)),
+	).String())
+	f.Add("invalid")
+
+	f.Fuzz(func(t *testing.T, text string) {
+		if len(text) > 64<<10 {
+			t.Skip()
+		}
+		prog, err := program.Parse(strings.NewReader(text))
+		if err != nil {
+			return
+		}
+		roundTrip, err := program.Parse(strings.NewReader(prog.String()))
+		require.NoError(t, err)
+		require.Equal(t, prog.String(), roundTrip.String())
 	})
 }

@@ -1,7 +1,7 @@
 digits = "0123456789"
 
 
-def number(value):
+def _number(value):
     if value == 0:
         return digits[0]
 
@@ -18,12 +18,10 @@ def run():
     text = ""
 
     for index in range(512):
-        token = number((index * 2654435761) % 99999)
+        token = _number((index * 2654435761) % 99999)
 
         for offset in range(len(token)):
-            result = (
-                result + ord(token[offset]) * (offset + 1)
-            ) % 1000000007
+            result = (result + ord(token[offset]) * (offset + 1)) % 1000000007
 
         text += token + " "
 

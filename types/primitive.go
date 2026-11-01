@@ -5,8 +5,13 @@ import "fmt"
 // I32, I64, F32, and F64 are scalar VM values.
 type I32 int32
 
+// I64 is a 64-bit integer value.
 type I64 int64
+
+// F32 is a 32-bit float value.
 type F32 float32
+
+// F64 is a 64-bit float value.
 type F64 float64
 
 // I1 is a boolean value (the i1 type). It shares the i32 representation but
@@ -36,21 +41,20 @@ type f64Type struct{}
 type anyType struct{}
 
 // Null, False, and True are the canonical scalar constants.
-var (
+const (
 	Null  = Ref(0)
 	False = I32(0)
 	True  = I32(1)
 )
 
-// TypeI1 through TypeAny are the canonical VM type values.
 var (
-	TypeI1  Type = i1Type{}
-	TypeI8  Type = i8Type{}
-	TypeI32 Type = i32Type{}
-	TypeI64 Type = i64Type{}
-	TypeF32 Type = f32Type{}
-	TypeF64 Type = f64Type{}
-	TypeAny Type = anyType{}
+	typeI1  Type = i1Type{}
+	typeI8  Type = i8Type{}
+	typeI32 Type = i32Type{}
+	typeI64 Type = i64Type{}
+	typeF32 Type = f32Type{}
+	typeF64 Type = f64Type{}
+	typeAny Type = anyType{}
 )
 
 var _ Value = I1(false)
@@ -69,6 +73,42 @@ var _ Type = f32Type{}
 var _ Type = f64Type{}
 var _ Type = anyType{}
 
+// TypeI1 returns the canonical i1 type.
+func TypeI1() Type {
+	return typeI1
+}
+
+// TypeI8 returns the canonical i8 type.
+func TypeI8() Type {
+	return typeI8
+}
+
+// TypeI32 returns the canonical i32 type.
+func TypeI32() Type {
+	return typeI32
+}
+
+// TypeI64 returns the canonical i64 type.
+func TypeI64() Type {
+	return typeI64
+}
+
+// TypeF32 returns the canonical f32 type.
+func TypeF32() Type {
+	return typeF32
+}
+
+// TypeF64 returns the canonical f64 type.
+func TypeF64() Type {
+	return typeF64
+}
+
+// TypeAny returns the canonical any type.
+func TypeAny() Type {
+	return typeAny
+}
+
+// Bool returns True when b is true and False otherwise.
 func Bool(b bool) I32 {
 	if b {
 		return I32(1)
@@ -76,12 +116,60 @@ func Bool(b bool) I32 {
 	return I32(0)
 }
 
+func (i I32) Kind() Kind {
+	return KindI32
+}
+
+func (i I32) Type() Type {
+	return TypeI32()
+}
+
+func (i I32) String() string {
+	return fmt.Sprintf("%d", int32(i))
+}
+
+func (i I64) Kind() Kind {
+	return KindI64
+}
+
+func (i I64) Type() Type {
+	return TypeI64()
+}
+
+func (i I64) String() string {
+	return fmt.Sprintf("%d", int64(i))
+}
+
+func (f F32) Kind() Kind {
+	return KindF32
+}
+
+func (f F32) Type() Type {
+	return TypeF32()
+}
+
+func (f F32) String() string {
+	return fmt.Sprintf("%g", float32(f))
+}
+
+func (f F64) Kind() Kind {
+	return KindF64
+}
+
+func (f F64) Type() Type {
+	return TypeF64()
+}
+
+func (f F64) String() string {
+	return fmt.Sprintf("%g", float64(f))
+}
+
 func (b I1) Kind() Kind {
 	return KindI1
 }
 
 func (b I1) Type() Type {
-	return TypeI1
+	return TypeI1()
 }
 
 func (b I1) String() string {
@@ -96,59 +184,11 @@ func (i I8) Kind() Kind {
 }
 
 func (i I8) Type() Type {
-	return TypeI8
+	return TypeI8()
 }
 
 func (i I8) String() string {
 	return fmt.Sprintf("%d", int8(i))
-}
-
-func (i I32) Kind() Kind {
-	return KindI32
-}
-
-func (i I32) Type() Type {
-	return TypeI32
-}
-
-func (i I32) String() string {
-	return fmt.Sprintf("%d", int32(i))
-}
-
-func (i I64) Kind() Kind {
-	return KindI64
-}
-
-func (i I64) Type() Type {
-	return TypeI64
-}
-
-func (i I64) String() string {
-	return fmt.Sprintf("%d", int64(i))
-}
-
-func (f F32) Kind() Kind {
-	return KindF32
-}
-
-func (f F32) Type() Type {
-	return TypeF32
-}
-
-func (f F32) String() string {
-	return fmt.Sprintf("%g", float32(f))
-}
-
-func (f F64) Kind() Kind {
-	return KindF64
-}
-
-func (f F64) Type() Type {
-	return TypeF64
-}
-
-func (f F64) String() string {
-	return fmt.Sprintf("%g", float64(f))
 }
 
 func (r Ref) Kind() Kind {
@@ -156,7 +196,7 @@ func (r Ref) Kind() Kind {
 }
 
 func (r Ref) Type() Type {
-	return TypeAny
+	return TypeAny()
 }
 
 func (r Ref) String() string {
@@ -167,104 +207,100 @@ func (i1Type) Kind() Kind {
 	return KindI1
 }
 
-func (i1Type) String() string {
-	return "i1"
-}
-
 func (i1Type) Cast(other Type) bool {
-	return other == TypeI1
+	return other == TypeI1()
 }
 
 func (i1Type) Equals(other Type) bool {
-	return other == TypeI1
+	return other == TypeI1()
+}
+
+func (i1Type) String() string {
+	return "i1"
 }
 
 func (i8Type) Kind() Kind {
 	return KindI8
 }
 
-func (i8Type) String() string {
-	return "i8"
-}
-
 func (i8Type) Cast(other Type) bool {
-	return other == TypeI8
+	return other == TypeI8()
 }
 
 func (i8Type) Equals(other Type) bool {
-	return other == TypeI8
+	return other == TypeI8()
+}
+
+func (i8Type) String() string {
+	return "i8"
 }
 
 func (i32Type) Kind() Kind {
 	return KindI32
 }
 
-func (i32Type) String() string {
-	return "i32"
-}
-
 func (i32Type) Cast(other Type) bool {
-	return other == TypeI32
+	return other == TypeI32()
 }
 
 func (i32Type) Equals(other Type) bool {
-	return other == TypeI32
+	return other == TypeI32()
+}
+
+func (i32Type) String() string {
+	return "i32"
 }
 
 func (i64Type) Kind() Kind {
 	return KindI64
 }
 
-func (i64Type) String() string {
-	return "i64"
-}
-
 func (i64Type) Cast(other Type) bool {
-	return other == TypeI64
+	return other == TypeI64()
 }
 
 func (i64Type) Equals(other Type) bool {
-	return other == TypeI64
+	return other == TypeI64()
+}
+
+func (i64Type) String() string {
+	return "i64"
 }
 
 func (f32Type) Kind() Kind {
 	return KindF32
 }
 
-func (f32Type) String() string {
-	return "f32"
-}
-
 func (f32Type) Cast(other Type) bool {
-	return other == TypeF32
+	return other == TypeF32()
 }
 
 func (f32Type) Equals(other Type) bool {
-	return other == TypeF32
+	return other == TypeF32()
+}
+
+func (f32Type) String() string {
+	return "f32"
 }
 
 func (f64Type) Kind() Kind {
 	return KindF64
 }
 
+func (f64Type) Cast(other Type) bool {
+	return other == TypeF64()
+}
+
+func (f64Type) Equals(other Type) bool {
+	return other == TypeF64()
+}
+
 func (f64Type) String() string {
 	return "f64"
 }
 
-func (f64Type) Cast(other Type) bool {
-	return other == TypeF64
-}
-
-func (f64Type) Equals(other Type) bool {
-	return other == TypeF64
-}
-
 func (anyType) Kind() Kind {
 	return KindRef
-}
-
-func (anyType) String() string {
-	return "any"
 }
 
 func (anyType) Cast(_ Type) bool {
@@ -272,5 +308,9 @@ func (anyType) Cast(_ Type) bool {
 }
 
 func (anyType) Equals(other Type) bool {
-	return other == TypeAny
+	return other == TypeAny()
+}
+
+func (anyType) String() string {
+	return "any"
 }

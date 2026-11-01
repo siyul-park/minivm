@@ -20,15 +20,18 @@ type samples struct {
 	ips   []uint64
 }
 
+// NewCollector returns an empty collector.
 func NewCollector() *Collector {
 	return &Collector{}
 }
 
+// Value returns the metric value, or 0 when absent.
 func (c *Collector) Value(name string, labels ...Label) float64 {
 	v, _ := c.Metric(name, labels...)
 	return v
 }
 
+// Metric returns the metric matching name and labels and whether it exists.
 func (c *Collector) Metric(name string, labels ...Label) (float64, bool) {
 	for _, m := range c.Metrics() {
 		if m.Name == name && slices.Equal(m.Labels, labels) {
@@ -38,6 +41,7 @@ func (c *Collector) Metric(name string, labels ...Label) (float64, bool) {
 	return 0, false
 }
 
+// Metrics returns the sample counters followed by the metrics added with AddMetric.
 func (c *Collector) Metrics() []Metric {
 	out := []Metric{{Name: "vm_samples_total", Value: float64(c.total)}}
 	for fn := range c.funcs {
@@ -91,6 +95,7 @@ func (c *Collector) Add(fn, ip int, op byte) {
 	c.ops[op]++
 }
 
+// AddMetric adds value to the metric matching name and labels, creating it when absent.
 func (c *Collector) AddMetric(name string, value float64, labels ...Label) {
 	for i := range c.metrics {
 		if c.metrics[i].Name == name && slices.Equal(c.metrics[i].Labels, labels) {
@@ -105,10 +110,12 @@ func (c *Collector) AddMetric(name string, value float64, labels ...Label) {
 	})
 }
 
+// Total returns the number of recorded samples.
 func (c *Collector) Total() uint64 {
 	return c.total
 }
 
+// Samples returns the number of samples recorded in function fn.
 func (c *Collector) Samples(fn int) uint64 {
 	if fn < 0 || fn >= len(c.funcs) {
 		return 0
@@ -116,6 +123,7 @@ func (c *Collector) Samples(fn int) uint64 {
 	return c.funcs[fn].count
 }
 
+// IPs returns the instruction pointers of fn that have samples.
 func (c *Collector) IPs(fn int) []int {
 	if fn < 0 || fn >= len(c.funcs) {
 		return nil
@@ -129,6 +137,7 @@ func (c *Collector) IPs(fn int) []int {
 	return ips
 }
 
+// IP returns the number of samples at instruction pointer ip of fn.
 func (c *Collector) IP(fn, ip int) uint64 {
 	if fn < 0 || fn >= len(c.funcs) || ip < 0 || ip >= len(c.funcs[fn].ips) {
 		return 0
@@ -136,6 +145,7 @@ func (c *Collector) IP(fn, ip int) uint64 {
 	return c.funcs[fn].ips[ip]
 }
 
+// Opcode returns the number of samples whose instruction has opcode code.
 func (c *Collector) Opcode(code byte) uint64 {
 	return c.ops[code]
 }
@@ -173,18 +183,6 @@ func (c *Collector) grow(fn, ip int) {
 	c.funcs[fn].ips = extend(c.funcs[fn].ips, ip+1)
 }
 
-func extend[S ~[]E, E any](s S, need int) S {
-	if len(s) >= need {
-		return s
-	}
-	if cap(s) >= need {
-		return s[:need]
-	}
-	grown := make(S, need, max(need, 2*cap(s)))
-	copy(grown, s)
-	return grown
-}
-
 // reset clears every recorded sample while keeping the backing arrays c.funcs
 // and each function's ips grew to. A Pool flushes (and so resets) its local
 // collector on every Put, so nil-ing these out here would defeat the
@@ -198,6 +196,18 @@ func (c *Collector) reset() {
 	clear(c.ops[:])
 	clear(c.metrics)
 	c.metrics = c.metrics[:0]
+}
+
+func extend[S ~[]E, E any](s S, need int) S {
+	if len(s) >= need {
+		return s
+	}
+	if cap(s) >= need {
+		return s[:need]
+	}
+	grown := make(S, need, max(need, 2*cap(s)))
+	copy(grown, s)
+	return grown
 }
 
 func opcodeLabel(code byte) string {

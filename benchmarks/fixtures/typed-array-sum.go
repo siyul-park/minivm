@@ -26,6 +26,25 @@ func typedArraySum(size int32) int32 {
 	return size * (size + 1) / 2
 }
 
+func typedArraySumModule() []byte {
+	values := make([]byte, 256*4)
+	for index := range 256 {
+		stdbinary.LittleEndian.PutUint32(values[index*4:], uint32(index+1))
+	}
+	module := &wasm.Module{
+		TypeSection:     []*wasm.FunctionType{{Params: []wasm.ValueType{wasm.ValueTypeI32}, Results: []wasm.ValueType{wasm.ValueTypeI32}}},
+		FunctionSection: []wasm.Index{0},
+		CodeSection:     []*wasm.Code{{LocalTypes: []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI32}, Body: typedArraySumWasm()}},
+		MemorySection:   &wasm.Memory{Min: 1},
+		DataSection: []*wasm.DataSegment{{
+			OffsetExpression: &wasm.ConstantExpression{Opcode: wasm.OpcodeI32Const, Data: leb128.EncodeInt32(arrayOffset)},
+			Init:             values,
+		}},
+		ExportSection: []*wasm.Export{{Name: "typed_array_sum", Type: wasm.ExternTypeFunc, Index: 0}},
+	}
+	return binary.EncodeModule(module)
+}
+
 func typedArraySumWasm() []byte {
 	var code wasmCode
 	code.i32(0)
@@ -59,23 +78,4 @@ func typedArraySumWasm() []byte {
 	code.local(wasm.OpcodeLocalGet, 2)
 	code.op(wasm.OpcodeEnd)
 	return code
-}
-
-func typedArraySumModule() []byte {
-	values := make([]byte, 256*4)
-	for index := range 256 {
-		stdbinary.LittleEndian.PutUint32(values[index*4:], uint32(index+1))
-	}
-	module := &wasm.Module{
-		TypeSection:     []*wasm.FunctionType{{Params: []wasm.ValueType{wasm.ValueTypeI32}, Results: []wasm.ValueType{wasm.ValueTypeI32}}},
-		FunctionSection: []wasm.Index{0},
-		CodeSection:     []*wasm.Code{{LocalTypes: []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI32}, Body: typedArraySumWasm()}},
-		MemorySection:   &wasm.Memory{Min: 1},
-		DataSection: []*wasm.DataSegment{{
-			OffsetExpression: &wasm.ConstantExpression{Opcode: wasm.OpcodeI32Const, Data: leb128.EncodeInt32(arrayOffset)},
-			Init:             values,
-		}},
-		ExportSection: []*wasm.Export{{Name: "typed_array_sum", Type: wasm.ExternTypeFunc, Index: 0}},
-	}
-	return binary.EncodeModule(module)
 }

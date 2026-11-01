@@ -21,7 +21,7 @@ func TestMarshalerFunc_Marshal(t *testing.T) {
 	m := interp.MarshalerFunc(func(_ *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
 		return types.I32(*(*int32)(p) * 2), nil
 	})
-	r := interp.NewRegistry(interp.WithMarshaler(reflect.TypeFor[int32](), types.TypeI32, m))
+	r := interp.NewRegistry(interp.WithMarshaler(reflect.TypeFor[int32](), types.TypeI32(), m))
 
 	got, err := r.Marshal(i, n)
 	require.NoError(t, err)
@@ -34,7 +34,7 @@ func TestEncoder_Interp(t *testing.T) {
 
 	var got *interp.Interpreter
 	r := interp.NewRegistry(interp.WithMarshaler(
-		reflect.TypeFor[encodeCelsius](), types.TypeI32,
+		reflect.TypeFor[encodeCelsius](), types.TypeI32(),
 		interp.MarshalerFunc(func(e *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
 			got = e.Interp()
 			return types.I32(*(*encodeCelsius)(p)), nil
@@ -54,13 +54,13 @@ func TestEncoder_Encode(t *testing.T) {
 
 	r := interp.NewRegistry(
 		interp.WithMarshaler(
-			reflect.TypeFor[encodeCelsius](), types.TypeI32,
+			reflect.TypeFor[encodeCelsius](), types.TypeI32(),
 			interp.MarshalerFunc(func(e *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
 				n := int32(*(*encodeCelsius)(p))
 				return e.Encode(reflect.TypeFor[int32](), unsafe.Pointer(&n))
 			})),
 		interp.WithMarshaler(
-			reflect.TypeFor[int32](), types.TypeI32,
+			reflect.TypeFor[int32](), types.TypeI32(),
 			interp.MarshalerFunc(func(_ *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
 				return types.I32(*(*int32)(p) + 100), nil
 			})))

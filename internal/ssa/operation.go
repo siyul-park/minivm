@@ -7,11 +7,53 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// Operation is one SSA instruction.
+type Operation struct {
+	// Op identifies the IR operation.
+	Op Op
+	// Code identifies the guest opcode for OpExec.
+	Code instr.Opcode
+	// Slot identifies storage for OpLoad/OpStore.
+	Slot Slot
+	// Const is the value for OpConst: the result type's native word (i1 0/1,
+	// i8/i32/f32 a zero-extended 32-bit lane, i64/f64 the full 64 bits, ref a
+	// types.Boxed word).
+	Const uint64
+	// Shape is the admitted specialization.
+	Shape Shape
+	// Frames is the deoptimization frame chain.
+	Frames []Frame
+
+	// Args are operation inputs.
+	Args []Value
+	// State identifies the resume state.
+	State Value
+	// Results are operation outputs.
+	Results []Value
+}
+
+// Terminator ends a block and selects successors.
+type Terminator struct {
+	// Op identifies the terminator.
+	Op Op
+	// Args are values passed to the successor.
+	Args []Value
+	// State identifies the resume state.
+	State Value
+	// Edges identify successor blocks and arguments.
+	Edges []Edge
+}
+
+// Edge names a successor and its block arguments.
+type Edge struct {
+	// Block is the successor id.
+	Block int
+	// Args are the values bound to the successor's params.
+	Args []Value
+}
+
 // Op identifies an SSA operation or terminator.
 type Op uint8
-
-// Space identifies interpreter storage.
-type Space uint8
 
 // Slot identifies one interpreter storage location.
 type Slot struct {
@@ -81,50 +123,8 @@ type Operand struct {
 	Owned bool
 }
 
-// Operation is one SSA instruction.
-type Operation struct {
-	// Op identifies the IR operation.
-	Op Op
-	// Code identifies the guest opcode for OpExec.
-	Code instr.Opcode
-	// Slot identifies storage for OpLoad/OpStore.
-	Slot Slot
-	// Const is the value for OpConst: the result type's native word (i1 0/1,
-	// i8/i32/f32 a zero-extended 32-bit lane, i64/f64 the full 64 bits, ref a
-	// types.Boxed word).
-	Const uint64
-	// Shape is the admitted specialization.
-	Shape Shape
-	// Frames is the deoptimization frame chain.
-	Frames []Frame
-
-	// Args are operation inputs.
-	Args []Value
-	// State identifies the resume state.
-	State Value
-	// Results are operation outputs.
-	Results []Value
-}
-
-// Terminator ends a block and selects successors.
-type Terminator struct {
-	// Op identifies the terminator.
-	Op Op
-	// Args are values passed to the successor.
-	Args []Value
-	// State identifies the resume state.
-	State Value
-	// Edges identify successor blocks and arguments.
-	Edges []Edge
-}
-
-// Edge names a successor and its block arguments.
-type Edge struct {
-	// Block is the successor id.
-	Block int
-	// Args are the values bound to the successor's params.
-	Args []Value
-}
+// Space identifies interpreter storage.
+type Space uint8
 
 const (
 	OpConst Op = iota

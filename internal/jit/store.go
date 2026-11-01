@@ -260,6 +260,12 @@ func (r *Reader) Detach() {
 	r.store.detach(r)
 }
 
+func newReader(store *Store, epoch uint64) *Reader {
+	r := &Reader{store: store}
+	r.seen.Store(epoch)
+	return r
+}
+
 func (s *Store) retire(c *Code) {
 	e := s.currentEpoch() + 1
 	c.retire(e)
@@ -268,18 +274,8 @@ func (s *Store) retire(c *Code) {
 	s.pending.Add(1)
 }
 
-func newReader(store *Store, epoch uint64) *Reader {
-	r := &Reader{store: store}
-	r.seen.Store(epoch)
-	return r
-}
-
 func (s *Store) currentEpoch() uint64 {
 	return s.epoch.Load()
-}
-
-func (r *Reader) seenEpoch() uint64 {
-	return r.seen.Load()
 }
 
 func (s *Store) detach(r *Reader) {
@@ -288,4 +284,8 @@ func (s *Store) detach(r *Reader) {
 	if k := slices.Index(s.readers, r); k >= 0 {
 		s.readers = slices.Delete(s.readers, k, k+1)
 	}
+}
+
+func (r *Reader) seenEpoch() uint64 {
+	return r.seen.Load()
 }

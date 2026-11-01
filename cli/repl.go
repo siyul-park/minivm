@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -139,8 +140,10 @@ func (r *REPL) Run(ctx context.Context) error {
 func (r *REPL) command(ctx context.Context, scanner *bufio.Scanner, line string) bool {
 	cmd, arg, _ := strings.Cut(strings.TrimSpace(line), " ")
 	arg = strings.TrimSpace(arg)
+	cmd = strings.ToLower(cmd)
 
-	switch strings.ToLower(cmd) {
+	var err error
+	switch cmd {
 	case ".quit", ".exit":
 		fmt.Fprintln(r.out, "bye")
 		return true
@@ -149,52 +152,35 @@ func (r *REPL) command(ctx context.Context, scanner *bufio.Scanner, line string)
 		fmt.Fprintln(r.out, "reset.")
 	case ".show":
 		r.show()
-	case ".profile":
-		if err := r.profile(ctx); err != nil {
-			r.printErr(err)
-		}
-	case ".load":
-		if err := r.load(arg); err != nil {
-			r.printErr(err)
-		}
-	case ".save":
-		if err := r.save(arg); err != nil {
-			r.printErr(err)
-		}
 	case ".help":
 		fmt.Fprint(r.out, helpText)
-	case ".const":
-		if err := r.readConst(scanner); err != nil {
-			r.printErr(err)
-		}
-	case ".type":
-		if err := r.readType(scanner); err != nil {
-			r.printErr(err)
-		}
-	case ".break", ".b":
-		if err := r.breakpoint(arg); err != nil {
-			r.printErr(err)
-		}
 	case ".breaks":
 		r.showBreakpoints()
+	case ".profile":
+		err = r.profile(ctx)
+	case ".load":
+		err = r.load(arg)
+	case ".save":
+		err = r.save(arg)
+	case ".const":
+		err = r.readConst(scanner)
+	case ".type":
+		err = r.readType(scanner)
+	case ".break", ".b":
+		err = r.breakpoint(arg)
 	case ".clear":
-		if err := r.clearBreakpoint(arg); err != nil {
-			r.printErr(err)
-		}
+		err = r.clearBreakpoint(arg)
 	case ".enable":
-		if err := r.enableBreakpoint(arg, true); err != nil {
-			r.printErr(err)
-		}
+		err = r.enableBreakpoint(arg, true)
 	case ".disable":
-		if err := r.enableBreakpoint(arg, false); err != nil {
-			r.printErr(err)
-		}
+		err = r.enableBreakpoint(arg, false)
 	case ".debug":
-		if err := r.debug(ctx, scanner); err != nil {
-			r.printErr(err)
-		}
+		err = r.debug(ctx, scanner)
 	default:
 		fmt.Fprintf(r.out, "unknown command: %s (type '.help' for help)\n", line)
+	}
+	if err != nil {
+		r.printErr(err)
 	}
 	return false
 }
@@ -485,6 +471,10 @@ func (r *REPL) debugLoop(scanner *bufio.Scanner, vm *interp.Interpreter, dbg *de
 		case "continue", "c":
 			dbg.Continue()
 			return false, nil
+		case "quit", "exit", "q":
+			return true, nil
+		case "":
+			r.showStop(dbg.Stop(), vm)
 		case "stack":
 			printStack(r.out, vm)
 		case "locals":
@@ -497,25 +487,16 @@ func (r *REPL) debugLoop(scanner *bufio.Scanner, vm *interp.Interpreter, dbg *de
 			r.showBreakpoints()
 		case "break", "b":
 			if arg == "" {
-				r.printErr(fmt.Errorf("usage: break <ip> or break <fn>:<ip>"))
-				continue
-			}
-			if err := r.breakpoint(arg); err != nil {
+				r.printErr(errors.New("usage: break <ip> or break <fn>:<ip>"))
+			} else if err := r.breakpoint(arg); err != nil {
 				r.printErr(err)
 			}
 		case "clear":
 			if arg == "" {
-				r.printErr(fmt.Errorf("usage: clear <id>"))
-				continue
-			}
-			if err := r.clearBreakpoint(arg); err != nil {
+				r.printErr(errors.New("usage: clear <id>"))
+			} else if err := r.clearBreakpoint(arg); err != nil {
 				r.printErr(err)
 			}
-		case "quit", "exit", "q":
-			return true, nil
-		case "":
-
-			r.showStop(dbg.Stop(), vm)
 		default:
 			fmt.Fprintf(r.out, "unknown debug command: %q (step/next/finish/continue/stack/locals/globals/frames/breaks/break/clear/quit)\n", line)
 		}
@@ -655,7 +636,7 @@ func printFrames(out io.Writer, vm *interp.Interpreter) {
 		return
 	}
 	for n := 0; n < depth; n++ {
-		fn, ip, _, err := vm.Frame(n)
+		fn, ip, err := vm.Frame(n)
 		if err != nil {
 			break
 		}
@@ -675,57 +656,42 @@ func normalize(line string, ip int) (string, error) {
 		line = after
 	}
 	fields := strings.Fields(line)
-	if len(fields) == 0 {
+	if len(fields) < 2 {
 		return line, nil
 	}
-	op := strings.ToLower(fields[0])
-	switch op {
+	switch strings.ToLower(fields[0]) {
 	case "br", "br_if":
-		if len(fields) < 2 || !strings.HasPrefix(fields[1], "@") {
+		if !strings.HasPrefix(fields[1], "@") {
 			return line, nil
-		}
-		abs, err := parseInt(fields[1][1:])
-		if err != nil {
-			return "", fmt.Errorf("invalid absolute branch target %s: %w", fields[1], err)
 		}
 		const width = 3
-		rel := abs - (ip + width)
-		if rel < 0 || rel > 0xFFFF {
-			return "", fmt.Errorf("branch target %s out of range from offset %d", fields[1], ip)
+		rel, err := relative(fields[1], ip, width)
+		if err != nil {
+			return "", err
 		}
 		return fmt.Sprintf("%s %d", fields[0], rel), nil
-
 	case "br_table":
-		if len(fields) < 2 {
-			return line, nil
-		}
 		count, err := parseInt(fields[1])
 		if err != nil {
 			return "", fmt.Errorf("invalid br_table count %s: %w", fields[1], err)
 		}
 		width := 4 + count*2
-		tokens := make([]string, len(fields))
-		copy(tokens, fields)
+		tokens := slices.Clone(fields)
 		changed := false
 		for i, f := range fields[2:] {
 			if !strings.HasPrefix(f, "@") {
 				continue
 			}
-			abs, err := parseInt(f[1:])
+			rel, err := relative(f, ip, width)
 			if err != nil {
-				return "", fmt.Errorf("invalid absolute branch target %s: %w", f, err)
+				return "", err
 			}
-			rel := abs - (ip + width)
-			if rel < 0 || rel > 0xFFFF {
-				return "", fmt.Errorf("branch target %s out of range from offset %d", f, ip)
-			}
-			tokens[2+i] = fmt.Sprintf("%d", rel)
+			tokens[2+i] = strconv.Itoa(rel)
 			changed = true
 		}
-		if !changed {
-			return line, nil
+		if changed {
+			return strings.Join(tokens, " "), nil
 		}
-		return strings.Join(tokens, " "), nil
 	}
 	return line, nil
 }
@@ -747,6 +713,20 @@ func parseBreakSpec(spec string) (fn, ip int, err error) {
 		}
 	}
 	return fn, ip, nil
+}
+
+// relative converts the "@N" absolute target token of the instruction at ip
+// into an offset from the end of that width-byte instruction.
+func relative(token string, ip, width int) (int, error) {
+	abs, err := parseInt(token[1:])
+	if err != nil {
+		return 0, fmt.Errorf("invalid absolute branch target %s: %w", token, err)
+	}
+	rel := abs - (ip + width)
+	if rel < 0 || rel > 0xFFFF {
+		return 0, fmt.Errorf("branch target %s out of range from offset %d", token, ip)
+	}
+	return rel, nil
 }
 
 func parseInt(s string) (int, error) {

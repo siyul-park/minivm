@@ -1,5 +1,6 @@
 package types
 
+// Closure is a function reference bound to its captured upvalues.
 type Closure struct {
 	Typ    *FunctionType
 	Fn     Ref
@@ -8,6 +9,7 @@ type Closure struct {
 
 var _ Traceable = (*Closure)(nil)
 
+// NewClosure returns a closure over the function at ref fn with upvals; a nil typ becomes the empty function type.
 func NewClosure(typ *FunctionType, fn Ref, upvals []Boxed) *Closure {
 	if typ == nil {
 		typ = &FunctionType{}
@@ -23,10 +25,6 @@ func (c *Closure) Type() Type {
 	return c.Typ
 }
 
-func (c *Closure) String() string {
-	return c.Typ.String()
-}
-
 func (c *Closure) Refs(dst []Ref) []Ref {
 	dst = append(dst, c.Fn)
 	for _, u := range c.Upvals {
@@ -35,4 +33,8 @@ func (c *Closure) Refs(dst []Ref) []Ref {
 		}
 	}
 	return dst
+}
+
+func (c *Closure) String() string {
+	return c.Typ.String()
 }

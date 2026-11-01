@@ -1,4 +1,73 @@
 {
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "jq -r '.tool_input.file_path // empty' | { read -r f && [[ \"$f\" == *.go ]] && ~/go/bin/goimports -w \"$f\"; } 2>/dev/null || true",
+            "statusMessage": "goimports...",
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit|Write"
+      },
+      {
+        "hooks": [
+          {
+            "command": "lighthouse hook claude-code post-tool-use --allow-incomplete",
+            "timeout": 120,
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit|Write|MultiEdit"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "lighthouse hook claude-code pre-tool-use",
+            "timeout": 120,
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit|Write|MultiEdit"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "lighthouse hook claude-code session-start",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "lighthouse hook claude-code stop --allow-incomplete",
+            "timeout": 300,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "lighthouse hook claude-code user-prompt-submit",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "allow": [
       "Bash(go test *)",
@@ -19,20 +88,9 @@
       "Bash(make doc*)",
       "Bash(grep *)",
       "Bash(find . *)"
-    ]
-  },
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "jq -r '.tool_input.file_path // empty' | { read -r f && [[ \"$f\" == *.go ]] && ~/go/bin/goimports -w \"$f\"; } 2>/dev/null || true",
-            "statusMessage": "goimports..."
-          }
-        ]
-      }
+    ],
+    "deny": [
+      "Bash(lighthouse trust:*)"
     ]
   }
 }

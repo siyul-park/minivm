@@ -15,6 +15,30 @@ func init() {
 		Native: registry.Native{I32: run},
 	})
 }
+
+func spectralNorm(n, rounds int32) int32 {
+	u := make([]float64, n)
+	for i := range u {
+		u[i] = 1.0
+	}
+	v := make([]float64, n)
+	tmp := make([]float64, n)
+
+	for it := int32(0); it < rounds; it++ {
+		spectralnormAtaTimesU(n, u, v, tmp)
+		spectralnormAtaTimesU(n, v, u, tmp)
+	}
+
+	var vbv, vv float64
+	for i := int32(0); i < n; i++ {
+		vbv += u[i] * v[i]
+		vv += v[i] * v[i]
+	}
+
+	result := math.Sqrt(vbv / vv)
+	return int32(result * 1e9)
+}
+
 func spectralnormAtaTimesU(n int32, u, out, tmp []float64) {
 	spectralnormATimesU(n, u, tmp)
 	spectralnormAtTimesU(n, tmp, out)
@@ -42,27 +66,4 @@ func spectralnormAtTimesU(n int32, u, out []float64) {
 
 func spectralnormEvalA(i, j int32) float64 {
 	return 1.0 / float64((i+j)*(i+j+1)/2+i+1)
-}
-
-func spectralNorm(n, rounds int32) int32 {
-	u := make([]float64, n)
-	for i := range u {
-		u[i] = 1.0
-	}
-	v := make([]float64, n)
-	tmp := make([]float64, n)
-
-	for it := int32(0); it < rounds; it++ {
-		spectralnormAtaTimesU(n, u, v, tmp)
-		spectralnormAtaTimesU(n, v, u, tmp)
-	}
-
-	var vbv, vv float64
-	for i := int32(0); i < n; i++ {
-		vbv += u[i] * v[i]
-		vv += v[i] * v[i]
-	}
-
-	result := math.Sqrt(vbv / vv)
-	return int32(result * 1e9)
 }

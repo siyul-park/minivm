@@ -77,23 +77,23 @@ func Parse(s string) (Type, error) {
 	s = strings.TrimSpace(s)
 	switch s {
 	case "i1":
-		return TypeI1, nil
+		return TypeI1(), nil
 	case "i8":
-		return TypeI8, nil
+		return TypeI8(), nil
 	case "i32":
-		return TypeI32, nil
+		return TypeI32(), nil
 	case "i64":
-		return TypeI64, nil
+		return TypeI64(), nil
 	case "f32":
-		return TypeF32, nil
+		return TypeF32(), nil
 	case "f64":
-		return TypeF64, nil
+		return TypeF64(), nil
 	case "any":
-		return TypeAny, nil
+		return TypeAny(), nil
 	case "string":
-		return TypeString, nil
+		return TypeString(), nil
 	case "error":
-		return TypeError, nil
+		return TypeError(), nil
 	}
 	if strings.HasPrefix(s, "[]") {
 		elem, err := Parse(s[2:])
@@ -184,41 +184,46 @@ func parseFunctionType(s string) (*FunctionType, error) {
 	paramStr := rest[:end]
 	suffix := strings.TrimSpace(rest[end+1:])
 
-	var params []Type
+	var params, returns []Type
+	var err error
 	if paramStr != "" {
-		for _, p := range strings.Split(paramStr, ",") {
-			t, err := Parse(strings.TrimSpace(p))
-			if err != nil {
-				return nil, fmt.Errorf("param type: %w", err)
-			}
-			params = append(params, t)
+		if params, err = parseTypeList(paramStr, "param"); err != nil {
+			return nil, err
 		}
 	}
 
-	var returns []Type
-	if suffix != "" {
-		if strings.HasPrefix(suffix, "(") {
-			inner := suffix[1:]
-			if idx := strings.LastIndex(inner, ")"); idx >= 0 {
-				inner = inner[:idx]
-			}
-			for _, r := range strings.Split(inner, ",") {
-				t, err := Parse(strings.TrimSpace(r))
-				if err != nil {
-					return nil, fmt.Errorf("return type: %w", err)
-				}
-				returns = append(returns, t)
-			}
-		} else {
-			t, err := Parse(suffix)
-			if err != nil {
-				return nil, fmt.Errorf("return type: %w", err)
-			}
-			returns = []Type{t}
+	switch {
+	case suffix == "":
+	case strings.HasPrefix(suffix, "("):
+		inner := suffix[1:]
+		if idx := strings.LastIndex(inner, ")"); idx >= 0 {
+			inner = inner[:idx]
 		}
+		if returns, err = parseTypeList(inner, "return"); err != nil {
+			return nil, err
+		}
+	default:
+		t, err := Parse(suffix)
+		if err != nil {
+			return nil, fmt.Errorf("return type: %w", err)
+		}
+		returns = []Type{t}
 	}
 
 	return &FunctionType{Params: params, Returns: returns}, nil
+}
+
+// parseTypeList parses comma-separated types; role names them in errors.
+func parseTypeList(list, role string) ([]Type, error) {
+	var out []Type
+	for _, item := range strings.Split(list, ",") {
+		t, err := Parse(strings.TrimSpace(item))
+		if err != nil {
+			return nil, fmt.Errorf("%s type: %w", role, err)
+		}
+		out = append(out, t)
+	}
+	return out, nil
 }
 
 func parseStructType(s string) (*StructType, error) {

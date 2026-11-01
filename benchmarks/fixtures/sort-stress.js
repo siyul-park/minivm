@@ -5,10 +5,9 @@ function makeList(n, seed) {
     for (let i = 0; i < n; i++) {
         const high = Math.trunc(state / 65536);
         const low = state - high * 65536;
-        state = (
-            (1103515245 * low + 12345)
-            + ((1103515245 * high) % 32768) * 65536
-        ) % 2147483648;
+        state =
+            (1103515245 * low + 12345 + ((1103515245 * high) % 32768) * 65536) %
+            2147483648;
         xs[i] = state % 1000000;
     }
 

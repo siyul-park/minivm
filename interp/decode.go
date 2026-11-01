@@ -1,7 +1,6 @@
 package interp
 
 import (
-	"context"
 	"fmt"
 	"math"
 	"reflect"
@@ -35,8 +34,15 @@ type Decoder struct {
 	registry *Registry
 }
 
+// Unmarshal decodes an encoded value.
+func (f UnmarshalerFunc) Unmarshal(d *Decoder, val types.Value, p unsafe.Pointer) error {
+	return f(d, val, p)
+}
+
 // Interp returns the interpreter this conversion runs against.
-func (d *Decoder) Interp() *Interpreter { return d.interp }
+func (d *Decoder) Interp() *Interpreter {
+	return d.interp
+}
 
 // Decode writes val into the Go value of type t at p, resolving t through the
 // same codec that started the conversion. Like Unmarshal, it takes a slot or a
@@ -52,36 +58,6 @@ func (d *Decoder) Decode(val types.Value, t reflect.Type, p unsafe.Pointer) erro
 		return err
 	}
 	return c.set(d, value, p)
-}
-
-// Unmarshal decodes an encoded value.
-func (f UnmarshalerFunc) Unmarshal(d *Decoder, val types.Value, p unsafe.Pointer) error {
-	return f(d, val, p)
-}
-
-// elements reports the length of a VM array and a reader for its elements. The
-// source representation is resolved once per array rather than per element.
-func (d *Decoder) elements(val types.Value) (int, func(int) (types.Value, error), error) {
-	switch v := val.(type) {
-	case types.TypedArray[bool]:
-		return len(v), func(i int) (types.Value, error) { return types.I1(v[i]), nil }, nil
-	case types.TypedArray[int8]:
-		return len(v), func(i int) (types.Value, error) { return types.I32(v[i]), nil }, nil
-	case types.TypedArray[int32]:
-		return len(v), func(i int) (types.Value, error) { return types.I32(v[i]), nil }, nil
-	case types.TypedArray[int64]:
-		return len(v), func(i int) (types.Value, error) { return types.I64(v[i]), nil }, nil
-	case types.TypedArray[float32]:
-		return len(v), func(i int) (types.Value, error) { return types.F32(v[i]), nil }, nil
-	case types.TypedArray[float64]:
-		return len(v), func(i int) (types.Value, error) { return types.F64(v[i]), nil }, nil
-	case *types.Array:
-		return len(v.Elems), func(i int) (types.Value, error) {
-			return d.interp.deref(v.Elems[i])
-		}, nil
-	default:
-		return 0, nil, fmt.Errorf("%w: source=%T", ErrTypeMismatch, val)
-	}
 }
 
 // unmarshalConverting calls the type's own UnmarshalVM.
@@ -159,73 +135,6 @@ func unmarshalPointer(elem *conversion) UnmarshalerFunc {
 	}
 }
 
-// unmarshalFunc wraps a VM function as a Go function that marshals arguments,
-// runs the VM function on the same interpreter, then decodes the results.
-func unmarshalFunc(t reflect.Type, typ *types.FunctionType) UnmarshalerFunc {
-	failing := t.NumOut() > 0 && t.Out(t.NumOut()-1).Implements(typeError)
-
-	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
-		target, ok := d.interp.callable(val)
-		if !ok || target.Type() == nil || !target.Type().Equals(typ) {
-			return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, val, t)
-		}
-		registry := d.registry
-		fn := reflect.MakeFunc(t, func(in []reflect.Value) []reflect.Value {
-			out := make([]reflect.Value, t.NumOut())
-			for idx := range out {
-				out[idx] = reflect.Zero(t.Out(idx))
-			}
-			fail := func(err error) []reflect.Value {
-				if !failing {
-					panic(err)
-				}
-				out[len(out)-1] = reflect.ValueOf(err)
-				return out
-			}
-
-			ctx := context.Background()
-			enc := &Encoder{interp: d.interp, registry: registry}
-			params := make([]types.Boxed, 0, len(typ.Params))
-			for idx := range in {
-				arg := in[idx]
-				if t.In(idx) == typeContext {
-					if caller, _ := arg.Interface().(context.Context); caller != nil {
-						ctx = caller
-					}
-					continue
-				}
-				boxed, err := enc.slot(arg, typ.Params[len(params)])
-				if err != nil {
-
-					enc.discard()
-					return fail(fmt.Errorf("function param %d: %w", len(params), err))
-				}
-				params = append(params, boxed)
-			}
-
-			returns, err := d.interp.invoke(ctx, val, params)
-			if err != nil {
-				return fail(err)
-			}
-			defer func() {
-				for _, value := range returns {
-					d.interp.releaseBox(value)
-				}
-			}()
-			for idx := range returns {
-				result := reflect.New(t.Out(idx))
-				if err := registry.Unmarshal(d.interp, returns[idx], result.Interface()); err != nil {
-					return fail(fmt.Errorf("function return %d: %w", idx, err))
-				}
-				out[idx] = result.Elem()
-			}
-			return out
-		})
-		reflect.NewAt(t, p).Elem().Set(fn)
-		return nil
-	}
-}
-
 // unmarshalArray decodes a VM array into a Go array or slice.
 func unmarshalArray(t reflect.Type, elem *conversion) UnmarshalerFunc {
 	stride := t.Elem().Size()
@@ -253,6 +162,31 @@ func unmarshalArray(t reflect.Type, elem *conversion) UnmarshalerFunc {
 		}
 		reflect.NewAt(t, p).Elem().Set(out)
 		return nil
+	}
+}
+
+// elements reports the length of a VM array and a reader for its elements. The
+// source representation is resolved once per array rather than per element.
+func (d *Decoder) elements(val types.Value) (int, func(int) (types.Value, error), error) {
+	switch v := val.(type) {
+	case types.TypedArray[bool]:
+		return len(v), func(i int) (types.Value, error) { return types.I1(v[i]), nil }, nil
+	case types.TypedArray[int8]:
+		return len(v), func(i int) (types.Value, error) { return types.I32(v[i]), nil }, nil
+	case types.TypedArray[int32]:
+		return len(v), func(i int) (types.Value, error) { return types.I32(v[i]), nil }, nil
+	case types.TypedArray[int64]:
+		return len(v), func(i int) (types.Value, error) { return types.I64(v[i]), nil }, nil
+	case types.TypedArray[float32]:
+		return len(v), func(i int) (types.Value, error) { return types.F32(v[i]), nil }, nil
+	case types.TypedArray[float64]:
+		return len(v), func(i int) (types.Value, error) { return types.F64(v[i]), nil }, nil
+	case *types.Array:
+		return len(v.Elems), func(i int) (types.Value, error) {
+			return d.interp.deref(v.Elems[i])
+		}, nil
+	default:
+		return 0, nil, fmt.Errorf("%w: source=%T", ErrTypeMismatch, val)
 	}
 }
 
@@ -341,26 +275,19 @@ func (d *Decoder) entries(val types.Value, reserve func(int), set func(key, valu
 	}
 	switch m := val.(type) {
 	case *types.TypedMap[bool]:
-		reserve(m.Len())
-		m.Range(func(k bool, v types.Boxed) { visit(types.I1(k), v) })
+		rangeKeys(m, func(k bool) types.Value { return types.I1(k) }, reserve, visit)
 	case *types.TypedMap[int8]:
-		reserve(m.Len())
-		m.Range(func(k int8, v types.Boxed) { visit(types.I8(k), v) })
+		rangeKeys(m, func(k int8) types.Value { return types.I8(k) }, reserve, visit)
 	case *types.TypedMap[int32]:
-		reserve(m.Len())
-		m.Range(func(k int32, v types.Boxed) { visit(types.I32(k), v) })
+		rangeKeys(m, func(k int32) types.Value { return types.I32(k) }, reserve, visit)
 	case *types.TypedMap[int64]:
-		reserve(m.Len())
-		m.Range(func(k int64, v types.Boxed) { visit(types.I64(k), v) })
+		rangeKeys(m, func(k int64) types.Value { return types.I64(k) }, reserve, visit)
 	case *types.TypedMap[float32]:
-		reserve(m.Len())
-		m.Range(func(k float32, v types.Boxed) { visit(types.F32(k), v) })
+		rangeKeys(m, func(k float32) types.Value { return types.F32(k) }, reserve, visit)
 	case *types.TypedMap[float64]:
-		reserve(m.Len())
-		m.Range(func(k float64, v types.Boxed) { visit(types.F64(k), v) })
+		rangeKeys(m, func(k float64) types.Value { return types.F64(k) }, reserve, visit)
 	case *types.TypedMap[string]:
-		reserve(m.Len())
-		m.Range(func(k string, v types.Boxed) { visit(types.String(k), v) })
+		rangeKeys(m, func(k string) types.Value { return types.String(k) }, reserve, visit)
 	case *types.Map:
 		reserve(m.Len())
 		m.Range(func(k types.MapKey, entry types.MapEntry) {
@@ -377,6 +304,12 @@ func (d *Decoder) entries(val types.Value, reserve func(int), set func(key, valu
 		return fmt.Errorf("%w: source=%T", ErrTypeMismatch, val)
 	}
 	return err
+}
+
+// rangeKeys reserves m's size, then visits each entry under its boxed key.
+func rangeKeys[K comparable](m *types.TypedMap[K], key func(K) types.Value, reserve func(int), visit func(types.Value, types.Boxed)) {
+	reserve(m.Len())
+	m.Range(func(k K, v types.Boxed) { visit(key(k), v) })
 }
 
 // unmarshalStruct decodes a VM struct into a Go struct, matching each Go field

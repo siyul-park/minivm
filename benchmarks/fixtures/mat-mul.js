@@ -18,13 +18,11 @@ function run() {
 
     for (let i = 0; i < n; i++) {
         for (let j = 0; j < n; j++) {
-            a[i * n + j] = (i * 7 + j * 3) % 13 - 6;
-            b[i * n + j] = (i * 5 + j * 11) % 17 - 8;
+            a[i * n + j] = ((i * 7 + j * 3) % 13) - 6;
+            b[i * n + j] = ((i * 5 + j * 11) % 17) - 8;
         }
     }
 
     mul(n, a, b, out);
-    return Math.trunc(
-        out.reduce((sum, value) => sum + value, 0) * 1e6,
-    );
+    return Math.trunc(out.reduce((sum, value) => sum + value, 0) * 1e6);
 }

@@ -7,6 +7,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestLedger_Spend(t *testing.T) {
+	tests := []struct {
+		name  string
+		work  int64
+		exits int
+		want  bool
+	}{
+		{"credit banks up to slack: 53 unpaid bridges after long work pay", 1 << 20, 53, true},
+		{"credit stops at slack: the 54th does not", 1 << 20, 54, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var ledger jit.Ledger
+			ledger.Spend(tt.work)
+			pays := true
+			for range tt.exits {
+				pays = ledger.Charge(jit.ClassBridge)
+			}
+			require.Equal(t, tt.want, pays)
+		})
+	}
+}
+
 func TestLedger_Charge(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -39,29 +62,6 @@ func TestLedger_Charge(t *testing.T) {
 			for range tt.exits {
 				ledger.Spend(tt.work)
 				pays = ledger.Charge(tt.class)
-			}
-			require.Equal(t, tt.want, pays)
-		})
-	}
-}
-
-func TestLedger_Spend(t *testing.T) {
-	tests := []struct {
-		name  string
-		work  int64
-		exits int
-		want  bool
-	}{
-		{"credit banks up to slack: 53 unpaid bridges after long work pay", 1 << 20, 53, true},
-		{"credit stops at slack: the 54th does not", 1 << 20, 54, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var ledger jit.Ledger
-			ledger.Spend(tt.work)
-			pays := true
-			for range tt.exits {
-				pays = ledger.Charge(jit.ClassBridge)
 			}
 			require.Equal(t, tt.want, pays)
 		})

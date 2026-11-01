@@ -68,6 +68,11 @@ var (
 	ErrCoroutineDone       = errors.New("coroutine done")
 	ErrInterpreterBusy     = errors.New("interpreter busy")
 	ErrUncaughtException   = errors.New("uncaught exception")
+
+	// errYield is the panic value a root-frame YIELD raises to unwind the Run loop.
+	// Run recovers it and returns ErrYield without wrapping, preserving all state so
+	// the next Run call resumes exactly after the YIELD.
+	errYield = errors.New("yield")
 )
 
 var errorCodes = []struct {
@@ -89,11 +94,6 @@ var errorCodes = []struct {
 	{ErrCoroutineDone, TrapCodeCoroutineDone},
 	{ErrUncaughtException, TrapCodeUncaughtException},
 }
-
-// errYield is the panic value a root-frame YIELD raises to unwind the Run loop.
-// Run recovers it and returns ErrYield without wrapping, preserving all state so
-// the next Run call resumes exactly after the YIELD.
-var errYield = errors.New("yield")
 
 // ErrorCode maps err to the types.ErrorCode a guest handler observes: the code
 // of a thrown Error, a TrapCode for an execution sentinel, or TrapCodeHostError.

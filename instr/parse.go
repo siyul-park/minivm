@@ -211,6 +211,45 @@ func Parse(line string) (Instruction, error) {
 	return New(op, operands...), nil
 }
 
+// define binds name to the next instruction Builder emits, failing if an
+// earlier line already defined it.
+func (lt *labelTable) define(name string, line int) error {
+	if def, ok := lt.defLine[name]; ok {
+		return fmt.Errorf("line %d: %w: %q (first defined at line %d)", line, ErrDuplicateLabel, name, def)
+	}
+	lt.b.Bind(lt.get(name))
+	lt.defLine[name] = line
+	return nil
+}
+
+func (lt *labelTable) describe(lines []int, err error) error {
+	b := lt.b
+	switch {
+	case errors.Is(err, ErrUnboundLabel):
+		for _, name := range lt.names {
+			if b.labels[lt.byName[name]] < 0 {
+				return fmt.Errorf("line %d: %w: %q", lt.refLine[name], ErrUnboundLabel, name)
+			}
+		}
+	case errors.Is(err, ErrOffsetRange):
+		pos := make([]int, len(b.instrs)+1)
+		for i, inst := range b.instrs {
+			pos[i+1] = pos[i] + inst.Width()
+		}
+		for i, fx := range b.fixups {
+			target := b.labels[fx.label]
+			if target < 0 {
+				continue
+			}
+			offset := pos[target] - pos[fx.branch+1]
+			if offset < math.MinInt16 || offset > math.MaxInt16 {
+				return fmt.Errorf("line %d: %w: %q", lines[i], ErrOffsetRange, lt.names[int(fx.label)])
+			}
+		}
+	}
+	return err
+}
+
 // stripOffsetPrefix removes a leading "NNNN:" or "NNNN:\t" byte-offset
 // prefix of the kind Format emits ahead of each instruction, if present.
 func stripOffsetPrefix(line string) string {
@@ -244,17 +283,6 @@ func parseLabelLine(line string) (name string, ok bool) {
 		return "", false
 	}
 	return name, true
-}
-
-// define binds name to the next instruction Builder emits, failing if an
-// earlier line already defined it.
-func (lt *labelTable) define(name string, line int) error {
-	if def, ok := lt.defLine[name]; ok {
-		return fmt.Errorf("line %d: %w: %q (first defined at line %d)", line, ErrDuplicateLabel, name, def)
-	}
-	lt.b.Bind(lt.get(name))
-	lt.defLine[name] = line
-	return nil
 }
 
 // parseBranch parses the operand fields of a br/br_if/br_table line. Each
@@ -334,23 +362,6 @@ func parseBranchOperand(tok string, lt *labelTable, line int) (uint64, *Label, e
 	return 0, &l, nil
 }
 
-// isLabelIdent reports whether s is a valid label identifier: a letter or
-// underscore followed by letters, digits, or underscores.
-func isLabelIdent(s string) bool {
-	if s == "" {
-		return false
-	}
-	for i, c := range s {
-		switch {
-		case c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'):
-		case i > 0 && c >= '0' && c <= '9':
-		default:
-			return false
-		}
-	}
-	return true
-}
-
 // reference records line as a use site of name, the first if there are
 // several, and returns its label handle.
 func (lt *labelTable) reference(name string, line int) Label {
@@ -371,32 +382,21 @@ func (lt *labelTable) get(name string) Label {
 	return l
 }
 
-func (lt *labelTable) describe(lines []int, err error) error {
-	b := lt.b
-	switch {
-	case errors.Is(err, ErrUnboundLabel):
-		for _, name := range lt.names {
-			if b.labels[lt.byName[name]] < 0 {
-				return fmt.Errorf("line %d: %w: %q", lt.refLine[name], ErrUnboundLabel, name)
-			}
-		}
-	case errors.Is(err, ErrOffsetRange):
-		pos := make([]int, len(b.instrs)+1)
-		for i, inst := range b.instrs {
-			pos[i+1] = pos[i] + inst.Width()
-		}
-		for i, fx := range b.fixups {
-			target := b.labels[fx.label]
-			if target < 0 {
-				continue
-			}
-			offset := pos[target] - pos[fx.branch+1]
-			if offset < math.MinInt16 || offset > math.MaxInt16 {
-				return fmt.Errorf("line %d: %w: %q", lines[i], ErrOffsetRange, lt.names[int(fx.label)])
-			}
+// isLabelIdent reports whether s is a valid label identifier: a letter or
+// underscore followed by letters, digits, or underscores.
+func isLabelIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, c := range s {
+		switch {
+		case c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'):
+		case i > 0 && c >= '0' && c <= '9':
+		default:
+			return false
 		}
 	}
-	return err
+	return true
 }
 
 func parseOperands(fields []string, widths []int) ([]uint64, error) {

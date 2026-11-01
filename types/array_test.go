@@ -9,27 +9,12 @@ import (
 )
 
 func TestArrayLiteral(t *testing.T) {
-	value := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeI32), Elems: []types.Value{types.I32(1)}}
+	value := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeI32()), Elems: []types.Value{types.I32(1)}}
 	require.Len(t, value.Elems, 1)
 }
 
-func TestArrayLiteral_Kind(t *testing.T) {
-	value := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeI32)}
-	require.Equal(t, types.KindRef, value.Kind())
-}
-
-func TestArrayLiteral_String(t *testing.T) {
-	value := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeI32), Elems: []types.Value{types.I32(1), types.I32(2)}}
-	require.Equal(t, "[]i32{1, 2}", value.String())
-}
-
-func TestArrayLiteral_Type(t *testing.T) {
-	typ := types.NewArrayType(types.TypeI32)
-	require.Same(t, typ, (&types.ArrayLiteral{Typ: typ}).Type())
-}
-
 func TestNewArray(t *testing.T) {
-	typ := types.NewArrayType(types.TypeAny)
+	typ := types.NewArrayType(types.TypeAny())
 	elems := []types.Boxed{types.BoxRef(1), types.BoxRef(2)}
 	array := types.NewArray(typ, elems...)
 
@@ -38,8 +23,42 @@ func TestNewArray(t *testing.T) {
 }
 
 func TestNewArrayType(t *testing.T) {
-	typ := types.NewArrayType(types.TypeI32)
-	require.Equal(t, types.TypeI32, typ.Elem)
+	typ := types.NewArrayType(types.TypeI32())
+	require.Equal(t, types.TypeI32(), typ.Elem)
+}
+
+func TestArray_Kind(t *testing.T) {
+	require.Equal(t, types.KindRef, types.NewArray(types.NewArrayType(types.TypeAny())).Kind())
+}
+
+func TestArray_Type(t *testing.T) {
+	typ := types.NewArrayType(types.TypeAny())
+	require.Equal(t, typ, types.NewArray(typ).Type())
+}
+
+func TestArray_Refs(t *testing.T) {
+	t.Run("primitive elements", func(t *testing.T) {
+		a := types.NewArray(types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2))
+
+		require.Equal(t, []types.Ref{9}, a.Refs([]types.Ref{9}))
+		var refs []types.Ref
+		allocs := testing.AllocsPerRun(100, func() {
+			refs = a.Refs(nil)
+		})
+		require.Empty(t, refs)
+		require.Zero(t, allocs)
+	})
+
+	t.Run("reference elements", func(t *testing.T) {
+		a := types.NewArray(types.NewArrayType(types.TypeAny()), types.BoxRef(1), types.BoxI32(2), types.BoxRef(3))
+
+		require.Equal(t, []types.Ref{9, 1, 3}, a.Refs([]types.Ref{9}))
+	})
+}
+
+func TestArray_String(t *testing.T) {
+	a := types.NewArray(types.NewArrayType(types.TypeAny()), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
+	require.Equal(t, "[]any{1, 2, 3}", a.String())
 }
 
 func TestTypedArray_Kind(t *testing.T) {
@@ -74,11 +93,11 @@ func TestTypedArray_Type(t *testing.T) {
 		val types.Value
 		typ types.Type
 	}{
-		{val: types.TypedArray[int8]{}, typ: types.TypeI8Array},
-		{val: types.TypedArray[int32]{}, typ: types.TypeI32Array},
-		{val: types.TypedArray[int64]{}, typ: types.TypeI64Array},
-		{val: types.TypedArray[float32]{}, typ: types.TypeF32Array},
-		{val: types.TypedArray[float64]{}, typ: types.TypeF64Array},
+		{val: types.TypedArray[int8]{}, typ: types.TypeI8Array()},
+		{val: types.TypedArray[int32]{}, typ: types.TypeI32Array()},
+		{val: types.TypedArray[int64]{}, typ: types.TypeI64Array()},
+		{val: types.TypedArray[float32]{}, typ: types.TypeF32Array()},
+		{val: types.TypedArray[float64]{}, typ: types.TypeF64Array()},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
@@ -87,68 +106,49 @@ func TestTypedArray_Type(t *testing.T) {
 	}
 }
 
-func TestArray_Kind(t *testing.T) {
-	require.Equal(t, types.KindRef, types.NewArray(types.NewArrayType(types.TypeAny)).Kind())
+func TestArrayLiteral_Kind(t *testing.T) {
+	value := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeI32())}
+	require.Equal(t, types.KindRef, value.Kind())
 }
 
-func TestArray_String(t *testing.T) {
-	a := types.NewArray(types.NewArrayType(types.TypeAny), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
-	require.Equal(t, "[]any{1, 2, 3}", a.String())
+func TestArrayLiteral_Type(t *testing.T) {
+	typ := types.NewArrayType(types.TypeI32())
+	require.Same(t, typ, (&types.ArrayLiteral{Typ: typ}).Type())
 }
 
-func TestArray_Type(t *testing.T) {
-	typ := types.NewArrayType(types.TypeAny)
-	require.Equal(t, typ, types.NewArray(typ).Type())
-}
-
-func TestArray_Refs(t *testing.T) {
-	t.Run("primitive elements", func(t *testing.T) {
-		a := types.NewArray(types.NewArrayType(types.TypeI32), types.BoxI32(1), types.BoxI32(2))
-
-		require.Equal(t, []types.Ref{9}, a.Refs([]types.Ref{9}))
-		var refs []types.Ref
-		allocs := testing.AllocsPerRun(100, func() {
-			refs = a.Refs(nil)
-		})
-		require.Empty(t, refs)
-		require.Zero(t, allocs)
-	})
-
-	t.Run("reference elements", func(t *testing.T) {
-		a := types.NewArray(types.NewArrayType(types.TypeAny), types.BoxRef(1), types.BoxI32(2), types.BoxRef(3))
-
-		require.Equal(t, []types.Ref{9, 1, 3}, a.Refs([]types.Ref{9}))
-	})
+func TestArrayLiteral_String(t *testing.T) {
+	value := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeI32()), Elems: []types.Value{types.I32(1), types.I32(2)}}
+	require.Equal(t, "[]i32{1, 2}", value.String())
 }
 
 func TestArrayType_Kind(t *testing.T) {
-	require.Equal(t, types.KindRef, types.NewArrayType(types.TypeI32).Kind())
-}
-
-func TestArrayType_String(t *testing.T) {
-	require.Equal(t, "[]i32", types.NewArrayType(types.TypeI32).String())
+	require.Equal(t, types.KindRef, types.NewArrayType(types.TypeI32()).Kind())
 }
 
 func TestArrayType_Cast(t *testing.T) {
-	typ := types.NewArrayType(types.TypeI32)
+	typ := types.NewArrayType(types.TypeI32())
 
-	require.True(t, typ.Cast(types.NewArrayType(types.TypeI32)))
-	require.False(t, typ.Cast(types.NewArrayType(types.TypeI64)))
-	require.False(t, typ.Cast(types.TypeI32))
+	require.True(t, typ.Cast(types.NewArrayType(types.TypeI32())))
+	require.False(t, typ.Cast(types.NewArrayType(types.TypeI64())))
+	require.False(t, typ.Cast(types.TypeI32()))
 }
 
 func TestArrayType_Equals(t *testing.T) {
-	typ := types.NewArrayType(types.TypeI32)
+	typ := types.NewArrayType(types.TypeI32())
 
 	require.True(t, typ.Equals(typ))
-	require.True(t, typ.Equals(types.NewArrayType(types.TypeI32)))
-	require.False(t, typ.Equals(types.NewArrayType(types.TypeI64)))
-	require.False(t, typ.Equals(types.TypeI32))
+	require.True(t, typ.Equals(types.NewArrayType(types.TypeI32())))
+	require.False(t, typ.Equals(types.NewArrayType(types.TypeI64())))
+	require.False(t, typ.Equals(types.TypeI32()))
+}
+
+func TestArrayType_String(t *testing.T) {
+	require.Equal(t, "[]i32", types.NewArrayType(types.TypeI32()).String())
 }
 
 func BenchmarkArray_Refs(b *testing.B) {
 	b.Run("no refs", func(b *testing.B) {
-		a := types.NewArray(types.NewArrayType(types.TypeI32), types.BoxI32(1), types.BoxI32(2))
+		a := types.NewArray(types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2))
 		require.Empty(b, a.Refs(nil))
 
 		var refs []types.Ref
@@ -162,7 +162,7 @@ func BenchmarkArray_Refs(b *testing.B) {
 	})
 
 	b.Run("child refs", func(b *testing.B) {
-		a := types.NewArray(types.NewArrayType(types.TypeAny), types.BoxRef(1), types.BoxRef(2))
+		a := types.NewArray(types.NewArrayType(types.TypeAny()), types.BoxRef(1), types.BoxRef(2))
 		require.Equal(b, []types.Ref{1, 2}, a.Refs(nil))
 
 		refs := make([]types.Ref, 0, 2)

@@ -1,0 +1,44 @@
+apiVersion = "lighthouse/v1alpha1"
+kind = "Project"
+
+[metadata]
+name = "minivm"
+
+[spec]
+plugins = [
+  { id = "lang-go" },
+  { id = "lang-markdown" },
+  { id = "lang-yaml" },
+  { id = "lang-toml" },
+  { id = "lang-typescript" },
+  { id = "lang-python" },
+]
+extends = ["core/recommended", "design/recommended", "testing/recommended", "go/recommended", "markdown/recommended"]
+
+[spec.generated]
+# Written by `make benchmark` (benchmarks/cmd/benchreport); edit the generator.
+files = ["docs/benchmarks.md"]
+
+# docs/coding-patterns.md "File Order": public options and functions come
+# before the constructors and methods of the types, and steps 8-10 order all
+# public constructors, then all public methods, then hooks across types; step 11
+# keeps private functions, private constructors and private methods together,
+# callers before their helpers.
+# Step 10's interface hooks include the types.Value, types.Type and
+# types.Traceable methods every value and type implements.
+[spec.rules]
+"design/declaration-groups" = { level = "error", options = { groups = ["public-type", "private-type", "public-const", "private-const", "var", "init", "public-function", "method", "private"], blocks = "kind", hooks = ["Kind", "Type", "Cast", "Equals", "Refs", "Clone", "String", "GoString", "Error", "Unwrap", "MarshalJSON", "UnmarshalJSON", "MarshalText", "UnmarshalText", "MarshalBinary", "UnmarshalBinary"] } }
+
+# JavaScript and Python fixtures are benchmark programs: the Go runners call
+# their `run` entry by name, and benchmarks/runtime_test.go is their owner test.
+# Their kernels mirror the published benchmark programs, signatures included,
+# and are scripts, not an API, so their functions carry no doc comments.
+[[spec.overrides]]
+files = ["benchmarks/fixtures/*.js", "benchmarks/fixtures/*.py"]
+rules = { "design/no-unused-symbol" = "off", "testing/no-missing-owner" = "off", "design/signature-size" = "off", "design/exported-doc" = "off" }
+
+# A test file mirrors one source file (foo.go ↔ foo_test.go) and is never split
+# by subject, so its length follows its source's contract count.
+[[spec.overrides]]
+files = ["**/*_test.go", "benchmarks/fixtures/*.mvm"]
+rules = { "core/max-lines" = "off" }

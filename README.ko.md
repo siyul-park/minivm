@@ -69,8 +69,8 @@ minivm의 실행 모델은 명확합니다. 바이트코드를 입력하고, 통
 ```go
 lookup := interp.NewHostFunction(
     &types.FunctionType{
-        Params:  []types.Type{types.TypeI32},
-        Returns: []types.Type{types.TypeI32},
+        Params:  []types.Type{types.TypeI32()},
+        Returns: []types.Type{types.TypeI32()},
     },
     func(vm *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error) {
         price := db.GetPrice(int(params[0].I32()))

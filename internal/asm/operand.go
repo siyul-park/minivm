@@ -88,16 +88,16 @@ func (o LabelOperand) String() string {
 }
 
 // String returns the operand's assembly form.
-func (SlotsOperand) String() string {
-	return "#slots"
-}
-
-// String returns the operand's assembly form.
 func (o MemOperand) String() string {
 	if o.Offset != 0 {
 		return fmt.Sprintf("[%s, #%d]", o.Base, o.Offset)
 	}
 	return fmt.Sprintf("[%s]", o.Base)
+}
+
+// String returns the operand's assembly form.
+func (SlotsOperand) String() string {
+	return "#slots"
 }
 
 func (VRegOperand) operand() {}

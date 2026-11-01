@@ -1,4 +1,4 @@
-def escape_count(cr, ci, max_iter):
+def _escape_count(cr, ci, max_iter):
     zr = 0.0
     zi = 0.0
     i = 0
@@ -31,7 +31,7 @@ def run():
         px = 0
         while px < width:
             cx = x_min + (x_max - x_min) * float(px) / float(width - 1)
-            total = total + escape_count(cx, cy, max_iter)
+            total = total + _escape_count(cx, cy, max_iter)
             px = px + 1
         py = py + 1
 

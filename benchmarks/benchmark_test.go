@@ -16,6 +16,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func readProgram(spec registry.Spec) *program.Program {
+	prog, err := program.Parse(strings.NewReader(spec.Source.MVM))
+	if err != nil {
+		panic("parse fixture " + spec.Name + ".mvm: " + err.Error())
+	}
+	return prog
+}
+
 func TestKernels(t *testing.T) {
 	for _, spec := range registry.All() {
 		spec := spec
@@ -61,14 +69,6 @@ func BenchmarkKernels(b *testing.B) {
 			benchmarkExternal(b, spec, result)
 		})
 	}
-}
-
-func readProgram(spec registry.Spec) *program.Program {
-	prog, err := program.Parse(strings.NewReader(spec.Source.MVM))
-	if err != nil {
-		panic("parse fixture " + spec.Name + ".mvm: " + err.Error())
-	}
-	return prog
 }
 
 func benchmarkVM(b *testing.B, prog *program.Program, want types.Value) {

@@ -50,7 +50,7 @@ Test structure should provide one obvious owner for each public contract and kee
 - Readiness polling MUST NOT outlive teardown or retain resources after the case closes them.
 - Polling conditions MUST return readiness and observed results/errors only; assertions belong after readiness is established.
 
-### F.I.R.S.T.
+### F.I.R.S.T
 
 F.I.R.S.T. keeps tests reliable evidence rather than intermittent diagnostics.
 

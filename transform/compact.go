@@ -92,20 +92,6 @@ func scan(codes [][]byte, visit func(pool int, inst instr.Instruction)) {
 	}
 }
 
-func poolOf(op instr.Opcode) int {
-	switch op {
-	case instr.CONST_GET:
-		return poolConst
-	case instr.REF_TEST, instr.REF_CAST,
-		instr.ARRAY_NEW, instr.ARRAY_NEW_DEFAULT,
-		instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT,
-		instr.MAP_NEW, instr.MAP_NEW_DEFAULT:
-		return poolType
-	default:
-		return poolNone
-	}
-}
-
 func compactValues(items []types.Value, used []bool) ([]int, int) {
 	index := make([]int, len(items))
 	seen := make(map[types.Value]int, len(items))
@@ -164,4 +150,18 @@ func compactTypes(items []types.Type, used []bool) ([]int, int) {
 		}
 	}
 	return index, size
+}
+
+func poolOf(op instr.Opcode) int {
+	switch op {
+	case instr.CONST_GET:
+		return poolConst
+	case instr.REF_TEST, instr.REF_CAST,
+		instr.ARRAY_NEW, instr.ARRAY_NEW_DEFAULT,
+		instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT,
+		instr.MAP_NEW, instr.MAP_NEW_DEFAULT:
+		return poolType
+	default:
+		return poolNone
+	}
 }

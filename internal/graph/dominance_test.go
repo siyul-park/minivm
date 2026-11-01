@@ -8,24 +8,6 @@ import (
 	"github.com/siyul-park/minivm/internal/graph"
 )
 
-func TestNewDominance(t *testing.T) {
-	t.Run("computes dominance for an empty graph", func(t *testing.T) {
-		g := newFixture(0, nil)
-
-		d := graph.NewDominance(g)
-
-		require.NotNil(t, d)
-	})
-
-	t.Run("computes dominance for a single node with no edges", func(t *testing.T) {
-		g := newFixture(1, nil)
-
-		d := graph.NewDominance(g)
-
-		require.True(t, d.Dominates(0, 0))
-	})
-}
-
 func TestFrontier(t *testing.T) {
 	t.Run("includes the entry in its own self-loop frontier", func(t *testing.T) {
 		g := newFixture(1, [][2]int{{0, 0}})
@@ -87,22 +69,21 @@ func TestFrontier(t *testing.T) {
 	})
 }
 
-func TestDominance_Children(t *testing.T) {
-	t.Run("returns dominator tree children in node order", func(t *testing.T) {
-		entry, left, right, join, exit := 0, 1, 2, 3, 4
-		g := newFixture(5, [][2]int{{entry, left}, {entry, right}, {left, join}, {right, join}, {join, exit}})
+func TestNewDominance(t *testing.T) {
+	t.Run("computes dominance for an empty graph", func(t *testing.T) {
+		g := newFixture(0, nil)
 
 		d := graph.NewDominance(g)
 
-		require.Equal(t, [][]int{{left, right, join}, nil, nil, {exit}, nil}, d.Children())
+		require.NotNil(t, d)
 	})
 
-	t.Run("omits unreachable nodes", func(t *testing.T) {
-		g := newFixture(3, [][2]int{{0, 1}})
+	t.Run("computes dominance for a single node with no edges", func(t *testing.T) {
+		g := newFixture(1, nil)
 
 		d := graph.NewDominance(g)
 
-		require.Equal(t, [][]int{{1}, nil, nil}, d.Children())
+		require.True(t, d.Dominates(0, 0))
 	})
 }
 
@@ -156,6 +137,25 @@ func TestDominance_Dominates(t *testing.T) {
 		require.False(t, d.Dominates(store, reload))
 		require.True(t, d.Dominates(join, reload))
 		require.True(t, d.Dominates(entry, reload))
+	})
+}
+
+func TestDominance_Children(t *testing.T) {
+	t.Run("returns dominator tree children in node order", func(t *testing.T) {
+		entry, left, right, join, exit := 0, 1, 2, 3, 4
+		g := newFixture(5, [][2]int{{entry, left}, {entry, right}, {left, join}, {right, join}, {join, exit}})
+
+		d := graph.NewDominance(g)
+
+		require.Equal(t, [][]int{{left, right, join}, nil, nil, {exit}, nil}, d.Children())
+	})
+
+	t.Run("omits unreachable nodes", func(t *testing.T) {
+		g := newFixture(3, [][2]int{{0, 1}})
+
+		d := graph.NewDominance(g)
+
+		require.Equal(t, [][]int{{1}, nil, nil}, d.Children())
 	})
 }
 

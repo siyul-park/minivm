@@ -78,12 +78,6 @@ type lowering struct {
 	op ssa.Operation
 }
 
-// place is where exit map value to lives in the rows: register reg.
-type place struct {
-	to  *jit.Value
-	reg asm.VReg
-}
-
 // outlet is one exit under construction: its published map plus the rows
 // its stub still has to emit. memo is an ExitCall map's one register per
 // remat constant; stalls holds remat constants materialized at the stub;
@@ -97,14 +91,20 @@ type outlet struct {
 	results []asm.VReg
 }
 
-type move struct {
-	dst, src asm.VReg
+// place is where exit map value to lives in the rows: register reg.
+type place struct {
+	to  *jit.Value
+	reg asm.VReg
 }
 
 type edge struct {
 	label asm.Label
 	block int
 	moves []move
+}
+
+type move struct {
+	dst, src asm.VReg
 }
 
 type stub struct {
@@ -130,34 +130,34 @@ type stall struct {
 // 0 may carry parameters, the operand stack the interpreter left at its
 // header (transform.Translate roots there); Lower loads them itself (see
 // preload) instead of rejecting them.
-func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects, address int, osr, count bool) ([]byte, []jit.Exit, int, error) {
+func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects, address int, osr, count bool) (jit.Assembly, error) {
 	l, err := newLowering(f, m, fn, objects, address, osr, count)
 	if err != nil {
-		return nil, nil, 0, err
+		return jit.Assembly{}, err
 	}
 	if err := l.function(); err != nil {
-		return nil, nil, 0, err
+		return jit.Assembly{}, err
 	}
 	code, err := l.a.Build()
 	if err != nil {
-		return nil, nil, 0, err
+		return jit.Assembly{}, err
 	}
 	entry, ok := l.a.Offset(l.enter)
 	if !ok {
-		return nil, nil, 0, fmt.Errorf("%w: unresolved entry stub", ErrUnsupported)
+		return jit.Assembly{}, fmt.Errorf("%w: unresolved entry stub", ErrUnsupported)
 	}
 	exits := make([]jit.Exit, len(l.outlets))
 	for id, o := range l.outlets {
 		for _, p := range o.places {
 			loc, ok := l.a.Loc(p.reg)
 			if !ok {
-				return nil, nil, 0, fmt.Errorf("%w: exit %d names v%d with no location", ErrUnsupported, id, p.reg.ID())
+				return jit.Assembly{}, fmt.Errorf("%w: exit %d names v%d with no location", ErrUnsupported, id, p.reg.ID())
 			}
 			p.to.Loc = loc
 		}
 		exits[id] = *o.exit
 	}
-	return code, exits, entry, nil
+	return jit.Assembly{Bytes: code, Exits: exits, Entry: entry}, nil
 }
 
 // Reg is v's virtual register, typed by its static representation; for a
@@ -226,15 +226,6 @@ func (l *lowering) Type(v ssa.Value) ssa.Type {
 	return l.f.Type(v)
 }
 
-// word places a stub of kind k whose Word is reg, of kind kind.
-func (l *lowering) word(k jit.Kind, kind types.Kind, reg asm.VReg) (exit, resume asm.Label) {
-	id := l.exit(k)
-	out := &l.outlets[id]
-	out.exit.Word.Kind = kind
-	out.places = append(out.places, place{to: &out.exit.Word, reg: reg})
-	return l.stub(id)
-}
-
 // newLowering rejects shapes the backend does not lower and scans f for what
 // lowering consults: homes, loops, uses, and remat constants.
 func newLowering(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects, address int, osr, count bool) (*lowering, error) {
@@ -279,6 +270,15 @@ func newLowering(f *ssa.Function, m Machine, fn *types.Function, objects transfo
 	l.a.Reserve(m.Reserve()...)
 	l.a.ReserveSlots(len(homes))
 	return l, nil
+}
+
+// word places a stub of kind k whose Word is reg, of kind kind.
+func (l *lowering) word(k jit.Kind, kind types.Kind, reg asm.VReg) (exit, resume asm.Label) {
+	id := l.exit(k)
+	out := &l.outlets[id]
+	out.exit.Word.Kind = kind
+	out.places = append(out.places, place{to: &out.exit.Word, reg: reg})
+	return l.stub(id)
 }
 
 // scan fills headers, loops, gate, upvals, uses, and remats. A scalar or ref
@@ -712,40 +712,6 @@ func (l *lowering) call(op ssa.Operation) error {
 	return l.err
 }
 
-// registers reports fn's register-convention results: at most two, of any
-// kind (an i64 one stays raw; Go boxes it). A function outside that shape
-// returns nil, so Return keeps boxing results to slots and Enter's stub
-// boxes nothing beyond the slot layout. The same static fact governs every unit
-// and tier of fn, so a caller compiled separately from its callee always
-// agrees with it.
-func registers(fn *types.Function) []types.Kind {
-	if fn == nil || fn.Typ == nil {
-		return nil
-	}
-	return convention(fn.Typ.Returns)
-}
-
-// arguments reports fn's register-convention parameters: at most two, of any
-// kind (an i64 one stays raw), in the target's register-convention registers
-// like registers' results. Every other function passes its arguments through
-// slots alone. Caller and callee agree on this static fact of fn at every
-// unit and tier.
-func arguments(fn *types.Function) []types.Kind {
-	if fn == nil || fn.Typ == nil {
-		return nil
-	}
-	return convention(fn.Typ.Params)
-}
-
-// convention is the kinds of ts when up to jit.Convention values travel in
-// registers.
-func convention(ts []types.Type) []types.Kind {
-	if len(ts) == 0 || len(ts) > jit.Convention {
-		return nil
-	}
-	return types.Kinds(ts)
-}
-
 // stub places the stub of exit id; a resumable one continues at resume,
 // which its caller binds.
 func (l *lowering) stub(id int) (exit, resume asm.Label) {
@@ -801,23 +767,6 @@ func (l *lowering) fresh(t ssa.Type) asm.VReg {
 	id := l.tmp
 	l.tmp++
 	return vreg(id, t)
-}
-
-// vreg is register id typed by t's static representation: its bank and
-// width.
-func vreg(id int32, t ssa.Type) asm.VReg {
-	switch t {
-	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32:
-		return asm.NewVReg(id, asm.RegTypeInt, asm.Width32)
-	case ssa.TypeI64, ssa.TypeRef:
-		return asm.NewVReg(id, asm.RegTypeInt, asm.Width64)
-	case ssa.TypeF32:
-		return asm.NewVReg(id, asm.RegTypeFloat, asm.Width32)
-	case ssa.TypeF64:
-		return asm.NewVReg(id, asm.RegTypeFloat, asm.Width64)
-	default:
-		return asm.VReg{}
-	}
 }
 
 // exit records the map of an exit of kind k at the current operation's state.
@@ -985,4 +934,55 @@ func (l *lowering) scratch(like asm.VReg) asm.VReg {
 		id++
 	}
 	return asm.NewVReg(id, like.Type(), like.Width())
+}
+
+// vreg is register id typed by t's static representation: its bank and
+// width.
+func vreg(id int32, t ssa.Type) asm.VReg {
+	switch t {
+	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32:
+		return asm.NewVReg(id, asm.RegTypeInt, asm.Width32)
+	case ssa.TypeI64, ssa.TypeRef:
+		return asm.NewVReg(id, asm.RegTypeInt, asm.Width64)
+	case ssa.TypeF32:
+		return asm.NewVReg(id, asm.RegTypeFloat, asm.Width32)
+	case ssa.TypeF64:
+		return asm.NewVReg(id, asm.RegTypeFloat, asm.Width64)
+	default:
+		return asm.VReg{}
+	}
+}
+
+// registers reports fn's register-convention results: at most two, of any
+// kind (an i64 one stays raw; Go boxes it). A function outside that shape
+// returns nil, so Return keeps boxing results to slots and Enter's stub
+// boxes nothing beyond the slot layout. The same static fact governs every unit
+// and tier of fn, so a caller compiled separately from its callee always
+// agrees with it.
+func registers(fn *types.Function) []types.Kind {
+	if fn == nil || fn.Typ == nil {
+		return nil
+	}
+	return convention(fn.Typ.Returns)
+}
+
+// arguments reports fn's register-convention parameters: at most two, of any
+// kind (an i64 one stays raw), in the target's register-convention registers
+// like registers' results. Every other function passes its arguments through
+// slots alone. Caller and callee agree on this static fact of fn at every
+// unit and tier.
+func arguments(fn *types.Function) []types.Kind {
+	if fn == nil || fn.Typ == nil {
+		return nil
+	}
+	return convention(fn.Typ.Params)
+}
+
+// convention is the kinds of ts when up to jit.Convention values travel in
+// registers.
+func convention(ts []types.Type) []types.Kind {
+	if len(ts) == 0 || len(ts) > jit.Convention {
+		return nil
+	}
+	return types.Kinds(ts)
 }

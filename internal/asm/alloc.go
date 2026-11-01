@@ -333,7 +333,7 @@ next:
 		}
 		return r, true
 	}
-	return PReg{}, false
+	return 0, false
 }
 
 // victim picks the non-tiny interval among iv and the actives of its bank
@@ -355,23 +355,6 @@ func (a *allocator) victim(iv interval, active []interval) (interval, bool) {
 		}
 	}
 	return best, ok
-}
-
-// overlaps reports whether iv and o are live at a common row.
-func (iv interval) overlaps(o interval) bool {
-	i, j := 0, 0
-	for i < len(iv.ranges) && j < len(o.ranges) {
-		x, y := iv.ranges[i], o.ranges[j]
-		if x[0] <= y[1] && y[0] <= x[1] {
-			return true
-		}
-		if x[1] < y[1] {
-			i++
-		} else {
-			j++
-		}
-	}
-	return false
 }
 
 // rewrite surrounds spilled reads/writes with reload/park rows using fresh
@@ -468,36 +451,6 @@ func (a *allocator) assign(assigned map[value]PReg) {
 	}
 }
 
-// register returns the register an operand names, looking through a memory
-// operand to its base, or nil.
-func register(op Operand) Reg {
-	switch op := op.(type) {
-	case VRegOperand:
-		return op.Reg
-	case PRegOperand:
-		return op.Reg
-	case MemOperand:
-		return register(op.Base)
-	default:
-		return nil
-	}
-}
-
-// replace returns op with its register - or its memory base - swapped for r.
-func replace(op Operand, r Reg) Operand {
-	var wrapped Operand
-	switch r := r.(type) {
-	case VReg:
-		wrapped = Virtual(r)
-	case PReg:
-		wrapped = Physical(r)
-	}
-	if mem, ok := op.(MemOperand); ok {
-		return Mem(wrapped, mem.Offset)
-	}
-	return wrapped
-}
-
 // compare orders values totally: physical before virtual, then by bank, id,
 // and width.
 func (v value) compare(o value) int {
@@ -516,8 +469,36 @@ func (v value) compare(o value) int {
 	}
 }
 
-func physical(r PReg) value {
-	return value{id: int32(r.ID()), typ: r.Type()}
+// overlaps reports whether iv and o are live at a common row.
+func (iv interval) overlaps(o interval) bool {
+	i, j := 0, 0
+	for i < len(iv.ranges) && j < len(o.ranges) {
+		x, y := iv.ranges[i], o.ranges[j]
+		if x[0] <= y[1] && y[0] <= x[1] {
+			return true
+		}
+		if x[1] < y[1] {
+			i++
+		} else {
+			j++
+		}
+	}
+	return false
+}
+
+// replace returns op with its register - or its memory base - swapped for r.
+func replace(op Operand, r Reg) Operand {
+	var wrapped Operand
+	switch r := r.(type) {
+	case VReg:
+		wrapped = Virtual(r)
+	case PReg:
+		wrapped = Physical(r)
+	}
+	if mem, ok := op.(MemOperand); ok {
+		return Mem(wrapped, mem.Offset)
+	}
+	return wrapped
 }
 
 func virtual(r VReg) value {
@@ -527,4 +508,23 @@ func virtual(r VReg) value {
 // vreg is the inverse of virtual.
 func vreg(v value) VReg {
 	return VReg{id: v.id, typ: v.typ, width: v.width}
+}
+
+// register returns the register an operand names, looking through a memory
+// operand to its base, or nil.
+func register(op Operand) Reg {
+	switch op := op.(type) {
+	case VRegOperand:
+		return op.Reg
+	case PRegOperand:
+		return op.Reg
+	case MemOperand:
+		return register(op.Base)
+	default:
+		return nil
+	}
+}
+
+func physical(r PReg) value {
+	return value{id: int32(r.ID()), typ: r.Type()}
 }

@@ -7,27 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestKind_String(t *testing.T) {
-	tests := []struct {
-		kind instr.Kind
-		want string
-	}{
-		{kind: instr.KindI1, want: "i1"},
-		{kind: instr.KindI8, want: "i8"},
-		{kind: instr.KindI32, want: "i32"},
-		{kind: instr.KindI64, want: "i64"},
-		{kind: instr.KindF32, want: "f32"},
-		{kind: instr.KindF64, want: "f64"},
-		{kind: instr.KindRef, want: "ref"},
-		{kind: instr.KindAny, want: "unknown"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.kind.String(), func(t *testing.T) {
-			require.Equal(t, tt.want, tt.kind.String())
-		})
-	}
-}
-
 func TestKind_IsNumeric(t *testing.T) {
 	for _, kind := range []instr.Kind{instr.KindI1, instr.KindI8, instr.KindI32, instr.KindI64, instr.KindF32, instr.KindF64} {
 		require.True(t, kind.IsNumeric())
@@ -75,6 +54,27 @@ func TestKind_Size(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.kind.String(), func(t *testing.T) {
 			require.Equal(t, tt.want, tt.kind.Size())
+		})
+	}
+}
+
+func TestKind_String(t *testing.T) {
+	tests := []struct {
+		kind instr.Kind
+		want string
+	}{
+		{kind: instr.KindI1, want: "i1"},
+		{kind: instr.KindI8, want: "i8"},
+		{kind: instr.KindI32, want: "i32"},
+		{kind: instr.KindI64, want: "i64"},
+		{kind: instr.KindF32, want: "f32"},
+		{kind: instr.KindF64, want: "f64"},
+		{kind: instr.KindRef, want: "ref"},
+		{kind: instr.KindAny, want: "unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.kind.String(), func(t *testing.T) {
+			require.Equal(t, tt.want, tt.kind.String())
 		})
 	}
 }

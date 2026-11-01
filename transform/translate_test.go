@@ -13,11 +13,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// calls returns the offset of every CALL in code, in order.
+func calls(code []byte) []int {
+	var out []int
+	for ip := 0; ip < len(code); ip += instr.Instruction(code[ip:]).Width() {
+		if instr.Instruction(code[ip:]).Opcode() == instr.CALL {
+			out = append(out, ip)
+		}
+	}
+	return out
+}
+
 func TestTranslate(t *testing.T) {
 	t.Run("translates a whole function", func(t *testing.T) {
 		fn := &types.Function{
-			Typ:    &types.FunctionType{Returns: []types.Type{types.TypeI32}},
-			Locals: []types.Type{types.TypeI32},
+			Typ:    &types.FunctionType{Returns: []types.Type{types.TypeI32()}},
+			Locals: []types.Type{types.TypeI32()},
 			Code: assemble(t, func(b *instr.Builder) {
 				header, done := b.Label(), b.Label()
 				b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
@@ -60,7 +71,7 @@ blk3: () <-- (blk1)
 
 	t.Run("merges facts at a join", func(t *testing.T) {
 		fn := &types.Function{
-			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32()}},
 			Code: assemble(t, func(b *instr.Builder) {
 				join := b.Label()
 				b.Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).BrIf(join)
@@ -75,7 +86,7 @@ blk3: () <-- (blk1)
 	})
 
 	t.Run("translates module code the native calling convention refuses", func(t *testing.T) {
-		callee := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}}
+		callee := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32()}}}
 		fn := &types.Function{
 			Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0).Emit(instr.CALL) })}
 		m := transform.Module{
@@ -97,7 +108,7 @@ blk0: ()
 
 	t.Run("gives every operation the state at its own instruction", func(t *testing.T) {
 		fn := &types.Function{
-			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32()}},
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Emit(instr.I32_CONST, 1).Emit(instr.I32_CONST, 2).Emit(instr.I32_ADD).Emit(instr.RETURN)
 			})}
@@ -184,8 +195,8 @@ blk3: (v6:ref) <-- (blk1)
 		// the same nil in analyze's states as a span analyze never reached;
 		// translate must tell them apart through reachability, not content.
 		fn := &types.Function{
-			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
-			Locals: []types.Type{types.TypeI32},
+			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
+			Locals: []types.Type{types.TypeI32()},
 			Code: assemble(t, func(b *instr.Builder) {
 				join := b.Label()
 				b.Emit(instr.LOCAL_GET, 0).BrIf(join)
@@ -259,7 +270,7 @@ blk1: (v5:i32) <-- (blk0)
 
 	t.Run("declines what bytecode alone cannot resolve/a constant read no object resolves", func(t *testing.T) {
 		fn := &types.Function{
-			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32()}},
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
 			})}
@@ -271,7 +282,7 @@ blk1: (v5:i32) <-- (blk0)
 
 	t.Run("declines a function holding a suspension", func(t *testing.T) {
 		fn := &types.Function{
-			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32()}},
 			Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.YIELD).Emit(instr.RETURN) })}
 		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
 		require.NoError(t, err)
@@ -280,8 +291,8 @@ blk1: (v5:i32) <-- (blk0)
 
 	t.Run("translates a tee of a reference", func(t *testing.T) {
 		fn := &types.Function{
-			Typ:    &types.FunctionType{Returns: []types.Type{types.TypeAny}},
-			Locals: []types.Type{types.TypeAny},
+			Typ:    &types.FunctionType{Returns: []types.Type{types.TypeAny()}},
+			Locals: []types.Type{types.TypeAny()},
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Emit(instr.REF_NULL).Emit(instr.LOCAL_TEE, 0).Emit(instr.RETURN)
 			})}
@@ -295,7 +306,7 @@ blk1: (v5:i32) <-- (blk0)
 	t.Run("guards an array load in a function that also calls", func(t *testing.T) {
 		callee := &types.Function{Typ: &types.FunctionType{}}
 		fn := &types.Function{
-			Typ: &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}, Returns: []types.Type{types.TypeI32}},
+			Typ: &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32())}, Returns: []types.Type{types.TypeI32()}},
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Emit(instr.CONST_GET, 0).Emit(instr.CALL).
 					Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
@@ -315,7 +326,7 @@ blk1: (v5:i32) <-- (blk0)
 		load := instr.New(instr.LOCAL_GET, 0)
 		index := instr.New(instr.I32_CONST, 0)
 		fn := &types.Function{
-			Typ: &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}, Returns: []types.Type{types.TypeI32}},
+			Typ: &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32())}, Returns: []types.Type{types.TypeI32()}},
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Append(load, index).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
 			})}
@@ -330,8 +341,8 @@ blk1: (v5:i32) <-- (blk0)
 
 	t.Run("guards an array load through a declared element kind", func(t *testing.T) {
 		fn := &types.Function{
-			Typ:    &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}, Returns: []types.Type{types.TypeI32}},
-			Locals: []types.Type{types.TypeI32},
+			Typ:    &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32())}, Returns: []types.Type{types.TypeI32()}},
+			Locals: []types.Type{types.TypeI32()},
 			Code: assemble(t, func(b *instr.Builder) {
 				header, done := b.Label(), b.Label()
 				b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
@@ -383,7 +394,7 @@ blk3: () <-- (blk1)
 
 	t.Run("guards an array store through the shape the stored value's own kind names", func(t *testing.T) {
 		fn := &types.Function{
-			Typ: &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32)}},
+			Typ: &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32())}},
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 5).Emit(instr.ARRAY_SET).Emit(instr.RETURN)
 			})}
@@ -407,7 +418,7 @@ blk0: ()
 
 	t.Run("guards an array store of an i32 value through a declared i1 element kind", func(t *testing.T) {
 		fn := &types.Function{
-			Typ: &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI1)}},
+			Typ: &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI1())}},
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SET).Emit(instr.RETURN)
 			})}
@@ -431,13 +442,13 @@ blk0: ()
 
 	t.Run("guards an array load through a constant cell's resolved element type", func(t *testing.T) {
 		fn := &types.Function{
-			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32()}},
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
 			})}
 		m := transform.Module{
 			Constants: []types.Boxed{types.BoxRef(2)},
-			Objects:   transform.Objects{2: {Array: types.NewArrayType(types.TypeI32)}}}
+			Objects:   transform.Objects{2: {Array: types.NewArrayType(types.TypeI32())}}}
 
 		out, err := transform.Translate(m, 1, fn, 0)
 		require.NoError(t, err)
@@ -448,12 +459,12 @@ blk0: ()
 
 	t.Run("attaches array.new_default's declared element type to its result", func(t *testing.T) {
 		fn := &types.Function{
-			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32()}},
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Emit(instr.I32_CONST, 4).Emit(instr.ARRAY_NEW_DEFAULT, 0).
 					Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
 			})}
-		m := transform.Module{Types: []types.Type{types.NewArrayType(types.TypeI32)}}
+		m := transform.Module{Types: []types.Type{types.NewArrayType(types.TypeI32())}}
 
 		out, err := transform.Translate(m, 1, fn, 0)
 		require.NoError(t, err)
@@ -469,7 +480,7 @@ blk0: ()
 				b.Emit(instr.I32_CONST, 4).Emit(instr.ARRAY_NEW_DEFAULT, 0).
 					Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 5).Emit(instr.ARRAY_SET).Emit(instr.RETURN)
 			})}
-		m := transform.Module{Types: []types.Type{types.NewArrayType(types.TypeAny)}}
+		m := transform.Module{Types: []types.Type{types.NewArrayType(types.TypeAny())}}
 
 		out, err := transform.Translate(m, 1, fn, 0)
 		require.NoError(t, err)
@@ -479,7 +490,7 @@ blk0: ()
 	})
 
 	t.Run("guards a struct store through a generic struct shape", func(t *testing.T) {
-		record := types.NewStructType(types.NewStructField(types.TypeI32))
+		record := types.NewStructType(types.NewStructField(types.TypeI32()))
 		fn := &types.Function{
 			Typ: &types.FunctionType{},
 			Code: assemble(t, func(b *instr.Builder) {
@@ -508,9 +519,9 @@ blk0: ()
 	})
 
 	t.Run("reads a struct field through a constant cell's resolved record", func(t *testing.T) {
-		record := types.NewStructType(types.NewStructField(types.TypeF64))
+		record := types.NewStructType(types.NewStructField(types.TypeF64()))
 		fn := &types.Function{
-			Typ: &types.FunctionType{Returns: []types.Type{types.TypeF64}},
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeF64()}},
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).Emit(instr.RETURN)
 			})}
@@ -526,9 +537,9 @@ blk0: ()
 	})
 
 	t.Run("ends a tail call by leaving native execution", func(t *testing.T) {
-		callee := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}}
+		callee := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}}
 		fn := &types.Function{
-			Typ: &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+			Typ: &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.RETURN_CALL)
 			})}
@@ -551,8 +562,8 @@ blk0: ()
 
 	t.Run("loops a self tail call", func(t *testing.T) {
 		fn := &types.Function{
-			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}},
-			Locals: []types.Type{types.TypeAny},
+			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
+			Locals: []types.Type{types.TypeAny()},
 			Code: assemble(t, func(b *instr.Builder) {
 				base := b.Label()
 				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_EQ).BrIf(base)
@@ -602,7 +613,7 @@ blk3: () <-- (blk1)
 
 	t.Run("exits a tail call whose frame it cannot reuse", func(t *testing.T) {
 		wide := &types.Function{
-			Typ: &types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI64}}}
+			Typ: &types.FunctionType{Params: []types.Type{types.TypeI64()}, Returns: []types.Type{types.TypeI64()}}}
 		wide.Code = assemble(t, func(b *instr.Builder) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.RETURN_CALL)
 		})
@@ -668,9 +679,9 @@ blk2: () <-- (blk0)
 	})
 
 	t.Run("resolves a closure built in the same unit as a static callee and lends it from its local", func(t *testing.T) {
-		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}, Captures: []types.Type{types.TypeI32}}
+		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32()}}, Captures: []types.Type{types.TypeI32()}}
 		fn := &types.Function{
-			Locals: []types.Type{types.TypeAny},
+			Locals: []types.Type{types.TypeAny()},
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Emit(instr.I32_CONST, 5).Emit(instr.CONST_GET, 0).Emit(instr.CLOSURE_NEW).Emit(instr.LOCAL_SET, 0)
 				b.Emit(instr.LOCAL_GET, 0).Emit(instr.CALL)
@@ -699,10 +710,10 @@ blk0: ()
 	})
 
 	t.Run("does not call a closure through a local another path re-stores", func(t *testing.T) {
-		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}}
+		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32()}}}
 		fn := &types.Function{
-			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI1, types.TypeAny}},
-			Locals: []types.Type{types.TypeAny},
+			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI1(), types.TypeAny()}},
+			Locals: []types.Type{types.TypeAny()},
 			Code: assemble(t, func(b *instr.Builder) {
 				skip := b.Label()
 				b.Emit(instr.CONST_GET, 0).Emit(instr.CLOSURE_NEW).Emit(instr.LOCAL_SET, 2)
@@ -720,9 +731,9 @@ blk0: ()
 	})
 
 	t.Run("speculates a closure callee its feedback observed and lends it from its local", func(t *testing.T) {
-		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}, Captures: []types.Type{types.TypeI32}}
+		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32()}}, Captures: []types.Type{types.TypeI32()}}
 		fn := &types.Function{
-			Typ: &types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}},
+			Typ: &types.FunctionType{Params: []types.Type{types.TypeAny()}, Returns: []types.Type{types.TypeI32()}},
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Emit(instr.LOCAL_GET, 0).Emit(instr.CALL).Emit(instr.RETURN)
 			}),
@@ -750,7 +761,7 @@ blk0: ()
 	})
 
 	t.Run("lends a global-backed argument by owning it and releasing it after the call", func(t *testing.T) {
-		callee := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}}}
+		callee := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeAny()}, Returns: []types.Type{types.TypeI32()}}}
 		fn := &types.Function{
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Emit(instr.GLOBAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
@@ -780,7 +791,7 @@ blk0: ()
 
 	t.Run("keeps a string op's operands with the translated code, since the op stores none of them", func(t *testing.T) {
 		fn := &types.Function{
-			Typ: &types.FunctionType{Params: []types.Type{types.TypeString}, Returns: []types.Type{types.TypeString}},
+			Typ: &types.FunctionType{Params: []types.Type{types.TypeString()}, Returns: []types.Type{types.TypeString()}},
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.STRING_CONCAT).Emit(instr.RETURN)
 			}),
@@ -883,11 +894,11 @@ blk4: () <-- (blk1)
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		fn := &types.Function{
-			Typ:  &types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}},
+			Typ:  &types.FunctionType{Params: []types.Type{types.TypeAny()}, Returns: []types.Type{types.TypeI32()}},
 			Code: instr.Marshal(code),
 		}
 		ip := calls(fn.Code)[0]
-		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}}
+		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32()}}}
 		m := transform.Module{
 			Constants: []types.Boxed{types.BoxRef(1)},
 			Objects:   transform.Objects{1: {Function: target}},
@@ -901,7 +912,7 @@ blk4: () <-- (blk1)
 
 	t.Run("guards an i64 slot load against a heap-promoted value", func(t *testing.T) {
 		fn := &types.Function{
-			Typ: &types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI64}},
+			Typ: &types.FunctionType{Params: []types.Type{types.TypeI64()}, Returns: []types.Type{types.TypeI64()}},
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
 			})}
@@ -921,7 +932,7 @@ blk0: ()
 
 	t.Run("reads a map entry as its declared element kind", func(t *testing.T) {
 		fn := &types.Function{
-			Typ: &types.FunctionType{Params: []types.Type{types.NewMapType(types.TypeI32, types.TypeI32)}, Returns: []types.Type{types.TypeI32}},
+			Typ: &types.FunctionType{Params: []types.Type{types.NewMapType(types.TypeI32(), types.TypeI32())}, Returns: []types.Type{types.TypeI32()}},
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 3).Emit(instr.MAP_GET)
 				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 4).Emit(instr.MAP_LOOKUP).Emit(instr.DROP)
@@ -950,7 +961,7 @@ blk0: ()
 
 	t.Run("retains the ref select picks before releasing both operands", func(t *testing.T) {
 		fn := &types.Function{
-			Typ: &types.FunctionType{Returns: []types.Type{types.TypeAny}},
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeAny()}},
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Emit(instr.REF_NULL).Emit(instr.REF_NULL).Emit(instr.I32_CONST, 1).Emit(instr.SELECT).Emit(instr.RETURN)
 			})}
@@ -974,27 +985,6 @@ blk0: ()
 	})
 }
 
-func TestAdopts(t *testing.T) {
-	tests := []struct {
-		name    string
-		code    instr.Opcode
-		pops    int
-		results int
-		want    int
-	}{
-		{name: "a call adopts every operand", code: instr.CALL, pops: 3, results: 1, want: 3},
-		{name: "a heap write with no result adopts the stored value", code: instr.MAP_SET, pops: 3, results: 0, want: 1},
-		{name: "a heap write with a result adopts nothing", code: instr.ARRAY_APPEND, pops: 3, results: 1, want: 0},
-		{name: "a heap read adopts nothing", code: instr.MAP_GET, pops: 2, results: 1, want: 0},
-		{name: "an allocation adopts nothing", code: instr.STRING_CONCAT, pops: 2, results: 1, want: 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, transform.Adopts(tt.code, tt.pops, tt.results))
-		})
-	}
-}
-
 func TestBorrows(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1004,7 +994,7 @@ func TestBorrows(t *testing.T) {
 		{
 			name: "an IRF-shaped func(i32, any) never writes either param",
 			fn: types.NewFunction(
-				&types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeAny}},
+				&types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeAny()}},
 				nil,
 				[]instr.Instruction{instr.New(instr.LOCAL_GET, 1), instr.New(instr.RETURN)},
 			),
@@ -1013,7 +1003,7 @@ func TestBorrows(t *testing.T) {
 		{
 			name: "a ref parameter written by local.set",
 			fn: types.NewFunction(
-				&types.FunctionType{Params: []types.Type{types.TypeAny}},
+				&types.FunctionType{Params: []types.Type{types.TypeAny()}},
 				nil,
 				[]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 0), instr.New(instr.RETURN)},
 			),
@@ -1022,7 +1012,7 @@ func TestBorrows(t *testing.T) {
 		{
 			name: "a ref parameter written by local.tee",
 			fn: types.NewFunction(
-				&types.FunctionType{Params: []types.Type{types.TypeAny}},
+				&types.FunctionType{Params: []types.Type{types.TypeAny()}},
 				nil,
 				[]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_TEE, 0), instr.New(instr.RETURN)},
 			),
@@ -1031,7 +1021,7 @@ func TestBorrows(t *testing.T) {
 		{
 			name: "a ref parameter in a function that tail calls",
 			fn: types.NewFunction(
-				&types.FunctionType{Params: []types.Type{types.TypeAny}},
+				&types.FunctionType{Params: []types.Type{types.TypeAny()}},
 				nil,
 				[]instr.Instruction{instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 0), instr.New(instr.RETURN_CALL)},
 			),
@@ -1040,7 +1030,7 @@ func TestBorrows(t *testing.T) {
 		{
 			name: "an i64 parameter",
 			fn: types.NewFunction(
-				&types.FunctionType{Params: []types.Type{types.TypeI64}},
+				&types.FunctionType{Params: []types.Type{types.TypeI64()}},
 				nil,
 				[]instr.Instruction{instr.New(instr.RETURN)},
 			),
@@ -1064,6 +1054,27 @@ func TestBorrows(t *testing.T) {
 	}
 }
 
+func TestAdopts(t *testing.T) {
+	tests := []struct {
+		name    string
+		code    instr.Opcode
+		pops    int
+		results int
+		want    int
+	}{
+		{name: "a call adopts every operand", code: instr.CALL, pops: 3, results: 1, want: 3},
+		{name: "a heap write with no result adopts the stored value", code: instr.MAP_SET, pops: 3, results: 0, want: 1},
+		{name: "a heap write with a result adopts nothing", code: instr.ARRAY_APPEND, pops: 3, results: 1, want: 0},
+		{name: "a heap read adopts nothing", code: instr.MAP_GET, pops: 2, results: 1, want: 0},
+		{name: "an allocation adopts nothing", code: instr.STRING_CONCAT, pops: 2, results: 1, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, transform.Adopts(tt.code, tt.pops, tt.results))
+		})
+	}
+}
+
 func loopFunction(t *testing.T) (*types.Function, int) {
 	t.Helper()
 	b := instr.NewBuilder()
@@ -1076,8 +1087,8 @@ func loopFunction(t *testing.T) (*types.Function, int) {
 	code, err := b.Assemble()
 	require.NoError(t, err)
 	return &types.Function{
-		Typ:    &types.FunctionType{Returns: []types.Type{types.TypeAny}},
-		Locals: []types.Type{types.TypeAny, types.TypeI32},
+		Typ:    &types.FunctionType{Returns: []types.Type{types.TypeAny()}},
+		Locals: []types.Type{types.TypeAny(), types.TypeI32()},
 		Code:   instr.Marshal(code),
 	}, instr.New(instr.LOCAL_GET, 0).Width()
 }
@@ -1099,7 +1110,7 @@ func indirectRecursiveFib(t *testing.T) (*types.Function, []int) {
 	code, err := b.Assemble()
 	require.NoError(t, err)
 	fn := &types.Function{
-		Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}},
+		Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeAny()}, Returns: []types.Type{types.TypeI32()}},
 		Code: instr.Marshal(code),
 	}
 	return fn, calls(fn.Code)
@@ -1121,23 +1132,12 @@ func coldCallFunction(t *testing.T) (*types.Function, int) {
 	require.NoError(t, err)
 	fn := &types.Function{
 		Typ: &types.FunctionType{
-			Params:  []types.Type{types.TypeI32, &types.FunctionType{Returns: []types.Type{types.TypeI32}}},
-			Returns: []types.Type{types.TypeI32},
+			Params:  []types.Type{types.TypeI32(), &types.FunctionType{Returns: []types.Type{types.TypeI32()}}},
+			Returns: []types.Type{types.TypeI32()},
 		},
 		Code: instr.Marshal(code),
 	}
 	return fn, calls(fn.Code)[0]
-}
-
-// calls returns the offset of every CALL in code, in order.
-func calls(code []byte) []int {
-	var out []int
-	for ip := 0; ip < len(code); ip += instr.Instruction(code[ip:]).Width() {
-		if instr.Instruction(code[ip:]).Opcode() == instr.CALL {
-			out = append(out, ip)
-		}
-	}
-	return out
 }
 
 func assemble(t *testing.T, emit func(b *instr.Builder)) []byte {
@@ -1163,7 +1163,7 @@ func protectedFunction(t *testing.T) (*types.Function, int) {
 	require.NoError(t, err)
 	at := instr.New(instr.LOCAL_GET, 0).Width()*2 + instr.New(instr.I32_DIV_S).Width() + instr.New(instr.RETURN).Width()
 	return &types.Function{
-		Typ:      &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+		Typ:      &types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
 		Code:     instr.Marshal(code),
 		Handlers: b.Handlers(),
 	}, at

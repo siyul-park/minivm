@@ -69,8 +69,8 @@ Expose Go behavior through a typed host function:
 ```go
 lookup := interp.NewHostFunction(
     &types.FunctionType{
-        Params:  []types.Type{types.TypeI32},
-        Returns: []types.Type{types.TypeI32},
+        Params:  []types.Type{types.TypeI32()},
+        Returns: []types.Type{types.TypeI32()},
     },
     func(vm *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error) {
         price := db.GetPrice(int(params[0].I32()))

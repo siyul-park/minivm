@@ -386,6 +386,50 @@ func (l loader) finish(result value, current step, ok bool) (value, error) {
 	return result, nil
 }
 
+// declaredTypesField names the threader field holding op's declared
+// types.Type per slot, indexed the same way slotInfo's Kind-only field is:
+// LOCAL_GET by localTypes, GLOBAL_GET by globalTypes, UPVAL_GET by
+// captureTypes.
+func declaredTypesField(op instr.Opcode) (string, bool) {
+	switch op {
+	case instr.LOCAL_GET:
+		return "localTypes", true
+	case instr.GLOBAL_GET:
+		return "globalTypes", true
+	case instr.UPVAL_GET:
+		return "captureTypes", true
+	default:
+		return "", false
+	}
+}
+
+func immediate(kind instr.Kind, at jen.Code) jen.Code {
+	operand := jen.Qual(instrPkg, "Instruction").Call(jen.Id("c").Dot("code").Index(jen.Add(at).Op(":"))).Dot("Operand").Call(jen.Lit(0))
+	switch kind.Repr() {
+	case instr.KindI32:
+		return jen.Int32().Call(operand)
+	case instr.KindI64:
+		return jen.Int64().Call(operand)
+	case instr.KindF32:
+		return jen.Qual(typesPkg, "Box").Call(jen.Uint64().Call(jen.Uint32().Call(operand)), jen.Qual(typesPkg, "KindF32")).Dot("F32").Call()
+	case instr.KindF64:
+		return jen.Qual(typesPkg, "Boxed").Call(operand).Dot("F64").Call()
+	default:
+		panic(fmt.Sprintf("unsupported immediate kind %s", kind))
+	}
+}
+
+func borrow(kind instr.Kind, boxed jen.Code) jen.Code {
+	if kind.Repr() == instr.KindI64 {
+		return jen.Id("i").Dot("borrowI64").Call(boxed)
+	}
+	name, ok := kindName(kind)
+	if !ok {
+		panic(fmt.Sprintf("unsupported borrowed kind %s", kind))
+	}
+	return jen.Add(boxed).Dot(name).Call()
+}
+
 func slotStandalone(current step, input value, field string) jen.Code {
 	compile := append([]jen.Code(nil), input.compile...)
 	scalar := materialize(input, false, width(current.op))
@@ -555,54 +599,10 @@ func slotInfo(op instr.Opcode) (field, method string, ok bool) {
 	}
 }
 
-// declaredTypesField names the threader field holding op's declared
-// types.Type per slot, indexed the same way slotInfo's Kind-only field is:
-// LOCAL_GET by localTypes, GLOBAL_GET by globalTypes, UPVAL_GET by
-// captureTypes.
-func declaredTypesField(op instr.Opcode) (string, bool) {
-	switch op {
-	case instr.LOCAL_GET:
-		return "localTypes", true
-	case instr.GLOBAL_GET:
-		return "globalTypes", true
-	case instr.UPVAL_GET:
-		return "captureTypes", true
-	default:
-		return "", false
-	}
-}
-
-func immediate(kind instr.Kind, at jen.Code) jen.Code {
-	operand := jen.Qual(instrPkg, "Instruction").Call(jen.Id("c").Dot("code").Index(jen.Add(at).Op(":"))).Dot("Operand").Call(jen.Lit(0))
-	switch kind.Repr() {
-	case instr.KindI32:
-		return jen.Int32().Call(operand)
-	case instr.KindI64:
-		return jen.Int64().Call(operand)
-	case instr.KindF32:
-		return jen.Qual(typesPkg, "Box").Call(jen.Uint64().Call(jen.Uint32().Call(operand)), jen.Qual(typesPkg, "KindF32")).Dot("F32").Call()
-	case instr.KindF64:
-		return jen.Qual(typesPkg, "Boxed").Call(operand).Dot("F64").Call()
-	default:
-		panic(fmt.Sprintf("unsupported immediate kind %s", kind))
-	}
-}
-
 func mustKindName(kind instr.Kind) string {
 	name, ok := kindName(kind)
 	if !ok {
 		panic(fmt.Sprintf("unsupported kind %s", kind))
 	}
 	return name
-}
-
-func borrow(kind instr.Kind, boxed jen.Code) jen.Code {
-	if kind.Repr() == instr.KindI64 {
-		return jen.Id("i").Dot("borrowI64").Call(boxed)
-	}
-	name, ok := kindName(kind)
-	if !ok {
-		panic(fmt.Sprintf("unsupported borrowed kind %s", kind))
-	}
-	return jen.Add(boxed).Dot(name).Call()
 }

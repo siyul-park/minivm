@@ -9,6 +9,7 @@ import (
 	"github.com/siyul-park/minivm/instr"
 )
 
+// Program is a loadable unit: top-level code plus its local, global, constant, and type pools and exception handlers.
 type Program struct {
 	Code      []byte
 	Locals    []types.Type
@@ -18,12 +19,14 @@ type Program struct {
 	Handlers  []instr.Handler
 }
 
+// WithConstants sets the constant pool.
 func WithConstants(consts ...types.Value) func(*Program) {
 	return func(p *Program) {
 		p.Constants = consts
 	}
 }
 
+// WithTypes sets the type pool.
 func WithTypes(types ...types.Type) func(*Program) {
 	return func(p *Program) {
 		p.Types = types
@@ -58,6 +61,7 @@ func WithHandlers(handlers ...instr.Handler) func(*Program) {
 	}
 }
 
+// New returns a program for instrs configured by options.
 func New(instrs []instr.Instruction, options ...func(*Program)) *Program {
 	p := &Program{Code: instr.Marshal(instrs)}
 	for _, opt := range options {

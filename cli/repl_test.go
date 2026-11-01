@@ -233,7 +233,6 @@ func TestREPL_Run(t *testing.T) {
 			input:    "br @0x0000\n.quit\n",
 			contains: []string{"error:"}},
 
-		// --- debug commands ---
 		{
 			name: ".debug with empty program",
 			// .debug with empty program

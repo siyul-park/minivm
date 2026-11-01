@@ -305,6 +305,7 @@ var types = map[Opcode]Type{
 	UPVAL_SET: {Mnemonic: "upval.set", Widths: []int{1}, Pop: []Kind{KindAny}, Writes: Upval},
 }
 
+// TypeOf returns the encoding metadata of op, or the zero Type when undefined.
 func TypeOf(op Opcode) Type {
 	return types[op]
 }
@@ -316,10 +317,14 @@ func Valid(op Opcode) bool {
 }
 
 // Reads reports whether op reads effect.
-func (op Opcode) Reads(effect Effect) bool { return TypeOf(op).Reads&effect != 0 }
+func (op Opcode) Reads(effect Effect) bool {
+	return TypeOf(op).Reads&effect != 0
+}
 
 // Writes reports whether op writes effect.
-func (op Opcode) Writes(effect Effect) bool { return TypeOf(op).Writes&effect != 0 }
+func (op Opcode) Writes(effect Effect) bool {
+	return TypeOf(op).Writes&effect != 0
+}
 
 // IsPure reports whether op computes its results from its operand values
 // alone: it touches no other part of the machine and yields at least one

@@ -1,4 +1,4 @@
-def make_list(n, seed):
+def _make_list(n, seed):
     xs = [0] * n
     s = seed
     i = 0
@@ -9,7 +9,7 @@ def make_list(n, seed):
     return xs
 
 
-def insertion_sort(xs, n):
+def _insertion_sort(xs, n):
     i = 1
     while i < n:
         key = xs[i]
@@ -28,8 +28,8 @@ def run():
     seed = 1
     r = 0
     while r < rounds:
-        xs = make_list(n, seed + r)
-        insertion_sort(xs, n)
+        xs = _make_list(n, seed + r)
+        _insertion_sort(xs, n)
         i = 0
         while i < n:
             checksum = checksum + xs[i] * (i % 7)

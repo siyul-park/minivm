@@ -34,7 +34,6 @@ Compares deterministic workloads across minivm's threaded interpreter, JIT, Waze
 | typed-array-sum | 2.826 µs · 0B · 0a | 147.1 ns · 0B · 0a | 19.2× | 153.9 ns · 8B · 1a | 1.723 ns · 0B · 0a | 19.22 µs · 94208B · 513a | 3.517 µs · 4000B · 15a | 13.49 µs · 2080B · 238a | 7.912 µs · 2496B · 246a | 2.623 µs · 0B · 0a | — |
 | xorshift-i64 | 53.25 µs · 18424B · 2046a | 779.3 ns · 18424B · 2046a | 68.3× | — | 420.6 ns · 0B · 0a | 46.32 µs · 107608B · 2188a | — | 402.1 µs · 447535B · 12736a | 170.4 µs · 199938B · 7772a | 49.54 µs · 4B · 0a | 31.38 µs · 7362B · 547a |
 
-
 <!-- benchmark-table:end -->
 
 ## Method

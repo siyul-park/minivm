@@ -9,6 +9,21 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+type step struct {
+	match
+	kind   instr.Kind
+	boxed  bool
+	commit bool
+}
+
+type state struct {
+	stack      []value
+	offset     int
+	width      int
+	label      string
+	standalone bool
+}
+
 type value struct {
 	op       instr.Opcode
 	head     instr.Opcode
@@ -25,21 +40,6 @@ type value struct {
 	declared jen.Code // compile-time *types.StructType proven for a struct container (local, global, or upvalue)
 	resident bool
 	handler  jen.Code
-}
-
-type step struct {
-	match
-	kind   instr.Kind
-	boxed  bool
-	commit bool
-}
-
-type state struct {
-	stack      []value
-	offset     int
-	width      int
-	label      string
-	standalone bool
 }
 
 type target struct {

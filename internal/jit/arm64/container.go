@@ -16,6 +16,14 @@ type address struct {
 	offset      int16
 }
 
+// row is the access at p: imm's form for an offset, reg's for an index.
+func (p address) row(imm func(r, base asm.Reg, offset int16) asm.Instruction, reg func(r, base, index asm.Reg) asm.Instruction, r asm.Reg) asm.Instruction {
+	if p.index == nil {
+		return imm(r, p.base, p.offset)
+	}
+	return reg(r, p.base, p.index)
+}
+
 // itab is the itab of the concrete representation shape admits: TypedArray[T]
 // for a scalar Kind, *types.Array for KindRef, *types.Struct when Struct,
 // *types.Closure when Function.
@@ -68,14 +76,6 @@ func limit(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	}
 	a.Emit(target.CMP(s.Reg(op.Args[0]), s.Reg(op.Args[1])), target.BCondLabel(target.OpBGT, s.Deopt()))
 	return true
-}
-
-// row is the access at p: imm's form for an offset, reg's for an index.
-func (p address) row(imm func(r, base asm.Reg, offset int16) asm.Instruction, reg func(r, base, index asm.Reg) asm.Instruction, r asm.Reg) asm.Instruction {
-	if p.index == nil {
-		return imm(r, p.base, p.offset)
-	}
-	return reg(r, p.base, p.index)
 }
 
 // field returns v widened to a struct.Data slot's 64 bits. Unlike box, an i64

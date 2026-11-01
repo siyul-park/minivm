@@ -32,14 +32,12 @@ func (p *FoldPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 		b := function.Block(block)
 		for _, operation := range b.Operations {
 			operation = r.operation(operation)
-			if operation.Op == ssa.OpExec && operation.Code.IsPure() {
-				if next, ok := fold(r, id, constants, computed, operation); ok {
-					changed = true
-					if len(next.Results) == 0 {
-						continue
-					}
-					operation = next
+			if next, ok := fold(r, id, constants, computed, operation); ok {
+				changed = true
+				if len(next.Results) == 0 {
+					continue
 				}
+				operation = next
 			}
 			operation = r.define(operation)
 			r.builder.Add(id, operation)
@@ -48,8 +46,8 @@ func (p *FoldPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 				constants[operation.Results[0]] = operation.Const
 				computed[operation.Results[0]] = true
 			case ssa.OpExec:
-				for _, r := range operation.Results {
-					computed[r] = true
+				for _, result := range operation.Results {
+					computed[result] = true
 				}
 			}
 		}
@@ -64,6 +62,9 @@ func (p *FoldPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 }
 
 func fold(r *rebuilder, id int, constants map[ssa.Value]uint64, computed map[ssa.Value]bool, operation ssa.Operation) (ssa.Operation, bool) {
+	if operation.Op != ssa.OpExec || !operation.Code.IsPure() {
+		return operation, false
+	}
 	args := make([]uint64, 0, len(operation.Args))
 	for _, a := range operation.Args {
 		w, ok := constants[a]
@@ -160,10 +161,6 @@ func eval(code instr.Opcode, args []uint64) (uint64, bool) {
 		return evalI32(code, int32(uint32(args[0])), int32(uint32(args[1])))
 	case instr.I32_EQZ:
 		return word(int32(uint32(args[0])) == 0), true
-	case instr.I32_TO_F32_S:
-		return word(float32(int32(uint32(args[0])))), true
-	case instr.I32_TO_F32_U:
-		return word(float32(uint32(args[0]))), true
 
 	case instr.I64_ADD, instr.I64_SUB, instr.I64_MUL, instr.I64_DIV_S, instr.I64_DIV_U,
 		instr.I64_REM_S, instr.I64_REM_U, instr.I64_SHL, instr.I64_SHR_S, instr.I64_SHR_U,
@@ -173,6 +170,19 @@ func eval(code instr.Opcode, args []uint64) (uint64, bool) {
 		return evalI64(code, int64(args[0]), int64(args[1]))
 	case instr.I64_EQZ:
 		return word(int64(args[0]) == 0), true
+
+	case instr.F32_ADD, instr.F32_SUB, instr.F32_MUL, instr.F32_DIV, instr.F32_REM, instr.F32_MOD,
+		instr.F32_EQ, instr.F32_NE, instr.F32_LT, instr.F32_GT, instr.F32_LE, instr.F32_GE:
+		return evalF32(code, math.Float32frombits(uint32(args[0])), math.Float32frombits(uint32(args[1])))
+
+	case instr.F64_ADD, instr.F64_SUB, instr.F64_MUL, instr.F64_DIV, instr.F64_REM, instr.F64_MOD,
+		instr.F64_EQ, instr.F64_NE, instr.F64_LT, instr.F64_GT, instr.F64_LE, instr.F64_GE:
+		return evalF64(code, math.Float64frombits(args[0]), math.Float64frombits(args[1]))
+
+	case instr.I32_TO_F32_S:
+		return word(float32(int32(uint32(args[0])))), true
+	case instr.I32_TO_F32_U:
+		return word(float32(uint32(args[0]))), true
 	case instr.I64_TO_I32:
 		return word(int32(int64(args[0]))), true
 	case instr.I64_TO_F32_S:
@@ -183,56 +193,41 @@ func eval(code instr.Opcode, args []uint64) (uint64, bool) {
 		return math.Float64bits(float64(int64(args[0]))), true
 	case instr.I64_TO_F64_U:
 		return math.Float64bits(float64(uint64(args[0]))), true
+	case instr.F32_TO_I32_S, instr.F32_TO_I32_U:
+		return truncate(code, float64(math.Float32frombits(uint32(args[0]))))
+	case instr.F64_TO_I32_S, instr.F64_TO_I32_U, instr.F64_TO_I64_S, instr.F64_TO_I64_U:
+		return truncate(code, math.Float64frombits(args[0]))
+	case instr.F64_TO_F32:
+		return word(float32(math.Float64frombits(args[0]))), true
+	default:
+		return 0, false
+	}
+}
 
-	case instr.F32_ADD, instr.F32_SUB, instr.F32_MUL, instr.F32_DIV, instr.F32_REM, instr.F32_MOD,
-		instr.F32_EQ, instr.F32_NE, instr.F32_LT, instr.F32_GT, instr.F32_LE, instr.F32_GE:
-		return evalF32(code, math.Float32frombits(uint32(args[0])), math.Float32frombits(uint32(args[1])))
-
-	case instr.F32_TO_I32_S:
-		f := float64(math.Float32frombits(uint32(args[0])))
+// truncate evaluates a float-to-integer conversion, failing when f is NaN or
+// outside the target range.
+func truncate(code instr.Opcode, f float64) (uint64, bool) {
+	switch code {
+	case instr.F32_TO_I32_S, instr.F64_TO_I32_S:
 		if math.IsNaN(f) || f < -(1<<31) || f >= 1<<31 {
 			return 0, false
 		}
 		return word(int32(f)), true
-	case instr.F32_TO_I32_U:
-		f := float64(math.Float32frombits(uint32(args[0])))
-		if math.IsNaN(f) || f < 0 || f >= 1<<32 {
-			return 0, false
-		}
-		return word(int32(uint32(f))), true
-
-	case instr.F64_ADD, instr.F64_SUB, instr.F64_MUL, instr.F64_DIV, instr.F64_REM, instr.F64_MOD,
-		instr.F64_EQ, instr.F64_NE, instr.F64_LT, instr.F64_GT, instr.F64_LE, instr.F64_GE:
-		return evalF64(code, math.Float64frombits(args[0]), math.Float64frombits(args[1]))
-	case instr.F64_TO_I32_S:
-		f := math.Float64frombits(args[0])
-		if math.IsNaN(f) || f < -(1<<31) || f >= 1<<31 {
-			return 0, false
-		}
-		return word(int32(f)), true
-	case instr.F64_TO_I32_U:
-		f := math.Float64frombits(args[0])
+	case instr.F32_TO_I32_U, instr.F64_TO_I32_U:
 		if math.IsNaN(f) || f < 0 || f >= 1<<32 {
 			return 0, false
 		}
 		return word(int32(uint32(f))), true
 	case instr.F64_TO_I64_S:
-		f := math.Float64frombits(args[0])
 		if math.IsNaN(f) || f < -(1<<63) || f >= 1<<63 {
 			return 0, false
 		}
 		return uint64(int64(f)), true
-	case instr.F64_TO_I64_U:
-		f := math.Float64frombits(args[0])
+	default:
 		if math.IsNaN(f) || f < 0 || f >= 1<<64 {
 			return 0, false
 		}
 		return uint64(f), true
-	case instr.F64_TO_F32:
-		return word(float32(math.Float64frombits(args[0]))), true
-
-	default:
-		return 0, false
 	}
 }
 

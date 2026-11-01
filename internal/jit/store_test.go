@@ -9,22 +9,6 @@ import (
 	"github.com/siyul-park/minivm/internal/jit"
 )
 
-// code returns a fresh, unpublished, non-OSR Code at address of tier.
-func code(t *testing.T, address int, tier jit.Tier) *jit.Code {
-	t.Helper()
-	c, err := jit.NewCode(address, 0, false, tier, 0, nil, nil, ret(), nil, 0)
-	require.NoError(t, err)
-	return c
-}
-
-// osrCode returns a fresh, unpublished OSR Code at address rooted at ip.
-func osrCode(t *testing.T, address, ip int, tier jit.Tier) *jit.Code {
-	t.Helper()
-	c, err := jit.NewCode(address, ip, true, tier, 0, nil, nil, ret(), nil, 0)
-	require.NoError(t, err)
-	return c
-}
-
 func TestNewStore(t *testing.T) {
 	t.Run("serves the given number of addresses", func(t *testing.T) {
 		s := jit.NewStore(4)
@@ -55,6 +39,36 @@ func TestStore_Code(t *testing.T) {
 	require.Equal(t, c, s.Code(0))
 	require.Nil(t, s.Code(-1))
 	require.Nil(t, s.Code(2))
+}
+
+func TestStore_CodeAt(t *testing.T) {
+	s := jit.NewStore(2)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+	require.Nil(t, s.CodeAt(1, 12))
+	c := osrCode(t, 1, 12, jit.Optimized)
+	require.True(t, s.Publish(c))
+	require.Equal(t, c, s.CodeAt(1, 12))
+	// An OSR code is never a call target: it never reaches the ordinary
+	// per-address publish path Code reads.
+	require.Nil(t, s.Code(1))
+}
+
+func TestStore_Find(t *testing.T) {
+	s := jit.NewStore(1)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+	c := code(t, 0, jit.Baseline)
+	require.True(t, s.Publish(c))
+
+	require.Equal(t, c, s.Find(c.Entry()))
+	require.Equal(t, c, s.Find(c.Entry()+3))
+	require.Nil(t, s.Find(c.Entry()+4))
+	require.Nil(t, s.Find(c.Entry()-1))
+
+	o := osrCode(t, 0, 12, jit.Optimized)
+	require.True(t, s.Publish(o))
+	require.Equal(t, o, s.Find(o.Entry()))
 }
 
 func TestStore_Publish(t *testing.T) {
@@ -222,19 +236,6 @@ func TestStore_Retire(t *testing.T) {
 	})
 }
 
-func TestStore_CodeAt(t *testing.T) {
-	s := jit.NewStore(2)
-	t.Cleanup(func() { require.NoError(t, s.Close()) })
-
-	require.Nil(t, s.CodeAt(1, 12))
-	c := osrCode(t, 1, 12, jit.Optimized)
-	require.True(t, s.Publish(c))
-	require.Equal(t, c, s.CodeAt(1, 12))
-	// An OSR code is never a call target: it never reaches the ordinary
-	// per-address publish path Code reads.
-	require.Nil(t, s.Code(1))
-}
-
 func TestStore_RetireAt(t *testing.T) {
 	t.Run("clears the published OSR code and keeps it findable while retired", func(t *testing.T) {
 		s := jit.NewStore(1)
@@ -255,23 +256,6 @@ func TestStore_RetireAt(t *testing.T) {
 		s.RetireAt(0, 12)
 		require.Nil(t, s.CodeAt(0, 12))
 	})
-}
-
-func TestStore_Find(t *testing.T) {
-	s := jit.NewStore(1)
-	t.Cleanup(func() { require.NoError(t, s.Close()) })
-
-	c := code(t, 0, jit.Baseline)
-	require.True(t, s.Publish(c))
-
-	require.Equal(t, c, s.Find(c.Entry()))
-	require.Equal(t, c, s.Find(c.Entry()+3))
-	require.Nil(t, s.Find(c.Entry()+4))
-	require.Nil(t, s.Find(c.Entry()-1))
-
-	o := osrCode(t, 0, 12, jit.Optimized)
-	require.True(t, s.Publish(o))
-	require.Equal(t, o, s.Find(o.Entry()))
 }
 
 func TestStore_Attach(t *testing.T) {
@@ -327,6 +311,18 @@ func TestStore_Reclaim(t *testing.T) {
 	})
 }
 
+func TestStore_Close(t *testing.T) {
+	s := jit.NewStore(2)
+	base := code(t, 0, jit.Baseline)
+	require.True(t, s.Publish(base))
+	opt := code(t, 0, jit.Optimized)
+	require.True(t, s.Publish(opt))
+	osr := osrCode(t, 1, 12, jit.Optimized)
+	require.True(t, s.Publish(osr))
+
+	require.NoError(t, s.Close())
+}
+
 func TestReader_Quiesce(t *testing.T) {
 	s := jit.NewStore(2)
 	t.Cleanup(func() { require.NoError(t, s.Close()) })
@@ -361,14 +357,18 @@ func TestReader_Detach(t *testing.T) {
 	require.Nil(t, s.Find(c.Entry()))
 }
 
-func TestStore_Close(t *testing.T) {
-	s := jit.NewStore(2)
-	base := code(t, 0, jit.Baseline)
-	require.True(t, s.Publish(base))
-	opt := code(t, 0, jit.Optimized)
-	require.True(t, s.Publish(opt))
-	osr := osrCode(t, 1, 12, jit.Optimized)
-	require.True(t, s.Publish(osr))
+// code returns a fresh, unpublished, non-OSR Code at address of tier.
+func code(t *testing.T, address int, tier jit.Tier) *jit.Code {
+	t.Helper()
+	c, err := jit.NewCode(address, 0, false, tier, 0, nil, nil, jit.Assembly{Bytes: ret()})
+	require.NoError(t, err)
+	return c
+}
 
-	require.NoError(t, s.Close())
+// osrCode returns a fresh, unpublished OSR Code at address rooted at ip.
+func osrCode(t *testing.T, address, ip int, tier jit.Tier) *jit.Code {
+	t.Helper()
+	c, err := jit.NewCode(address, ip, true, tier, 0, nil, nil, jit.Assembly{Bytes: ret()})
+	require.NoError(t, err)
+	return c
 }

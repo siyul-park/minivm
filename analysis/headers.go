@@ -26,10 +26,16 @@ func Headers(function *types.Function) ([]int, error) {
 }
 
 // Len returns the number of blocks.
-func (g cfg) Len() int { return len(g) }
+func (g cfg) Len() int {
+	return len(g)
+}
 
 // Succ returns a node's successors.
-func (g cfg) Succ(node int) []int { return g[node].Succs }
+func (g cfg) Succ(node int) []int {
+	return g[node].Succs
+}
 
 // Pred returns a node's predecessors.
-func (g cfg) Pred(node int) []int { return g[node].Preds }
+func (g cfg) Pred(node int) []int {
+	return g[node].Preds
+}

@@ -8,13 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewError(t *testing.T) {
-	e := types.NewError(42, "boom", types.BoxRef(3))
-	require.Equal(t, types.ErrorCode(42), e.Code())
-	require.Equal(t, "boom", e.Error())
-	require.Equal(t, types.BoxRef(3), e.Value())
-}
-
 func TestWrapError(t *testing.T) {
 	sentinel := errors.New("cause")
 	e := types.WrapError(types.ErrorCodeUserBase, sentinel)
@@ -23,14 +16,11 @@ func TestWrapError(t *testing.T) {
 	require.Nil(t, types.WrapError(types.ErrorCodeNone, nil))
 }
 
-func TestError_Error(t *testing.T) {
-	require.Equal(t, "boom", types.NewError(types.ErrorCodeNone, "boom", types.BoxedNull).Error())
-}
-
-func TestError_Unwrap(t *testing.T) {
-	sentinel := errors.New("cause")
-	e := types.WrapError(types.ErrorCodeNone, sentinel)
-	require.ErrorIs(t, e.Unwrap(), sentinel)
+func TestNewError(t *testing.T) {
+	e := types.NewError(42, "boom", types.BoxRef(3))
+	require.Equal(t, types.ErrorCode(42), e.Code())
+	require.Equal(t, "boom", e.Error())
+	require.Equal(t, types.BoxRef(3), e.Value())
 }
 
 func TestError_Value(t *testing.T) {
@@ -53,20 +43,30 @@ func TestError_Kind(t *testing.T) {
 
 func TestError_Type(t *testing.T) {
 	typ := types.NewError(types.ErrorCodeNone, "", types.BoxedNull).Type()
-	require.Equal(t, types.TypeError, typ)
+	require.Equal(t, types.TypeError(), typ)
 	require.Equal(t, types.KindRef, typ.Kind())
 	require.Equal(t, "error", typ.String())
-	require.True(t, typ.Cast(types.TypeError))
-	require.False(t, typ.Cast(types.TypeI32))
-	require.True(t, typ.Equals(types.TypeError))
-	require.False(t, typ.Equals(types.TypeString))
-}
-
-func TestError_String(t *testing.T) {
-	require.Equal(t, `error("boom")`, types.NewError(types.ErrorCodeNone, "boom", types.BoxedNull).String())
+	require.True(t, typ.Cast(types.TypeError()))
+	require.False(t, typ.Cast(types.TypeI32()))
+	require.True(t, typ.Equals(types.TypeError()))
+	require.False(t, typ.Equals(types.TypeString()))
 }
 
 func TestError_Refs(t *testing.T) {
 	require.Equal(t, []types.Ref{9}, types.NewError(types.ErrorCodeNone, "", types.BoxI32(7)).Refs([]types.Ref{9}))
 	require.Equal(t, []types.Ref{types.Ref(9), types.Ref(3)}, types.NewError(types.ErrorCodeNone, "", types.BoxRef(3)).Refs([]types.Ref{9}))
+}
+
+func TestError_Error(t *testing.T) {
+	require.Equal(t, "boom", types.NewError(types.ErrorCodeNone, "boom", types.BoxedNull).Error())
+}
+
+func TestError_Unwrap(t *testing.T) {
+	sentinel := errors.New("cause")
+	e := types.WrapError(types.ErrorCodeNone, sentinel)
+	require.ErrorIs(t, e.Unwrap(), sentinel)
+}
+
+func TestError_String(t *testing.T) {
+	require.Equal(t, `error("boom")`, types.NewError(types.ErrorCodeNone, "boom", types.BoxedNull).String())
 }

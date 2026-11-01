@@ -20,6 +20,7 @@ type Builder struct {
 	globals   []types.Type
 }
 
+// NewBuilder returns an empty program builder.
 func NewBuilder() *Builder {
 	return &Builder{code: instr.NewBuilder()}
 }

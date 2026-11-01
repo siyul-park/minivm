@@ -36,7 +36,7 @@ func New(level Level) *Optimizer {
 		level:    level,
 	}
 
-	pass.Register(o.manager, analysis.NewBlocksAnalysis())
+	pass.Register(o.manager, analysis.NewCFG())
 	for _, p := range o.passes() {
 		o.pipeline.Add(p)
 	}

@@ -46,3 +46,6 @@ docs/superpowers/
 
 # Python cache
 __pycache__/
+.lighthouse/*.db*
+.lighthouse/local.toml
+.lighthouse/cache/

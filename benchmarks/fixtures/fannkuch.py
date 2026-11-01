@@ -1,4 +1,4 @@
-def count_flips(perm):
+def _count_flips(perm):
     a = perm[:]
     flips = 0
     k = a[0]
@@ -18,7 +18,7 @@ def count_flips(perm):
 
 def permute(a, k, permcount, checksum, maxflips):
     if k == 1:
-        flips = count_flips(a)
+        flips = _count_flips(a)
         if flips > maxflips:
             maxflips = flips
         if permcount % 2 == 0:

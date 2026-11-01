@@ -16,32 +16,6 @@ func (r runner[U, R]) Run(m *pass.Manager, unit U) (R, error) {
 	return r(m, unit)
 }
 
-func TestNewManager(t *testing.T) {
-	require.NotNil(t, pass.NewManager())
-}
-
-func TestManager_Invalidate(t *testing.T) {
-	calls := 0
-	m := pass.NewManager()
-	pass.Register[*program.Program, int](m, runner[*program.Program, int](func(_ *pass.Manager, prog *program.Program) (int, error) {
-		calls++
-		return len(prog.Code), nil
-	}))
-	prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
-	_, err := pass.GetResult[int](m, prog)
-	require.NoError(t, err)
-
-	m.Invalidate(true)
-	_, err = pass.GetResult[int](m, prog)
-	require.NoError(t, err)
-	require.Equal(t, 1, calls)
-
-	m.Invalidate(false)
-	_, err = pass.GetResult[int](m, prog)
-	require.NoError(t, err)
-	require.Equal(t, 2, calls)
-}
-
 func TestRegister(t *testing.T) {
 	m := pass.NewManager()
 	pass.Register[*program.Program, int](m, runner[*program.Program, int](func(_ *pass.Manager, prog *program.Program) (int, error) {
@@ -126,4 +100,30 @@ func TestGetResult(t *testing.T) {
 		require.Equal(t, 1, got)
 		require.Equal(t, 2, calls)
 	})
+}
+
+func TestNewManager(t *testing.T) {
+	require.NotNil(t, pass.NewManager())
+}
+
+func TestManager_Invalidate(t *testing.T) {
+	calls := 0
+	m := pass.NewManager()
+	pass.Register[*program.Program, int](m, runner[*program.Program, int](func(_ *pass.Manager, prog *program.Program) (int, error) {
+		calls++
+		return len(prog.Code), nil
+	}))
+	prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+	_, err := pass.GetResult[int](m, prog)
+	require.NoError(t, err)
+
+	m.Invalidate(true)
+	_, err = pass.GetResult[int](m, prog)
+	require.NoError(t, err)
+	require.Equal(t, 1, calls)
+
+	m.Invalidate(false)
+	_, err = pass.GetResult[int](m, prog)
+	require.NoError(t, err)
+	require.Equal(t, 2, calls)
 }

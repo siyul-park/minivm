@@ -9,12 +9,9 @@ type Reg interface {
 	String() string
 }
 
-// PReg is a physical register selected by the architecture.
-type PReg struct {
-	id    uint8
-	typ   RegType
-	width RegWidth
-}
+// PReg is a physical register selected by the architecture. It packs the
+// identifier, bank, and width so register names can be constants.
+type PReg uint32
 
 // VReg is a virtual register. Build assigns it a PReg or a spill slot when the
 // target is a Frame, and rejects it otherwise.
@@ -42,9 +39,22 @@ const (
 	Width64 RegWidth = 64
 )
 
+// Bank bases: add a register identifier to name a physical register.
+const (
+	Int32   PReg = PReg(RegTypeInt)<<pregTypeShift | PReg(Width32)<<pregWidthShift
+	Int64   PReg = PReg(RegTypeInt)<<pregTypeShift | PReg(Width64)<<pregWidthShift
+	Float32 PReg = PReg(RegTypeFloat)<<pregTypeShift | PReg(Width32)<<pregWidthShift
+	Float64 PReg = PReg(RegTypeFloat)<<pregTypeShift | PReg(Width64)<<pregWidthShift
+)
+
+const (
+	pregTypeShift  = 8
+	pregWidthShift = 16
+)
+
 // NewPReg constructs a physical register descriptor.
 func NewPReg(id uint8, typ RegType, w RegWidth) PReg {
-	return PReg{id: id, typ: typ, width: w}
+	return PReg(id) | PReg(typ)<<pregTypeShift | PReg(w)<<pregWidthShift
 }
 
 // NewVReg constructs a virtual register descriptor.
@@ -53,35 +63,47 @@ func NewVReg(id int32, typ RegType, w RegWidth) VReg {
 }
 
 // ID returns the register identifier.
-func (r PReg) ID() uint8 { return r.id }
+func (r PReg) ID() uint8 {
+	return uint8(r)
+}
+
+// Width returns the register width.
+func (r PReg) Width() RegWidth {
+	return RegWidth(r >> pregWidthShift)
+}
 
 // ID returns the register identifier.
-func (r VReg) ID() int32 { return r.id }
+func (r VReg) ID() int32 {
+	return r.id
+}
 
 // Width returns the register width.
-func (r PReg) Width() RegWidth { return r.width }
-
-// Width returns the register width.
-func (r VReg) Width() RegWidth { return r.width }
-
-// Type returns the value type.
-func (r PReg) Type() RegType { return r.typ }
-
-func (r PReg) String() string {
-	if r.typ == RegTypeFloat {
-		if r.width == Width32 {
-			return fmt.Sprintf("s%d", r.id)
-		}
-		return fmt.Sprintf("d%d", r.id)
-	}
-	if r.width == Width32 {
-		return fmt.Sprintf("w%d", r.id)
-	}
-	return fmt.Sprintf("x%d", r.id)
+func (r VReg) Width() RegWidth {
+	return r.width
 }
 
 // Type returns the value type.
-func (r VReg) Type() RegType { return r.typ }
+func (r PReg) Type() RegType {
+	return RegType(r >> pregTypeShift)
+}
+
+func (r PReg) String() string {
+	if r.Type() == RegTypeFloat {
+		if r.Width() == Width32 {
+			return fmt.Sprintf("s%d", r.ID())
+		}
+		return fmt.Sprintf("d%d", r.ID())
+	}
+	if r.Width() == Width32 {
+		return fmt.Sprintf("w%d", r.ID())
+	}
+	return fmt.Sprintf("x%d", r.ID())
+}
+
+// Type returns the value type.
+func (r VReg) Type() RegType {
+	return r.typ
+}
 
 func (r VReg) String() string {
 	prefix := "vr"

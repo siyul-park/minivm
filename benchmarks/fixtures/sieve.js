@@ -2,11 +2,7 @@ function run() {
     const composite = new Int32Array(256);
 
     for (let value = 2; value * value < 256; value++) {
-        for (
-            let multiple = value * value;
-            multiple < 256;
-            multiple += value
-        ) {
+        for (let multiple = value * value; multiple < 256; multiple += value) {
             composite[multiple] = 1;
         }
     }

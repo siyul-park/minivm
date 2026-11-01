@@ -27,12 +27,20 @@ func TestPReg_ID(t *testing.T) {
 	require.Equal(t, uint8(3), asm.NewPReg(3, asm.RegTypeInt, asm.Width64).ID())
 }
 
-func TestPReg_Type(t *testing.T) {
-	require.Equal(t, asm.RegTypeFloat, asm.NewPReg(3, asm.RegTypeFloat, asm.Width64).Type())
-}
-
 func TestPReg_Width(t *testing.T) {
 	require.Equal(t, asm.Width32, asm.NewPReg(3, asm.RegTypeInt, asm.Width32).Width())
+}
+
+func TestVReg_ID(t *testing.T) {
+	require.Equal(t, int32(3), asm.NewVReg(3, asm.RegTypeInt, asm.Width64).ID())
+}
+
+func TestVReg_Width(t *testing.T) {
+	require.Equal(t, asm.Width32, asm.NewVReg(3, asm.RegTypeInt, asm.Width32).Width())
+}
+
+func TestPReg_Type(t *testing.T) {
+	require.Equal(t, asm.RegTypeFloat, asm.NewPReg(3, asm.RegTypeFloat, asm.Width64).Type())
 }
 
 func TestPReg_String(t *testing.T) {
@@ -51,16 +59,8 @@ func TestPReg_String(t *testing.T) {
 	}
 }
 
-func TestVReg_ID(t *testing.T) {
-	require.Equal(t, int32(3), asm.NewVReg(3, asm.RegTypeInt, asm.Width64).ID())
-}
-
 func TestVReg_Type(t *testing.T) {
 	require.Equal(t, asm.RegTypeFloat, asm.NewVReg(3, asm.RegTypeFloat, asm.Width64).Type())
-}
-
-func TestVReg_Width(t *testing.T) {
-	require.Equal(t, asm.Width32, asm.NewVReg(3, asm.RegTypeInt, asm.Width32).Width())
 }
 
 func TestVReg_String(t *testing.T) {

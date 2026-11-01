@@ -7,13 +7,6 @@ import (
 	"github.com/siyul-park/minivm/internal/jit"
 )
 
-// Job is one finished compile: its Unit and either its Code or why not.
-type Job struct {
-	Unit Unit
-	Code *jit.Code
-	Err  error
-}
-
 // Queue compiles at most one unit per address at a time.
 type Queue struct {
 	machine func() Machine
@@ -33,6 +26,13 @@ type Queue struct {
 
 	mu   sync.Mutex
 	cond *sync.Cond
+}
+
+// Job is one finished compile: its Unit and either its Code or why not.
+type Job struct {
+	Unit Unit
+	Code *jit.Code
+	Err  error
 }
 
 // NewQueue returns a Queue whose workers each own one machine(). Workers

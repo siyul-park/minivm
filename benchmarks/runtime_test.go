@@ -510,7 +510,7 @@ func interpExports(register func(registry.Spec)) yaegi.Exports {
 			"Value":      reflect.Zero(reflect.TypeOf((*types.Value)(nil))),
 			"I32":        reflect.Zero(reflect.TypeOf((*types.I32)(nil))),
 			"I64":        reflect.Zero(reflect.TypeOf((*types.I64)(nil))),
-			"TypeI32":    reflect.ValueOf(types.TypeI32),
+			"TypeI32":    reflect.ValueOf(types.TypeI32()),
 			"TypedArray": reflect.Zero(reflect.TypeOf((*types.TypedArray[int32])(nil))),
 		},
 	}

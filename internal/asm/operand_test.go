@@ -7,6 +7,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSlots(t *testing.T) {
+	require.Equal(t, asm.SlotsOperand{}, asm.Slots())
+}
+
 func TestVirtual(t *testing.T) {
 	reg := asm.NewVReg(1, asm.RegTypeInt, asm.Width64)
 
@@ -27,10 +31,6 @@ func TestMem(t *testing.T) {
 	base := asm.Physical(asm.NewPReg(1, asm.RegTypeInt, asm.Width64))
 
 	require.Equal(t, asm.MemOperand{Base: base, Offset: 8}, asm.Mem(base, 8))
-}
-
-func TestSlots(t *testing.T) {
-	require.Equal(t, asm.SlotsOperand{}, asm.Slots())
 }
 
 func TestVRegOperand_String(t *testing.T) {

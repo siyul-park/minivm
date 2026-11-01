@@ -21,10 +21,7 @@ function run() {
         const token = digits((i * 2654435761) % 99999);
 
         for (let j = 0; j < token.length; j++) {
-            result = (
-                result
-                + token.charCodeAt(j) * (j + 1)
-            ) % 1000000007;
+            result = (result + token.charCodeAt(j) * (j + 1)) % 1000000007;
         }
 
         text += token + " ";

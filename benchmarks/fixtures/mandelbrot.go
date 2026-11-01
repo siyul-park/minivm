@@ -13,21 +13,6 @@ func init() {
 		Native: registry.Native{I32: run},
 	})
 }
-func mandelbrotEscapeCount(cr, ci float64, maxIter int32) int32 {
-	var zr, zi float64
-	for i := int32(0); i < maxIter; i++ {
-		zr2 := zr * zr
-		zi2 := zi * zi
-		if zr2+zi2 > 4.0 {
-			return i
-		}
-		newZr := zr2 - zi2 + cr
-		newZi := 2.0*zr*zi + ci
-		zr = newZr
-		zi = newZi
-	}
-	return maxIter
-}
 
 func mandelbrot(width, height, maxIter int32) int32 {
 	const xMin, xMax = -2.0, 1.0
@@ -42,4 +27,20 @@ func mandelbrot(width, height, maxIter int32) int32 {
 		}
 	}
 	return total
+}
+
+func mandelbrotEscapeCount(cr, ci float64, maxIter int32) int32 {
+	var zr, zi float64
+	for i := int32(0); i < maxIter; i++ {
+		zr2 := zr * zr
+		zi2 := zi * zi
+		if zr2+zi2 > 4.0 {
+			return i
+		}
+		newZr := zr2 - zi2 + cr
+		newZi := 2.0*zr*zi + ci
+		zr = newZr
+		zi = newZi
+	}
+	return maxIter
 }

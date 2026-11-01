@@ -178,12 +178,12 @@ func function(params, locals int, code ...instr.Instruction) *types.Function {
 	slots := func(n int) []types.Type {
 		var out []types.Type
 		for range n {
-			out = append(out, types.TypeI32)
+			out = append(out, types.TypeI32())
 		}
 		return out
 	}
 	return &types.Function{
-		Typ:    &types.FunctionType{Params: slots(params), Returns: []types.Type{types.TypeI32}},
+		Typ:    &types.FunctionType{Params: slots(params), Returns: []types.Type{types.TypeI32()}},
 		Locals: slots(locals),
 		Code:   instr.Marshal(code),
 	}
@@ -209,8 +209,9 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		m := new(machine)
-		_, exits, _, err := compile.Lower(b.Build(), m, function(0, 1), nil, 0, false, true)
+		assembly, err := compile.Lower(b.Build(), m, function(0, 1), nil, 0, false, true)
 		require.NoError(t, err)
+		exits := assembly.Exits
 		require.Len(t, exits, 1)
 		require.Equal(t, []int{0}, m.spills)
 		require.Empty(t, m.uses[0])
@@ -230,8 +231,9 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{v}})
 
 		m := new(machine)
-		_, exits, _, err := compile.Lower(b.Build(), m, function(1, 1, instr.New(instr.CALL)), transform.Objects{9: {Function: function(1, 1)}}, 0, false, true)
+		assembly, err := compile.Lower(b.Build(), m, function(1, 1, instr.New(instr.CALL)), transform.Objects{9: {Function: function(1, 1)}}, 0, false, true)
 		require.NoError(t, err)
+		exits := assembly.Exits
 		require.Empty(t, m.spills)
 		// v, a constant, is loaded once for the call's map and kept live
 		// across the call; the local and the stack entry share it.
@@ -251,7 +253,7 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		m := new(machine)
-		_, _, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
 		require.Equal(t, map[ssa.Value]asm.VReg{1: i32(1), 2: i32(2), 3: i32(3), 4: i64(4), 5: i64(5)}, m.regs)
 	})
@@ -266,7 +268,7 @@ func TestLower(t *testing.T) {
 		b.Term(join, ssa.Terminator{Op: ssa.OpComplete})
 
 		m := new(machine)
-		_, _, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
 		require.Equal(t, []string{"prologue", "const", "br", "jump", "jump", "complete", "epilogue", "enter"}, m.calls)
 		require.Equal(t, []bool{true, false, true}, m.falls)
@@ -285,7 +287,7 @@ func TestLower(t *testing.T) {
 		b.Term(right, ssa.Terminator{Op: ssa.OpComplete})
 
 		m := new(machine)
-		_, _, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
 		require.Equal(t, []ssa.Value{less}, m.fused)
 	})
@@ -304,7 +306,7 @@ func TestLower(t *testing.T) {
 		b.Term(right, ssa.Terminator{Op: ssa.OpComplete, State: after})
 
 		m := new(machine)
-		_, _, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
 		require.Empty(t, m.fused)
 	})
@@ -323,7 +325,7 @@ func TestLower(t *testing.T) {
 		b.Term(right, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{r}})
 
 		m := new(machine)
-		_, _, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
 		require.Equal(t, [][2]asm.VReg{{i32(1), i32(3)}, {i32(2), i32(3)}}, m.moves)
 		require.Equal(t, []string{
@@ -345,7 +347,7 @@ func TestLower(t *testing.T) {
 		b.Term(loop, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: loop, Args: []ssa.Value{q, p}}}})
 
 		m := new(machine)
-		_, _, _, err := compile.Lower(b.Build(), m, function(0, 1), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), m, function(0, 1), nil, 0, false, true)
 		require.NoError(t, err)
 		scratch := i32(6)
 		require.Equal(t, [][2]asm.VReg{
@@ -365,8 +367,9 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
-		_, exits, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		assembly, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
+		exits := assembly.Exits
 		require.Equal(t, []string{"prologue", "const", "const", "exit 0 1", "results", "return", "epilogue", "enter"}, m.calls)
 		require.Equal(t, [][]asm.VReg{{i64(1), i32(2)}}, m.uses)
 		require.Equal(t, []jit.Exit{{
@@ -392,8 +395,9 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		m := new(machine)
-		_, exits, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		assembly, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
+		exits := assembly.Exits
 		require.Len(t, exits, 1)
 		require.Equal(t, jit.ExitBridge, exits[0].Kind)
 		require.Equal(t, 3, exits[0].Pops)
@@ -411,8 +415,9 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{q}})
 
 		m := new(machine)
-		_, exits, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		assembly, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
+		exits := assembly.Exits
 		require.Equal(t, []string{"prologue", "const", "const", "exec", "return", "exit 0 0", "epilogue", "enter"}, m.calls)
 		require.Len(t, exits, 1)
 		require.Equal(t, jit.ExitDeopt, exits[0].Kind)
@@ -433,7 +438,7 @@ func TestLower(t *testing.T) {
 		b.Term(right, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{y}})
 
 		m := new(machine)
-		_, _, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
 		require.Equal(t, []string{"prologue", "const", "const", "exec", "br", "return", "exit 0 0", "return", "epilogue", "enter"}, m.calls)
 	})
@@ -447,8 +452,9 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		m := new(machine)
-		_, exits, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		assembly, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
+		exits := assembly.Exits
 		require.Equal(t, []string{"prologue", "const", "release", "return", "exit 0 3", "jump", "epilogue", "enter"}, m.calls)
 		require.Equal(t, []jit.Exit{{
 			Kind: jit.ExitRelease,
@@ -464,8 +470,9 @@ func TestLower(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{wide}, State: at})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
-		_, exits, _, err := compile.Lower(b.Build(), new(machine), function(0, 1), nil, 0, false, true)
+		assembly, err := compile.Lower(b.Build(), new(machine), function(0, 1), nil, 0, false, true)
 		require.NoError(t, err)
+		exits := assembly.Exits
 		require.Len(t, exits, 1)
 		require.Equal(t, jit.ExitBox, exits[0].Kind)
 		require.Equal(t, types.KindI64, exits[0].Word.Kind)
@@ -489,7 +496,7 @@ func TestLower(t *testing.T) {
 
 		m := new(machine)
 		caller := function(1, 1, instr.New(instr.CALL))
-		_, _, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
+		_, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
 		require.NoError(t, err)
 		require.Contains(t, m.consts, uint64(seed))
 	})
@@ -507,8 +514,9 @@ func TestLower(t *testing.T) {
 
 		m := new(machine)
 		caller := function(1, 1, instr.New(instr.CALL))
-		_, exits, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
+		assembly, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
 		require.NoError(t, err)
+		exits := assembly.Exits
 		require.Equal(t, []string{"prologue", "const", "call", "return", "exit 0 4", "results", "jump", "const", "const", "const", "exit 1 2", "jump", "epilogue", "enter"}, m.calls)
 		site := m.sites[0]
 		site.Stub = 0
@@ -544,7 +552,7 @@ func TestLower(t *testing.T) {
 	})
 
 	t.Run("calls the closure its call names, passing its upvals and mapping it on the call exit", func(t *testing.T) {
-		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}, Captures: []types.Type{types.TypeI32}}
+		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32()}}, Captures: []types.Type{types.TypeI32()}}
 		b := ssa.New("f")
 		entry := b.Block()
 		closure := b.Value(ssa.TypeRef)
@@ -555,9 +563,10 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
-		caller := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeAny}, Returns: []types.Type{types.TypeI32}}, Code: instr.Marshal([]instr.Instruction{instr.New(instr.CALL)})}
-		_, exits, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: target}}, 0, false, true)
+		caller := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeAny()}, Returns: []types.Type{types.TypeI32()}}, Code: instr.Marshal([]instr.Instruction{instr.New(instr.CALL)})}
+		assembly, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: target}}, 0, false, true)
 		require.NoError(t, err)
+		exits := assembly.Exits
 		require.Equal(t, 2, m.sites[0].Callee)
 		require.Equal(t, closure, m.sites[0].Target)
 		require.True(t, m.sites[0].Upvals)
@@ -569,7 +578,7 @@ func TestLower(t *testing.T) {
 	})
 
 	t.Run("rejects a direct call of a function that captures", func(t *testing.T) {
-		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32}}, Captures: []types.Type{types.TypeI32}}
+		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32()}}, Captures: []types.Type{types.TypeI32()}}
 		b := ssa.New("f")
 		entry := b.Block()
 		callee := constant(b, entry, types.BoxRef(2))
@@ -578,7 +587,7 @@ func TestLower(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: at, Results: []ssa.Value{got}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
 
-		_, _, _, err := compile.Lower(b.Build(), new(machine), function(0, 0, instr.New(instr.CALL)), transform.Objects{2: {Function: target}}, 0, false, true)
+		_, err := compile.Lower(b.Build(), new(machine), function(0, 0, instr.New(instr.CALL)), transform.Objects{2: {Function: target}}, 0, false, true)
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
@@ -592,8 +601,8 @@ func TestLower(t *testing.T) {
 
 			m := new(machine)
 			fn := function(1, 0)
-			fn.Captures = []types.Type{types.TypeI32}
-			_, _, _, err := compile.Lower(b.Build(), m, fn, nil, 0, false, true)
+			fn.Captures = []types.Type{types.TypeI32()}
+			_, err := compile.Lower(b.Build(), m, fn, nil, 0, false, true)
 			require.NoError(t, err)
 			return m.upvals
 		}
@@ -605,7 +614,7 @@ func TestLower(t *testing.T) {
 	t.Run("lends a borrowed argument its state does not own and keeps one it owns", func(t *testing.T) {
 		// target never writes param 1 (any), so transform.Borrows marks it
 		// borrowed; param 0 (i32) is never borrowable regardless.
-		target := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}}}
+		target := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeAny()}, Returns: []types.Type{types.TypeI32()}}}
 		borrowed := func(t *testing.T, argOwned bool) (lent, kept []int) {
 			b := ssa.New("f")
 			entry := b.Block()
@@ -619,8 +628,9 @@ func TestLower(t *testing.T) {
 
 			m := new(machine)
 			caller := function(0, 0, instr.New(instr.CALL))
-			_, exits, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: target}}, 0, false, true)
+			assembly, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: target}}, 0, false, true)
 			require.NoError(t, err)
+			exits := assembly.Exits
 			return exits[0].Lent, exits[0].Kept
 		}
 
@@ -644,8 +654,8 @@ func TestLower(t *testing.T) {
 
 		m := new(machine)
 		caller := function(0, 0, instr.New(instr.CALL))
-		target := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI32}}}
-		_, _, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: target}}, 0, false, true)
+		target := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI64()}, Returns: []types.Type{types.TypeI32()}}}
+		_, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: target}}, 0, false, true)
 		require.NoError(t, err)
 		require.Equal(t, []types.Kind{types.KindI64}, m.sites[0].Arguments)
 	})
@@ -663,8 +673,9 @@ func TestLower(t *testing.T) {
 
 		m := new(machine)
 		caller := function(1, 1, instr.New(instr.CALL))
-		_, exits, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
+		assembly, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
 		require.NoError(t, err)
+		exits := assembly.Exits
 		require.Equal(t, []string{"prologue", "retain", "call", "return", "exit 0 4", "results", "jump", "const", "const", "exit 1 2", "jump", "epilogue", "enter"}, m.calls)
 		require.True(t, m.sites[0].Owned)
 		require.True(t, exits[0].Owned)
@@ -682,7 +693,7 @@ func TestLower(t *testing.T) {
 
 		m := new(machine)
 		caller := function(1, 1, instr.New(instr.CALL))
-		_, _, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{9: {Function: caller}}, 9, false, true)
+		_, err := compile.Lower(b.Build(), m, caller, transform.Objects{9: {Function: caller}}, 9, false, true)
 		require.NoError(t, err)
 		site := m.sites[0]
 		require.Equal(t, 9, site.Callee)
@@ -701,7 +712,7 @@ func TestLower(t *testing.T) {
 
 		m := new(machine)
 		caller := function(1, 1, instr.New(instr.CALL))
-		_, _, _, err := compile.Lower(b.Build(), m, caller, transform.Objects{9: {Function: caller}}, 9, true, false)
+		_, err := compile.Lower(b.Build(), m, caller, transform.Objects{9: {Function: caller}}, 9, true, false)
 		require.NoError(t, err)
 		site := m.sites[0]
 		require.Equal(t, 9, site.Callee)
@@ -713,8 +724,8 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		m := new(machine)
-		fn := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI8, types.TypeF64}}}
-		_, _, _, err := compile.Lower(b.Build(), m, fn, nil, 0, false, true)
+		fn := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI8(), types.TypeF64()}}}
+		_, err := compile.Lower(b.Build(), m, fn, nil, 0, false, true)
 		require.NoError(t, err)
 		require.Len(t, m.args, 2)
 		require.NotEqual(t, m.args[0].ID(), m.args[1].ID())
@@ -728,8 +739,8 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		m := new(machine)
-		fn := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI64}}, Locals: []types.Type{types.TypeString}}
-		_, _, _, err := compile.Lower(b.Build(), m, fn, nil, 0, false, true)
+		fn := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI64()}}, Locals: []types.Type{types.TypeString()}}
+		_, err := compile.Lower(b.Build(), m, fn, nil, 0, false, true)
 		require.NoError(t, err)
 		require.Equal(t, []types.Kind{types.KindI64, types.KindRef}, m.kinds)
 	})
@@ -744,8 +755,9 @@ func TestLower(t *testing.T) {
 		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
 
 		m := new(machine)
-		_, exits, _, err := compile.Lower(b.Build(), m, function(0, 1), nil, 0, false, true)
+		assembly, err := compile.Lower(b.Build(), m, function(0, 1), nil, 0, false, true)
 		require.NoError(t, err)
+		exits := assembly.Exits
 		require.Equal(t, []string{"prologue", "const", "budget", "store", "br", "return", "exit 0 2", "jump", "epilogue", "enter"}, m.calls)
 		require.Equal(t, jit.ExitSafepoint, exits[0].Kind)
 		require.Equal(t, 9, exits[0].Frame.IP)
@@ -766,7 +778,7 @@ func TestLower(t *testing.T) {
 		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
-		_, _, _, err := compile.Lower(b.Build(), m, function(0, 1, instr.New(instr.CALL)), transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
+		_, err := compile.Lower(b.Build(), m, function(0, 1, instr.New(instr.CALL)), transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
 		require.NoError(t, err)
 		// value is lowered once at its definition, not at the store and the
 		// branch; arg, outside the loop, is loaded at the call only.
@@ -780,8 +792,9 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: at})
 
 		m := new(machine)
-		_, exits, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		assembly, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
+		exits := assembly.Exits
 		require.Equal(t, []string{"prologue", "exit 0 0", "epilogue", "enter"}, m.calls)
 		require.Equal(t, jit.ExitDeopt, exits[0].Kind)
 		require.False(t, exits[0].Trap)
@@ -806,7 +819,7 @@ func TestLower(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{value}, State: at, Results: []ssa.Value{again}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{again}})
 
-		_, _, _, err := compile.Lower(b.Build(), new(machine), function(1, 0), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), new(machine), function(1, 0), nil, 0, false, true)
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
@@ -821,8 +834,8 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{value}})
 
 		m := new(machine)
-		caller := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI64}}}
-		_, _, _, err := compile.Lower(b.Build(), m, caller, nil, 0, false, true)
+		caller := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI64()}, Returns: []types.Type{types.TypeI64()}}}
+		_, err := compile.Lower(b.Build(), m, caller, nil, 0, false, true)
 		require.NoError(t, err)
 		require.Equal(t, []string{"prologue", "move", "move", "return", "epilogue", "enter"}, m.calls)
 	})
@@ -834,7 +847,7 @@ func TestLower(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Results: []ssa.Value{word}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{word}})
 
-		_, _, _, err := compile.Lower(b.Build(), new(machine), function(1, 0), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), new(machine), function(1, 0), nil, 0, false, true)
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
@@ -846,7 +859,7 @@ func TestLower(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: at})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
-		_, _, _, err := compile.Lower(b.Build(), new(machine), function(0, 0, instr.New(instr.CALL)), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), new(machine), function(0, 0, instr.New(instr.CALL)), nil, 0, false, true)
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
@@ -863,11 +876,12 @@ func TestLower(t *testing.T) {
 
 		m := new(machine)
 		caller := &types.Function{
-			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeAny}, Returns: []types.Type{types.TypeI32}},
+			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeAny()}, Returns: []types.Type{types.TypeI32()}},
 			Code: instr.Marshal([]instr.Instruction{instr.New(instr.CALL)}),
 		}
-		_, exits, _, err := compile.Lower(b.Build(), m, caller, nil, 0, false, true)
+		assembly, err := compile.Lower(b.Build(), m, caller, nil, 0, false, true)
 		require.NoError(t, err)
+		exits := assembly.Exits
 		require.Len(t, m.sites, 1)
 		site := m.sites[0]
 		site.Stub, site.Join = 0, 0
@@ -895,9 +909,9 @@ func TestLower(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: at, Results: []ssa.Value{got}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
-		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64}}}
+		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64()}}}
 		m := new(machine)
-		_, _, _, err := compile.Lower(b.Build(), m, function(0, 0, instr.New(instr.CALL)), transform.Objects{2: {Function: target}}, 0, false, true)
+		_, err := compile.Lower(b.Build(), m, function(0, 0, instr.New(instr.CALL)), transform.Objects{2: {Function: target}}, 0, false, true)
 		require.NoError(t, err)
 		require.Len(t, m.sites, 1)
 		require.Equal(t, []types.Kind{types.KindI64}, m.sites[0].Registers)
@@ -912,8 +926,8 @@ func TestLower(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: at, Results: got[:]})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
-		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64, types.TypeI32, types.TypeI32}}}
-		_, _, _, err := compile.Lower(b.Build(), new(machine), function(0, 0, instr.New(instr.CALL)), transform.Objects{2: {Function: target}}, 0, false, true)
+		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64(), types.TypeI32(), types.TypeI32()}}}
+		_, err := compile.Lower(b.Build(), new(machine), function(0, 0, instr.New(instr.CALL)), transform.Objects{2: {Function: target}}, 0, false, true)
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
@@ -925,7 +939,7 @@ func TestLower(t *testing.T) {
 		at := state(b, entry, 0, ssa.Operand{Value: ref, Owned: true}, ssa.Operand{Value: value})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{value}, State: at})
 
-		_, _, _, err := compile.Lower(b.Build(), new(machine), function(0, 0), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), new(machine), function(0, 0), nil, 0, false, true)
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
@@ -941,7 +955,7 @@ func TestLower(t *testing.T) {
 		}, Results: []ssa.Value{at}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{value}, State: at})
 
-		_, _, _, err := compile.Lower(b.Build(), new(machine), function(0, 0), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), new(machine), function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
 	})
 
@@ -955,7 +969,7 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		m := new(machine)
-		_, _, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
 		require.Contains(t, m.calls, ssa.OpGuardShape.String())
 	})
@@ -971,7 +985,7 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		m := new(machine)
-		_, _, _, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
 		require.Contains(t, m.calls, ssa.OpGuardValue.String())
 	})
@@ -982,7 +996,7 @@ func TestLower(t *testing.T) {
 		at := state(b, entry, 0)
 		b.Term(entry, ssa.Terminator{Op: ssa.OpGuardKind, State: at})
 
-		_, _, _, err := compile.Lower(b.Build(), new(machine), function(0, 0), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), new(machine), function(0, 0), nil, 0, false, true)
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
@@ -992,7 +1006,7 @@ func TestLower(t *testing.T) {
 		b.Param(entry, ssa.TypeI32)
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
-		_, _, _, err := compile.Lower(b.Build(), new(machine), function(1, 0), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), new(machine), function(1, 0), nil, 0, false, true)
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
@@ -1003,7 +1017,7 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{p}})
 
 		m := new(machine)
-		_, _, _, err := compile.Lower(b.Build(), m, function(0, 1), nil, 0, true, false)
+		_, err := compile.Lower(b.Build(), m, function(0, 1), nil, 0, true, false)
 		require.NoError(t, err)
 		require.Equal(t, []string{"prologue", "load", "return", "epilogue", "enter"}, m.calls)
 	})
@@ -1014,7 +1028,7 @@ func TestLower(t *testing.T) {
 		p := b.Param(entry, ssa.TypeI64)
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{p}})
 
-		_, _, _, err := compile.Lower(b.Build(), new(machine), function(0, 1), nil, 0, true, false)
+		_, err := compile.Lower(b.Build(), new(machine), function(0, 1), nil, 0, true, false)
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
@@ -1034,7 +1048,7 @@ func TestLower(t *testing.T) {
 		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: header}, {Block: exit}}})
 		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
 
-		_, _, _, err := compile.Lower(b.Build(), new(machine), function(0, 1), nil, 0, true, false)
+		_, err := compile.Lower(b.Build(), new(machine), function(0, 1), nil, 0, true, false)
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
@@ -1049,7 +1063,7 @@ func TestLower(t *testing.T) {
 		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: header}, {Block: exit}}})
 		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
 
-		_, _, _, err := compile.Lower(b.Build(), new(machine), function(0, 1), nil, 0, true, false)
+		_, err := compile.Lower(b.Build(), new(machine), function(0, 1), nil, 0, true, false)
 		require.NoError(t, err)
 	})
 
@@ -1059,7 +1073,7 @@ func TestLower(t *testing.T) {
 		constant(b, header, types.BoxI32(1))
 		b.Term(header, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
 
-		_, _, _, err := compile.Lower(b.Build(), new(machine), function(0, 0), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), new(machine), function(0, 0), nil, 0, false, true)
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
@@ -1070,7 +1084,7 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: target}}})
 		b.Term(target, ssa.Terminator{Op: ssa.OpReturn})
 
-		_, _, _, err := compile.Lower(b.Build(), new(machine), function(0, 0), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), new(machine), function(0, 0), nil, 0, false, true)
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 }

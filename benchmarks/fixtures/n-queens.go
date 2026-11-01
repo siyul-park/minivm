@@ -13,6 +13,14 @@ func init() {
 		Native: registry.Native{I32: run},
 	})
 }
+
+func nQueens(n int32) int32 {
+	cols := make([]bool, n)
+	diag1 := make([]bool, 2*n-1)
+	diag2 := make([]bool, 2*n-1)
+	return nqueensSolve(0, n, cols, diag1, diag2)
+}
+
 func nqueensSolve(row, n int32, cols, diag1, diag2 []bool) int32 {
 	if row == n {
 		return 1
@@ -32,11 +40,4 @@ func nqueensSolve(row, n int32, cols, diag1, diag2 []bool) int32 {
 		}
 	}
 	return count
-}
-
-func nQueens(n int32) int32 {
-	cols := make([]bool, n)
-	diag1 := make([]bool, 2*n-1)
-	diag2 := make([]bool, 2*n-1)
-	return nqueensSolve(0, n, cols, diag1, diag2)
 }

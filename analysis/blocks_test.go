@@ -10,10 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewBlocksAnalysis(t *testing.T) {
-	require.NotNil(t, analysis.NewBlocksAnalysis())
-}
-
 func TestBlocks(t *testing.T) {
 	fn := types.NewFunctionBuilder(nil).Emit(instr.New(instr.NOP)).MustBuild()
 	got, err := analysis.Blocks(fn)
@@ -21,7 +17,11 @@ func TestBlocks(t *testing.T) {
 	require.Equal(t, []*analysis.BasicBlock{{Start: 0, End: 1}}, got)
 }
 
-func TestBlocksAnalysis_Run(t *testing.T) {
+func TestNewCFG(t *testing.T) {
+	require.NotNil(t, analysis.NewCFG())
+}
+
+func TestCFG_Run(t *testing.T) {
 	tests := []struct {
 		fn     *types.Function
 		blocks []*analysis.BasicBlock
@@ -275,7 +275,7 @@ func TestBlocksAnalysis_Run(t *testing.T) {
 
 	for _, tt := range tests {
 		m := pass.NewManager()
-		pass.Register[*types.Function, []*analysis.BasicBlock](m, analysis.NewBlocksAnalysis())
+		pass.Register[*types.Function, []*analysis.BasicBlock](m, analysis.NewCFG())
 
 		t.Run(tt.fn.String(), func(t *testing.T) {
 			actual, err := pass.GetResult[[]*analysis.BasicBlock](m, tt.fn)
@@ -289,7 +289,7 @@ func TestBlocksAnalysis_Run(t *testing.T) {
 	}
 }
 
-func BenchmarkBlocksAnalysis_Run(b *testing.B) {
+func BenchmarkCFG_Run(b *testing.B) {
 	b.Run("many_blocks", func(b *testing.B) {
 		const n = 10000
 		emit := make([]instr.Instruction, 0, n)
@@ -299,7 +299,7 @@ func BenchmarkBlocksAnalysis_Run(b *testing.B) {
 		fn := types.NewFunctionBuilder(nil).Emit(emit...).MustBuild()
 
 		m := pass.NewManager()
-		blocksAnalysis := analysis.NewBlocksAnalysis()
+		blocksAnalysis := analysis.NewCFG()
 
 		var err error
 		b.ResetTimer()

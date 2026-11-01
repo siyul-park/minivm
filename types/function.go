@@ -7,6 +7,7 @@ import (
 	"github.com/siyul-park/minivm/instr"
 )
 
+// FunctionBuilder assembles a Function: its signature, locals, captures, and code.
 type FunctionBuilder struct {
 	code *instr.Builder
 
@@ -15,6 +16,7 @@ type FunctionBuilder struct {
 	captures []Type
 }
 
+// Function is compiled code with its signature, local and capture slots, and exception handlers.
 type Function struct {
 	Typ      *FunctionType
 	Locals   []Type
@@ -23,6 +25,7 @@ type Function struct {
 	Handlers []instr.Handler
 }
 
+// FunctionType is a function signature.
 type FunctionType struct {
 	Params  []Type
 	Returns []Type
@@ -32,6 +35,7 @@ var _ Value = (*Function)(nil)
 
 var _ Type = (*FunctionType)(nil)
 
+// NewFunctionBuilder returns a builder for typ; a nil typ becomes the empty signature.
 func NewFunctionBuilder(typ *FunctionType) *FunctionBuilder {
 	if typ == nil {
 		typ = &FunctionType{}
@@ -39,6 +43,7 @@ func NewFunctionBuilder(typ *FunctionType) *FunctionBuilder {
 	return &FunctionBuilder{code: instr.NewBuilder(), typ: typ}
 }
 
+// NewFunction returns a function of type typ with locals and instrs; a nil typ becomes the empty signature.
 func NewFunction(typ *FunctionType, locals []Type, instrs []instr.Instruction) *Function {
 	if typ == nil {
 		typ = &FunctionType{}
@@ -50,26 +55,31 @@ func NewFunction(typ *FunctionType, locals []Type, instrs []instr.Instruction) *
 	}
 }
 
+// Params appends parameter types.
 func (b *FunctionBuilder) Params(ps ...Type) *FunctionBuilder {
 	b.typ.Params = append(b.typ.Params, ps...)
 	return b
 }
 
+// Returns appends result types.
 func (b *FunctionBuilder) Returns(rs ...Type) *FunctionBuilder {
 	b.typ.Returns = append(b.typ.Returns, rs...)
 	return b
 }
 
+// Locals appends local slot types.
 func (b *FunctionBuilder) Locals(ls ...Type) *FunctionBuilder {
 	b.locals = append(b.locals, ls...)
 	return b
 }
 
+// Captures appends captured slot types.
 func (b *FunctionBuilder) Captures(cs ...Type) *FunctionBuilder {
 	b.captures = append(b.captures, cs...)
 	return b
 }
 
+// Emit appends instrs to the function body.
 func (b *FunctionBuilder) Emit(instrs ...instr.Instruction) *FunctionBuilder {
 	b.code.Append(instrs...)
 	return b
@@ -170,6 +180,10 @@ func (f *Function) Kind() Kind {
 	return KindRef
 }
 
+func (f *Function) Type() Type {
+	return f.Typ
+}
+
 func (f *Function) String() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("%s\n", f.Type().String()))
@@ -191,30 +205,8 @@ func (f *Function) String() string {
 	return sb.String()
 }
 
-func (f *Function) Type() Type {
-	return f.Typ
-}
-
 func (t *FunctionType) Kind() Kind {
 	return KindRef
-}
-
-func (t *FunctionType) String() string {
-	var params []string
-	for _, p := range t.Params {
-		params = append(params, p.String())
-	}
-	var returns []string
-	for _, r := range t.Returns {
-		returns = append(returns, r.String())
-	}
-	if len(returns) == 0 {
-		return fmt.Sprintf("func(%s)", strings.Join(params, ", "))
-	}
-	if len(returns) == 1 {
-		return fmt.Sprintf("func(%s) %s", strings.Join(params, ", "), returns[0])
-	}
-	return fmt.Sprintf("func(%s) (%s)", strings.Join(params, ", "), strings.Join(returns, ", "))
 }
 
 func (t *FunctionType) Cast(other Type) bool {
@@ -243,4 +235,22 @@ func (t *FunctionType) Equals(other Type) bool {
 		}
 	}
 	return true
+}
+
+func (t *FunctionType) String() string {
+	var params []string
+	for _, p := range t.Params {
+		params = append(params, p.String())
+	}
+	var returns []string
+	for _, r := range t.Returns {
+		returns = append(returns, r.String())
+	}
+	if len(returns) == 0 {
+		return fmt.Sprintf("func(%s)", strings.Join(params, ", "))
+	}
+	if len(returns) == 1 {
+		return fmt.Sprintf("func(%s) %s", strings.Join(params, ", "), returns[0])
+	}
+	return fmt.Sprintf("func(%s) (%s)", strings.Join(params, ", "), strings.Join(returns, ", "))
 }

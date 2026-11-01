@@ -1,5 +1,5 @@
 function build(d) {
-    const node = {left: null, right: null};
+    const node = { left: null, right: null };
 
     if (d > 0) {
         node.left = build(d - 1);

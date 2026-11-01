@@ -122,7 +122,7 @@ func write(path string, samples map[string]map[string]sample) error {
 		return fmt.Errorf("benchmark table markers not found")
 	}
 	table := render(samples)
-	doc = doc[:begin] + start + "\n\n" + table + "\n\n" + end + doc[finish+len(end):]
+	doc = doc[:begin] + start + "\n\n" + table + "\n" + end + doc[finish+len(end):]
 	return os.WriteFile(path, []byte(doc), 0o644)
 }
 

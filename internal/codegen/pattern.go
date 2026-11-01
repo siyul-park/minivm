@@ -17,13 +17,13 @@ type match struct {
 	exclude bool
 }
 
-type pattern []match
-
 type family struct {
 	sources []pattern
 	binary  []instr.Opcode
 	compare []instr.Opcode
 }
+
+type pattern []match
 
 var families = []family{
 	{sources: producers[types.I32](instr.I32_CONST), binary: []instr.Opcode{
@@ -51,20 +51,6 @@ func (p pattern) width() int {
 		size += width(current.op)
 	}
 	return size
-}
-
-func (p pattern) key() string {
-	var key strings.Builder
-	for index, current := range p {
-		if index > 0 {
-			key.WriteByte('/')
-		}
-		fmt.Fprintf(&key, "%d", current.op)
-		if current.typ != nil {
-			fmt.Fprintf(&key, ":%t:%s", current.exclude, current.typ)
-		}
-	}
-	return key.String()
 }
 
 func (p pattern) overlaps(other pattern) bool {
@@ -127,6 +113,20 @@ func catalog() []pattern {
 		return patterns[i].key() < patterns[j].key()
 	})
 	return patterns
+}
+
+func (p pattern) key() string {
+	var key strings.Builder
+	for index, current := range p {
+		if index > 0 {
+			key.WriteByte('/')
+		}
+		fmt.Fprintf(&key, "%d", current.op)
+		if current.typ != nil {
+			fmt.Fprintf(&key, ":%t:%s", current.exclude, current.typ)
+		}
+	}
+	return key.String()
 }
 
 func scalars() []pattern {

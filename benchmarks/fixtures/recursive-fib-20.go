@@ -16,11 +16,22 @@ func init() {
 		Wazero: &registry.Wazero{Module: recursiveFib20Module, Export: "recursive_fib", Args: []uint64{20}},
 	})
 }
+
 func recursiveFib20(n int32) int32 {
 	if n < 2 {
 		return n
 	}
 	return recursiveFib20(n-1) + recursiveFib20(n-2)
+}
+
+func recursiveFib20Module() []byte {
+	module := &wasm.Module{
+		TypeSection:     []*wasm.FunctionType{{Params: []wasm.ValueType{wasm.ValueTypeI32}, Results: []wasm.ValueType{wasm.ValueTypeI32}}},
+		FunctionSection: []wasm.Index{0},
+		CodeSection:     []*wasm.Code{{Body: recursiveFib20Wasm(0)}},
+		ExportSection:   []*wasm.Export{{Name: "recursive_fib", Type: wasm.ExternTypeFunc, Index: 0}},
+	}
+	return binary.EncodeModule(module)
 }
 
 func recursiveFib20Wasm(index uint32) []byte {
@@ -44,14 +55,4 @@ func recursiveFib20Wasm(index uint32) []byte {
 	code.op(wasm.OpcodeEnd)
 	code.op(wasm.OpcodeEnd)
 	return code
-}
-
-func recursiveFib20Module() []byte {
-	module := &wasm.Module{
-		TypeSection:     []*wasm.FunctionType{{Params: []wasm.ValueType{wasm.ValueTypeI32}, Results: []wasm.ValueType{wasm.ValueTypeI32}}},
-		FunctionSection: []wasm.Index{0},
-		CodeSection:     []*wasm.Code{{Body: recursiveFib20Wasm(0)}},
-		ExportSection:   []*wasm.Export{{Name: "recursive_fib", Type: wasm.ExternTypeFunc, Index: 0}},
-	}
-	return binary.EncodeModule(module)
 }

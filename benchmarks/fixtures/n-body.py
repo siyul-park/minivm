@@ -47,7 +47,7 @@ def energy(nb, x, y, z, vx, vy, vz, mass):
     return energy
 
 
-def offset_momentum(nb, vx, vy, vz, mass, solar_mass):
+def _offset_momentum(nb, vx, vy, vz, mass, solar_mass):
     px = 0.0
     py = 0.0
     pz = 0.0
@@ -119,7 +119,7 @@ def run():
     ]
 
     nb = 5
-    offset_momentum(nb, vx, vy, vz, mass, solar_mass)
+    _offset_momentum(nb, vx, vy, vz, mass, solar_mass)
 
     steps = 0
     while steps < 100:

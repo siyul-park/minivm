@@ -19,8 +19,8 @@ type hostCounter struct {
 func TestNewHostFunction(t *testing.T) {
 	t.Run("wraps the signature and callback", func(t *testing.T) {
 		typ := &types.FunctionType{
-			Params:  []types.Type{types.TypeI32},
-			Returns: []types.Type{types.TypeI32}}
+			Params:  []types.Type{types.TypeI32()},
+			Returns: []types.Type{types.TypeI32()}}
 		fn := interp.NewHostFunction(typ, func(_ *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error) {
 			return []types.Boxed{types.BoxI32(params[0].I32() * 2)}, nil
 		})
@@ -30,60 +30,6 @@ func TestNewHostFunction(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []types.Boxed{types.BoxI32(8)}, got)
 	})
-}
-
-func TestHostFunction_Kind(t *testing.T) {
-	fn := interp.NewHostFunction(&types.FunctionType{}, nil)
-	require.Equal(t, types.KindRef, fn.Kind())
-}
-
-func TestHostFunction_Type(t *testing.T) {
-	typ := &types.FunctionType{Returns: []types.Type{types.TypeI32}}
-	fn := interp.NewHostFunction(typ, nil)
-	require.Same(t, typ, fn.Type())
-}
-
-func TestHostFunction_String(t *testing.T) {
-	typ := &types.FunctionType{Returns: []types.Type{types.TypeI32}}
-	fn := interp.NewHostFunction(typ, nil)
-	require.Equal(t, "func() i32\n<native>", fn.String())
-}
-
-func TestHostStruct_Kind(t *testing.T) {
-	i := interp.New(program.New(nil))
-	r := interp.NewRegistry()
-	defer i.Close()
-
-	value, err := r.Marshal(i, &hostCounter{})
-	require.NoError(t, err)
-	require.Equal(t, types.KindRef, value.(*interp.HostStruct).Kind())
-}
-
-func TestHostStruct_Type(t *testing.T) {
-	i := interp.New(program.New(nil))
-	r := interp.NewRegistry()
-	defer i.Close()
-
-	value, err := r.Marshal(i, &hostCounter{})
-	require.NoError(t, err)
-
-	// The view reports the type a copy of the same struct would have reported,
-	// so guest code that reads it needs to know nothing about the Go side.
-	typ, ok := value.(*interp.HostStruct).Type().(*types.StructType)
-	require.True(t, ok)
-	require.Len(t, typ.Fields, 1)
-	require.Equal(t, "Count", typ.Fields[0].Name)
-	require.Equal(t, types.TypeI32, typ.Fields[0].Type)
-}
-
-func TestHostStruct_String(t *testing.T) {
-	i := interp.New(program.New(nil))
-	r := interp.NewRegistry()
-	defer i.Close()
-
-	value, err := r.Marshal(i, &hostCounter{})
-	require.NoError(t, err)
-	require.Equal(t, "struct {Count: i32}\n<native>", value.(*interp.HostStruct).String())
 }
 
 func TestHostStruct_Field(t *testing.T) {
@@ -156,36 +102,6 @@ func TestHostStruct_SetField(t *testing.T) {
 	})
 }
 
-func TestHostArray_Kind(t *testing.T) {
-	i := interp.New(program.New(nil))
-	r := interp.NewRegistry()
-	defer i.Close()
-
-	value, err := r.Marshal(i, []int32{1})
-	require.NoError(t, err)
-	require.Equal(t, types.KindRef, value.(*interp.HostArray).Kind())
-}
-
-func TestHostArray_Type(t *testing.T) {
-	i := interp.New(program.New(nil))
-	r := interp.NewRegistry()
-	defer i.Close()
-
-	value, err := r.Marshal(i, []int32{1})
-	require.NoError(t, err)
-	require.True(t, value.(*interp.HostArray).Type().Equals(types.NewArrayType(types.TypeI32)))
-}
-
-func TestHostArray_String(t *testing.T) {
-	i := interp.New(program.New(nil))
-	r := interp.NewRegistry()
-	defer i.Close()
-
-	value, err := r.Marshal(i, []int32{1})
-	require.NoError(t, err)
-	require.Equal(t, "[]i32\n<native>", value.(*interp.HostArray).String())
-}
-
 func TestHostArray_Len(t *testing.T) {
 	i := interp.New(program.New(nil))
 	r := interp.NewRegistry()
@@ -200,6 +116,49 @@ func TestHostArray_Len(t *testing.T) {
 	// A copy would have frozen the length the slice had at marshal time.
 	src = append(src, 3)
 	require.Equal(t, 3, host.Len())
+}
+
+func TestHostArray_Delete(t *testing.T) {
+	t.Run("removes the element and shortens the Go slice", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
+		defer i.Close()
+		src := []int32{1, 2, 3}
+
+		value, err := r.Marshal(i, &src)
+		require.NoError(t, err)
+
+		removed, err := value.(*interp.HostArray).Delete(i, 1)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(2), removed)
+		require.Equal(t, []int32{1, 3}, src)
+	})
+
+	t.Run("an index outside the length faults", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
+		defer i.Close()
+		src := []int32{1}
+
+		value, err := r.Marshal(i, &src)
+		require.NoError(t, err)
+
+		_, err = value.(*interp.HostArray).Delete(i, 1)
+		require.ErrorIs(t, err, interp.ErrIndexOutOfRange)
+	})
+
+	t.Run("a Go array cannot shrink", func(t *testing.T) {
+		i := interp.New(program.New(nil))
+		r := interp.NewRegistry()
+		defer i.Close()
+		src := [1]int32{1}
+
+		value, err := r.Marshal(i, &src)
+		require.NoError(t, err)
+
+		_, err = value.(*interp.HostArray).Delete(i, 0)
+		require.ErrorIs(t, err, interp.ErrUnsupportedMarshalType)
+	})
 }
 
 func TestHostArray_Element(t *testing.T) {
@@ -321,49 +280,6 @@ func TestHostArray_Append(t *testing.T) {
 	})
 }
 
-func TestHostArray_Delete(t *testing.T) {
-	t.Run("removes the element and shortens the Go slice", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		r := interp.NewRegistry()
-		defer i.Close()
-		src := []int32{1, 2, 3}
-
-		value, err := r.Marshal(i, &src)
-		require.NoError(t, err)
-
-		removed, err := value.(*interp.HostArray).Delete(i, 1)
-		require.NoError(t, err)
-		require.Equal(t, types.BoxI32(2), removed)
-		require.Equal(t, []int32{1, 3}, src)
-	})
-
-	t.Run("an index outside the length faults", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		r := interp.NewRegistry()
-		defer i.Close()
-		src := []int32{1}
-
-		value, err := r.Marshal(i, &src)
-		require.NoError(t, err)
-
-		_, err = value.(*interp.HostArray).Delete(i, 1)
-		require.ErrorIs(t, err, interp.ErrIndexOutOfRange)
-	})
-
-	t.Run("a Go array cannot shrink", func(t *testing.T) {
-		i := interp.New(program.New(nil))
-		r := interp.NewRegistry()
-		defer i.Close()
-		src := [1]int32{1}
-
-		value, err := r.Marshal(i, &src)
-		require.NoError(t, err)
-
-		_, err = value.(*interp.HostArray).Delete(i, 0)
-		require.ErrorIs(t, err, interp.ErrUnsupportedMarshalType)
-	})
-}
-
 func TestHostArray_Array(t *testing.T) {
 	i := interp.New(program.New(nil))
 	r := interp.NewRegistry()
@@ -380,36 +296,6 @@ func TestHostArray_Array(t *testing.T) {
 
 	src[0] = 9
 	require.Equal(t, types.TypedArray[int32]{1, 2}, out)
-}
-
-func TestHostMap_Kind(t *testing.T) {
-	i := interp.New(program.New(nil))
-	r := interp.NewRegistry()
-	defer i.Close()
-
-	value, err := r.Marshal(i, map[int32]int32{})
-	require.NoError(t, err)
-	require.Equal(t, types.KindRef, value.(*interp.HostMap).Kind())
-}
-
-func TestHostMap_Type(t *testing.T) {
-	i := interp.New(program.New(nil))
-	r := interp.NewRegistry()
-	defer i.Close()
-
-	value, err := r.Marshal(i, map[int32]int32{})
-	require.NoError(t, err)
-	require.True(t, value.(*interp.HostMap).Type().Equals(types.NewMapType(types.TypeI32, types.TypeI32)))
-}
-
-func TestHostMap_String(t *testing.T) {
-	i := interp.New(program.New(nil))
-	r := interp.NewRegistry()
-	defer i.Close()
-
-	value, err := r.Marshal(i, map[int32]int32{})
-	require.NoError(t, err)
-	require.Equal(t, "map[i32]i32\n<native>", value.(*interp.HostMap).String())
 }
 
 func TestHostMap_Len(t *testing.T) {
@@ -569,6 +455,120 @@ func TestHostMap_Map(t *testing.T) {
 
 	src[2] = 8
 	require.Equal(t, 1, out.(*types.TypedMap[int32]).Len())
+}
+
+func TestHostFunction_Kind(t *testing.T) {
+	fn := interp.NewHostFunction(&types.FunctionType{}, nil)
+	require.Equal(t, types.KindRef, fn.Kind())
+}
+
+func TestHostFunction_Type(t *testing.T) {
+	typ := &types.FunctionType{Returns: []types.Type{types.TypeI32()}}
+	fn := interp.NewHostFunction(typ, nil)
+	require.Same(t, typ, fn.Type())
+}
+
+func TestHostFunction_String(t *testing.T) {
+	typ := &types.FunctionType{Returns: []types.Type{types.TypeI32()}}
+	fn := interp.NewHostFunction(typ, nil)
+	require.Equal(t, "func() i32\n<native>", fn.String())
+}
+
+func TestHostStruct_Kind(t *testing.T) {
+	i := interp.New(program.New(nil))
+	r := interp.NewRegistry()
+	defer i.Close()
+
+	value, err := r.Marshal(i, &hostCounter{})
+	require.NoError(t, err)
+	require.Equal(t, types.KindRef, value.(*interp.HostStruct).Kind())
+}
+
+func TestHostStruct_Type(t *testing.T) {
+	i := interp.New(program.New(nil))
+	r := interp.NewRegistry()
+	defer i.Close()
+
+	value, err := r.Marshal(i, &hostCounter{})
+	require.NoError(t, err)
+
+	// The view reports the type a copy of the same struct would have reported,
+	// so guest code that reads it needs to know nothing about the Go side.
+	typ, ok := value.(*interp.HostStruct).Type().(*types.StructType)
+	require.True(t, ok)
+	require.Len(t, typ.Fields, 1)
+	require.Equal(t, "Count", typ.Fields[0].Name)
+	require.Equal(t, types.TypeI32(), typ.Fields[0].Type)
+}
+
+func TestHostStruct_String(t *testing.T) {
+	i := interp.New(program.New(nil))
+	r := interp.NewRegistry()
+	defer i.Close()
+
+	value, err := r.Marshal(i, &hostCounter{})
+	require.NoError(t, err)
+	require.Equal(t, "struct {Count: i32}\n<native>", value.(*interp.HostStruct).String())
+}
+
+func TestHostArray_Kind(t *testing.T) {
+	i := interp.New(program.New(nil))
+	r := interp.NewRegistry()
+	defer i.Close()
+
+	value, err := r.Marshal(i, []int32{1})
+	require.NoError(t, err)
+	require.Equal(t, types.KindRef, value.(*interp.HostArray).Kind())
+}
+
+func TestHostArray_Type(t *testing.T) {
+	i := interp.New(program.New(nil))
+	r := interp.NewRegistry()
+	defer i.Close()
+
+	value, err := r.Marshal(i, []int32{1})
+	require.NoError(t, err)
+	require.True(t, value.(*interp.HostArray).Type().Equals(types.NewArrayType(types.TypeI32())))
+}
+
+func TestHostArray_String(t *testing.T) {
+	i := interp.New(program.New(nil))
+	r := interp.NewRegistry()
+	defer i.Close()
+
+	value, err := r.Marshal(i, []int32{1})
+	require.NoError(t, err)
+	require.Equal(t, "[]i32\n<native>", value.(*interp.HostArray).String())
+}
+
+func TestHostMap_Kind(t *testing.T) {
+	i := interp.New(program.New(nil))
+	r := interp.NewRegistry()
+	defer i.Close()
+
+	value, err := r.Marshal(i, map[int32]int32{})
+	require.NoError(t, err)
+	require.Equal(t, types.KindRef, value.(*interp.HostMap).Kind())
+}
+
+func TestHostMap_Type(t *testing.T) {
+	i := interp.New(program.New(nil))
+	r := interp.NewRegistry()
+	defer i.Close()
+
+	value, err := r.Marshal(i, map[int32]int32{})
+	require.NoError(t, err)
+	require.True(t, value.(*interp.HostMap).Type().Equals(types.NewMapType(types.TypeI32(), types.TypeI32())))
+}
+
+func TestHostMap_String(t *testing.T) {
+	i := interp.New(program.New(nil))
+	r := interp.NewRegistry()
+	defer i.Close()
+
+	value, err := r.Marshal(i, map[int32]int32{})
+	require.NoError(t, err)
+	require.Equal(t, "map[i32]i32\n<native>", value.(*interp.HostMap).String())
 }
 func (c *hostCounter) Bump(n int32) int32 {
 	c.Count += n + c.offset

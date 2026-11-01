@@ -44,6 +44,11 @@ type block struct {
 	preds []int
 }
 
+// stack is the abstract operand stack threaded through a basic block.
+type stack struct {
+	slots []slot
+}
+
 // slot is one abstract operand-stack entry: its kind plus, when the entry
 // definitely holds a function or closure reference, that reference's signature.
 // The signature lets CALL recover a callee's arity statically even though the
@@ -51,11 +56,6 @@ type block struct {
 type slot struct {
 	kind types.Kind
 	typ  types.Type
-}
-
-// stack is the abstract operand stack threaded through a basic block.
-type stack struct {
-	slots []slot
 }
 
 // anyKind is the verifier's top element over types.Kind: a slot whose concrete
@@ -66,16 +66,26 @@ type stack struct {
 const anyKind = instr.KindAny
 
 var (
-	ErrTruncated       = errors.New("truncated instruction")
-	ErrUnknownOpcode   = errors.New("unknown opcode")
+	// ErrTruncated reports an instruction cut off by the end of its code.
+	ErrTruncated = errors.New("truncated instruction")
+	// ErrUnknownOpcode reports an opcode with no encoding.
+	ErrUnknownOpcode = errors.New("unknown opcode")
+	// ErrIndexOutOfRange reports an operand index outside its pool or frame.
 	ErrIndexOutOfRange = errors.New("operand index out of range")
-	ErrStackUnderflow  = errors.New("stack underflow")
-	ErrStackMismatch   = errors.New("stack mismatch at control-flow merge")
-	ErrTypeMismatch    = errors.New("operand type mismatch")
-	ErrFallThrough     = errors.New("control falls off end of function")
-	ErrInvalidJump     = errors.New("invalid jump")
-	ErrHandlerRange    = errors.New("invalid exception handler range")
-	ErrHandlerTarget   = errors.New("invalid exception handler target")
+	// ErrStackUnderflow reports an instruction that pops more values than the stack holds.
+	ErrStackUnderflow = errors.New("stack underflow")
+	// ErrStackMismatch reports control-flow paths that reach a point with different stacks.
+	ErrStackMismatch = errors.New("stack mismatch at control-flow merge")
+	// ErrTypeMismatch reports an operand whose kind differs from the required one.
+	ErrTypeMismatch = errors.New("operand type mismatch")
+	// ErrFallThrough reports a function whose last path does not end in a return or jump.
+	ErrFallThrough = errors.New("control falls off end of function")
+	// ErrInvalidJump reports a branch target that is not an instruction boundary.
+	ErrInvalidJump = errors.New("invalid jump")
+	// ErrHandlerRange reports an exception handler whose protected range is invalid.
+	ErrHandlerRange = errors.New("invalid exception handler range")
+	// ErrHandlerTarget reports an exception handler whose catch target or depth is invalid.
+	ErrHandlerTarget = errors.New("invalid exception handler target")
 )
 
 // Verify checks every function slot of prog and returns the first violation as
@@ -207,46 +217,36 @@ func (c *checker) bounds(ip int, op instr.Opcode) error {
 	return nil
 }
 
-// blocks builds the control-flow graph, splitting the code at branch targets,
-// terminators, and protected-region boundaries, and validates that every branch
-// target lands on an instruction boundary. Top-level branches may target the
-// virtual exit at len(code); function branches must stay inside their body.
+// blocks builds the control-flow graph over the leaders of the code and
+// validates that every branch target lands on an instruction boundary.
 // Throws and traps transfer out of band, so no edges are added for them; the
 // flow pass seeds catch blocks directly.
 func (c *checker) blocks() ([]*block, error) {
+	// Leaders are the sorted offsets where blocks start: branch targets,
+	// instructions after terminators, and protected-region boundaries.
+	// Top-level branches may target the virtual exit at len(code); function
+	// branches must stay inside their body.
 	offsets := []int{0}
 	starts := c.starts()
-	mark := func(ip, target int) error {
-		if target < 0 || target > len(c.code) || (target == len(c.code) && c.slot != 0) || !starts[target] {
-			return c.fail(ip, instr.Opcode(c.code[ip]), ErrInvalidJump)
-		}
-		if target < len(c.code) {
-			offsets = append(offsets, target)
-		}
-		return nil
-	}
 	for ip := 0; ip < len(c.code); {
 		inst := instr.Instruction(c.code[ip:])
 		next := ip + inst.Width()
-		switch inst.Opcode() {
-		case instr.UNREACHABLE, instr.RETURN, instr.THROW:
-			if next < len(c.code) {
-				offsets = append(offsets, next)
-			}
-		case instr.BR, instr.BR_IF:
+		op := inst.Opcode()
+		switch op {
+		case instr.BR, instr.BR_IF, instr.BR_TABLE:
 			for _, target := range instr.Targets(c.code, ip) {
-				if err := mark(ip, target); err != nil {
-					return nil, err
+				if target < 0 || target > len(c.code) || (target == len(c.code) && c.slot != 0) || !starts[target] {
+					return nil, c.fail(ip, op, ErrInvalidJump)
+				}
+				if target < len(c.code) {
+					offsets = append(offsets, target)
 				}
 			}
+		}
+		switch op {
+		case instr.UNREACHABLE, instr.RETURN, instr.THROW, instr.BR, instr.BR_IF:
 			if next < len(c.code) {
 				offsets = append(offsets, next)
-			}
-		case instr.BR_TABLE:
-			for _, target := range instr.Targets(c.code, ip) {
-				if err := mark(ip, target); err != nil {
-					return nil, err
-				}
 			}
 		}
 		ip = next
@@ -258,7 +258,6 @@ func (c *checker) blocks() ([]*block, error) {
 			}
 		}
 	}
-
 	slices.Sort(offsets)
 	offsets = slices.Compact(offsets)
 
@@ -363,24 +362,17 @@ func (c *checker) terminate(blocks []*block) error {
 func (c *checker) flow(blocks []*block) error {
 	entries := make([]*stack, len(blocks))
 	entries[0] = &stack{}
-	work := []int{0}
 
+	// Every catch block is entered with the exception payload above the
+	// operands live at the throw, merging into entries.
+	work := []int{0}
 	for _, h := range c.table {
-		operands := h.Depth - len(c.locals)
-		if operands < 0 {
-			operands = 0
-		}
+		operands := max(h.Depth-len(c.locals), 0)
 		seed := &stack{}
-		for k := 0; k < operands+1; k++ {
+		for range operands + 1 {
 			seed.push(slot{kind: anyKind})
 		}
-		idx := -1
-		for i, b := range blocks {
-			if b.start == h.Catch {
-				idx = i
-				break
-			}
-		}
+		idx := slices.IndexFunc(blocks, func(b *block) bool { return b.start == h.Catch })
 		if idx < 0 {
 			continue
 		}
@@ -451,63 +443,59 @@ func (c *checker) step(st *stack, inst instr.Instruction, op instr.Opcode, ip in
 	switch op {
 	case instr.NOP, instr.UNREACHABLE, instr.BR:
 		return false, nil
-	case instr.LOCAL_TEE:
-		if st.len() == 0 {
-			return false, c.fail(ip, op, ErrStackUnderflow)
+	case instr.LOCAL_GET, instr.UPVAL_GET, instr.CONST_GET, instr.GLOBAL_GET:
+		var t types.Type
+		switch op {
+		case instr.LOCAL_GET:
+			t = c.locals[inst.Operand(0)]
+		case instr.UPVAL_GET:
+			t = c.captures[inst.Operand(0)]
+		case instr.GLOBAL_GET:
+			t = c.prog.Globals[inst.Operand(0)]
+		default:
+			v := c.prog.Constants[inst.Operand(0)]
+			st.push(slot{kind: v.Kind(), typ: v.Type()})
+			return false, nil
 		}
-		return false, nil
-	case instr.GLOBAL_TEE:
-		if st.len() == 0 {
-			return false, c.fail(ip, op, ErrStackUnderflow)
-		}
-		if !acceptsType(st.top(), c.prog.Globals[inst.Operand(0)]) {
-			return false, c.fail(ip, op, ErrTypeMismatch)
-		}
-		return false, nil
-	case instr.LOCAL_GET:
-		t := c.locals[inst.Operand(0)]
 		st.push(slot{kind: t.Kind(), typ: t})
 		return false, nil
-	case instr.UPVAL_GET:
-		t := c.captures[inst.Operand(0)]
-		st.push(slot{kind: t.Kind(), typ: t})
-		return false, nil
-	case instr.CONST_GET:
-		v := c.prog.Constants[inst.Operand(0)]
-		st.push(slot{kind: v.Kind(), typ: v.Type()})
-		return false, nil
-	case instr.GLOBAL_GET:
-		t := c.prog.Globals[inst.Operand(0)]
-		st.push(slot{kind: t.Kind(), typ: t})
-		return false, nil
-	case instr.GLOBAL_SET:
+	case instr.LOCAL_TEE, instr.GLOBAL_TEE, instr.GLOBAL_SET:
 		if st.len() == 0 {
 			return false, c.fail(ip, op, ErrStackUnderflow)
 		}
-		if !acceptsType(st.pop(), c.prog.Globals[inst.Operand(0)]) {
-			return false, c.fail(ip, op, ErrTypeMismatch)
+		switch op {
+		case instr.GLOBAL_TEE:
+			if !acceptsType(st.top(), c.prog.Globals[inst.Operand(0)]) {
+				return false, c.fail(ip, op, ErrTypeMismatch)
+			}
+		case instr.GLOBAL_SET:
+			if !acceptsType(st.pop(), c.prog.Globals[inst.Operand(0)]) {
+				return false, c.fail(ip, op, ErrTypeMismatch)
+			}
 		}
 		return false, nil
-	case instr.DUP:
-		if st.len() == 0 {
+	case instr.DUP, instr.SWAP, instr.SELECT:
+		need := 1
+		switch op {
+		case instr.SWAP:
+			need = 2
+		case instr.SELECT:
+			need = 3
+		}
+		if st.len() < need {
 			return false, c.fail(ip, op, ErrStackUnderflow)
 		}
-		st.push(st.top())
-		return false, nil
-	case instr.SWAP:
-		if st.len() < 2 {
-			return false, c.fail(ip, op, ErrStackUnderflow)
+		switch op {
+		case instr.DUP:
+			st.push(st.top())
+		case instr.SWAP:
+			st.swap()
+		default:
+			st.pop()
+			b := st.pop()
+			a := st.pop()
+			st.push(slot{kind: unify(a.kind, b.kind)})
 		}
-		st.swap()
-		return false, nil
-	case instr.SELECT:
-		if st.len() < 3 {
-			return false, c.fail(ip, op, ErrStackUnderflow)
-		}
-		st.pop()
-		b := st.pop()
-		a := st.pop()
-		st.push(slot{kind: unify(a.kind, b.kind)})
 		return false, nil
 	case instr.I32_AND, instr.I32_OR, instr.I32_XOR:
 		if st.len() < 2 {
@@ -535,7 +523,7 @@ func (c *checker) step(st *stack, inst instr.Instruction, op instr.Opcode, ip in
 			return true, nil
 		}
 		if st.len() < len(t.Fields) {
-			return false, c.fail(ip, op, ErrStackUnderflow)
+			return false, c.fail(ip, instr.STRUCT_NEW, ErrStackUnderflow)
 		}
 		st.drop(len(t.Fields))
 		st.push(slot{kind: types.KindRef, typ: t})
@@ -672,13 +660,29 @@ func (s *stack) merge(other *stack) (changed, balanced bool) {
 }
 
 func acceptsType(got slot, want types.Type) bool {
-	if want == types.TypeAny {
+	if want == types.TypeAny() {
 		return true
 	}
 	if got.typ != nil {
 		return want.Cast(got.typ)
 	}
 	return accepts(got.kind, want.Kind())
+}
+
+// bitwise computes the result kind of a width-closed integer op (and/or/xor):
+// when both operands share one narrow kind the result keeps it (i8&i8 → i8,
+// i1&i1 → i1, matching Rust/Swift), since the operation cannot escape that
+// kind's value range. A mixed pair widens to the i32 representation they
+// compute in; an unknown operand yields anyKind because narrowness cannot be
+// proven.
+func bitwise(a, b types.Kind) types.Kind {
+	if a == b {
+		return a
+	}
+	if a == anyKind || b == anyKind {
+		return anyKind
+	}
+	return types.KindI32
 }
 
 // accepts reports whether an actual stack slot of kind got satisfies a required
@@ -697,20 +701,4 @@ func unify(a, b types.Kind) types.Kind {
 		return a
 	}
 	return anyKind
-}
-
-// bitwise computes the result kind of a width-closed integer op (and/or/xor):
-// when both operands share one narrow kind the result keeps it (i8&i8 → i8,
-// i1&i1 → i1, matching Rust/Swift), since the operation cannot escape that
-// kind's value range. A mixed pair widens to the i32 representation they
-// compute in; an unknown operand yields anyKind because narrowness cannot be
-// proven.
-func bitwise(a, b types.Kind) types.Kind {
-	if a == b {
-		return a
-	}
-	if a == anyKind || b == anyKind {
-		return anyKind
-	}
-	return types.KindI32
 }

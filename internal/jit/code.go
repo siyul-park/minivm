@@ -10,9 +10,6 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// Tier is how far a function's native code is optimized; the zero Tier is none.
-type Tier uint8
-
 // Code is the native code of one function at one tier, in executable memory of its own.
 type Code struct {
 	Address int
@@ -51,6 +48,17 @@ type Code struct {
 	retired atomic.Uint64
 }
 
+// Assembly is one unit's machine code before NewCode links it: the bytes,
+// the exit maps their exits index, and the Go entry stub's byte offset.
+type Assembly struct {
+	Bytes []byte
+	Exits []Exit
+	Entry int
+}
+
+// Tier is how far a function's native code is optimized; the zero Tier is none.
+type Tier uint8
+
 // Tier values published by the native runtime.
 const (
 	Baseline Tier = iota + 1
@@ -59,22 +67,22 @@ const (
 
 // NewCode links code into a new Buffer and returns one native code value with
 // its identity, signature metadata, exits, and Go entry stub.
-func NewCode(address, ip int, osr bool, tier Tier, results int, registers, arguments []types.Kind, code []byte, exits []Exit, stub int) (*Code, error) {
-	if stub < 0 || stub > len(code) {
-		return nil, fmt.Errorf("%w: entry stub offset %d", asm.ErrInvalidArgs, stub)
+func NewCode(address, ip int, osr bool, tier Tier, results int, registers, arguments []types.Kind, a Assembly) (*Code, error) {
+	if a.Entry < 0 || a.Entry > len(a.Bytes) {
+		return nil, fmt.Errorf("%w: entry stub offset %d", asm.ErrInvalidArgs, a.Entry)
 	}
-	buffer, err := asm.NewBuffer(len(code))
+	buffer, err := asm.NewBuffer(len(a.Bytes))
 	if err != nil {
 		return nil, err
 	}
-	native, err := buffer.Link(code)
+	native, err := buffer.Link(a.Bytes)
 	if err != nil {
 		return nil, errors.Join(err, buffer.Free())
 	}
 	return &Code{
 		Address: address, IP: ip, OSR: osr, Tier: tier, Results: results,
-		Registers: slices.Clone(registers), Arguments: slices.Clone(arguments), Exits: slices.Clone(exits),
-		native: native, entry: native + uintptr(stub), size: len(code), buffer: buffer,
+		Registers: slices.Clone(registers), Arguments: slices.Clone(arguments), Exits: slices.Clone(a.Exits),
+		native: native, entry: native + uintptr(a.Entry), size: len(a.Bytes), buffer: buffer,
 	}, nil
 }
 

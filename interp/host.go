@@ -194,7 +194,9 @@ func (h *HostArray) Array(i *Interpreter) (types.Value, error) {
 }
 
 // Len reports the number of entries the Go map holds now.
-func (h *HostMap) Len() int { return h.value().Len() }
+func (h *HostMap) Len() int {
+	return h.value().Len()
+}
 
 // Get reads the entry keyed by key, reporting whether the Go map holds one. A
 // missing key reads as the element zero value, the way every VM map reads one.
@@ -251,7 +253,9 @@ func (h *HostMap) Delete(i *Interpreter, key types.Boxed) error {
 }
 
 // Clear removes every entry of the Go map.
-func (h *HostMap) Clear() { h.value().Clear() }
+func (h *HostMap) Clear() {
+	h.value().Clear()
+}
 
 // Map rebuilds the view as the VM map a copy of the Go value would have
 // produced, for an opcode that yields a new value rather than changing this one.
@@ -260,10 +264,14 @@ func (h *HostMap) Map(i *Interpreter) (types.Value, error) {
 }
 
 // Kind returns the value kind.
-func (f *HostFunction) Kind() types.Kind { return types.KindRef }
+func (f *HostFunction) Kind() types.Kind {
+	return types.KindRef
+}
 
 // Type returns the value type.
-func (f *HostFunction) Type() types.Type { return f.Typ }
+func (f *HostFunction) Type() types.Type {
+	return f.Typ
+}
 
 // String returns the textual representation.
 func (f *HostFunction) String() string {
@@ -271,31 +279,49 @@ func (f *HostFunction) String() string {
 }
 
 // Kind returns the value kind.
-func (h *HostStruct) Kind() types.Kind { return types.KindRef }
+func (h *HostStruct) Kind() types.Kind {
+	return types.KindRef
+}
 
 // Type returns the value type.
-func (h *HostStruct) Type() types.Type { return h.typ }
+func (h *HostStruct) Type() types.Type {
+	return h.typ
+}
 
 // String returns the textual representation.
-func (h *HostStruct) String() string { return fmt.Sprintf("%s\n<native>", h.typ) }
+func (h *HostStruct) String() string {
+	return fmt.Sprintf("%s\n<native>", h.typ)
+}
 
 // Kind returns the value kind.
-func (h *HostArray) Kind() types.Kind { return types.KindRef }
+func (h *HostArray) Kind() types.Kind {
+	return types.KindRef
+}
 
 // Type returns the value type.
-func (h *HostArray) Type() types.Type { return h.typ }
+func (h *HostArray) Type() types.Type {
+	return h.typ
+}
 
 // String returns the textual representation.
-func (h *HostArray) String() string { return fmt.Sprintf("%s\n<native>", h.typ) }
+func (h *HostArray) String() string {
+	return fmt.Sprintf("%s\n<native>", h.typ)
+}
 
 // Kind returns the value kind.
-func (h *HostMap) Kind() types.Kind { return types.KindRef }
+func (h *HostMap) Kind() types.Kind {
+	return types.KindRef
+}
 
 // Type returns the value type.
-func (h *HostMap) Type() types.Type { return h.typ }
+func (h *HostMap) Type() types.Type {
+	return h.typ
+}
 
 // String returns the textual representation.
-func (h *HostMap) String() string { return fmt.Sprintf("%s\n<native>", h.typ) }
+func (h *HostMap) String() string {
+	return fmt.Sprintf("%s\n<native>", h.typ)
+}
 
 // slice addresses the Go slice through the variable the view holds, so a slice
 // that append reallocated is the one the next access reaches. A Go array has no
@@ -309,7 +335,9 @@ func (h *HostArray) slice() (reflect.Value, bool) {
 
 // value addresses the Go map through the variable the view holds, so a map the
 // Go side replaced is the one every access reaches.
-func (h *HostMap) value() reflect.Value { return reflect.NewAt(h.rtyp, h.ptr).Elem() }
+func (h *HostMap) value() reflect.Value {
+	return reflect.NewAt(h.rtyp, h.ptr).Elem()
+}
 
 // key decodes a VM key into the Go key type, which is what makes a key the
 // guest computed find the entry the Go side stored.

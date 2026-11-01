@@ -45,7 +45,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 		prog := program.New(
 			[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
 			program.WithConstants(
-				types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+				types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.I32_CONST, 2),
 					instr.New(instr.I32_ADD),
@@ -75,8 +75,8 @@ func TestOptimizer_Optimize(t *testing.T) {
 			instr.New(instr.CALL)},
 		program.WithConstants(
 			types.NewFunctionBuilder(&types.FunctionType{
-				Params:  []types.Type{types.TypeI64},
-				Returns: []types.Type{types.TypeI64}}).Emit(
+				Params:  []types.Type{types.TypeI64()},
+				Returns: []types.Type{types.TypeI64()}}).Emit(
 				instr.New(instr.LOCAL_GET, 0),
 				instr.New(instr.I32_CONST, 2),
 				instr.New(instr.I32_LT_S),
@@ -138,8 +138,8 @@ func TestOptimizer_Optimize(t *testing.T) {
 					instr.New(instr.CALL)},
 				program.WithConstants(
 					types.NewFunctionBuilder(&types.FunctionType{
-						Params:  []types.Type{types.TypeI32, types.TypeI32},
-						Returns: []types.Type{types.TypeI32}}).Emit(
+						Params:  []types.Type{types.TypeI32(), types.TypeI32()},
+						Returns: []types.Type{types.TypeI32()}}).Emit(
 						instr.New(instr.LOCAL_GET, 0),
 						instr.New(instr.LOCAL_GET, 1),
 						instr.New(instr.I32_ADD),
@@ -175,8 +175,8 @@ func TestOptimizer_Optimize(t *testing.T) {
 	t.Run("O3 repairs branch offsets after shrinking", func(t *testing.T) {
 		build := func() *program.Program {
 			fb := types.NewFunctionBuilder(&types.FunctionType{
-				Params:  []types.Type{types.TypeI32, types.TypeI32},
-				Returns: []types.Type{types.TypeI32}})
+				Params:  []types.Type{types.TypeI32(), types.TypeI32()},
+				Returns: []types.Type{types.TypeI32()}})
 			l := fb.Label()
 			fb.Emit(
 				instr.New(instr.LOCAL_GET, 0),
@@ -225,8 +225,8 @@ func TestOptimizer_Optimize(t *testing.T) {
 	t.Run("O3 eliminates a redundancy across a control-flow merge", func(t *testing.T) {
 		build := func() *program.Program {
 			fb := types.NewFunctionBuilder(&types.FunctionType{
-				Params:  []types.Type{types.TypeI32, types.TypeI32},
-				Returns: []types.Type{types.TypeI32}})
+				Params:  []types.Type{types.TypeI32(), types.TypeI32()},
+				Returns: []types.Type{types.TypeI32()}})
 			then, merge := fb.Label(), fb.Label()
 			fb.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_GT_S))
 			fb.BrIf(then)
@@ -275,8 +275,8 @@ func TestOptimizer_Optimize(t *testing.T) {
 	t.Run("O3 preserves types and handlers", func(t *testing.T) {
 		build := func() *program.Program {
 			fb := types.NewFunctionBuilder(&types.FunctionType{
-				Params:  []types.Type{types.TypeI32, types.TypeI32},
-				Returns: []types.Type{types.TypeI32}})
+				Params:  []types.Type{types.TypeI32(), types.TypeI32()},
+				Returns: []types.Type{types.TypeI32()}})
 			start, end, catch := fb.Label(), fb.Label(), fb.Label()
 			fb.Bind(start)
 			fb.Emit(
@@ -303,7 +303,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.CALL)},
 				program.WithConstants(fb.MustBuild()),
-				program.WithTypes(types.NewArrayType(types.TypeI32)))
+				program.WithTypes(types.NewArrayType(types.TypeI32())))
 		}
 
 		before := build()
@@ -407,4 +407,43 @@ func TestOptimizer_Add(t *testing.T) {
 	got, err := o.Optimize(prog)
 	require.NoError(t, err)
 	require.NotEqual(t, before, got.String())
+}
+
+func FuzzOptimizerParity(f *testing.F) {
+	f.Add(byte(0), int64(20), int64(22))
+	f.Add(byte(1), int64(-10), int64(3))
+	f.Add(byte(4), int64(7), int64(0))
+	f.Add(byte(9), int64(-3750763034362895579), int64(1)<<62)
+	f.Add(byte(11), int64(1)<<62, int64(3))
+
+	f.Fuzz(func(t *testing.T, operation byte, left, right int64) {
+		// An even operation picks an i32 op over the operands' low halves,
+		// an odd one an i64 op.
+		ops := [2][]instr.Opcode{
+			{instr.I32_ADD, instr.I32_SUB, instr.I32_MUL, instr.I32_XOR, instr.I32_EQ, instr.I32_LT_S},
+			{instr.I64_ADD, instr.I64_SUB, instr.I64_MUL, instr.I64_XOR, instr.I64_SHL, instr.I64_EQ, instr.I64_LT_S},
+		}[operation&1]
+		code, a, b := instr.I64_CONST, uint64(left), uint64(right)
+		if operation&1 == 0 {
+			code, a, b = instr.I32_CONST, uint64(uint32(left)), uint64(uint32(right))
+		}
+		prog := program.New([]instr.Instruction{
+			instr.New(code, a), instr.New(code, b), instr.New(ops[int(operation/2)%len(ops)])})
+		require.NoError(t, program.Verify(prog))
+
+		run := func(prog *program.Program) types.Value {
+			vm := interp.New(prog, interp.WithTick(1))
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			value, err := vm.Pop()
+			require.NoError(t, err)
+			return value
+		}
+
+		want := run(prog)
+		optimized, err := optimize.New(optimize.O3).Optimize(prog)
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(optimized))
+		require.Equal(t, want, run(optimized))
+	})
 }

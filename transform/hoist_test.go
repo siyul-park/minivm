@@ -20,6 +20,49 @@ type countedLoop struct {
 	bound, one, counter, cond ssa.Value
 }
 
+func newCountedLoop() *countedLoop {
+	b := ssa.New("f")
+	l := &countedLoop{b: b, pre: b.Block(), header: b.Block(), body: b.Block(), exit: b.Block()}
+
+	l.bound = b.Value(ssa.TypeI32)
+	b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: 10, Results: []ssa.Value{l.bound}})
+	l.one = b.Value(ssa.TypeI32)
+	b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{l.one}})
+	zero := b.Value(ssa.TypeI32)
+	b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{zero}})
+	b.Term(l.pre, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: l.header, Args: []ssa.Value{zero}}}})
+
+	l.counter = b.Param(l.header, ssa.TypeI32)
+	l.cond = b.Value(ssa.TypeI1)
+	b.Add(l.header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{l.counter, l.bound}, State: deoptState(l.b, l.pre), Results: []ssa.Value{l.cond}})
+	b.Term(l.header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{l.cond}, Edges: []ssa.Edge{{Block: l.body}, {Block: l.exit}}})
+
+	b.Term(l.exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{l.counter}})
+	return l
+}
+
+func hasCode(ops []ssa.Operation, code instr.Opcode) bool {
+	for _, op := range ops {
+		if op.Op == ssa.OpExec && op.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func blockChunk(format string, id int) string {
+	marker := fmt.Sprintf("blk%d:", id)
+	idx := strings.Index(format, marker)
+	if idx < 0 {
+		return ""
+	}
+	rest := format[idx+len(marker):]
+	if next := strings.Index(rest, "\nblk"); next >= 0 {
+		rest = rest[:next]
+	}
+	return rest
+}
+
 func TestNewHoistPass(t *testing.T) {
 	t.Run("returns a pass over ssa.Function", func(t *testing.T) {
 		var p pass.Pass[*ssa.Function] = transform.NewHoistPass()
@@ -514,52 +557,9 @@ blk3: () <-- (blk1)
 		require.Equal(t, before, ssa.Format(fn))
 	})
 }
-func newCountedLoop() *countedLoop {
-	b := ssa.New("f")
-	l := &countedLoop{b: b, pre: b.Block(), header: b.Block(), body: b.Block(), exit: b.Block()}
-
-	l.bound = b.Value(ssa.TypeI32)
-	b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: 10, Results: []ssa.Value{l.bound}})
-	l.one = b.Value(ssa.TypeI32)
-	b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{l.one}})
-	zero := b.Value(ssa.TypeI32)
-	b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{zero}})
-	b.Term(l.pre, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: l.header, Args: []ssa.Value{zero}}}})
-
-	l.counter = b.Param(l.header, ssa.TypeI32)
-	l.cond = b.Value(ssa.TypeI1)
-	b.Add(l.header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{l.counter, l.bound}, State: deoptState(l.b, l.pre), Results: []ssa.Value{l.cond}})
-	b.Term(l.header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{l.cond}, Edges: []ssa.Edge{{Block: l.body}, {Block: l.exit}}})
-
-	b.Term(l.exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{l.counter}})
-	return l
-}
-
 func (l *countedLoop) close() *ssa.Function {
 	next := l.b.Value(ssa.TypeI32)
 	l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{l.counter, l.one}, State: deoptState(l.b, l.pre), Results: []ssa.Value{next}})
 	l.b.Term(l.body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: l.header, Args: []ssa.Value{next}}}})
 	return l.b.Build()
-}
-
-func hasCode(ops []ssa.Operation, code instr.Opcode) bool {
-	for _, op := range ops {
-		if op.Op == ssa.OpExec && op.Code == code {
-			return true
-		}
-	}
-	return false
-}
-
-func blockChunk(format string, id int) string {
-	marker := fmt.Sprintf("blk%d:", id)
-	idx := strings.Index(format, marker)
-	if idx < 0 {
-		return ""
-	}
-	rest := format[idx+len(marker):]
-	if next := strings.Index(rest, "\nblk"); next >= 0 {
-		rest = rest[:next]
-	}
-	return rest
 }

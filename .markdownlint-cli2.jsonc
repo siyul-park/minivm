@@ -1,0 +1,13 @@
+{
+  // docs/writing.md owns Markdown form: prose keeps one paragraph per line and
+  // tables use the compact `|---|` separator, so width and table-padding rules
+  // do not apply. Go code blocks keep gofmt tabs; .github holds form
+  // templates, not documents.
+  "config": {
+    "MD013": false,
+    "MD060": false,
+    "MD010": { "code_blocks": false },
+    "MD024": { "siblings_only": true }
+  },
+  "ignores": [".github/**", ".claude/**", "docs/plans/**", "docs/superpowers/**"]
+}

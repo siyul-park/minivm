@@ -40,7 +40,7 @@ function permute(a, k, permcount, checksum, maxflips) {
 }
 
 function run() {
-    const a = Array.from({length: 6}, (_, i) => i);
+    const a = Array.from({ length: 6 }, (_, i) => i);
     const [, checksum, maxflips] = permute(a, 6, 0, 0, 0);
     return checksum * 1000 + maxflips;
 }

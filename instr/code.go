@@ -5,6 +5,7 @@ import (
 	"strings"
 )
 
+// Marshal concatenates instrs into one code stream.
 func Marshal(instrs []Instruction) []byte {
 	var code []byte
 	for _, instr := range instrs {
@@ -70,6 +71,7 @@ func Format(code []byte) string {
 	return sb.String()
 }
 
+// Unmarshal splits code into instructions; the results alias code.
 func Unmarshal(code []byte) []Instruction {
 	var instrs []Instruction
 	for ip := 0; ip < len(code); {

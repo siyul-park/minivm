@@ -8,32 +8,32 @@ import (
 )
 
 func TestNewIteratorType(t *testing.T) {
-	typ := types.NewIteratorType(types.TypeI32)
-	require.Equal(t, types.TypeI32, typ.Elem)
+	typ := types.NewIteratorType(types.TypeI32())
+	require.Equal(t, types.TypeI32(), typ.Elem)
 }
 
 func TestIteratorType_Kind(t *testing.T) {
-	require.Equal(t, types.KindRef, types.NewIteratorType(types.TypeI32).Kind())
-}
-
-func TestIteratorType_String(t *testing.T) {
-	require.Equal(t, "iterator[i32]", types.NewIteratorType(types.TypeI32).String())
+	require.Equal(t, types.KindRef, types.NewIteratorType(types.TypeI32()).Kind())
 }
 
 func TestIteratorType_Cast(t *testing.T) {
-	typ := types.NewIteratorType(types.TypeI32)
+	typ := types.NewIteratorType(types.TypeI32())
 
 	require.True(t, typ.Cast(typ))
-	require.True(t, typ.Cast(types.NewIteratorType(types.TypeI32)))
-	require.False(t, typ.Cast(types.NewIteratorType(types.TypeI64)))
-	require.False(t, typ.Cast(types.TypeAny))
+	require.True(t, typ.Cast(types.NewIteratorType(types.TypeI32())))
+	require.False(t, typ.Cast(types.NewIteratorType(types.TypeI64())))
+	require.False(t, typ.Cast(types.TypeAny()))
 }
 
 func TestIteratorType_Equals(t *testing.T) {
-	typ := types.NewIteratorType(types.TypeI32)
+	typ := types.NewIteratorType(types.TypeI32())
 
 	require.True(t, typ.Equals(typ))
-	require.True(t, typ.Equals(types.NewIteratorType(types.TypeI32)))
-	require.False(t, typ.Equals(types.NewIteratorType(types.TypeI64)))
-	require.False(t, typ.Equals(types.TypeAny))
+	require.True(t, typ.Equals(types.NewIteratorType(types.TypeI32())))
+	require.False(t, typ.Equals(types.NewIteratorType(types.TypeI64())))
+	require.False(t, typ.Equals(types.TypeAny()))
+}
+
+func TestIteratorType_String(t *testing.T) {
+	require.Equal(t, "iterator[i32]", types.NewIteratorType(types.TypeI32()).String())
 }

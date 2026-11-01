@@ -17,12 +17,11 @@ const (
 	KindI8              // 0b101
 	KindI1              // 0b110
 
+	// KindAny is the verifier's top element over Kind: a required or produced
+	// operand whose concrete kind is not statically fixed. It is not a real value
+	// kind, so it sits outside the iota range and prints as "unknown".
+	KindAny Kind = 0xFF
 )
-
-// KindAny is the verifier's top element over Kind: a required or produced
-// operand whose concrete kind is not statically fixed. It is not a real value
-// kind, so it sits outside the iota range and prints as "unknown".
-const KindAny Kind = 0xFF
 
 // IsNumeric reports whether k is one of the numeric kinds (i1, i8, i32, i64,
 // f32, f64).
@@ -46,6 +45,7 @@ func (k Kind) Repr() Kind {
 	}
 }
 
+// Size returns the stored byte size of a value of kind k, or 0 when it has none.
 func (k Kind) Size() int {
 	switch k {
 	case KindI1, KindI8:

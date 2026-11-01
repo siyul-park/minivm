@@ -59,30 +59,6 @@ func TestQueue_Submit(t *testing.T) {
 	})
 }
 
-func TestQueue_Drain(t *testing.T) {
-	q := compile.NewQueue(newStub, 2)
-	defer q.Close()
-
-	require.True(t, q.Submit(unlowerable(1)))
-	require.True(t, q.Submit(unlowerable(2)))
-
-	var jobs []compile.Job
-	poll(t, func() bool {
-		jobs = append(jobs, q.Drain()...)
-		return len(jobs) == 2
-	})
-
-	addresses := map[int]bool{}
-	for _, j := range jobs {
-		require.ErrorIs(t, j.Err, compile.ErrUnsupported)
-		require.Nil(t, j.Code)
-		addresses[j.Unit.Address] = true
-	}
-	require.Equal(t, map[int]bool{1: true, 2: true}, addresses)
-
-	require.True(t, q.Submit(unlowerable(1)))
-}
-
 func TestQueue_Close(t *testing.T) {
 	t.Run("refuses submits once closed", func(t *testing.T) {
 		q := compile.NewQueue(newStub, 1)
@@ -113,6 +89,30 @@ func TestQueue_Close(t *testing.T) {
 		require.Empty(t, jobs)
 		require.False(t, q.Submit(unlowerable(1)))
 	})
+}
+
+func TestQueue_Drain(t *testing.T) {
+	q := compile.NewQueue(newStub, 2)
+	defer q.Close()
+
+	require.True(t, q.Submit(unlowerable(1)))
+	require.True(t, q.Submit(unlowerable(2)))
+
+	var jobs []compile.Job
+	poll(t, func() bool {
+		jobs = append(jobs, q.Drain()...)
+		return len(jobs) == 2
+	})
+
+	addresses := map[int]bool{}
+	for _, j := range jobs {
+		require.ErrorIs(t, j.Err, compile.ErrUnsupported)
+		require.Nil(t, j.Code)
+		addresses[j.Unit.Address] = true
+	}
+	require.Equal(t, map[int]bool{1: true, 2: true}, addresses)
+
+	require.True(t, q.Submit(unlowerable(1)))
 }
 
 // poll runs cond on the calling goroutine until it holds, so Drain never runs

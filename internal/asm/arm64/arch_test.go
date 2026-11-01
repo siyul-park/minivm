@@ -10,48 +10,19 @@ import (
 )
 
 func TestArch(t *testing.T) {
-	var _ asm.Arch = arm64.Arch{}
-	var _ asm.Frame = arm64.Arch{}
-	var _ asm.Relaxer = arm64.Arch{}
-}
+	t.Run("implements the assembler contracts", func(t *testing.T) {
+		var _ asm.Arch = arm64.Arch{}
+		var _ asm.Frame = arm64.Arch{}
+		var _ asm.Relaxer = arm64.Arch{}
+	})
 
-func TestArch_New(t *testing.T) {
-	require.Equal(t, arm64.Arch{}, arm64.New())
+	t.Run("New returns the zero Arch", func(t *testing.T) {
+		require.Equal(t, arm64.Arch{}, arm64.New())
+	})
 }
 
 func TestArch_Encoder(t *testing.T) {
 	require.IsType(t, arm64.Encoder{}, arm64.Arch{}.Encoder())
-}
-
-func TestArch_Flow(t *testing.T) {
-	frame := arm64.Arch{}
-	tests := []struct {
-		name string
-		inst asm.Instruction
-		want asm.Flow
-	}{
-		{"ADD", arm64.ADD(arm64.X0, arm64.X1, arm64.X2), asm.FlowNext},
-		{"STR", arm64.STR(arm64.X0, arm64.X1, 0), asm.FlowNext},
-		{"USE", arm64.USE(arm64.X0), asm.FlowNext},
-		{"B label", arm64.BLabel(0), asm.FlowJump},
-		{"B", arm64.B(8), asm.FlowJump},
-		{"BR", arm64.BR(arm64.X0), asm.FlowEnd},
-		{"BL", arm64.BL(8), asm.FlowCall},
-		{"BLR", arm64.BLR(arm64.X0), asm.FlowCall},
-		{"EXIT", arm64.EXIT(arm64.X0), asm.FlowNext},
-		{"RET", arm64.RET(), asm.FlowEnd},
-		{"BRK", arm64.BRK(0), asm.FlowEnd},
-		{"CBZ", arm64.CBZLabel(arm64.X0, 0), asm.FlowBranch},
-		{"CBNZ", arm64.CBNZLabel(arm64.X0, 0), asm.FlowBranch},
-		{"TBZ", arm64.TBZ(arm64.X0, 1, 8), asm.FlowBranch},
-		{"B.NE", arm64.BCondLabel(arm64.OpBNE, 0), asm.FlowBranch},
-		{"B.GE", arm64.BGE(8), asm.FlowBranch},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, frame.Flow(tt.inst))
-		})
-	}
 }
 
 func TestArch_Writes(t *testing.T) {
@@ -85,6 +56,37 @@ func TestArch_Writes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			require.Equal(t, tt.want, frame.Writes(tt.inst))
+		})
+	}
+}
+
+func TestArch_Flow(t *testing.T) {
+	frame := arm64.Arch{}
+	tests := []struct {
+		name string
+		inst asm.Instruction
+		want asm.Flow
+	}{
+		{"ADD", arm64.ADD(arm64.X0, arm64.X1, arm64.X2), asm.FlowNext},
+		{"STR", arm64.STR(arm64.X0, arm64.X1, 0), asm.FlowNext},
+		{"USE", arm64.USE(arm64.X0), asm.FlowNext},
+		{"B label", arm64.BLabel(0), asm.FlowJump},
+		{"B", arm64.B(8), asm.FlowJump},
+		{"BR", arm64.BR(arm64.X0), asm.FlowEnd},
+		{"BL", arm64.BL(8), asm.FlowCall},
+		{"BLR", arm64.BLR(arm64.X0), asm.FlowCall},
+		{"EXIT", arm64.EXIT(arm64.X0), asm.FlowNext},
+		{"RET", arm64.RET(), asm.FlowEnd},
+		{"BRK", arm64.BRK(0), asm.FlowEnd},
+		{"CBZ", arm64.CBZLabel(arm64.X0, 0), asm.FlowBranch},
+		{"CBNZ", arm64.CBNZLabel(arm64.X0, 0), asm.FlowBranch},
+		{"TBZ", arm64.TBZ(arm64.X0, 1, 8), asm.FlowBranch},
+		{"B.NE", arm64.BCondLabel(arm64.OpBNE, 0), asm.FlowBranch},
+		{"B.GE", arm64.BGE(8), asm.FlowBranch},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, frame.Flow(tt.inst))
 		})
 	}
 }

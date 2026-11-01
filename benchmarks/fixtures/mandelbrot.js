@@ -18,10 +18,10 @@ function run() {
     let total = 0;
 
     for (let py = 0; py < 16; py++) {
-        const cy = -1.5 + 3 * py / 15;
+        const cy = -1.5 + (3 * py) / 15;
 
         for (let px = 0; px < 16; px++) {
-            total += escape(-2 + 3 * px / 15, cy, 50);
+            total += escape(-2 + (3 * px) / 15, cy, 50);
         }
     }
 

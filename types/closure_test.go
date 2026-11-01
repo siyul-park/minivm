@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewClosure(t *testing.T) {
-	typ := &types.FunctionType{Returns: []types.Type{types.TypeI32}}
+	typ := &types.FunctionType{Returns: []types.Type{types.TypeI32()}}
 	ups := []types.Boxed{types.BoxRef(2)}
 	cl := types.NewClosure(typ, 5, ups)
 	require.Equal(t, typ, cl.Typ)
@@ -25,7 +25,7 @@ func TestClosure_Kind(t *testing.T) {
 }
 
 func TestClosure_Type(t *testing.T) {
-	typ := &types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}
+	typ := &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}
 	cl := types.NewClosure(typ, 1, nil)
 	require.Equal(t, typ, cl.Type())
 
@@ -33,11 +33,6 @@ func TestClosure_Type(t *testing.T) {
 	b := types.NewClosure(typ, 2, []types.Boxed{types.BoxI32(2), types.BoxRef(3)})
 	require.True(t, a.Type().Equals(b.Type()))
 	require.True(t, a.Type().Equals(typ))
-}
-
-func TestClosure_String(t *testing.T) {
-	cl := types.NewClosure(&types.FunctionType{Returns: []types.Type{types.TypeI32}}, 1, nil)
-	require.Equal(t, "func() i32", cl.String())
 }
 
 func TestClosure_Refs(t *testing.T) {
@@ -55,4 +50,9 @@ func TestClosure_Refs(t *testing.T) {
 		cl := types.NewClosure(nil, 7, []types.Boxed{types.BoxI32(1), types.BoxF64(2)})
 		require.Equal(t, []types.Ref{types.Ref(7)}, cl.Refs(nil))
 	})
+}
+
+func TestClosure_String(t *testing.T) {
+	cl := types.NewClosure(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}, 1, nil)
+	require.Equal(t, "func() i32", cl.String())
 }

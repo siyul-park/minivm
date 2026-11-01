@@ -5,8 +5,7 @@ import (
 	"unicode/utf8"
 )
 
-type String string
-
+// StringIterator walks a string by rune.
 type StringIterator struct {
 	value   String
 	current Value
@@ -15,19 +14,29 @@ type StringIterator struct {
 	done    bool
 }
 
+// String is an immutable string value.
+type String string
+
 type stringType struct{}
 
-// TypeString is the VM string type.
-var TypeString Type = stringType{}
+var (
+	typeString Type = stringType{}
+	_          Type = stringType{}
+)
 
 var _ Value = String("")
 
-var _ Traceable = (*StringIterator)(nil)
+var (
+	_ Traceable = (*StringIterator)(nil)
+	_ Iterator  = (*StringIterator)(nil)
+)
 
-var _ Iterator = (*StringIterator)(nil)
+// TypeString returns the VM string type.
+func TypeString() Type {
+	return typeString
+}
 
-var _ Type = stringType{}
-
+// NewStringIterator returns an iterator over val, which is at heap ref.
 func NewStringIterator(ref Ref, val String) *StringIterator {
 	return &StringIterator{value: val, current: BoxedNull, ref: ref, done: true}
 }
@@ -50,9 +59,32 @@ func (it *StringIterator) Next() bool {
 	return true
 }
 
-func (it *StringIterator) Current() Value { return it.current }
+func (it *StringIterator) Current() Value {
+	return it.current
+}
 
-func (it *StringIterator) Done() bool { return it.done }
+func (it *StringIterator) Done() bool {
+	return it.done
+}
+
+// Kind returns the value kind.
+func (it *StringIterator) Kind() Kind {
+	return KindRef
+}
+
+// Type returns the value type.
+func (it *StringIterator) Type() Type {
+	return NewIteratorType(TypeI32())
+}
+
+func (it *StringIterator) Refs(dst []Ref) []Ref {
+	return append(dst, it.ref)
+}
+
+// String returns the textual representation.
+func (it *StringIterator) String() string {
+	return "string.iterator"
+}
 
 // Kind returns the value kind.
 func (s String) Kind() Kind {
@@ -61,7 +93,7 @@ func (s String) Kind() Kind {
 
 // Type returns the value type.
 func (s String) Type() Type {
-	return TypeString
+	return TypeString()
 }
 
 // String returns the textual representation.
@@ -69,29 +101,18 @@ func (s String) String() string {
 	return fmt.Sprintf("%q", string(s))
 }
 
-// Kind returns the value kind.
-func (it *StringIterator) Kind() Kind { return KindRef }
-
-// Type returns the value type.
-func (it *StringIterator) Type() Type { return NewIteratorType(TypeI32) }
-
-// String returns the textual representation.
-func (it *StringIterator) String() string { return "string.iterator" }
-
-func (it *StringIterator) Refs(dst []Ref) []Ref { return append(dst, it.ref) }
-
 func (stringType) Kind() Kind {
 	return KindRef
 }
 
-func (stringType) String() string {
-	return "string"
-}
-
 func (stringType) Cast(other Type) bool {
-	return other == TypeString
+	return other == TypeString()
 }
 
 func (stringType) Equals(other Type) bool {
-	return other == TypeString
+	return other == TypeString()
+}
+
+func (stringType) String() string {
+	return "string"
 }

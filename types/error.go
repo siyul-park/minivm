@@ -17,6 +17,7 @@ type Error struct {
 	message string
 }
 
+// ErrorCode is the numeric code of an Error.
 type ErrorCode int32
 
 type errorType struct{}
@@ -29,18 +30,24 @@ const ErrorValueOffset = int(unsafe.Offsetof(Error{}.value))
 const ErrorCodeOffset = int(unsafe.Offsetof(Error{}.code))
 
 const (
-	ErrorCodeNone     ErrorCode = 0
+	// ErrorCodeNone is the code of an error with no code.
+	ErrorCodeNone ErrorCode = 0
+	// ErrorCodeUserBase is the first code available to guest programs.
 	ErrorCodeUserBase ErrorCode = 1 << 20
 )
 
-// TypeError is the VM error type.
-var TypeError Type = errorType{}
+var typeError Type = errorType{}
 
 var (
 	_ Traceable = (*Error)(nil)
 	_ Type      = errorType{}
 	_ error     = (*Error)(nil)
 )
+
+// TypeError returns the VM error type.
+func TypeError() Type {
+	return typeError
+}
 
 // WrapError adapts a Go error into an exception value with a numeric code. Its
 // message is err.Error() and the original is retained for Unwrap. It returns nil
@@ -60,12 +67,29 @@ func NewError(code ErrorCode, message string, value Boxed) *Error {
 	return &Error{code: code, message: message, value: value}
 }
 
+// Value returns the payload, BoxedNull when absent.
 func (e *Error) Value() Boxed {
 	return e.value
 }
 
+// Code returns the numeric code.
 func (e *Error) Code() ErrorCode {
 	return e.code
+}
+
+func (e *Error) Kind() Kind {
+	return KindRef
+}
+
+func (e *Error) Type() Type {
+	return TypeError()
+}
+
+func (e *Error) Refs(dst []Ref) []Ref {
+	if e.value.Kind() == KindRef {
+		dst = append(dst, Ref(e.value.Ref()))
+	}
+	return dst
 }
 
 // Error returns the underlying error.
@@ -78,39 +102,24 @@ func (e *Error) Unwrap() error {
 	return e.cause
 }
 
-func (e *Error) Kind() Kind {
-	return KindRef
-}
-
-func (e *Error) Type() Type {
-	return TypeError
-}
-
 func (e *Error) String() string {
 	return fmt.Sprintf("error(%q)", e.message)
-}
-
-func (e *Error) Refs(dst []Ref) []Ref {
-	if e.value.Kind() == KindRef {
-		dst = append(dst, Ref(e.value.Ref()))
-	}
-	return dst
 }
 
 func (errorType) Kind() Kind {
 	return KindRef
 }
 
-func (errorType) String() string {
-	return "error"
-}
-
 func (errorType) Cast(other Type) bool {
-	return other == TypeError
+	return other == TypeError()
 }
 
 func (errorType) Equals(other Type) bool {
-	return other == TypeError
+	return other == TypeError()
+}
+
+func (errorType) String() string {
+	return "error"
 }
 
 func (e *Error) wrap(err error) {

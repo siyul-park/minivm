@@ -2,12 +2,14 @@ package types
 
 import "github.com/siyul-park/minivm/instr"
 
+// Value is a runtime value with its kind and type.
 type Value interface {
 	Kind() Kind
 	Type() Type
 	String() string
 }
 
+// Type describes values: its kind, textual form, and its cast and equality relations to other types.
 type Type interface {
 	Kind() Kind
 	String() string
@@ -25,6 +27,7 @@ type Traceable interface {
 	Refs(dst []Ref) []Ref
 }
 
+// Iterator walks a sequence: Next advances, Current reads, and Done reports exhaustion.
 type Iterator interface {
 	Value
 	Next() bool
@@ -38,15 +41,23 @@ type Iterator interface {
 type Kind = instr.Kind
 
 const (
+	// KindF64 is the f64 value kind.
 	KindF64 = instr.KindF64
+	// KindF32 is the f32 value kind.
 	KindF32 = instr.KindF32
+	// KindI64 is the i64 value kind.
 	KindI64 = instr.KindI64
+	// KindI32 is the i32 value kind.
 	KindI32 = instr.KindI32
-	KindI8  = instr.KindI8
-	KindI1  = instr.KindI1
+	// KindI8 is the i8 value kind.
+	KindI8 = instr.KindI8
+	// KindI1 is the i1 value kind.
+	KindI1 = instr.KindI1
+	// KindRef is the ref value kind.
 	KindRef = instr.KindRef
 )
 
+// IsNull reports whether v is the null reference.
 func IsNull(v Value) bool {
 	switch v := v.(type) {
 	case Ref:

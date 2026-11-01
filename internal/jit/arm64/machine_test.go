@@ -82,13 +82,6 @@ func TestMachine_Arch(t *testing.T) {
 	require.Equal(t, target.New(), arm64.New().Arch())
 }
 
-func TestMachine_Spill(t *testing.T) {
-	a := asm.New(target.New())
-	w := asm.NewVReg(1, asm.RegTypeInt, asm.Width32)
-	arm64.New().Spill(a, w, 2)
-	require.Equal(t, []asm.Instruction{target.New().Spill(w, 2)}, a.Rows())
-}
-
 func TestMachine_Reserve(t *testing.T) {
 	require.Equal(t, []asm.PReg{target.X16, target.X17, target.X24, target.X25, target.X27}, arm64.New().Reserve())
 }
@@ -1781,6 +1774,75 @@ func TestMachine_Return(t *testing.T) {
 	})
 }
 
+func TestMachine_Budget(t *testing.T) {
+	m, a := arm64.New(), asm.New(target.New())
+	m.Prologue(a, 0, true, compile.Layout{}, nil)
+	start := len(a.Rows())
+	m.Budget(a, exit)
+	require.Equal(t, []asm.Instruction{
+		target.SUBSI(target.X24, target.X24, 1),
+		target.BCondLabel(target.OpBLE, exit),
+	}, a.Rows()[start:])
+}
+
+func TestMachine_Exit(t *testing.T) {
+	uses := []asm.VReg{asm.NewVReg(1, asm.RegTypeInt, asm.Width64), asm.NewVReg(2, asm.RegTypeFloat, asm.Width64)}
+	rows := func(id uint64, trap jit.Trap) []asm.Instruction {
+		return slices.Concat(
+			[]asm.Instruction{
+				target.STR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+				target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+			},
+			target.LDI(target.X16, id),
+			[]asm.Instruction{target.STR(target.X16, target.Ctx, int16(jit.OffsetExit))},
+			target.LDI(target.X16, uint64(trap)),
+			[]asm.Instruction{
+				target.STR(target.X16, target.Ctx, int16(jit.OffsetTrap)),
+				target.LDR(target.X16, target.Ctx, int16(asm.OffsetStub)),
+				target.EXIT(target.X16),
+				target.USE(uses[0]),
+				target.USE(uses[1]),
+			},
+		)
+	}
+
+	for _, c := range []struct {
+		name string
+		id   int
+		kind jit.Kind
+		trap jit.Trap
+		tail asm.Instruction
+	}{
+		{"suspends a resumable exit", 3, jit.ExitBridge, jit.TrapBridge, target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget))},
+		{"never returns from a deopt", 4, jit.ExitDeopt, jit.TrapDeopt, target.BRK(0)},
+		{"suspends a call for the interpreter to run", 5, jit.ExitCall, jit.TrapBridge, target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget))},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			a := asm.New(target.New())
+			arm64.New().Exit(a, c.id, c.kind, uses)
+			require.Equal(t, append(rows(uint64(c.id), c.trap), c.tail), a.Rows())
+		})
+	}
+}
+
+func TestMachine_Spill(t *testing.T) {
+	a := asm.New(target.New())
+	w := asm.NewVReg(1, asm.RegTypeInt, asm.Width32)
+	arm64.New().Spill(a, w, 2)
+	require.Equal(t, []asm.Instruction{target.New().Spill(w, 2)}, a.Rows())
+}
+
+func TestMachine_Results(t *testing.T) {
+	a := asm.New(target.New())
+	w := asm.NewVReg(1, asm.RegTypeInt, asm.Width32)
+	d := asm.NewVReg(2, asm.RegTypeFloat, asm.Width64)
+	arm64.New().Results(a, []asm.VReg{w, d})
+	require.Equal(t, []asm.Instruction{
+		target.LDR(w, target.Ctx, int16(jit.OffsetResults)),
+		target.LDR(d, target.Ctx, int16(jit.OffsetResults)+8),
+	}, a.Rows())
+}
+
 func TestMachine_Call(t *testing.T) {
 	r := regs{1: ssa.TypeI32, 2: ssa.TypeRef, 3: ssa.TypeF64}
 	live := asm.NewVReg(9, asm.RegTypeInt, asm.Width32)
@@ -2200,68 +2262,6 @@ func TestMachine_Call(t *testing.T) {
 		m.Prologue(a, 0, true, compile.Layout{}, nil)
 		require.False(t, m.Call(a, compile.Call{Callee: 5, Target: 2, Base: 510, Size: 2}, r))
 	})
-}
-
-func TestMachine_Budget(t *testing.T) {
-	m, a := arm64.New(), asm.New(target.New())
-	m.Prologue(a, 0, true, compile.Layout{}, nil)
-	start := len(a.Rows())
-	m.Budget(a, exit)
-	require.Equal(t, []asm.Instruction{
-		target.SUBSI(target.X24, target.X24, 1),
-		target.BCondLabel(target.OpBLE, exit),
-	}, a.Rows()[start:])
-}
-
-func TestMachine_Exit(t *testing.T) {
-	uses := []asm.VReg{asm.NewVReg(1, asm.RegTypeInt, asm.Width64), asm.NewVReg(2, asm.RegTypeFloat, asm.Width64)}
-	rows := func(id uint64, trap jit.Trap) []asm.Instruction {
-		return slices.Concat(
-			[]asm.Instruction{
-				target.STR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
-				target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
-			},
-			target.LDI(target.X16, id),
-			[]asm.Instruction{target.STR(target.X16, target.Ctx, int16(jit.OffsetExit))},
-			target.LDI(target.X16, uint64(trap)),
-			[]asm.Instruction{
-				target.STR(target.X16, target.Ctx, int16(jit.OffsetTrap)),
-				target.LDR(target.X16, target.Ctx, int16(asm.OffsetStub)),
-				target.EXIT(target.X16),
-				target.USE(uses[0]),
-				target.USE(uses[1]),
-			},
-		)
-	}
-
-	for _, c := range []struct {
-		name string
-		id   int
-		kind jit.Kind
-		trap jit.Trap
-		tail asm.Instruction
-	}{
-		{"suspends a resumable exit", 3, jit.ExitBridge, jit.TrapBridge, target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget))},
-		{"never returns from a deopt", 4, jit.ExitDeopt, jit.TrapDeopt, target.BRK(0)},
-		{"suspends a call for the interpreter to run", 5, jit.ExitCall, jit.TrapBridge, target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget))},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			a := asm.New(target.New())
-			arm64.New().Exit(a, c.id, c.kind, uses)
-			require.Equal(t, append(rows(uint64(c.id), c.trap), c.tail), a.Rows())
-		})
-	}
-}
-
-func TestMachine_Results(t *testing.T) {
-	a := asm.New(target.New())
-	w := asm.NewVReg(1, asm.RegTypeInt, asm.Width32)
-	d := asm.NewVReg(2, asm.RegTypeFloat, asm.Width64)
-	arm64.New().Results(a, []asm.VReg{w, d})
-	require.Equal(t, []asm.Instruction{
-		target.LDR(w, target.Ctx, int16(jit.OffsetResults)),
-		target.LDR(d, target.Ctx, int16(jit.OffsetResults)+8),
-	}, a.Rows())
 }
 
 func TestMachine_Move(t *testing.T) {

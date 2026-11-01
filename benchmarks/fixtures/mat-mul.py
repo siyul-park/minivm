@@ -1,4 +1,4 @@
-def matmul(n, a, b, out):
+def _matmul(n, a, b, out):
     i = 0
     while i < n:
         j = 0
@@ -28,7 +28,7 @@ def run():
             j = j + 1
         i = i + 1
 
-    matmul(n, a, b, out)
+    _matmul(n, a, b, out)
 
     checksum = 0.0
     idx = 0

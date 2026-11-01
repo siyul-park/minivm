@@ -7,12 +7,6 @@ import (
 	"slices"
 )
 
-// Label identifies a position in the emitted instruction stream. Labels are
-// allocated with Assembler.Label and anchored with Assembler.Bind. Build
-// resolves every label reference, so a reference to a label that was never
-// bound is an error.
-type Label int
-
 // Assembler emits target-architecture instructions into a single-shot
 // buffer. Append instructions with Emit, declare labels with Label/Bind, and
 // finalize with Build.
@@ -29,6 +23,12 @@ type Assembler struct {
 	slots    int
 	offsets  map[Label]int
 }
+
+// Label identifies a position in the emitted instruction stream. Labels are
+// allocated with Assembler.Label and anchored with Assembler.Bind. Build
+// resolves every label reference, so a reference to a label that was never
+// bound is an error.
+type Label int
 
 // Stable assembler errors.
 var (
@@ -127,19 +127,6 @@ func (a *Assembler) Offset(id Label) (int, bool) {
 	return off, ok
 }
 
-func validate(op Operand) error {
-	switch op := op.(type) {
-	case nil, PRegOperand, ImmOperand, LabelOperand:
-		return nil
-	case VRegOperand:
-		return fmt.Errorf("%w: %v", ErrUnallocated, op.Reg)
-	case MemOperand:
-		return validate(op.Base)
-	default:
-		return fmt.Errorf("%w: %T", ErrInvalidOperand, op)
-	}
-}
-
 // encode drafts instructions with label placeholders, then asks the target
 // Relaxer to rewrite out-of-range branches. Each branch relaxes at most once,
 // and all splices for a pass are batched.
@@ -186,31 +173,6 @@ func (a *Assembler) draft(insts []Instruction) ([][]byte, []int, error) {
 	return draft, offsets, nil
 }
 
-// collect drafts a Relaxer replacement for every label branch whose
-// displacement is out of range, in instruction order. at and repl are
-// parallel: at[k] is the index of the branch replaced by repl[k].
-func collect(
-	relaxer Relaxer, insts []Instruction, labels map[Label]int, offsets []int,
-) (at []int, repl [][]Instruction) {
-	for i, inst := range insts {
-		lbl, ok := inst.Src2.(LabelOperand)
-		if !ok {
-			continue
-		}
-		target, bound := labels[lbl.ID]
-		if !bound {
-			continue
-		}
-		replacement, relaxed := relaxer.Relax(inst, int64(offsets[target]-offsets[i]))
-		if !relaxed {
-			continue
-		}
-		at = append(at, i)
-		repl = append(repl, replacement)
-	}
-	return at, repl
-}
-
 // resolve concatenates the drafted encodings, re-encoding each label branch
 // with its resolved displacement.
 func (a *Assembler) resolve(
@@ -236,6 +198,44 @@ func (a *Assembler) resolve(
 		out = append(out, bytes...)
 	}
 	return out, nil
+}
+
+func validate(op Operand) error {
+	switch op := op.(type) {
+	case nil, PRegOperand, ImmOperand, LabelOperand:
+		return nil
+	case VRegOperand:
+		return fmt.Errorf("%w: %v", ErrUnallocated, op.Reg)
+	case MemOperand:
+		return validate(op.Base)
+	default:
+		return fmt.Errorf("%w: %T", ErrInvalidOperand, op)
+	}
+}
+
+// collect drafts a Relaxer replacement for every label branch whose
+// displacement is out of range, in instruction order. at and repl are
+// parallel: at[k] is the index of the branch replaced by repl[k].
+func collect(
+	relaxer Relaxer, insts []Instruction, labels map[Label]int, offsets []int,
+) (at []int, repl [][]Instruction) {
+	for i, inst := range insts {
+		lbl, ok := inst.Src2.(LabelOperand)
+		if !ok {
+			continue
+		}
+		target, bound := labels[lbl.ID]
+		if !bound {
+			continue
+		}
+		replacement, relaxed := relaxer.Relax(inst, int64(offsets[target]-offsets[i]))
+		if !relaxed {
+			continue
+		}
+		at = append(at, i)
+		repl = append(repl, replacement)
+	}
+	return at, repl
 }
 
 // splice rebuilds insts with every collected replacement spliced in and

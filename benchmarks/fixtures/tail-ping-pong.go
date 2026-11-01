@@ -14,11 +14,8 @@ func init() {
 	})
 }
 
-func tailPing(n, sum int32) int32 {
-	if n == 0 {
-		return sum
-	}
-	return pong(n-1, sum+n)
+func tailPingPong() int32 {
+	return tailPing(1000, 0)
 }
 
 func pong(n, sum int32) int32 {
@@ -28,6 +25,9 @@ func pong(n, sum int32) int32 {
 	return tailPing(n-1, sum+n)
 }
 
-func tailPingPong() int32 {
-	return tailPing(1000, 0)
+func tailPing(n, sum int32) int32 {
+	if n == 0 {
+		return sum
+	}
+	return pong(n-1, sum+n)
 }

@@ -18,7 +18,7 @@ endif
 
 PROJECT = $(shell basename -s .git $(shell git config --get remote.origin.url))
 
-.PHONY: init install-tools install-modules generate build clean tidy update clean-sum clean-cache sync check check-generated check-tidy check-fmt check-arm64 check-inline test coverage coverage-check benchmark vigil lint fmt vet doc fuzz
+.PHONY: init install-tools install-modules generate build clean tidy update clean-sum clean-cache sync check check-generated check-tidy check-fmt check-arm64 check-inline test coverage coverage-check benchmark lighthouse lint fmt vet doc fuzz
 all: lint test build
 
 init:
@@ -111,23 +111,14 @@ benchmark:
 	test $$status -eq 0; \
 	(cd benchmarks && go run ./cmd/benchreport -input "$$tmp" -output ../docs/benchmarks.md)
 
-vigil:
-	@bin="$$(mktemp)"; \
-	trap 'rm -f "$$bin"' EXIT; \
-	go build -o "$$bin" ./internal/cmd/vigil; \
-	"$$bin" -diff ./...; \
-	(cd benchmarks && "$$bin" -diff ./...)
+lighthouse:
+	@lighthouse check
 
-lint: vet vigil
+lint: vet lighthouse
 
 fmt:
 	@command -v $(GOIMPORTS) >/dev/null
 	@$(GOIMPORTS) -w .
-	@bin="$$(mktemp)"; \
-	trap 'rm -f "$$bin"' EXIT; \
-	go build -o "$$bin" ./internal/cmd/vigil; \
-	status=0; "$$bin" -fix ./... || status=$$?; test $$status -le 1; \
-	(cd benchmarks && status=0; "$$bin" -fix ./... || status=$$?; test $$status -le 1)
 
 vet:
 	@go vet ./...

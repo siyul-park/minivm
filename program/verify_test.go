@@ -60,7 +60,7 @@ func TestVerify(t *testing.T) {
 			// i8 and i1 share the i32 representation: an i8 param and an i1
 			// comparison result both satisfy i32 operands.
 			name: "valid/narrow int operands",
-			prog: withFunction(types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI8}, Returns: []types.Type{types.TypeI32}}).
+			prog: withFunction(types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI8()}, Returns: []types.Type{types.TypeI32()}}).
 				Emit(
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.I32_CONST, 1),
@@ -75,7 +75,7 @@ func TestVerify(t *testing.T) {
 			// (i8 & i8 -> i8); the result still satisfies an i32 operand, so
 			// chaining another i32 op on it verifies.
 			name: "valid/narrow bitwise operands",
-			prog: withFunction(types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI8}, Returns: []types.Type{types.TypeI32}}).
+			prog: withFunction(types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI8()}, Returns: []types.Type{types.TypeI32()}}).
 				Emit(
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.LOCAL_GET, 0),
@@ -87,7 +87,7 @@ func TestVerify(t *testing.T) {
 		},
 		{
 			name: "calls/function returns",
-			prog: withFunction(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			prog: withFunction(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 				Emit(instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).
 				MustBuild()),
 		},
@@ -119,7 +119,7 @@ func TestVerify(t *testing.T) {
 				instr.New(instr.I32_CONST, 5),
 				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.CALL),
-			}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}}).
+			}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).
 				Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).
 				MustBuild())),
 		},
@@ -148,7 +148,7 @@ func TestVerify(t *testing.T) {
 				instr.New(instr.LOCAL_SET, 0),
 				instr.New(instr.LOCAL_GET, 0),
 				instr.New(instr.DROP),
-			}, program.WithLocals(types.TypeI32)),
+			}, program.WithLocals(types.TypeI32())),
 		},
 		{
 			name:    "bounds/top-level local",
@@ -167,7 +167,7 @@ func TestVerify(t *testing.T) {
 		},
 		{
 			name:    "bounds/global index",
-			prog:    program.New([]instr.Instruction{instr.New(instr.GLOBAL_GET, 9)}, program.WithGlobals(types.TypeI32)),
+			prog:    program.New([]instr.Instruction{instr.New(instr.GLOBAL_GET, 9)}, program.WithGlobals(types.TypeI32())),
 			wantErr: program.ErrIndexOutOfRange,
 		},
 		{
@@ -192,7 +192,7 @@ func TestVerify(t *testing.T) {
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.ARRAY_DELETE),
 				instr.New(instr.DROP),
-			}, program.WithTypes(types.NewArrayType(types.TypeI32))),
+			}, program.WithTypes(types.NewArrayType(types.TypeI32()))),
 		},
 		{
 			name:    "stack/array delete underflow",
@@ -206,12 +206,12 @@ func TestVerify(t *testing.T) {
 		},
 		{
 			name:    "types/global set mismatch",
-			prog:    program.New([]instr.Instruction{f32, instr.New(instr.GLOBAL_SET, 0)}, program.WithGlobals(types.TypeI32)),
+			prog:    program.New([]instr.Instruction{f32, instr.New(instr.GLOBAL_SET, 0)}, program.WithGlobals(types.TypeI32())),
 			wantErr: program.ErrTypeMismatch,
 		},
 		{
 			name:    "types/global tee mismatch",
-			prog:    program.New([]instr.Instruction{f32, instr.New(instr.GLOBAL_TEE, 0)}, program.WithGlobals(types.TypeI32)),
+			prog:    program.New([]instr.Instruction{f32, instr.New(instr.GLOBAL_TEE, 0)}, program.WithGlobals(types.TypeI32())),
 			wantErr: program.ErrTypeMismatch,
 		},
 		{
@@ -229,21 +229,21 @@ func TestVerify(t *testing.T) {
 			prog: program.New([]instr.Instruction{
 				instr.New(instr.GLOBAL_GET, 0),
 				instr.New(instr.DROP),
-			}, program.WithGlobals(types.TypeI32)),
+			}, program.WithGlobals(types.TypeI32())),
 		},
 		{
 			name: "types/dynamic global accepts scalar",
 			prog: program.New([]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.GLOBAL_SET, 0),
-			}, program.WithGlobals(types.TypeAny)),
+			}, program.WithGlobals(types.TypeAny())),
 		},
 		{
 			name: "types/global concrete ref mismatch",
 			prog: program.New([]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.GLOBAL_SET, 0),
-			}, program.WithConstants(types.TypedArray[float32]{1}), program.WithGlobals(types.NewArrayType(types.TypeI32))),
+			}, program.WithConstants(types.TypedArray[float32]{1}), program.WithGlobals(types.NewArrayType(types.TypeI32()))),
 			wantErr: program.ErrTypeMismatch,
 		},
 		{
@@ -315,4 +315,18 @@ func TestVerifyError_Error(t *testing.T) {
 func TestVerifyError_Unwrap(t *testing.T) {
 	err := &program.VerifyError{Err: program.ErrTypeMismatch}
 	require.ErrorIs(t, err, program.ErrTypeMismatch)
+}
+
+func FuzzVerify(f *testing.F) {
+	f.Add([]byte(nil))
+	f.Add([]byte{byte(instr.NOP)})
+	f.Add([]byte{byte(instr.I32_CONST), 1})
+	f.Add([]byte{0xff})
+
+	f.Fuzz(func(t *testing.T, code []byte) {
+		if len(code) > 4096 {
+			t.Skip()
+		}
+		_ = program.Verify(&program.Program{Code: code})
+	})
 }

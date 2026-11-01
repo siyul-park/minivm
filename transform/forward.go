@@ -52,6 +52,7 @@ func (p *ForwardPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error)
 			case ssa.OpStore:
 				delete(held, operation.Slot)
 			case ssa.OpExec:
+				// Drop the held values the code may overwrite.
 				for slot := range held {
 					// A local is reloaded after CALL: a load is cheaper than a
 					// value kept live, and so spilled, across the call.

@@ -82,6 +82,13 @@ func (p profile) opcodes() []opcodeRow {
 	return limit(rows)
 }
 
+func limit[T any](values []T) []T {
+	if len(values) > profileLimit {
+		return values[:profileLimit]
+	}
+	return values
+}
+
 func collect(metrics []prof.Metric) profile {
 	p := profile{
 		functionSamples: map[int]uint64{},
@@ -120,11 +127,4 @@ func metricLabel(metric prof.Metric, key string) string {
 		}
 	}
 	return ""
-}
-
-func limit[T any](values []T) []T {
-	if len(values) > profileLimit {
-		return values[:profileLimit]
-	}
-	return values
 }
