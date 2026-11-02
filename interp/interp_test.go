@@ -7816,6 +7816,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("records a failed Headers analysis through the compiles metric", func(t *testing.T) {
+		native(t)
 		profiler := prof.New()
 		bad := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 			Emit(instr.New(instr.BR, 10)).MustBuild()
