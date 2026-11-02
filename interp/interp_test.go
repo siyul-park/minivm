@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/internal/testenv"
 	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
@@ -2798,7 +2799,7 @@ func TestWithFuel(t *testing.T) {
 
 func TestWithThreshold(t *testing.T) {
 	t.Run("reports threaded's heap exhaustion from a callout with threaded's counts", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 
 		b := instr.NewBuilder()
 		loop, inner, next := b.Label(), b.Label(), b.Label()
@@ -2849,7 +2850,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("enters a hot recursive function's native code", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := fibCallsProgram(t, 20)
 		want := runProgram(t, prog)
 
@@ -2879,7 +2880,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("runs a hot function natively by default", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := fibCallsProgram(t, 20)
 		want := runProgram(t, prog)
 
@@ -2909,7 +2910,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("enters native code within one long profiled Run by default", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := fibCallsProgram(t, 2048)
 		want := runProgram(t, prog)
 
@@ -2926,7 +2927,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("enters native code within one long Run without safepoints by default", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		for _, prog := range []*program.Program{
 			fibCallsProgram(t, 2048),
 			iterativeFibProgram(t, 4<<20),
@@ -2947,7 +2948,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("enters native code under a hook or fuel", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 
 		b := instr.NewBuilder()
 		b.Emit(instr.I32_CONST, 20).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
@@ -2993,7 +2994,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("exhausts fuel inside a native loop", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 
 		prog := iterativeFibProgram(t, 1<<22)
 		profiler := prof.New()
@@ -3010,7 +3011,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("shows a hook threaded state inside a native loop and keeps its writes", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const n = 1 << 20
 		prog := iterativeFibProgram(t, n)
 		// The loop header follows the three local initializations; the
@@ -3080,7 +3081,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("shows a hook the native callers of a call it runs", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 
 		g := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
 		refuse(g)
@@ -3134,7 +3135,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("stops a Run with a hook's error inside native code", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := iterativeFibProgram(t, 1<<20)
 		stop := errors.New("stop")
 		calls := 0
@@ -3158,7 +3159,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("runs WithTick(1) exactly, without native code", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := iterativeFibProgram(t, 1<<12)
 		count := func(opts ...interp.Option) int {
 			calls := 0
@@ -3183,7 +3184,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("recompiles a retired function only after more calls than its first compile", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 
 		inc := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
 		refuse(inc)
@@ -3235,7 +3236,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("runs code shorter than a Go entry threaded by default", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		for _, prog := range []*program.Program{
 			program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.NOP)}),
 			program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(incFunction())),
@@ -3258,7 +3259,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("runs a self tail call as a native loop", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := tailRefProgram(t, 1000)
 		threaded := interp.New(prog, interp.WithThreshold(-1))
 		require.NoError(t, threaded.Run(context.Background()))
@@ -3316,7 +3317,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("completes a deep self tail call without growing frames", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := tailRefProgram(t, 1_000_000)
 		want := runProgram(t, prog)
 
@@ -3333,7 +3334,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("cancels a long self tail call", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := tailRefProgram(t, math.MaxInt32)
 
 		var runErr error
@@ -3357,7 +3358,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("keeps a bridged loop-free module native", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		record := node()
 		b := instr.NewBuilder()
 		b.Emit(instr.STRUCT_NEW_DEFAULT, 0).Emit(instr.DROP)
@@ -3415,7 +3416,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("retires a loop that only bridges and releases", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		record := node()
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
@@ -3478,7 +3479,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("refills a loop's budget at a safepoint", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		sum := sumFunction(t)
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
@@ -3519,7 +3520,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("releases a dying ref parameter on exit", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		fnBuilder := instr.NewBuilder()
 		fnBuilder.Emit(instr.I32_CONST, 42).Emit(instr.RETURN)
 		fnCode, err := fnBuilder.Assemble()
@@ -3574,7 +3575,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("treats NaN as unordered in float comparisons", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const warm = 1000
 		nan := uint64(math.Float32bits(float32(math.NaN())))
 		b := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}})
@@ -3627,7 +3628,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("catches a native division by zero in a guest handler", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		fn := divFunction(t)
 		b := instr.NewBuilder()
 		loop, done, start, end, catch := b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
@@ -3672,7 +3673,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("reports an uncaught division by zero's stack trace", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		fn := divFunction(t)
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
@@ -3701,7 +3702,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("bridges STRING_CONCAT", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		fn := concatFunction(t)
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
@@ -3745,7 +3746,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("bridges STRUCT_NEW", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		record := node()
 		b := instr.NewBuilder()
 		loop, done, inner, innerDone := b.Label(), b.Label(), b.Label(), b.Label()
@@ -3804,7 +3805,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("bridges ARRAY_NEW_DEFAULT", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const length = 4
 		elem := types.NewArrayType(types.TypeI32())
 		b := instr.NewBuilder()
@@ -3852,7 +3853,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("declines a trapping ARRAY_NEW_DEFAULT", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		elem := types.NewArrayType(types.TypeI32())
 		b := instr.NewBuilder()
 		loop, done, bad, length, inner, innerDone := b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
@@ -3902,7 +3903,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("bridges string ops", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := texts(t, 20_000)
 		threaded := interp.New(prog, interp.WithThreshold(-1))
 		require.NoError(t, threaded.Run(context.Background()))
@@ -3948,7 +3949,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("declines a string op that exhausts the heap", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const limit = 20_000
 		prog := texts(t, 2*limit)
 		threaded := interp.New(prog, interp.WithHeapLimit(limit), interp.WithThreshold(-1))
@@ -3982,7 +3983,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("bridges unlowered operators in a loop", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		dict, list := types.NewMapType(types.TypeI32(), types.TypeI32()), types.NewArrayType(types.TypeI32())
 		wide, named := types.NewMapType(types.TypeI32(), types.TypeI64()), types.NewMapType(types.TypeString(), types.TypeI32())
 		b := instr.NewBuilder()
@@ -4102,7 +4103,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("selects between two refs", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
 		b.Bind(loop)
@@ -4164,7 +4165,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("deoptimizes an unlowered operator that traps", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const warm = 4000
 		b := instr.NewBuilder()
 		loop, done, inner, innerDone, same := b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
@@ -4227,7 +4228,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("keeps a callee native while its native calls amortize bridges", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		// The loop adds f(i) for i < n. f(0) bridges three string ops with no
 		// native work between them; every other f(i) loops four times first,
 		// amortizing its bridges.
@@ -4306,7 +4307,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("releases a ref slot's old value on store", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const n = 200_000
 		prog := store(t, n)
 
@@ -4330,7 +4331,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("bridges a dynamically entered call", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		fn := concatFunction(t)
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
@@ -4375,7 +4376,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("overflows a small frame limit inside a served call", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		fib := fibFunction()
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
@@ -4426,7 +4427,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("deopts self-recursive fib at a frame limit", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 
 		fib := fibFunction()
 		b := instr.NewBuilder()
@@ -4478,7 +4479,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("deopts a callee with register-passed ref and i32 parameters", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 
 		fb := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
 		small := fb.Label()
@@ -4544,7 +4545,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("resumes a caller after a call to a function without native code", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		s := types.String("s")
 		deep := []interp.Option{interp.WithFrame(1024), interp.WithStack(1 << 14)}
 		sumrecBuilder := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
@@ -4606,7 +4607,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("resumes a dynamic call through call exits", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := mixedProgram(t, 64, false)
 		want := interp.New(prog, interp.WithThreshold(-1))
 		require.NoError(t, want.Run(context.Background()))
@@ -4651,7 +4652,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("retires a caller whose served calls outweigh its work", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const runs = 16
 
 		held := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
@@ -4711,7 +4712,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("deopts a dynamic call whose callee takes other parameters", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := mixedProgram(t, 64, true)
 		want := interp.New(prog, interp.WithThreshold(-1))
 		require.NoError(t, want.Run(context.Background()))
@@ -4740,7 +4741,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("deopts a dynamic call only once it runs", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		for _, c := range []struct {
 			name  string
 			final int
@@ -4818,7 +4819,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("reports an uncaught trap in a resumed callee", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := loopProgram(t, 8, 50, 100, false, guardFunction(60, false), loopFunction(0, false), types.String("s"))
 		wantErr := runProgramErr(t, prog, interp.WithThreshold(-1))
 		require.ErrorIs(t, wantErr, interp.ErrDivideByZero)
@@ -4840,7 +4841,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("serves a trapping, throwing, or coroutine callee by call exit", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		s := types.String("s")
 
 		co := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString(), types.TypeI32()}, Returns: []types.Type{types.TypeAny()}}).
@@ -4891,7 +4892,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("deopts two native activations deep", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		ib := instr.NewBuilder()
 		ib.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.STRING_EQ).Emit(instr.DROP)
 		ib.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.STRING_CONCAT).Emit(instr.RETURN)
@@ -4957,7 +4958,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("keeps a borrowed callee's RefCount across a served call", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 
 		held := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString()}, Returns: []types.Type{types.TypeString()}})
 		refuse(held)
@@ -5012,7 +5013,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("passes a borrowed parameter through native recursion", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 
 		fib := indirectFibFunction()
 		b := instr.NewBuilder()
@@ -5063,7 +5064,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("transfers an owned argument lent to a borrowed parameter", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := lentProgram(t, 3000)
 
 		wantVM := interp.New(lentProgram(t, 3000), interp.WithThreshold(-1))
@@ -5131,7 +5132,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("deopts a deep recursion at its frame limit", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 
 		record := types.NewStructType(types.NewStructField(types.TypeI32(), types.FieldWithName("n")))
 		fb := instr.NewBuilder()
@@ -5203,7 +5204,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("returns a wide i64 from native code", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		fnBuilder := instr.NewBuilder()
 		fnBuilder.Emit(instr.LOCAL_GET, 0).Emit(instr.I64_CONST, 50).Emit(instr.I64_SHL).Emit(instr.RETURN)
 		fnCode, err := fnBuilder.Assemble()
@@ -5239,7 +5240,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("returns a wide i64 from native recursion", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		fnBuilder := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI64()}, Returns: []types.Type{types.TypeI64()}})
 		small := fnBuilder.Label()
 		fnBuilder.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_CONST, 2), instr.New(instr.I64_LT_S)).BrIf(small)
@@ -5291,7 +5292,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("passes a wide i64 argument into a native function", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		fn := wideArgFunction()
 		b := instr.NewBuilder()
 		for range 2000 {
@@ -5333,7 +5334,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("passes a wide i64 register argument from a native caller", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		inner := wideArgFunction()
 		outerBuilder := instr.NewBuilder()
 		loop, done := outerBuilder.Label(), outerBuilder.Label()
@@ -5393,7 +5394,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("returns a wide i64 from an OSR unit", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		fnBuilder := instr.NewBuilder()
 		loop, done := fnBuilder.Label(), fnBuilder.Label()
 		fnBuilder.Bind(loop)
@@ -5447,7 +5448,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("compiles a loop seeded with a wide i64", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		seed := int64(-3750763034362895579)
 		for _, c := range []struct {
 			name string
@@ -5487,7 +5488,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("keeps a wide i64 constant's RefCount across a shape-guard deopt", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		seed := int64(-3750763034362895579)
 		fnBuilder := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32())}, Returns: []types.Type{types.TypeI64()}})
 		fnBuilder.Emit(instr.New(instr.I64_CONST, uint64(seed)))
@@ -5569,7 +5570,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("promotes a narrow i64 accumulator in an OSR loop", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		fn := wideArgFunction()
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
@@ -5615,7 +5616,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("promotes an i64 accumulator in an OSR FNV loop", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
 		b.Emit(instr.I64_CONST, uint64(0x1234567)).Emit(instr.LOCAL_SET, 0)
@@ -5663,7 +5664,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("boxes a wide store in a loop each iteration", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
@@ -5710,7 +5711,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("tiers a hot function up to Optimized", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := fibFlatCallsProgram(t, 2000)
 		want := runProgram(t, prog)
 
@@ -5740,7 +5741,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("keeps a caller entering past a callee's caught traps", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const rounds, batches = 32, 64
 		b := instr.NewBuilder()
 		loop, done, start, end, catch, next := b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
@@ -5823,7 +5824,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("keeps a protected hot loop native past caught traps", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const rounds, batches = 32, 64
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
@@ -5899,7 +5900,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("catches a native callee's throw in its native caller", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const calls, batches = 32, 64
 		thrower := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
 		raise := thrower.Label()
@@ -5976,7 +5977,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("enters a protected module loop and reports a trap outside it", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const n = 200_000
 		want := 0
 		for i := range n {
@@ -6021,7 +6022,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("escapes guest handlers on a cancelled context", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 
 		sum := sumFunction(t)
 		b := instr.NewBuilder()
@@ -6066,7 +6067,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("runs a function allocated after construction interpreted", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		b := instr.NewBuilder()
 		b.Emit(instr.I32_CONST, 7).Emit(instr.RETURN)
 		code, err := b.Assemble()
@@ -6090,7 +6091,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("keeps a callee alive across a boxed wide i64 argument", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		b := instr.NewBuilder()
 		b.Emit(instr.I32_CONST, 1).Emit(instr.RETURN)
 		code, err := b.Assemble()
@@ -6149,7 +6150,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("sums a typed i32 array in a calling function", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		identBuilder := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
 		identBuilder.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
 		ident := identBuilder.MustBuild()
@@ -6209,7 +6210,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("reads and writes a ref array element", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 
 		wantValue, wantCount := runProgramString(t, refArrayProgram(t, 20000))
 
@@ -6241,7 +6242,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("walks a struct tree", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 
 		want := runProgram(t, structTreeProgram(t, 20000))
 
@@ -6272,7 +6273,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("catches an out-of-bounds array.get in a guest handler", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		at := types.NewFunctionBuilder(&types.FunctionType{
 			Params: []types.Type{types.NewArrayType(types.TypeI32()), types.TypeI32()}, Returns: []types.Type{types.TypeI32()},
 		})
@@ -6323,7 +6324,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("deopts a host array that fails its shape guard", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		ln := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32())}, Returns: []types.Type{types.TypeI32()}})
 		ln.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.ARRAY_LEN), instr.New(instr.RETURN))
 		lnFn := ln.MustBuild()
@@ -6393,7 +6394,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("recompiles a null array's refuted container guard with its site bridged", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const rounds, batches = 64, 8
 		at := types.NewFunctionBuilder(&types.FunctionType{
 			Params: []types.Type{types.NewArrayType(types.TypeI32()), types.TypeI32()}, Returns: []types.Type{types.TypeI32()},
@@ -6470,7 +6471,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("keeps a loop with a never-true null array read native", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const runs = 32
 
 		b := instr.NewBuilder()
@@ -6526,7 +6527,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("guards an array replaced inside an Optimized loop afresh", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
@@ -6585,7 +6586,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("enters a module loop by OSR", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := iterativeFibProgram(t, 200_000)
 		want := runProgram(t, prog)
 
@@ -6615,7 +6616,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("compiles a module loop straight to Optimized", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const n = 20000
 		want := runProgram(t, concat(t, n))
 		prog := concat(t, n)
@@ -6634,7 +6635,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("restores promoted locals when a callee deopts under a loop", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const n = 200_000
 		want := runProgram(t, deopt(t, n, n-10))
 		prog := deopt(t, n, n-10)
@@ -6655,7 +6656,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("tiers up a callee reached only from native code", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const n = 200_000
 		want := runProgram(t, fib(t, n))
 		prog := fib(t, n)
@@ -6675,7 +6676,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("tiers up a native-only callee across short Runs", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
@@ -6718,7 +6719,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("enters a function's loop header mid-call by OSR", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		// warmCalls*warmEach back edges warm sum's own loop-header OSR site
 		// across calls too few (warmCalls) to ever reach its entry-0 CALL
 		// threshold on their own, so entry-0 never compiles: the final call
@@ -6765,7 +6766,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("catches a deopt inside an OSR loop in a guest handler", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 
 		fnBuilder := instr.NewBuilder()
 		loop, done := fnBuilder.Label(), fnBuilder.Label()
@@ -6846,7 +6847,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("unwraps an OSR loop header that cannot compile", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		b := instr.NewBuilder()
 		header, done := b.Label(), b.Label()
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
@@ -6898,7 +6899,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("retires an OSR site whose loop body always bridges", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const n = 600
 		b := instr.NewBuilder()
 		header, done := b.Label(), b.Label()
@@ -6970,7 +6971,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("reuses a resolved OSR site after Reset", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := iterativeFibProgram(t, 200_000)
 		want := runProgram(t, prog)
 
@@ -7017,7 +7018,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("runs an indirect self call through a parameter", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 
 		prog := indirectFibCallsProgram(t, 20, 50)
 
@@ -7072,7 +7073,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("recompiles a unit retired by a later-recorded site", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := indirectFibCallsProgram(t, 20, 50)
 		want := runProgram(t, prog)
 
@@ -7111,7 +7112,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("compiles a unit before its dynamic sites ran", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := indirectFibCallsProgram(t, 20, 50)
 		want := runProgram(t, prog)
 
@@ -7143,7 +7144,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("retires a speculated callee refuted by a second function", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := applyProgram(t, 3000)
 
 		wantVM := interp.New(applyProgram(t, 3000), interp.WithThreshold(-1))
@@ -7211,7 +7212,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("recompiles a polymorphic speculated site generic", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const n, runs = 200, 16
 		b := instr.NewBuilder()
 		loop, done, inner, counted, high, chosen := b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
@@ -7296,7 +7297,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("traps a closure callee's site until native code records it", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
 		b.Emit(instr.CONST_GET, 0).Emit(instr.CLOSURE_NEW).Emit(instr.LOCAL_SET, 1)
@@ -7325,7 +7326,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("calls closures natively", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := counterProgram(t)
 
 		threaded := interp.New(prog, interp.WithThreshold(-1))
@@ -7382,7 +7383,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("keeps a caller entering while its closure callee's Baseline is pending", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 
 		prog := counterProgram(t)
 		want := runProgram(t, prog)
@@ -7422,7 +7423,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("compiles a closure body reached only from native code", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		counter := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 			Captures(types.TypeI32()).
 			Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.DUP), instr.New(instr.UPVAL_SET, 0), instr.New(instr.RETURN)).
@@ -7481,7 +7482,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("rebuilds a closure frame with its upvals after a declined bridge", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const calls = 64
 		fb := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeI1()}, Returns: []types.Type{types.TypeI32()}}).Captures(types.TypeI32())
 		loop, done, slow := fb.Label(), fb.Label(), fb.Label()
@@ -7546,7 +7547,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("bridges CLOSURE_NEW", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const n = 200_000
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeString()}}).
 			Captures(types.TypeString()).
@@ -7602,7 +7603,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("faults on a directly called function's missing upval", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const calls = 200
 		fb := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeI1()}, Returns: []types.Type{types.TypeI32()}}).Captures(types.TypeI32())
 		loop, done, read := fb.Label(), fb.Label(), fb.Label()
@@ -7631,7 +7632,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("zeroes each unwritten local of a native function", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
 		b.Bind(loop)
@@ -7677,7 +7678,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("zeroes each unwritten module local and global under OSR", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
 		b.Bind(loop)
@@ -7726,7 +7727,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("computes every primitive operator bit for bit", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		w32 := func(v int32) uint64 { return uint64(uint32(v)) }
 		w64 := func(v int64) uint64 { return uint64(v) }
 		f32 := func(v float32) uint64 { return uint64(math.Float32bits(v)) }
@@ -7816,7 +7817,7 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("records a failed Headers analysis through the compiles metric", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		profiler := prof.New()
 		bad := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 			Emit(instr.New(instr.BR, 10)).MustBuild()

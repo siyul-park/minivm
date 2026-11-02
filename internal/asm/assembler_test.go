@@ -1,11 +1,11 @@
 package asm_test
 
 import (
-	"runtime"
 	"testing"
 
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/asm/arm64"
+	"github.com/siyul-park/minivm/internal/testenv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -513,9 +513,7 @@ func TestAssembler_Build(t *testing.T) {
 		), code)
 	})
 	t.Run("runs a value spilled across an exit", func(t *testing.T) {
-		if runtime.GOARCH != "arm64" {
-			t.Skip("native execution requires arm64")
-		}
+		testenv.MustHaveNative(t)
 		s, err := asm.NewState(4096)
 		require.NoError(t, err)
 		exit := []asm.Instruction{

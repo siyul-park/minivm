@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/internal/testenv"
 	interp "github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
@@ -79,7 +80,7 @@ func TestPool_Get(t *testing.T) {
 	})
 
 	t.Run("shares one native JIT runtime across pooled interpreters, compiling once", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		prog := fibFlatCallsProgram(t, 1000)
 		profiler := prof.New()
 		p := interp.NewPool(prog, 2, interp.WithThreshold(1), interp.WithProfiler(profiler))
@@ -115,7 +116,7 @@ func TestPool_Get(t *testing.T) {
 	})
 
 	t.Run("pooled interpreters observing different callees match threaded with bounded deopts", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const calls = 5
 		const rounds = 600
 		prog := applyGlobalProgram(t, calls)
@@ -177,7 +178,7 @@ func TestPool_Get(t *testing.T) {
 	})
 
 	t.Run("pooled interpreters entering and retiring shared code concurrently match threaded", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		const calls = 200
 		const rounds = 300
 		prog := applyGlobalProgram(t, calls)
@@ -235,7 +236,7 @@ func TestPool_Get(t *testing.T) {
 	})
 
 	t.Run("a pooled interpreter promotes code another interpreter drained", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		b := instr.NewBuilder()
 		b.Emit(instr.I32_CONST, 1).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
 		code, err := b.Assemble()
@@ -282,7 +283,7 @@ func TestPool_Get(t *testing.T) {
 	})
 
 	t.Run("pooled interpreters alternating Runs publish code after about threshold total entries", func(t *testing.T) {
-		native(t)
+		testenv.MustHaveNative(t)
 		// Loop-free module code: its only OSR site is ip 0, entry-site
 		// threshold max(n, 2), cadence 1 (Entries table).
 		b := instr.NewBuilder()
