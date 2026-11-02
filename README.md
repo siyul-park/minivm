@@ -32,7 +32,7 @@ prog := program.New([]instr.Instruction{
     instr.MustNew(instr.I32_MUL),
 })
 
-vm := interp.New(prog)
+vm := interp.MustNew(prog)
 defer vm.Close()
 
 if err := vm.Run(context.Background()); err != nil {
@@ -110,7 +110,7 @@ Optimization levels range from local constant folding and deduplication to dead-
 ### Control execution
 
 ```go
-vm := interp.New(prog,
+vm := interp.MustNew(prog,
     interp.WithStack(4096),
     interp.WithHeap(512),
     interp.WithFrame(256),

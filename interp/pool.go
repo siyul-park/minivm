@@ -10,9 +10,9 @@ import (
 	"github.com/siyul-park/minivm/program"
 )
 
-// Pool hands out Interpreter instances bound to a shared Program for use across
-// goroutines. Each Interpreter owns its runtime state; callers must borrow one
-// per goroutine via Get/Put or Run.
+// Pool hands out Interpreter instances bound to a shared verified Program for
+// use across goroutines. Each Interpreter owns its runtime state; callers must
+// borrow one per goroutine via Get/Put or Run.
 type Pool struct {
 	prog *program.Program
 	opts []Option
@@ -33,18 +33,23 @@ type Pool struct {
 var ErrPoolClosed = errors.New("pool closed")
 
 // NewPool builds a pool that lends up to size Interpreters constructed from
-// prog with opts. size <= 0 is normalized to 1. Interpreters are created lazily
-// on Get.
-func NewPool(prog *program.Program, size int, opts ...Option) *Pool {
+// prog with opts. It verifies and snapshots prog once, as New does, and returns
+// the same errors; Interpreters share that snapshot. size <= 0 is normalized to
+// 1. Interpreters are created lazily on Get.
+func NewPool(prog *program.Program, size int, opts ...Option) (*Pool, error) {
+	snap, err := snapshot(prog)
+	if err != nil {
+		return nil, err
+	}
 	if size <= 0 {
 		size = 1
 	}
 	return &Pool{
-		prog: prog,
+		prog: snap,
 		opts: append([]Option(nil), opts...),
 		size: size,
 		idle: make(chan *Interpreter, size),
-	}
+	}, nil
 }
 
 // Get returns an Interpreter ready for use. It reuses an idle one if available,
@@ -146,7 +151,7 @@ func (p *Pool) grow() *Interpreter {
 			return nil
 		}
 		if p.live.CompareAndSwap(live, live+1) {
-			i := New(p.prog, p.opts...)
+			i := build(p.prog, p.opts...)
 			p.share(i)
 			return i
 		}

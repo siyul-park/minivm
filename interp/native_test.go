@@ -823,7 +823,7 @@ func poll(t *testing.T, cond func() bool) {
 // the stack.
 func runProgram(t *testing.T, prog *program.Program) types.Value {
 	t.Helper()
-	vm := interp.New(prog, interp.WithThreshold(-1))
+	vm := interp.MustNew(prog, interp.WithThreshold(-1))
 	defer vm.Close()
 	require.NoError(t, vm.Run(context.Background()))
 	v, err := vm.Pop()
@@ -834,7 +834,7 @@ func runProgram(t *testing.T, prog *program.Program) types.Value {
 // runProgramErr runs prog threaded with opts and returns Run's error.
 func runProgramErr(t *testing.T, prog *program.Program, opts ...interp.Option) error {
 	t.Helper()
-	vm := interp.New(prog, opts...)
+	vm := interp.MustNew(prog, opts...)
 	defer vm.Close()
 	return vm.Run(context.Background())
 }
@@ -843,7 +843,7 @@ func runProgramErr(t *testing.T, prog *program.Program, opts ...interp.Option) e
 // value it leaves, as its string content and live RefCount.
 func runProgramString(t *testing.T, prog *program.Program) (string, int) {
 	t.Helper()
-	vm := interp.New(prog, interp.WithThreshold(-1))
+	vm := interp.MustNew(prog, interp.WithThreshold(-1))
 	defer vm.Close()
 	require.NoError(t, vm.Run(context.Background()))
 	value, count, err := popString(vm)

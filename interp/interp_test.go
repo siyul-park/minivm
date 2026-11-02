@@ -99,8 +99,9 @@ var runTests = []struct {
 	{
 		program: program.New([]instr.Instruction{
 			instr.MustNew(instr.I32_CONST, 1),
-			instr.MustNew(instr.BR_IF, 5),
+			instr.MustNew(instr.BR_IF, 6),
 			instr.MustNew(instr.I32_CONST, 999),
+			instr.MustNew(instr.DROP),
 			instr.MustNew(instr.I32_CONST, 1),
 		}),
 		values: []types.Value{types.I32(1)},
@@ -108,8 +109,9 @@ var runTests = []struct {
 	{
 		program: program.New([]instr.Instruction{
 			instr.MustNew(instr.I32_CONST, 0),
-			instr.MustNew(instr.BR_TABLE, 1, 5, 0),
+			instr.MustNew(instr.BR_TABLE, 1, 6, 0),
 			instr.MustNew(instr.I32_CONST, 999),
+			instr.MustNew(instr.DROP),
 			instr.MustNew(instr.I32_CONST, 1),
 		}),
 		values: []types.Value{types.I32(1)},
@@ -160,7 +162,7 @@ var runTests = []struct {
 			instr.MustNew(instr.I32_CONST, 41),
 			instr.MustNew(instr.RESUME),
 			instr.MustNew(instr.CORO_VALUE),
-		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
+		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny()}}).
 			Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN)).MustBuild())),
 		values: []types.Value{types.I32(42)},
 	},
@@ -169,7 +171,7 @@ var runTests = []struct {
 			instr.MustNew(instr.CONST_GET, 0),
 			instr.MustNew(instr.CALL),
 			instr.MustNew(instr.CORO_DONE),
-		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
+		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny()}}).
 			Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.RETURN)).MustBuild())),
 		values: []types.Value{types.I1(false)},
 	},
@@ -178,7 +180,7 @@ var runTests = []struct {
 			instr.MustNew(instr.CONST_GET, 0),
 			instr.MustNew(instr.CALL),
 			instr.MustNew(instr.CORO_VALUE),
-		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
+		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny()}}).
 			Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.RETURN)).MustBuild())),
 		values: []types.Value{types.I32(1)},
 	},
@@ -1129,7 +1131,9 @@ var runTests = []struct {
 			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.MustNew(instr.DUP),
 			instr.MustNew(instr.I32_CONST, 0),
-			instr.MustNew(instr.I32_CONST, 9), instr.MustNew(instr.I32_CONST, 8), instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.DUP),
+			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 9), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_FILL),
 			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_COPY),
 			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
 		}, program.WithTypes(types.TypeI32Array())),
@@ -1345,23 +1349,9 @@ var runTests = []struct {
 			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
 		},
 			program.WithConstants(types.TypedArray[float32]{1.5}),
-			program.WithGlobals(types.TypeI32Array()),
+			program.WithGlobals(types.TypeF32Array()),
 		),
 		values: []types.Value{types.F32(1.5)},
-	},
-	{
-		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.GLOBAL_SET, 0),
-			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
-		}, program.WithGlobals(types.TypeI32Array())),
-		err: interp.ErrTypeMismatch,
-	},
-	{
-		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.GLOBAL_SET, 0),
-			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.STRUCT_GET),
-		}, program.WithGlobals(types.NewStructType(types.NewStructField(types.TypeI32())))),
-		err: interp.ErrTypeMismatch,
 	},
 	{
 		program: program.New([]instr.Instruction{
@@ -1583,6 +1573,7 @@ var runTests = []struct {
 			instr.MustNew(instr.I32_CONST, 99),
 			instr.MustNew(instr.THROW),
 			instr.MustNew(instr.I32_CONST, 0),
+			instr.MustNew(instr.NOP),
 		}, program.WithHandlers(instr.Handler{Start: 0, End: 6, Catch: 11, Depth: 0})),
 		values: []types.Value{types.I32(99)},
 	},
@@ -1621,13 +1612,6 @@ var runTests = []struct {
 			instr.MustNew(instr.STRUCT_GET),
 		}, program.WithConstants(types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32())), types.BoxI32(7)))),
 		values: []types.Value{types.I32(7)},
-	},
-	{
-		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.CONST_GET, 0),
-			instr.MustNew(instr.REF_GET),
-		}, program.WithConstants(types.I64(math.MaxInt64))),
-		values: []types.Value{types.I64(math.MaxInt64)},
 	},
 	{
 		program: program.New([]instr.Instruction{
@@ -1681,9 +1665,9 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.MustNew(instr.I32_CONST, 2),
-			instr.MustNew(instr.I32_CONST, 4), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.I32_CONST, 6), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, uint64(^uint32(0))),
 			instr.MustNew(instr.ARRAY_COPY),
 		}, program.WithTypes(types.TypeI32Array())),
@@ -2314,6 +2298,20 @@ func structGetHostLoop(repeats int32) *program.Program {
 	return prog
 }
 
+func TestMustNew(t *testing.T) {
+	t.Run("builds a verified program", func(t *testing.T) {
+		i := interp.MustNew(program.New([]instr.Instruction{instr.MustNew(instr.NOP)}))
+		defer i.Close()
+		require.NotNil(t, i)
+	})
+
+	t.Run("panics on a malformed program", func(t *testing.T) {
+		require.Panics(t, func() {
+			interp.MustNew(program.New([]instr.Instruction{instr.MustNew(instr.I32_ADD)}))
+		})
+	})
+}
+
 func TestWithHook(t *testing.T) {
 	tests := []struct {
 		name string
@@ -2351,7 +2349,7 @@ func TestWithHook(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			calls := 0
-			i := interp.New(tt.prog, interp.WithTick(1), interp.WithHook(func(*interp.Interpreter) error {
+			i := interp.MustNew(tt.prog, interp.WithTick(1), interp.WithHook(func(*interp.Interpreter) error {
 				calls++
 				return nil
 			}))
@@ -2367,7 +2365,7 @@ func TestWithHook(t *testing.T) {
 }
 
 func TestWithCodec(t *testing.T) {
-	i := interp.New(program.New(nil), interp.WithCodec(upperCodec(0)))
+	i := interp.MustNew(program.New(nil), interp.WithCodec(upperCodec(0)))
 	defer i.Close()
 
 	v, err := i.Marshal("go")
@@ -2381,7 +2379,7 @@ func TestWithCodec(t *testing.T) {
 
 func TestWithProfiler(t *testing.T) {
 	profiler := prof.New()
-	i := interp.New(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}), interp.WithProfiler(profiler), interp.WithTick(1))
+	i := interp.MustNew(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}), interp.WithProfiler(profiler), interp.WithTick(1))
 	defer i.Close()
 	require.NoError(t, i.Run(context.Background()))
 
@@ -2394,12 +2392,12 @@ func TestWithProfiler(t *testing.T) {
 func TestWithFrame(t *testing.T) {
 	t.Run("function call overflows once frames are exhausted", func(t *testing.T) {
 		selfFn := types.NewFunctionBuilder(&types.FunctionType{}).Append(
-			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.RETURN),
 		).MustBuild()
 		prog := program.New([]instr.Instruction{
 			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
 		}, program.WithConstants(selfFn))
-		i := interp.New(prog, interp.WithFrame(3))
+		i := interp.MustNew(prog, interp.WithFrame(3))
 		defer i.Close()
 
 		require.ErrorIs(t, i.Run(context.Background()), interp.ErrFrameOverflow)
@@ -2416,7 +2414,7 @@ func TestWithFrame(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
 		}, program.WithConstants(fillFn, hostFn))
-		i := interp.New(prog, interp.WithFrame(2))
+		i := interp.MustNew(prog, interp.WithFrame(2))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -2431,7 +2429,7 @@ func TestWithStack(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 3),
 		})
-		i := interp.New(prog, interp.WithStack(2))
+		i := interp.MustNew(prog, interp.WithStack(2))
 		defer i.Close()
 
 		require.ErrorIs(t, i.Run(context.Background()), interp.ErrStackOverflow)
@@ -2441,7 +2439,7 @@ func TestWithStack(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.MustNew(instr.I32_CONST, 1),
 		})
-		i := interp.New(prog, interp.WithStack(0))
+		i := interp.MustNew(prog, interp.WithStack(0))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -2458,7 +2456,7 @@ func TestWithHeap(t *testing.T) {
 			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.REF_NEW),
 			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.REF_NEW),
 		})
-		i := interp.New(prog, interp.WithHeap(1))
+		i := interp.MustNew(prog, interp.WithHeap(1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -2466,7 +2464,7 @@ func TestWithHeap(t *testing.T) {
 	})
 
 	t.Run("collects cycle at backing capacity", func(t *testing.T) {
-		i := interp.New(program.New(nil), interp.WithHeap(2))
+		i := interp.MustNew(program.New(nil), interp.WithHeap(2))
 		defer i.Close()
 
 		value, addr := selfCycle(t, i)
@@ -2481,7 +2479,7 @@ func TestWithHeap(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.REF_NEW),
 		})
-		i := interp.New(prog, interp.WithHeap(-1))
+		i := interp.MustNew(prog, interp.WithHeap(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -2491,7 +2489,7 @@ func TestWithHeap(t *testing.T) {
 	t.Run("collects cycles at adaptive goal", func(t *testing.T) {
 		const capacity = 2 * heapRunway
 
-		i := interp.New(program.New(nil), interp.WithHeap(capacity), interp.WithHeapLimit(capacity))
+		i := interp.MustNew(program.New(nil), interp.WithHeap(capacity), interp.WithHeapLimit(capacity))
 		defer i.Close()
 
 		_, err := i.Alloc(types.I32(1))
@@ -2519,7 +2517,7 @@ func TestWithHeap(t *testing.T) {
 	t.Run("paces from live set", func(t *testing.T) {
 		const capacity = 3 * heapRunway
 
-		i := interp.New(program.New(nil), interp.WithHeap(capacity), interp.WithHeapLimit(capacity))
+		i := interp.MustNew(program.New(nil), interp.WithHeap(capacity), interp.WithHeapLimit(capacity))
 		defer i.Close()
 
 		for n := range heapRunway + 1 {
@@ -2553,7 +2551,7 @@ func TestWithHeap(t *testing.T) {
 	t.Run("resets adaptive goal", func(t *testing.T) {
 		const capacity = 3 * heapRunway
 
-		i := interp.New(program.New(nil), interp.WithHeap(capacity), interp.WithHeapLimit(4*heapRunway))
+		i := interp.MustNew(program.New(nil), interp.WithHeap(capacity), interp.WithHeapLimit(4*heapRunway))
 		defer i.Close()
 
 		for n := range capacity {
@@ -2579,14 +2577,14 @@ func TestWithHeap(t *testing.T) {
 func TestWithHeapLimit(t *testing.T) {
 	t.Run("rejects live heap at limit", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.REF_NEW)})
-		i := interp.New(prog, interp.WithHeapLimit(1))
+		i := interp.MustNew(prog, interp.WithHeapLimit(1))
 		defer i.Close()
 
 		require.ErrorIs(t, i.Run(context.Background()), interp.ErrHeapExhausted)
 	})
 
 	t.Run("preserves host-owned reference", func(t *testing.T) {
-		i := interp.New(program.New(nil), interp.WithHeap(2), interp.WithHeapLimit(2))
+		i := interp.MustNew(program.New(nil), interp.WithHeap(2), interp.WithHeapLimit(2))
 		defer i.Close()
 
 		value := &trackedValue{}
@@ -2610,7 +2608,7 @@ func TestWithHeapLimit(t *testing.T) {
 		mid := types.NewArray(types.NewArrayType(types.TypeAny()), types.BoxRef(leafAddr))
 		root := types.NewArray(types.NewArrayType(types.TypeAny()), types.BoxRef(midAddr), types.BoxRef(midAddr))
 		prog := program.New(nil, program.WithConstants(leaf, mid, root))
-		i := interp.New(prog, interp.WithHeap(4), interp.WithHeapLimit(4))
+		i := interp.MustNew(prog, interp.WithHeap(4), interp.WithHeapLimit(4))
 		defer i.Close()
 
 		_, err := i.Alloc(types.String("blocked"))
@@ -2630,7 +2628,7 @@ func TestWithHeapLimit(t *testing.T) {
 	})
 
 	t.Run("collects unreachable cycle", func(t *testing.T) {
-		i := interp.New(program.New(nil), interp.WithHeap(3), interp.WithHeapLimit(3))
+		i := interp.MustNew(program.New(nil), interp.WithHeap(3), interp.WithHeapLimit(3))
 		defer i.Close()
 
 		left := &trackedValue{}
@@ -2656,7 +2654,7 @@ func TestWithHeapLimit(t *testing.T) {
 	})
 
 	t.Run("preserves host-rooted cycle", func(t *testing.T) {
-		i := interp.New(program.New(nil), interp.WithHeap(3), interp.WithHeapLimit(3))
+		i := interp.MustNew(program.New(nil), interp.WithHeap(3), interp.WithHeapLimit(3))
 		defer i.Close()
 
 		left := &trackedValue{}
@@ -2693,7 +2691,7 @@ func TestWithHeapLimit(t *testing.T) {
 	})
 
 	t.Run("collects self cycle", func(t *testing.T) {
-		i := interp.New(program.New(nil), interp.WithHeap(2), interp.WithHeapLimit(2))
+		i := interp.MustNew(program.New(nil), interp.WithHeap(2), interp.WithHeapLimit(2))
 		defer i.Close()
 
 		value, _ := selfCycle(t, i)
@@ -2705,7 +2703,7 @@ func TestWithHeapLimit(t *testing.T) {
 	})
 
 	t.Run("collects duplicate cycle edges", func(t *testing.T) {
-		i := interp.New(program.New(nil), interp.WithHeap(3), interp.WithHeapLimit(3))
+		i := interp.MustNew(program.New(nil), interp.WithHeap(3), interp.WithHeapLimit(3))
 		defer i.Close()
 
 		left := &trackedValue{}
@@ -2733,7 +2731,7 @@ func TestWithHeapLimit(t *testing.T) {
 	})
 
 	t.Run("settles dead edges to live object", func(t *testing.T) {
-		i := interp.New(program.New(nil), interp.WithHeap(4), interp.WithHeapLimit(4))
+		i := interp.MustNew(program.New(nil), interp.WithHeap(4), interp.WithHeapLimit(4))
 		defer i.Close()
 
 		left := &trackedValue{}
@@ -2776,7 +2774,7 @@ func TestWithTick(t *testing.T) {
 	prog := program.New([]instr.Instruction{
 		instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_CONST, 4),
 	})
-	i := interp.New(prog, interp.WithTick(2), interp.WithHook(func(i *interp.Interpreter) error {
+	i := interp.MustNew(prog, interp.WithTick(2), interp.WithHook(func(i *interp.Interpreter) error {
 		calls++
 		return nil
 	}))
@@ -2790,7 +2788,7 @@ func TestWithFuel(t *testing.T) {
 	prog := program.New([]instr.Instruction{
 		instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_ADD),
 	})
-	i := interp.New(prog, interp.WithTick(1), interp.WithFuel(2))
+	i := interp.MustNew(prog, interp.WithTick(1), interp.WithFuel(2))
 	defer i.Close()
 
 	require.ErrorIs(t, i.Run(context.Background()), interp.ErrFuelExhausted)
@@ -2817,7 +2815,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeAny(), types.TypeI32()), program.WithTypes(types.NewArrayType(types.TypeAny())))
 
-		threaded := interp.New(prog, interp.WithThreshold(-1), interp.WithHeapLimit(300))
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1), interp.WithHeapLimit(300))
 		defer threaded.Close()
 		wantErr := threaded.Run(context.Background())
 		require.ErrorIs(t, wantErr, interp.ErrHeapExhausted)
@@ -2831,7 +2829,7 @@ func TestWithThreshold(t *testing.T) {
 		var bridges float64
 		var counts []int
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHeapLimit(300))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHeapLimit(300))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -2857,7 +2855,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -2887,7 +2885,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -2914,7 +2912,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithProfiler(profiler))
 		defer vm.Close()
 		require.NoError(t, vm.Run(context.Background()))
 		got, err := vm.Pop()
@@ -2934,7 +2932,7 @@ func TestWithThreshold(t *testing.T) {
 			want := runProgram(t, prog)
 
 			profiler := prof.New()
-			vm := interp.New(prog, interp.WithProfiler(profiler), interp.WithTick(1<<30))
+			vm := interp.MustNew(prog, interp.WithProfiler(profiler), interp.WithTick(1<<30))
 			require.NoError(t, vm.Run(context.Background()))
 			got, err := vm.Pop()
 			require.NoError(t, err)
@@ -2964,7 +2962,7 @@ func TestWithThreshold(t *testing.T) {
 				interp.WithFuel(math.MaxUint64),
 			} {
 				profiler := prof.New()
-				vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), opt)
+				vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), opt)
 				var runErr, popErr error
 				var result types.Value
 				run := func() bool {
@@ -2997,7 +2995,7 @@ func TestWithThreshold(t *testing.T) {
 
 		prog := iterativeFibProgram(t, 1<<22)
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithFuel(1<<20))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithFuel(1<<20))
 		defer vm.Close()
 		var runErr error
 		poll(t, func() bool {
@@ -3028,7 +3026,7 @@ func TestWithThreshold(t *testing.T) {
 
 		seen, stop, at, torn := 0, -1, 0, false
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHook(func(vm *interp.Interpreter) error {
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHook(func(vm *interp.Interpreter) error {
 			ip := vm.IP()
 			if ip < header || ip > body || stop >= 0 {
 				return nil
@@ -3109,7 +3107,7 @@ func TestWithThreshold(t *testing.T) {
 
 		ips := map[int]int{}
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithTick(2), interp.WithProfiler(profiler), interp.WithHook(func(vm *interp.Interpreter) error {
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithTick(2), interp.WithProfiler(profiler), interp.WithHook(func(vm *interp.Interpreter) error {
 			callee, err := vm.Const(1)
 			if err != nil || vm.Func() != callee.Ref() {
 				return err
@@ -3139,7 +3137,7 @@ func TestWithThreshold(t *testing.T) {
 		stop := errors.New("stop")
 		calls := 0
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHook(func(*interp.Interpreter) error {
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHook(func(*interp.Interpreter) error {
 			if calls++; calls == 256 {
 				return stop
 			}
@@ -3162,7 +3160,7 @@ func TestWithThreshold(t *testing.T) {
 		prog := iterativeFibProgram(t, 1<<12)
 		count := func(opts ...interp.Option) int {
 			calls := 0
-			vm := interp.New(prog, append(opts, interp.WithTick(1), interp.WithHook(func(*interp.Interpreter) error {
+			vm := interp.MustNew(prog, append(opts, interp.WithTick(1), interp.WithHook(func(*interp.Interpreter) error {
 				calls++
 				return nil
 			}))...)
@@ -3199,7 +3197,7 @@ func TestWithThreshold(t *testing.T) {
 			program.WithConstants(applyFunction(), inc.MustBuild(), dec.MustBuild()))
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(0), interp.WithProfiler(profiler))
 		defer vm.Close()
 		// calls runs the program with callee constant c until apply has
 		// compiled ok compiles in total, and returns how many calls it took.
@@ -3241,7 +3239,7 @@ func TestWithThreshold(t *testing.T) {
 			program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(incFunction())),
 		} {
 			profiler := prof.New()
-			vm := interp.New(prog, interp.WithProfiler(profiler))
+			vm := interp.MustNew(prog, interp.WithProfiler(profiler))
 
 			for range 8 {
 				for range 512 {
@@ -3260,7 +3258,7 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("runs a self tail call as a native loop", func(t *testing.T) {
 		native(t)
 		prog := tailRefProgram(t, 1000)
-		threaded := interp.New(prog, interp.WithThreshold(-1))
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
 		require.NoError(t, threaded.Run(context.Background()))
 		want, err := threaded.Pop()
 		require.NoError(t, err)
@@ -3271,7 +3269,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, threaded.Close())
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		var runErr, popErr, countErr error
 		var result types.Value
@@ -3320,7 +3318,7 @@ func TestWithThreshold(t *testing.T) {
 		prog := tailRefProgram(t, 1_000_000)
 		want := runProgram(t, prog)
 
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithFrame(4))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithFrame(4))
 		defer vm.Close()
 		for range 8 {
 			require.NoError(t, vm.Run(context.Background()))
@@ -3339,7 +3337,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr error
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -3371,7 +3369,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 
 		var result types.Value
@@ -3432,7 +3430,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 
 		var result types.Value
@@ -3497,7 +3495,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -3547,7 +3545,7 @@ func TestWithThreshold(t *testing.T) {
 		var count int
 		var released float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -3605,7 +3603,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -3650,7 +3648,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -3689,7 +3687,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Error(t, wantErr)
 
 		var gotErr error
-		vm := interp.New(prog, interp.WithThreshold(1))
+		vm := interp.MustNew(prog, interp.WithThreshold(1))
 		defer vm.Close()
 		poll(t, func() bool {
 			gotErr = vm.Run(context.Background())
@@ -3722,7 +3720,7 @@ func TestWithThreshold(t *testing.T) {
 		var count int
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -3778,7 +3776,7 @@ func TestWithThreshold(t *testing.T) {
 		var count int
 		var bridges, deopts float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -3828,7 +3826,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var bridges, deopts float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -3885,7 +3883,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotErr error
 		var bridges float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			gotErr = vm.Run(context.Background())
@@ -3904,7 +3902,7 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("bridges string ops", func(t *testing.T) {
 		native(t)
 		prog := texts(t, 20_000)
-		threaded := interp.New(prog, interp.WithThreshold(-1))
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
 		require.NoError(t, threaded.Run(context.Background()))
 		wantValue, wantCount, err := popString(threaded)
 		require.NoError(t, err)
@@ -3919,7 +3917,7 @@ func TestWithThreshold(t *testing.T) {
 		var count, constCount int
 		var bridges, entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -3951,7 +3949,7 @@ func TestWithThreshold(t *testing.T) {
 		native(t)
 		const limit = 20_000
 		prog := texts(t, 2*limit)
-		threaded := interp.New(prog, interp.WithHeapLimit(limit), interp.WithThreshold(-1))
+		threaded := interp.MustNew(prog, interp.WithHeapLimit(limit), interp.WithThreshold(-1))
 		wantErr := threaded.Run(context.Background())
 		require.ErrorIs(t, wantErr, interp.ErrHeapExhausted)
 		ab, err := threaded.Const(1)
@@ -3964,7 +3962,7 @@ func TestWithThreshold(t *testing.T) {
 		var constCount int
 		var bridges, entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithHeapLimit(limit), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithHeapLimit(limit), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			gotErr = vm.Run(context.Background())
@@ -4048,7 +4046,7 @@ func TestWithThreshold(t *testing.T) {
 			program.WithTypes(dict, list, types.TypeString(), wide, named),
 			program.WithConstants(types.String("x"), types.String("y")))
 
-		threaded := interp.New(prog, interp.WithThreshold(-1))
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
 		require.NoError(t, threaded.Run(context.Background()))
 		boxed, err := threaded.PopBoxed()
 		require.NoError(t, err)
@@ -4063,7 +4061,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, threaded.Close())
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name, key, value string) float64 {
 			vm.Flush()
@@ -4116,7 +4114,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithConstants(types.String("x"), types.String("y")))
 
-		threaded := interp.New(prog, interp.WithThreshold(-1))
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
 		require.NoError(t, threaded.Run(context.Background()))
 		want, err := threaded.Pop()
 		require.NoError(t, err)
@@ -4131,7 +4129,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, threaded.Close())
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name, key, value string) float64 {
 			vm.Flush()
@@ -4189,7 +4187,7 @@ func TestWithThreshold(t *testing.T) {
 			program.WithLocals(types.TypeI32(), types.TypeI32(), types.TypeAny()),
 			program.WithConstants(types.String("x"), types.TypedArray[int32]{1}))
 
-		threaded := interp.New(prog, interp.WithThreshold(-1))
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
 		wantErr := threaded.Run(context.Background())
 		require.ErrorIs(t, wantErr, interp.ErrTypeMismatch)
 		x, err := threaded.Const(0)
@@ -4206,7 +4204,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotX, gotArray int
 		var bridges float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			gotErr = vm.Run(context.Background())
@@ -4271,7 +4269,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 
 		// f(0) runs threaded-entered at most once per Run; enough Runs pass
@@ -4310,7 +4308,7 @@ func TestWithThreshold(t *testing.T) {
 		const n = 200_000
 		prog := store(t, n)
 
-		threaded := interp.New(store(t, n), interp.WithThreshold(-1))
+		threaded := interp.MustNew(store(t, n), interp.WithThreshold(-1))
 		require.NoError(t, threaded.Run(context.Background()))
 		wantConst, err := threaded.Const(0)
 		require.NoError(t, err)
@@ -4318,7 +4316,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, threaded.Close())
 
-		vm := interp.New(prog, interp.WithThreshold(1))
+		vm := interp.MustNew(prog, interp.WithThreshold(1))
 		defer vm.Close()
 		require.NoError(t, vm.Run(context.Background()))
 		gotConst, err := vm.Const(0)
@@ -4352,7 +4350,7 @@ func TestWithThreshold(t *testing.T) {
 		var count int
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -4394,7 +4392,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotErr error
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithFrame(8), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithFrame(8), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			gotErr = vm.Run(context.Background())
@@ -4444,7 +4442,7 @@ func TestWithThreshold(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithConstants(fib), program.WithHandlers(b.Handlers()...))
-		wantVM := interp.New(prog, interp.WithFrame(8), interp.WithThreshold(-1))
+		wantVM := interp.MustNew(prog, interp.WithFrame(8), interp.WithThreshold(-1))
 		defer wantVM.Close()
 		require.NoError(t, wantVM.Run(context.Background()))
 		wantConst, err := wantVM.Const(0)
@@ -4457,7 +4455,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotRC int
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithFrame(8), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithFrame(8), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -4506,7 +4504,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithConstants(rec, types.String("s")), program.WithHandlers(mb.Handlers()...))
 
-		wantVM := interp.New(prog, interp.WithFrame(8), interp.WithThreshold(-1))
+		wantVM := interp.MustNew(prog, interp.WithFrame(8), interp.WithThreshold(-1))
 		defer wantVM.Close()
 		require.NoError(t, wantVM.Run(context.Background()))
 		want, err := wantVM.Pop()
@@ -4521,7 +4519,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotRC int
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithFrame(8), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithFrame(8), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -4566,14 +4564,14 @@ func TestWithThreshold(t *testing.T) {
 			{"a callee that never compiles calling native code that calls it again", loopProgram(t, 8, 64, 64, false, guardFunction(1000, false), loopFunction(4, false), s, relayFunction(0, false), relayFunction(3, true)), nil},
 			{"recursion past the native activation limit", loopProgram(t, 8, 10, 600, false, guardFunction(1000, false), sumrec, s), deep},
 		} {
-			want := interp.New(c.prog, append([]interp.Option{interp.WithThreshold(-1)}, c.opts...)...)
+			want := interp.MustNew(c.prog, append([]interp.Option{interp.WithThreshold(-1)}, c.opts...)...)
 			require.NoError(t, want.Run(context.Background()), c.name)
 			wantSum, wantCount, err := popLoop(want)
 			require.NoError(t, err, c.name)
 			require.NoError(t, want.Close())
 
 			profiler := prof.New()
-			vm := interp.New(c.prog, append([]interp.Option{interp.WithThreshold(1), interp.WithProfiler(profiler)}, c.opts...)...)
+			vm := interp.MustNew(c.prog, append([]interp.Option{interp.WithThreshold(1), interp.WithProfiler(profiler)}, c.opts...)...)
 			exits := func(kind string) float64 {
 				vm.Flush()
 				v, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: kind})
@@ -4608,14 +4606,14 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("resumes a dynamic call through call exits", func(t *testing.T) {
 		native(t)
 		prog := mixedProgram(t, 64, false)
-		want := interp.New(prog, interp.WithThreshold(-1))
+		want := interp.MustNew(prog, interp.WithThreshold(-1))
 		require.NoError(t, want.Run(context.Background()))
 		wantSum, wantCount, err := popLoop(want)
 		require.NoError(t, err)
 		require.NoError(t, want.Close())
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(8), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(8), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, labels ...prof.Label) float64 {
 			vm.Flush()
@@ -4672,7 +4670,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		calls := func() float64 {
 			vm.Flush()
@@ -4713,14 +4711,14 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("deopts a dynamic call whose callee takes other parameters", func(t *testing.T) {
 		native(t)
 		prog := mixedProgram(t, 64, true)
-		want := interp.New(prog, interp.WithThreshold(-1))
+		want := interp.MustNew(prog, interp.WithThreshold(-1))
 		require.NoError(t, want.Run(context.Background()))
 		wantSum, wantCount, err := popLoop(want)
 		require.NoError(t, err)
 		require.NoError(t, want.Close())
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(8), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(8), interp.WithProfiler(profiler))
 		defer vm.Close()
 		entries := func() float64 {
 			vm.Flush()
@@ -4777,14 +4775,14 @@ func TestWithThreshold(t *testing.T) {
 			cold := coldBuilder.MustBuild()
 			prog := program.New(code, program.WithLocals(types.TypeI32(), types.TypeI32(), types.TypeString()),
 				program.WithConstants(cold, bumpFunction(1), types.String("s")))
-			want := interp.New(prog, interp.WithThreshold(-1))
+			want := interp.MustNew(prog, interp.WithThreshold(-1))
 			require.NoError(t, want.Run(context.Background()), c.name)
 			wantSum, wantCount, err := popLoop(want)
 			require.NoError(t, err, c.name)
 			require.NoError(t, want.Close())
 
 			profiler := prof.New()
-			vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+			vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 			metric := func(name string, labels ...prof.Label) float64 {
 				vm.Flush()
 				v, _ := profiler.Metric(name, labels...)
@@ -4824,7 +4822,7 @@ func TestWithThreshold(t *testing.T) {
 		require.ErrorIs(t, wantErr, interp.ErrDivideByZero)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		var gotErr error
 		var exits float64
@@ -4862,14 +4860,14 @@ func TestWithThreshold(t *testing.T) {
 			{"trap with an owned argument", loopProgram(t, 8, 50, 100, true, guardFunction(60, false), loopFunction(0, true), s)},
 			{"throw", loopProgram(t, 8, 50, 100, true, guardFunction(60, true), loopFunction(0, false), s)},
 		} {
-			want := interp.New(c.prog, interp.WithThreshold(-1))
+			want := interp.MustNew(c.prog, interp.WithThreshold(-1))
 			require.NoError(t, want.Run(context.Background()), c.name)
 			wantSum, wantCount, err := popLoop(want)
 			require.NoError(t, err, c.name)
 			require.NoError(t, want.Close())
 
 			profiler := prof.New()
-			vm := interp.New(c.prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+			vm := interp.MustNew(c.prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 			exits := func() float64 {
 				vm.Flush()
 				v, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
@@ -4928,7 +4926,7 @@ func TestWithThreshold(t *testing.T) {
 		var count, innerCount int
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -4983,7 +4981,7 @@ func TestWithThreshold(t *testing.T) {
 		var count, innerCount int
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -5030,7 +5028,7 @@ func TestWithThreshold(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithConstants(fib), program.WithHandlers(b.Handlers()...))
-		wantVM := interp.New(prog, interp.WithFrame(8), interp.WithThreshold(-1))
+		wantVM := interp.MustNew(prog, interp.WithFrame(8), interp.WithThreshold(-1))
 		defer wantVM.Close()
 		require.NoError(t, wantVM.Run(context.Background()))
 		wantConst, err := wantVM.Const(0)
@@ -5042,7 +5040,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotRC int
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithFrame(8), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithFrame(8), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -5066,7 +5064,7 @@ func TestWithThreshold(t *testing.T) {
 		native(t)
 		prog := lentProgram(t, 3000)
 
-		wantVM := interp.New(lentProgram(t, 3000), interp.WithThreshold(-1))
+		wantVM := interp.MustNew(lentProgram(t, 3000), interp.WithThreshold(-1))
 		defer wantVM.Close()
 		require.NoError(t, wantVM.Run(context.Background()))
 		want, err := wantVM.Pop()
@@ -5085,7 +5083,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotIncRC, gotDecRC int
 		var deopts float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -5169,7 +5167,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithTypes(record), program.WithConstants(fn), program.WithHandlers(mb.Handlers()...))
 
-		wantVM := interp.New(prog, interp.WithFrame(8), interp.WithThreshold(-1))
+		wantVM := interp.MustNew(prog, interp.WithFrame(8), interp.WithThreshold(-1))
 		defer wantVM.Close()
 		require.NoError(t, wantVM.Run(context.Background()))
 		want, err := wantVM.Pop()
@@ -5179,7 +5177,7 @@ func TestWithThreshold(t *testing.T) {
 		var got types.Value
 		var safepoints, releases, calls float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithFrame(8), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithFrame(8), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -5226,7 +5224,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		require.NoError(t, vm.Run(context.Background()))
 		result, err := vm.Pop()
@@ -5265,7 +5263,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr, popErr error
 		var deopts, entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -5307,7 +5305,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr, popErr error
 		var deopts, entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -5367,7 +5365,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr, popErr error
 		var deopts, entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -5423,7 +5421,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr, popErr error
 		var deopts, compiles float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -5462,7 +5460,7 @@ func TestWithThreshold(t *testing.T) {
 			var runErr, popErr error
 			var deopts, compiles float64
 			profiler := prof.New()
-			vm := interp.New(c.prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+			vm := interp.MustNew(c.prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 			defer vm.Close()
 			poll(t, func() bool {
 				runErr = vm.Run(context.Background())
@@ -5509,7 +5507,7 @@ func TestWithThreshold(t *testing.T) {
 		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithGlobals(elem),
 			program.WithConstants(fn), program.WithTypes(elem))
 
-		threaded := interp.New(prog, interp.WithThreshold(-1))
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
 		defer threaded.Close()
 		hostVal, err := threaded.Marshal([]int32{1, 2, 3})
 		require.NoError(t, err)
@@ -5528,7 +5526,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotRC int
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			var hostVal types.Value
@@ -5591,7 +5589,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr, popErr error
 		var deopts, compiles float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -5638,7 +5636,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr, popErr error
 		var deopts, compiles float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -5684,7 +5682,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr, popErr error
 		var deopts, entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -5718,7 +5716,7 @@ func TestWithThreshold(t *testing.T) {
 		var compiles float64
 		var runErr, popErr error
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -5771,7 +5769,7 @@ func TestWithThreshold(t *testing.T) {
 		prog := program.New(code, program.WithLocals(types.TypeI32(), types.TypeI32()),
 			program.WithConstants(rare, divFunction(t)), program.WithHandlers(b.Handlers()...))
 
-		threaded := interp.New(prog, interp.WithThreshold(-1))
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.Run(context.Background()))
 		want, err := threaded.Pop()
@@ -5791,7 +5789,7 @@ func TestWithThreshold(t *testing.T) {
 		wantCounts := counts(threaded)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, labels ...prof.Label) float64 {
 			vm.Flush()
@@ -5852,7 +5850,7 @@ func TestWithThreshold(t *testing.T) {
 		protected := protectedBuilder.MustBuild()
 		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithConstants(protected, types.String("owned")))
 
-		threaded := interp.New(prog, interp.WithThreshold(-1))
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.Run(context.Background()))
 		want, err := threaded.Pop()
@@ -5867,7 +5865,7 @@ func TestWithThreshold(t *testing.T) {
 		wantCount := count(threaded)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, labels ...prof.Label) float64 {
 			vm.Flush()
@@ -5923,7 +5921,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(code, program.WithConstants(guard.MustBuild(), thrower.MustBuild(), types.String("boom!")))
 
-		threaded := interp.New(prog, interp.WithThreshold(-1))
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.Run(context.Background()))
 		want, err := threaded.Pop()
@@ -5942,7 +5940,7 @@ func TestWithThreshold(t *testing.T) {
 		wantCounts := counts(threaded)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, labels ...prof.Label) float64 {
 			vm.Flush()
@@ -6005,7 +6003,7 @@ func TestWithThreshold(t *testing.T) {
 		require.ErrorIs(t, wantErr, interp.ErrDivideByZero)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		var runErr error
 		var entries float64
@@ -6044,7 +6042,7 @@ func TestWithThreshold(t *testing.T) {
 		var runErr error
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -6078,7 +6076,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(code, program.WithGlobals(types.TypeAny()))
 
-		vm := interp.New(prog, interp.WithThreshold(1))
+		vm := interp.MustNew(prog, interp.WithThreshold(1))
 		defer vm.Close()
 		addr, err := vm.Alloc(fn)
 		require.NoError(t, err)
@@ -6127,7 +6125,7 @@ func TestWithThreshold(t *testing.T) {
 		var rc int
 		var deopts, entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			if err = vm.Run(context.Background()); err != nil {
@@ -6187,7 +6185,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -6218,7 +6216,7 @@ func TestWithThreshold(t *testing.T) {
 		var count int
 		var entries float64
 		profiler := prof.New()
-		vm := interp.New(refArrayProgram(t, 20000), interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(refArrayProgram(t, 20000), interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -6249,7 +6247,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var compiles float64
 		profiler := prof.New()
-		vm := interp.New(structTreeProgram(t, 20000), interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(structTreeProgram(t, 20000), interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -6301,7 +6299,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -6340,7 +6338,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithGlobals(types.NewArrayType(types.TypeI32())), program.WithConstants(lnFn))
 
-		threaded := interp.New(prog, interp.WithThreshold(-1))
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
 		defer threaded.Close()
 		hostVal, err := threaded.Marshal([]int32{1, 2, 3, 4, 5})
 		require.NoError(t, err)
@@ -6356,7 +6354,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var exits float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			hostVal, marshalErr := vm.Marshal([]int32{1, 2, 3, 4, 5})
@@ -6434,7 +6432,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, types.I32(rounds/16), want)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, labels ...prof.Label) float64 {
 			vm.Flush()
@@ -6494,7 +6492,7 @@ func TestWithThreshold(t *testing.T) {
 		var results []types.Value
 		var entries, deopts float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			errs, results = nil, nil
@@ -6551,7 +6549,7 @@ func TestWithThreshold(t *testing.T) {
 		var result types.Value
 		var entries float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -6574,7 +6572,7 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("reports no vm_jit metrics for a short first Run by default", func(t *testing.T) {
 		profiler := prof.New()
-		vm := interp.New(fibCallsProgram(t, 3), interp.WithProfiler(profiler))
+		vm := interp.MustNew(fibCallsProgram(t, 3), interp.WithProfiler(profiler))
 		defer vm.Close()
 		require.NoError(t, vm.Run(context.Background()))
 		vm.Flush()
@@ -6593,7 +6591,7 @@ func TestWithThreshold(t *testing.T) {
 		var entries float64
 		var runErr, popErr error
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -6621,7 +6619,7 @@ func TestWithThreshold(t *testing.T) {
 		prog := concat(t, n)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		require.NoError(t, vm.Run(context.Background()))
 		got, err := vm.Pop()
@@ -6640,7 +6638,7 @@ func TestWithThreshold(t *testing.T) {
 		prog := deopt(t, n, n-10)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		require.NoError(t, vm.Run(context.Background()))
 		got, err := vm.Pop()
@@ -6661,7 +6659,7 @@ func TestWithThreshold(t *testing.T) {
 		prog := fib(t, n)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		require.NoError(t, vm.Run(context.Background()))
 		got, err := vm.Pop()
@@ -6691,7 +6689,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 
 		var got types.Value
@@ -6743,7 +6741,7 @@ func TestWithThreshold(t *testing.T) {
 		var entries float64
 		var runErr, popErr error
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(threshold), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(threshold), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -6789,15 +6787,17 @@ func TestWithThreshold(t *testing.T) {
 			Code:   instr.Marshal(fnCode),
 		}
 		b := instr.NewBuilder()
-		start, end, catch := b.Label(), b.Label(), b.Label()
+		start, end, catch, exit := b.Label(), b.Label(), b.Label(), b.Label()
 		b.Bind(start).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+		b.Emit(instr.I32_CONST, 0).Br(exit)
 		b.Bind(end)
 		b.Bind(catch).Emit(instr.ERROR_CODE)
+		b.Bind(exit)
 		b.Try(start, end, catch, 0)
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		prog := program.New(code, program.WithConstants(fn), program.WithHandlers(b.Handlers()...))
-		threaded := interp.New(prog, interp.WithThreshold(-1))
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.Run(context.Background()))
 		wantCode, err := threaded.PopBoxed()
@@ -6812,7 +6812,7 @@ func TestWithThreshold(t *testing.T) {
 		var exits float64
 		var runErr, popErr, constErr, refErr error
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -6866,7 +6866,7 @@ func TestWithThreshold(t *testing.T) {
 		var unsupported float64
 		var runErr, popErr error
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -6915,7 +6915,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		ctx := context.Background()
 
@@ -6975,7 +6975,8 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		pool := interp.NewPool(prog, 2, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		pool, err := interp.NewPool(prog, 2, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		require.NoError(t, err)
 		defer pool.Close()
 		first, err := pool.Get(context.Background())
 		require.NoError(t, err)
@@ -7021,7 +7022,7 @@ func TestWithThreshold(t *testing.T) {
 
 		prog := indirectFibCallsProgram(t, 20, 50)
 
-		wantVM := interp.New(indirectFibCallsProgram(t, 20, 50), interp.WithThreshold(-1))
+		wantVM := interp.MustNew(indirectFibCallsProgram(t, 20, 50), interp.WithThreshold(-1))
 		defer wantVM.Close()
 		require.NoError(t, wantVM.Run(context.Background()))
 		want, err := wantVM.Pop()
@@ -7036,7 +7037,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotRC int
 		var compiles, entries, deopts float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(100), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(100), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -7077,7 +7078,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, labels ...prof.Label) float64 {
 			vm.Flush()
@@ -7119,7 +7120,7 @@ func TestWithThreshold(t *testing.T) {
 		var got types.Value
 		var unsupported, ok float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -7146,7 +7147,7 @@ func TestWithThreshold(t *testing.T) {
 		native(t)
 		prog := applyProgram(t, 3000)
 
-		wantVM := interp.New(applyProgram(t, 3000), interp.WithThreshold(-1))
+		wantVM := interp.MustNew(applyProgram(t, 3000), interp.WithThreshold(-1))
 		defer wantVM.Close()
 		require.NoError(t, wantVM.Run(context.Background()))
 		want, err := wantVM.Pop()
@@ -7165,7 +7166,7 @@ func TestWithThreshold(t *testing.T) {
 		var gotIncRC, gotDecRC int
 		var deopts float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -7238,7 +7239,7 @@ func TestWithThreshold(t *testing.T) {
 		prog := program.New(code, program.WithLocals(types.TypeI32(), types.TypeI32(), types.TypeString(), types.TypeI32()), program.WithGlobals(types.TypeI32()),
 			program.WithConstants(relayDynamicFunction(), bumpFunction(1), bumpFunction(3), types.String("s")))
 
-		threaded := interp.New(prog, interp.WithThreshold(-1))
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.SetGlobal(0, types.BoxI32(1)))
 		require.NoError(t, threaded.Run(context.Background()))
@@ -7246,7 +7247,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, labels ...prof.Label) float64 {
 			vm.Flush()
@@ -7316,7 +7317,7 @@ func TestWithThreshold(t *testing.T) {
 			program.WithConstants(incFunction(), wrap.MustBuild()))
 		want := runProgram(t, prog)
 
-		vm := interp.New(prog, interp.WithThreshold(1))
+		vm := interp.MustNew(prog, interp.WithThreshold(1))
 		defer vm.Close()
 		require.NoError(t, vm.Run(context.Background()))
 		got, err := vm.Pop()
@@ -7328,7 +7329,7 @@ func TestWithThreshold(t *testing.T) {
 		native(t)
 		prog := counterProgram(t)
 
-		threaded := interp.New(prog, interp.WithThreshold(-1))
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.Run(context.Background()))
 		wantCounter, err := threaded.Pop()
@@ -7337,7 +7338,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, label prof.Label) float64 {
 			v, _ := profiler.Metric(name, label)
@@ -7388,7 +7389,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(2*8), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(2*8), interp.WithProfiler(profiler))
 		defer vm.Close()
 
 		metric := func(name string, label prof.Label) float64 {
@@ -7442,7 +7443,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, labels ...prof.Label) float64 {
 			v, _ := profiler.Metric(name, labels...)
@@ -7508,7 +7509,7 @@ func TestWithThreshold(t *testing.T) {
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		metric := func(name string, labels ...prof.Label) float64 {
 			v, _ := profiler.Metric(name, labels...)
@@ -7577,7 +7578,7 @@ func TestWithThreshold(t *testing.T) {
 		var count int
 		var bridges, deopts float64
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			if runErr = vm.Run(context.Background()); runErr != nil {
@@ -7651,7 +7652,7 @@ func TestWithThreshold(t *testing.T) {
 		var entries float64
 		var runErr, popErr error
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -7700,7 +7701,7 @@ func TestWithThreshold(t *testing.T) {
 		var entries float64
 		var runErr, popErr error
 		profiler := prof.New()
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		poll(t, func() bool {
 			runErr = vm.Run(context.Background())
@@ -7781,7 +7782,7 @@ func TestWithThreshold(t *testing.T) {
 				require.NoError(t, err)
 				prog := program.New(code, program.WithLocals(i32), program.WithConstants(fn))
 
-				threaded := interp.New(prog, interp.WithThreshold(-1))
+				threaded := interp.MustNew(prog, interp.WithThreshold(-1))
 				require.NoError(t, threaded.Run(context.Background()))
 				want, err := threaded.PopBoxed()
 				require.NoError(t, err)
@@ -7791,7 +7792,7 @@ func TestWithThreshold(t *testing.T) {
 				var entries, deopts float64
 				var runErr, popErr error
 				profiler := prof.New()
-				vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+				vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 				defer vm.Close()
 				poll(t, func() bool {
 					if runErr = vm.Run(context.Background()); runErr != nil {
@@ -7814,25 +7815,11 @@ func TestWithThreshold(t *testing.T) {
 			}
 		}
 	})
-
-	t.Run("records a failed Headers analysis through the compiles metric", func(t *testing.T) {
-		profiler := prof.New()
-		bad := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
-			Append(instr.MustNew(instr.BR, 10)).MustBuild()
-		prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}, program.WithConstants(bad))
-		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
-		defer vm.Close()
-
-		require.NoError(t, vm.Run(context.Background()))
-		vm.Flush()
-		v, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "failed"})
-		require.Equal(t, float64(1), v)
-	})
 }
 
 func TestNew(t *testing.T) {
 	t.Run("runs a program", func(t *testing.T) {
-		i := interp.New(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 5)}))
+		i := interp.MustNew(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 5)}))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -7845,7 +7832,7 @@ func TestNew(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_EQ),
 		}, program.WithConstants(types.String("same"), types.String("same")))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		c0, err := i.Const(0)
@@ -7859,6 +7846,48 @@ func TestNew(t *testing.T) {
 		got, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I1(true), got)
+	})
+
+	t.Run("rejects a malformed program", func(t *testing.T) {
+		i, err := interp.New(program.New([]instr.Instruction{instr.MustNew(instr.I32_ADD)}))
+		require.Nil(t, i)
+		var ve *program.VerifyError
+		require.ErrorAs(t, err, &ve)
+		require.ErrorIs(t, err, program.ErrStackUnderflow)
+	})
+
+	t.Run("rejects a nil program", func(t *testing.T) {
+		i, err := interp.New(nil)
+		require.Nil(t, i)
+		require.ErrorIs(t, err, program.ErrNil)
+	})
+
+	t.Run("ignores later mutation of the program code", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 5)})
+		i := interp.MustNew(prog)
+		defer i.Close()
+		clear(prog.Code)
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), v)
+	})
+
+	t.Run("ignores later mutation of a function constant", func(t *testing.T) {
+		fn := &types.Function{
+			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32()}},
+			Code: instr.Marshal([]instr.Instruction{instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)}),
+		}
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(fn))
+		i := interp.MustNew(prog)
+		defer i.Close()
+		clear(fn.Code)
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(7), v)
 	})
 }
 
@@ -7880,7 +7909,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(prog))
 
-		vm := interp.New(prog, interp.WithThreshold(-1))
+		vm := interp.MustNew(prog, interp.WithThreshold(-1))
 		defer vm.Close()
 		require.NoError(t, vm.Run(context.Background()))
 		got, err := vm.PopBoxed()
@@ -7904,7 +7933,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(prog))
 
-		vm := interp.New(prog, interp.WithThreshold(-1))
+		vm := interp.MustNew(prog, interp.WithThreshold(-1))
 		defer vm.Close()
 		require.NoError(t, vm.Run(context.Background()))
 		got, err := vm.PopBoxed()
@@ -7974,7 +8003,7 @@ func TestInterpreter_Run(t *testing.T) {
 		} {
 			for _, tt := range runTests {
 				name := runTestName(tt.program) + "/" + mode.name
-				i := interp.New(tt.program, mode.opts...)
+				i := interp.MustNew(tt.program, mode.opts...)
 
 				err := i.Run(context.Background())
 				if tt.err != nil {
@@ -8018,7 +8047,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(prog))
 
-		i := interp.New(prog, interp.WithHeapLimit(heapRunway))
+		i := interp.MustNew(prog, interp.WithHeapLimit(heapRunway))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -8043,7 +8072,7 @@ func TestInterpreter_Run(t *testing.T) {
 		}, program.WithConstants(fb.MustBuild()))
 		require.NoError(t, program.Verify(prog))
 
-		i := interp.New(prog, interp.WithStack(64))
+		i := interp.MustNew(prog, interp.WithStack(64))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -8071,7 +8100,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(prog))
 
-		i := interp.New(prog, interp.WithHeapLimit(heapRunway))
+		i := interp.MustNew(prog, interp.WithHeapLimit(heapRunway))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -8104,7 +8133,7 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.MustNew(instr.REF_SET),
 				instr.MustNew(instr.REF_GET),
 			}, program.WithGlobals(tt.typ, tt.typ))
-			i := interp.New(prog)
+			i := interp.MustNew(prog)
 			require.NoError(t, i.SetGlobal(0, tt.initial), tt.name)
 			require.NoError(t, i.SetGlobal(1, tt.replacement), tt.name)
 
@@ -8129,7 +8158,7 @@ func TestInterpreter_Run(t *testing.T) {
 
 		huge := int64(1) << 50
 		fn := types.NewFunctionBuilder(nil).Append(instr.MustNew(instr.RETURN)).MustBuild()
-		coroutine := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
+		coroutine := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny()}}).Append(
 			instr.MustNew(instr.I32_CONST, 1),
 			instr.MustNew(instr.YIELD),
 			instr.MustNew(instr.RETURN),
@@ -8284,7 +8313,7 @@ func TestInterpreter_Run(t *testing.T) {
 				{interp.WithTick(1)},
 				{},
 			} {
-				i := interp.New(tt.prog, opts...)
+				i := interp.MustNew(tt.prog, opts...)
 				err := i.Run(context.Background())
 				if tt.err == nil {
 					require.NoError(t, err, tt.name)
@@ -8330,7 +8359,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.MustNew(instr.I32_CONST, 2),
 			instr.MustNew(instr.I32_ADD),
 		})
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.ErrorIs(t, i.Run(context.Background()), interp.ErrYield)
@@ -8347,7 +8376,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.MustNew(instr.I32_CONST, 1),
 			instr.MustNew(instr.SELECT),
 		})
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -8368,7 +8397,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.MustNew(instr.GLOBAL_TEE, 0),
 			instr.MustNew(instr.DROP),
 		}, program.WithGlobals(types.TypeAny()))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -8387,7 +8416,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.MustNew(instr.LOCAL_TEE, 0),
 			instr.MustNew(instr.DROP),
 		}, program.WithLocals(types.TypeI32Array()))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -8441,7 +8470,7 @@ func TestInterpreter_Run(t *testing.T) {
 				released: []int{1},
 			},
 		} {
-			i := interp.New(tt.prog)
+			i := interp.MustNew(tt.prog)
 
 			require.NoError(t, i.Run(context.Background()), tt.name)
 			for _, addr := range tt.released {
@@ -8457,7 +8486,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.MustNew(instr.I32_CONST, 1),
 			instr.MustNew(instr.STRUCT_NEW_DEFAULT, 0),
 		}, program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32()))))
-		i := interp.New(prog, interp.WithStack(1))
+		i := interp.MustNew(prog, interp.WithStack(1))
 		defer i.Close()
 
 		require.ErrorIs(t, i.Run(context.Background()), interp.ErrStackOverflow)
@@ -8471,53 +8500,6 @@ func TestInterpreter_Run(t *testing.T) {
 			opts []interp.Option
 		}{
 			{
-				name: "LOCAL_GET one past the current locals",
-				prog: program.New([]instr.Instruction{
-					instr.MustNew(instr.DROP),
-					instr.MustNew(instr.LOCAL_GET, 0),
-				}, program.WithLocals(types.TypeI32())),
-				opts: []interp.Option{interp.WithTick(1)},
-			},
-			{
-				name: "LOCAL_GET undeclared",
-				prog: program.New([]instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0)}),
-				opts: []interp.Option{interp.WithTick(1)},
-			},
-			{
-				name: "LOCAL_SET one past the current locals",
-				prog: program.New([]instr.Instruction{
-					instr.MustNew(instr.DROP),
-					instr.MustNew(instr.DROP),
-					instr.MustNew(instr.I32_CONST, 1),
-					instr.MustNew(instr.LOCAL_SET, 1),
-				}, program.WithLocals(types.TypeI32(), types.TypeI32())),
-				opts: []interp.Option{interp.WithTick(1)},
-			},
-			{
-				name: "LOCAL_TEE one past the current locals",
-				prog: program.New([]instr.Instruction{
-					instr.MustNew(instr.DROP),
-					instr.MustNew(instr.DROP),
-					instr.MustNew(instr.I32_CONST, 1),
-					instr.MustNew(instr.LOCAL_TEE, 1),
-				}, program.WithLocals(types.TypeI32(), types.TypeI32())),
-				opts: []interp.Option{interp.WithTick(1)},
-			},
-			{
-				name: "GLOBAL_SET undeclared",
-				prog: program.New([]instr.Instruction{
-					instr.MustNew(instr.I32_CONST, 1),
-					instr.MustNew(instr.GLOBAL_SET, 0),
-				}),
-			},
-			{
-				name: "GLOBAL_TEE undeclared",
-				prog: program.New([]instr.Instruction{
-					instr.MustNew(instr.I32_CONST, 1),
-					instr.MustNew(instr.GLOBAL_TEE, 0),
-				}),
-			},
-			{
 				name: "ARRAY_NEW_DEFAULT negative size",
 				prog: program.New([]instr.Instruction{
 					instr.MustNew(instr.I32_CONST, i32operand(-1)),
@@ -8525,7 +8507,7 @@ func TestInterpreter_Run(t *testing.T) {
 				}, program.WithTypes(types.TypeI32Array())),
 			},
 		} {
-			i := interp.New(tt.prog, tt.opts...)
+			i := interp.MustNew(tt.prog, tt.opts...)
 
 			require.ErrorIs(t, i.Run(context.Background()), interp.ErrSegmentationFault, tt.name)
 			require.NoError(t, i.Close(), tt.name)
@@ -8540,7 +8522,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.MustNew(instr.GLOBAL_GET, 1),
 			instr.MustNew(instr.GLOBAL_GET, 2),
 		}, program.WithGlobals(types.TypeI32(), types.TypeF64(), types.TypeAny()))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -8564,7 +8546,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.MustNew(instr.I32_CONST, i32operand(2)),
 			instr.MustNew(instr.I32_ADD),
 		}, program.WithGlobals(types.TypeI32()))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -8590,7 +8572,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_FILL),
 		}, program.WithTypes(types.TypeI32Array(), types.NewArrayType(types.TypeI32Array())))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -8615,7 +8597,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.MustNew(instr.I32_CONST, 6), instr.MustNew(instr.I32_CONST, 7),
 			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
 		}, program.WithConstants(hostFn))
-		i := interp.New(prog, interp.WithTick(1))
+		i := interp.MustNew(prog, interp.WithTick(1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -8640,7 +8622,7 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.MustNew(instr.I32_CONST, 9), instr.MustNew(instr.REF_NEW),
 				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
 			}, program.WithConstants(hostFn))
-			i := interp.New(prog, tt.opts...)
+			i := interp.MustNew(prog, tt.opts...)
 
 			require.NoError(t, i.Run(context.Background()), tt.name)
 			_, err := i.RefCount(2)
@@ -8665,7 +8647,7 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.MustNew(instr.I32_CONST, 9),
 				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
 			}, program.WithConstants(hostFn))
-			i := interp.New(prog, tt.opts...)
+			i := interp.MustNew(prog, tt.opts...)
 
 			require.NoError(t, i.Run(context.Background()), tt.name)
 			rc, err := i.RefCount(1)
@@ -8687,7 +8669,7 @@ func TestInterpreter_Run(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
 		}, program.WithConstants(hostFn))
-		i := interp.New(prog, interp.WithTick(1))
+		i := interp.MustNew(prog, interp.WithTick(1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -8706,7 +8688,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.MustNew(instr.I64_CONST, i64operand(huge)),
 			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
 		}, program.WithConstants(hostFn))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -8728,7 +8710,7 @@ func TestInterpreter_Run(t *testing.T) {
 		}, program.WithConstants(fn))
 
 		maxRC := 0
-		i := interp.New(prog, interp.WithTick(1), interp.WithHook(func(i *interp.Interpreter) error {
+		i := interp.MustNew(prog, interp.WithTick(1), interp.WithHook(func(i *interp.Interpreter) error {
 			if count, hookErr := i.RefCount(2); hookErr == nil && count > maxRC {
 				maxRC = count
 			}
@@ -8753,7 +8735,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.MustNew(instr.CLOSURE_NEW),
 			instr.MustNew(instr.CALL),
 		}, program.WithConstants(fn))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -8777,7 +8759,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.MustNew(instr.CLOSURE_NEW),
 			instr.MustNew(instr.CALL),
 		}, program.WithConstants(fn))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -8929,7 +8911,7 @@ func TestInterpreter_Run(t *testing.T) {
 				want: types.I32(8),
 			},
 		} {
-			i := interp.New(tt.prog, tt.opts...)
+			i := interp.MustNew(tt.prog, tt.opts...)
 
 			require.NoError(t, i.Run(context.Background()), tt.name)
 			got, err := i.Pop()
@@ -9005,7 +8987,7 @@ func TestInterpreter_Run(t *testing.T) {
 				refs: 1,
 			},
 		} {
-			i := interp.New(tt.prog)
+			i := interp.MustNew(tt.prog)
 
 			require.NoError(t, i.Run(context.Background()), tt.name)
 			got, err := i.Pop()
@@ -9058,7 +9040,7 @@ func TestInterpreter_Run(t *testing.T) {
 		var callableStoreErr error
 		var coroutineStoreErr error
 		var functionStoreErr error
-		vm := interp.New(prog,
+		vm := interp.MustNew(prog,
 			interp.WithHeap(8),
 			interp.WithHeapLimit(8),
 			interp.WithTick(1),
@@ -9127,7 +9109,7 @@ func TestInterpreter_Run(t *testing.T) {
 			},
 		} {
 			fn := types.NewFunctionBuilder(nil).
-				Returns(types.TypeI32()).
+				Returns(types.TypeAny()).
 				Append(
 					instr.MustNew(instr.I32_CONST, 1),
 					instr.MustNew(instr.YIELD),
@@ -9141,7 +9123,7 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.MustNew(instr.REF_NULL),
 				instr.MustNew(instr.RESUME),
 				instr.MustNew(instr.CORO_VALUE)}, program.WithConstants(fn, tt.tail))
-			vm := interp.New(prog)
+			vm := interp.MustNew(prog)
 
 			require.NoError(t, vm.Run(context.Background()), tt.name)
 			value, err := vm.Pop()
@@ -9181,7 +9163,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.MustNew(instr.REF_NEW),
 			instr.MustNew(instr.I32_CONST, 5),
 			instr.MustNew(instr.REF_NEW)}, program.WithConstants(fn))
-		vm := interp.New(prog,
+		vm := interp.MustNew(prog,
 			interp.WithHeap(5),
 			interp.WithHeapLimit(5))
 		defer vm.Close()
@@ -9194,7 +9176,7 @@ func TestInterpreter_Run(t *testing.T) {
 func TestInterpreter_Context(t *testing.T) {
 	var got context.Context
 	prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})
-	i := interp.New(prog, interp.WithTick(1), interp.WithHook(func(i *interp.Interpreter) error {
+	i := interp.MustNew(prog, interp.WithTick(1), interp.WithHook(func(i *interp.Interpreter) error {
 		got = i.Context()
 		return nil
 	}))
@@ -9207,7 +9189,7 @@ func TestInterpreter_Context(t *testing.T) {
 
 func TestInterpreter_FP(t *testing.T) {
 	prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.NOP)})
-	i := interp.New(prog)
+	i := interp.MustNew(prog)
 	defer i.Close()
 
 	require.ErrorIs(t, i.Run(context.Background()), interp.ErrYield)
@@ -9216,7 +9198,7 @@ func TestInterpreter_FP(t *testing.T) {
 
 func TestInterpreter_Opcode(t *testing.T) {
 	prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.NOP)})
-	i := interp.New(prog)
+	i := interp.MustNew(prog)
 	defer i.Close()
 
 	require.ErrorIs(t, i.Run(context.Background()), interp.ErrYield)
@@ -9227,7 +9209,7 @@ func TestInterpreter_Opcode(t *testing.T) {
 
 func TestInterpreter_Func(t *testing.T) {
 	prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.NOP)})
-	i := interp.New(prog)
+	i := interp.MustNew(prog)
 	defer i.Close()
 
 	require.ErrorIs(t, i.Run(context.Background()), interp.ErrYield)
@@ -9236,7 +9218,7 @@ func TestInterpreter_Func(t *testing.T) {
 
 func TestInterpreter_IP(t *testing.T) {
 	prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.NOP)})
-	i := interp.New(prog)
+	i := interp.MustNew(prog)
 	defer i.Close()
 
 	require.ErrorIs(t, i.Run(context.Background()), interp.ErrYield)
@@ -9245,7 +9227,7 @@ func TestInterpreter_IP(t *testing.T) {
 
 func TestInterpreter_Frame(t *testing.T) {
 	prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.NOP)})
-	i := interp.New(prog)
+	i := interp.MustNew(prog)
 	defer i.Close()
 
 	require.ErrorIs(t, i.Run(context.Background()), interp.ErrYield)
@@ -9256,7 +9238,7 @@ func TestInterpreter_Frame(t *testing.T) {
 }
 
 func TestInterpreter_Const(t *testing.T) {
-	i := interp.New(program.New(nil, program.WithConstants(types.I32(9))))
+	i := interp.MustNew(program.New(nil, program.WithConstants(types.I32(9))))
 	defer i.Close()
 
 	v, err := i.Const(0)
@@ -9266,7 +9248,7 @@ func TestInterpreter_Const(t *testing.T) {
 
 func TestInterpreter_Global(t *testing.T) {
 	prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 4), instr.MustNew(instr.GLOBAL_SET, 0)}, program.WithGlobals(types.TypeI32()))
-	i := interp.New(prog)
+	i := interp.MustNew(prog)
 	defer i.Close()
 
 	require.NoError(t, i.Run(context.Background()))
@@ -9278,7 +9260,7 @@ func TestInterpreter_Global(t *testing.T) {
 func TestInterpreter_SetGlobal(t *testing.T) {
 	t.Run("sets scalar", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.GLOBAL_SET, 0)}, program.WithGlobals(types.TypeI32()))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -9290,7 +9272,7 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 
 	t.Run("rejects incompatible type", func(t *testing.T) {
 		prog := program.New(nil, program.WithGlobals(types.TypeI32()))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.ErrorIs(t, i.SetGlobal(0, types.BoxF32(1)), interp.ErrTypeMismatch)
@@ -9298,7 +9280,7 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 
 	t.Run("accepts dynamic ref value", func(t *testing.T) {
 		prog := program.New(nil, program.WithGlobals(types.TypeAny()))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.NoError(t, i.SetGlobal(0, types.BoxI32(8)))
@@ -9306,7 +9288,7 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 
 	t.Run("accepts heap backed i64", func(t *testing.T) {
 		prog := program.New(nil, program.WithGlobals(types.TypeI64()))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.I64(1<<60)))
@@ -9318,7 +9300,7 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 
 	t.Run("rejects incompatible concrete ref type", func(t *testing.T) {
 		prog := program.New(nil, program.WithGlobals(types.NewArrayType(types.TypeI32())))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		matching, err := i.Alloc(types.TypedArray[int32]{1})
@@ -9333,7 +9315,7 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 
 	t.Run("preserves same reference", func(t *testing.T) {
 		prog := program.New(nil, program.WithGlobals(types.TypeAny()))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		addr, err := i.Alloc(types.String("value"))
@@ -9347,7 +9329,7 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 
 	t.Run("rejects invalid reference", func(t *testing.T) {
 		prog := program.New(nil, program.WithGlobals(types.TypeAny()))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		before, err := i.Global(0)
@@ -9361,9 +9343,9 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 
 func TestInterpreter_Local(t *testing.T) {
 	prog := program.New([]instr.Instruction{
-		instr.MustNew(instr.I32_CONST, 6), instr.MustNew(instr.LOCAL_SET, 0), instr.MustNew(instr.YIELD),
+		instr.MustNew(instr.I32_CONST, 6), instr.MustNew(instr.LOCAL_SET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.YIELD),
 	}, program.WithLocals(types.TypeI32()))
-	i := interp.New(prog)
+	i := interp.MustNew(prog)
 	defer i.Close()
 
 	require.ErrorIs(t, i.Run(context.Background()), interp.ErrYield)
@@ -9374,8 +9356,8 @@ func TestInterpreter_Local(t *testing.T) {
 
 func TestInterpreter_SetLocal(t *testing.T) {
 	t.Run("sets scalar", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.MustNew(instr.YIELD)}, program.WithLocals(types.TypeI32()))
-		i := interp.New(prog)
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.YIELD)}, program.WithLocals(types.TypeI32()))
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.ErrorIs(t, i.Run(context.Background()), interp.ErrYield)
@@ -9387,7 +9369,7 @@ func TestInterpreter_SetLocal(t *testing.T) {
 
 	t.Run("preserves same reference", func(t *testing.T) {
 		prog := program.New(nil, program.WithLocals(types.TypeAny()))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		addr, err := i.Alloc(types.String("value"))
@@ -9401,7 +9383,7 @@ func TestInterpreter_SetLocal(t *testing.T) {
 
 	t.Run("rejects invalid reference", func(t *testing.T) {
 		prog := program.New(nil, program.WithLocals(types.TypeAny()))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		before, err := i.Local(0)
@@ -9414,7 +9396,7 @@ func TestInterpreter_SetLocal(t *testing.T) {
 }
 
 func TestInterpreter_Load(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	defer i.Close()
 
 	addr, err := i.Alloc(types.I32(5))
@@ -9426,7 +9408,7 @@ func TestInterpreter_Load(t *testing.T) {
 
 func TestInterpreter_Store(t *testing.T) {
 	t.Run("replaces scalar", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.I32(5))
@@ -9438,7 +9420,7 @@ func TestInterpreter_Store(t *testing.T) {
 	})
 
 	t.Run("finalizes replaced value", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		old := &trackedValue{}
@@ -9452,7 +9434,7 @@ func TestInterpreter_Store(t *testing.T) {
 	})
 
 	t.Run("releases replaced child", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		child, err := i.Alloc(types.String("child"))
@@ -9469,7 +9451,7 @@ func TestInterpreter_Store(t *testing.T) {
 	})
 
 	t.Run("ignores same-address ref", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		value := &trackedValue{}
@@ -9485,7 +9467,7 @@ func TestInterpreter_Store(t *testing.T) {
 	})
 
 	t.Run("ignores identical value", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		value := &trackedValue{}
@@ -9498,7 +9480,7 @@ func TestInterpreter_Store(t *testing.T) {
 	})
 
 	t.Run("rejects different-address ref", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		source := &trackedValue{}
@@ -9517,7 +9499,7 @@ func TestInterpreter_Store(t *testing.T) {
 	})
 
 	t.Run("rejects owned pointer", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		source := &trackedValue{}
@@ -9534,7 +9516,7 @@ func TestInterpreter_Store(t *testing.T) {
 	})
 
 	t.Run("rejects invalid ref", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.I32(5))
@@ -9550,7 +9532,7 @@ func TestInterpreter_Store(t *testing.T) {
 
 func TestInterpreter_Alloc(t *testing.T) {
 	t.Run("allocates value", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.String("hi"))
@@ -9561,7 +9543,7 @@ func TestInterpreter_Alloc(t *testing.T) {
 	})
 
 	t.Run("copies boxed reference ownership", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.String("hi"))
@@ -9577,7 +9559,7 @@ func TestInterpreter_Alloc(t *testing.T) {
 	})
 
 	t.Run("copies reference ownership", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.String("hi"))
@@ -9593,7 +9575,7 @@ func TestInterpreter_Alloc(t *testing.T) {
 	})
 
 	t.Run("rejects owned pointer", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		value := &trackedValue{}
@@ -9608,7 +9590,7 @@ func TestInterpreter_Alloc(t *testing.T) {
 	})
 
 	t.Run("rejects pointer read back out of the heap", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(&trackedValue{})
@@ -9625,7 +9607,7 @@ func TestInterpreter_Alloc(t *testing.T) {
 	})
 
 	t.Run("accepts pointer whose slot was released", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		value := &trackedValue{}
@@ -9640,7 +9622,7 @@ func TestInterpreter_Alloc(t *testing.T) {
 }
 
 func TestInterpreter_Retain(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	defer i.Close()
 
 	addr, err := i.Alloc(types.String("hi"))
@@ -9653,7 +9635,7 @@ func TestInterpreter_Retain(t *testing.T) {
 }
 
 func TestInterpreter_Release(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	defer i.Close()
 
 	addr, err := i.Alloc(types.String("hi"))
@@ -9665,7 +9647,7 @@ func TestInterpreter_Release(t *testing.T) {
 
 func TestInterpreter_RefCount(t *testing.T) {
 	t.Run("counts a fresh allocation", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.String("hi"))
@@ -9676,7 +9658,7 @@ func TestInterpreter_RefCount(t *testing.T) {
 	})
 
 	t.Run("tracks retain and release", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.String("hi"))
@@ -9694,7 +9676,7 @@ func TestInterpreter_RefCount(t *testing.T) {
 	})
 
 	t.Run("rejects a dead address", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.String("hi"))
@@ -9708,7 +9690,7 @@ func TestInterpreter_RefCount(t *testing.T) {
 
 func TestInterpreter_HeapLen(t *testing.T) {
 	t.Run("grows to cover a new allocation", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		before := i.HeapLen()
@@ -9719,7 +9701,7 @@ func TestInterpreter_HeapLen(t *testing.T) {
 	})
 
 	t.Run("bounds a scan over live addresses", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		first, err := i.Alloc(types.String("one"))
@@ -9739,7 +9721,7 @@ func TestInterpreter_HeapLen(t *testing.T) {
 	})
 
 	t.Run("keeps a released slot in range until it is reused", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.String("hi"))
@@ -9754,7 +9736,7 @@ func TestInterpreter_HeapLen(t *testing.T) {
 
 func TestInterpreter_Push(t *testing.T) {
 	t.Run("pushes scalar", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.I32(4)))
@@ -9762,7 +9744,7 @@ func TestInterpreter_Push(t *testing.T) {
 	})
 
 	t.Run("rejects owned pointer", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		value := &trackedValue{}
@@ -9776,7 +9758,7 @@ func TestInterpreter_Push(t *testing.T) {
 
 func TestInterpreter_Pop(t *testing.T) {
 	t.Run("scalar", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.I32(4)))
@@ -9786,7 +9768,7 @@ func TestInterpreter_Pop(t *testing.T) {
 	})
 
 	t.Run("reference value releases its heap ownership", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.String("value")))
@@ -9800,7 +9782,7 @@ func TestInterpreter_Pop(t *testing.T) {
 	})
 
 	t.Run("stack underflow", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		_, err := i.Pop()
@@ -9810,7 +9792,7 @@ func TestInterpreter_Pop(t *testing.T) {
 
 func TestInterpreter_PopBoxed(t *testing.T) {
 	t.Run("scalar f64 returns raw box without allocation", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.F64(3.5)))
@@ -9822,7 +9804,7 @@ func TestInterpreter_PopBoxed(t *testing.T) {
 	})
 
 	t.Run("ref kind transfers the reference to the caller", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.String("hello")))
@@ -9838,7 +9820,7 @@ func TestInterpreter_PopBoxed(t *testing.T) {
 	})
 
 	t.Run("stack underflow", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		_, err := i.PopBoxed()
@@ -9848,7 +9830,7 @@ func TestInterpreter_PopBoxed(t *testing.T) {
 
 func TestInterpreter_Peek(t *testing.T) {
 	t.Run("leaves value on stack", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.I32(4)))
@@ -9859,7 +9841,7 @@ func TestInterpreter_Peek(t *testing.T) {
 	})
 
 	t.Run("keeps reference owned by stack", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.String("value")))
@@ -9872,7 +9854,7 @@ func TestInterpreter_Peek(t *testing.T) {
 	})
 
 	t.Run("invalid depth", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		_, err := i.Peek(0)
@@ -9881,7 +9863,7 @@ func TestInterpreter_Peek(t *testing.T) {
 }
 
 func TestInterpreter_Len(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	defer i.Close()
 
 	require.Equal(t, 0, i.Len())
@@ -9892,7 +9874,7 @@ func TestInterpreter_Len(t *testing.T) {
 func TestInterpreter_Flush(t *testing.T) {
 	t.Run("publishes pending samples to the profiler", func(t *testing.T) {
 		profiler := prof.New()
-		i := interp.New(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}), interp.WithProfiler(profiler), interp.WithTick(1))
+		i := interp.MustNew(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}), interp.WithProfiler(profiler), interp.WithTick(1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 
@@ -9903,7 +9885,7 @@ func TestInterpreter_Flush(t *testing.T) {
 	})
 
 	t.Run("does nothing without a profiler", func(t *testing.T) {
-		i := interp.New(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}), interp.WithTick(1))
+		i := interp.MustNew(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}), interp.WithTick(1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 
@@ -9913,7 +9895,7 @@ func TestInterpreter_Flush(t *testing.T) {
 
 func TestInterpreter_Reset(t *testing.T) {
 	t.Run("clears pushed values", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.I32(1)))
@@ -9923,7 +9905,7 @@ func TestInterpreter_Reset(t *testing.T) {
 
 	t.Run("restarts module after unpopped result", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 7)})
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		for range 64 {
@@ -9944,7 +9926,7 @@ func TestInterpreter_Reset(t *testing.T) {
 
 	t.Run("restores declared-kind zero globals", func(t *testing.T) {
 		prog := program.New(nil, program.WithGlobals(types.TypeI32(), types.TypeAny()))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.NoError(t, i.SetGlobal(0, types.BoxI32(9)))
@@ -9960,7 +9942,7 @@ func TestInterpreter_Reset(t *testing.T) {
 
 	t.Run("restores heap baseline after reset", func(t *testing.T) {
 		prog := program.New(nil, program.WithConstants(types.Ref(42)))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.String("temporary")))
@@ -9977,7 +9959,7 @@ func TestInterpreter_Reset(t *testing.T) {
 	})
 
 	t.Run("finalizes and clears dynamic values", func(t *testing.T) {
-		i := interp.New(program.New(nil), interp.WithHeap(4))
+		i := interp.MustNew(program.New(nil), interp.WithHeap(4))
 
 		value := &trackedValue{}
 		addr, err := i.Alloc(value)
@@ -10002,7 +9984,7 @@ func TestInterpreter_Reset(t *testing.T) {
 			[]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0)},
 			program.WithTypes(typ),
 		)
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -10026,7 +10008,7 @@ func TestInterpreter_Reset(t *testing.T) {
 			[]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0)},
 			program.WithTypes(typ),
 		)
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -10050,7 +10032,7 @@ func TestInterpreter_Reset(t *testing.T) {
 
 func TestInterpreter_Marshal(t *testing.T) {
 
-	i := interp.New(program.New(nil), interp.WithCodec(upperCodec(0)))
+	i := interp.MustNew(program.New(nil), interp.WithCodec(upperCodec(0)))
 	defer i.Close()
 
 	got, err := i.Marshal("go")
@@ -10059,7 +10041,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 }
 
 func TestInterpreter_Unmarshal(t *testing.T) {
-	i := interp.New(program.New(nil), interp.WithCodec(upperCodec(0)))
+	i := interp.MustNew(program.New(nil), interp.WithCodec(upperCodec(0)))
 	defer i.Close()
 
 	var dst string
@@ -10068,7 +10050,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 }
 
 func TestInterpreter_Close(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	value := &trackedValue{}
 	_, err := i.Alloc(value)
 	require.NoError(t, err)
@@ -10103,7 +10085,7 @@ func BenchmarkNew(b *testing.B) {
 		b.ResetTimer()
 		for b.Loop() {
 			start := time.Now()
-			vm = interp.New(prog)
+			vm = interp.MustNew(prog)
 			elapsed += time.Since(start)
 			closeErr = vm.Close()
 		}
@@ -10120,7 +10102,7 @@ func BenchmarkNew(b *testing.B) {
 		b.ResetTimer()
 		for b.Loop() {
 			start := time.Now()
-			vm = interp.New(prog)
+			vm = interp.MustNew(prog)
 			elapsed += time.Since(start)
 			closeErr = vm.Close()
 		}
@@ -10141,7 +10123,7 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 			} {
 				b.Run(mode.name, func(b *testing.B) {
 					ctx := context.Background()
-					vm := interp.New(tt.program, mode.opts...)
+					vm := interp.MustNew(tt.program, mode.opts...)
 					b.Cleanup(func() { require.NoError(b, vm.Close()) })
 
 					for range 1 {
@@ -10187,7 +10169,7 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 			}
 			b.Run(runTestName(tt.program), func(b *testing.B) {
 				ctx := context.Background()
-				vm := interp.New(tt.program)
+				vm := interp.MustNew(tt.program)
 				b.Cleanup(func() { require.NoError(b, vm.Close()) })
 
 				require.NoError(b, vm.Run(ctx))
@@ -10236,7 +10218,7 @@ func BenchmarkInterpreter_Reset(b *testing.B) {
 
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
-			vm := interp.New(tt.prog)
+			vm := interp.MustNew(tt.prog)
 			defer vm.Close()
 			require.NoError(b, vm.Run(context.Background()))
 
@@ -10255,7 +10237,7 @@ func BenchmarkInterpreter_Reset(b *testing.B) {
 
 func BenchmarkInterpreter_Push(b *testing.B) {
 	b.Run("Scalar", func(b *testing.B) {
-		vm := interp.New(program.New(nil))
+		vm := interp.MustNew(program.New(nil))
 		defer vm.Close()
 		var pushErr error
 		var elapsed time.Duration
@@ -10272,7 +10254,7 @@ func BenchmarkInterpreter_Push(b *testing.B) {
 	})
 
 	b.Run("Reference", func(b *testing.B) {
-		vm := interp.New(program.New(nil))
+		vm := interp.MustNew(program.New(nil))
 		defer vm.Close()
 		var pushErr error
 		var elapsed time.Duration
@@ -10290,7 +10272,7 @@ func BenchmarkInterpreter_Push(b *testing.B) {
 }
 
 func BenchmarkInterpreter_Pop(b *testing.B) {
-	vm := interp.New(program.New(nil))
+	vm := interp.MustNew(program.New(nil))
 	defer vm.Close()
 	var value types.Value
 	var pushErr, popErr error
@@ -10310,7 +10292,7 @@ func BenchmarkInterpreter_Pop(b *testing.B) {
 }
 
 func BenchmarkInterpreter_PopBoxed(b *testing.B) {
-	vm := interp.New(program.New(nil))
+	vm := interp.MustNew(program.New(nil))
 	defer vm.Close()
 	var value types.Boxed
 	var pushErr, popErr error
@@ -10330,7 +10312,7 @@ func BenchmarkInterpreter_PopBoxed(b *testing.B) {
 }
 
 func BenchmarkInterpreter_Peek(b *testing.B) {
-	vm := interp.New(program.New(nil))
+	vm := interp.MustNew(program.New(nil))
 	defer vm.Close()
 	require.NoError(b, vm.Push(types.I32(42)))
 	var value types.Boxed
@@ -10345,7 +10327,7 @@ func BenchmarkInterpreter_Peek(b *testing.B) {
 }
 
 func BenchmarkInterpreter_Alloc(b *testing.B) {
-	vm := interp.New(program.New(nil))
+	vm := interp.MustNew(program.New(nil))
 	defer vm.Close()
 	var addr int
 	var err error
@@ -10363,7 +10345,7 @@ func BenchmarkInterpreter_Alloc(b *testing.B) {
 }
 
 func BenchmarkInterpreter_Retain(b *testing.B) {
-	vm := interp.New(program.New(nil))
+	vm := interp.MustNew(program.New(nil))
 	defer vm.Close()
 	addr, err := vm.Alloc(types.String("value"))
 	require.NoError(b, err)
@@ -10382,7 +10364,7 @@ func BenchmarkInterpreter_Retain(b *testing.B) {
 }
 
 func BenchmarkInterpreter_Release(b *testing.B) {
-	vm := interp.New(program.New(nil))
+	vm := interp.MustNew(program.New(nil))
 	defer vm.Close()
 	addr, err := vm.Alloc(types.String("value"))
 	require.NoError(b, err)
@@ -10404,7 +10386,7 @@ func BenchmarkInterpreter_Release(b *testing.B) {
 
 func BenchmarkInterpreter_StructGetLocalFusion(b *testing.B) {
 	prog := structSumTree(12, 500)
-	vm := interp.New(prog)
+	vm := interp.MustNew(prog)
 	b.Cleanup(func() { require.NoError(b, vm.Close()) })
 	ctx := context.Background()
 
@@ -10435,7 +10417,7 @@ func BenchmarkInterpreter_ArrayGetContainerFusion(b *testing.B) {
 		{name: "upvalue", prog: arraySumUpvalue(size, repeats)},
 	} {
 		b.Run(tt.name, func(b *testing.B) {
-			vm := interp.New(tt.prog)
+			vm := interp.MustNew(tt.prog)
 			b.Cleanup(func() { require.NoError(b, vm.Close()) })
 			ctx := context.Background()
 
@@ -10469,7 +10451,7 @@ func BenchmarkInterpreter_ArraySetContainerFusion(b *testing.B) {
 		{name: "upvalue", prog: arrayFillUpvalue(size, repeats)},
 	} {
 		b.Run(tt.name, func(b *testing.B) {
-			vm := interp.New(tt.prog)
+			vm := interp.MustNew(tt.prog)
 			b.Cleanup(func() { require.NoError(b, vm.Close()) })
 			ctx := context.Background()
 
@@ -10495,7 +10477,7 @@ func BenchmarkInterpreter_ArraySetContainerFusion(b *testing.B) {
 func BenchmarkInterpreter_StructGetHost(b *testing.B) {
 	const repeats = 10000
 	prog := structGetHostLoop(repeats)
-	vm := interp.New(prog)
+	vm := interp.MustNew(prog)
 	b.Cleanup(func() { require.NoError(b, vm.Close()) })
 	ctx := context.Background()
 
@@ -10548,7 +10530,7 @@ func BenchmarkInterpreter_Marshal(b *testing.B) {
 		{name: "methods", value: &marshalBenchMethods{Count: 7}},
 	} {
 		b.Run(tt.name, func(b *testing.B) {
-			i := interp.New(program.New(nil))
+			i := interp.MustNew(program.New(nil))
 			b.Cleanup(func() { require.NoError(b, i.Close()) })
 
 			_, err := i.Marshal(tt.value)
@@ -10590,7 +10572,7 @@ func BenchmarkInterpreter_Unmarshal(b *testing.B) {
 		{name: "map", value: entries, dst: new(map[string]int32)},
 	} {
 		b.Run(tt.name, func(b *testing.B) {
-			i := interp.New(program.New(nil))
+			i := interp.MustNew(program.New(nil))
 			b.Cleanup(func() { require.NoError(b, i.Close()) })
 
 			value, err := i.Marshal(tt.value)

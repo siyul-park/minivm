@@ -50,6 +50,70 @@ func TestNew(t *testing.T) {
 	require.Equal(t, []types.Type{types.TypeAny()}, prog.Globals)
 }
 
+func TestProgram_Clone(t *testing.T) {
+	t.Run("nil receiver", func(t *testing.T) {
+		var prog *program.Program
+		require.Nil(t, prog.Clone())
+	})
+
+	t.Run("copies program slices", func(t *testing.T) {
+		h := instr.Handler{Start: 0, End: 1, Catch: 2}
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)},
+			program.WithLocals(types.TypeI32()),
+			program.WithGlobals(types.TypeI64()),
+			program.WithConstants(types.I32(1)),
+			program.WithTypes(types.TypeF32()),
+			program.WithHandlers(h),
+		)
+		clone := prog.Clone()
+		require.Equal(t, prog, clone)
+
+		clone.Code[0] = byte(instr.DROP)
+		clone.Locals[0] = types.TypeI64()
+		clone.Globals[0] = types.TypeI32()
+		clone.Constants[0] = types.I32(2)
+		clone.Types[0] = types.TypeF64()
+		clone.Handlers[0].Catch = 9
+		require.Equal(t, byte(instr.NOP), prog.Code[0])
+		require.Equal(t, types.TypeI32(), prog.Locals[0])
+		require.Equal(t, types.TypeI64(), prog.Globals[0])
+		require.Equal(t, types.I32(1), prog.Constants[0])
+		require.Equal(t, types.TypeF32(), prog.Types[0])
+		require.Equal(t, 2, prog.Handlers[0].Catch)
+	})
+
+	t.Run("copies function constants", func(t *testing.T) {
+		typ := &types.FunctionType{Returns: []types.Type{types.TypeI32()}}
+		fn := &types.Function{
+			Typ:      typ,
+			Locals:   []types.Type{types.TypeI32()},
+			Captures: []types.Type{types.TypeI64()},
+			Code:     instr.Marshal([]instr.Instruction{instr.MustNew(instr.NOP)}),
+			Handlers: []instr.Handler{{Start: 0, End: 1, Catch: 2}},
+		}
+		prog := program.New(nil, program.WithConstants(fn))
+		clone := prog.Clone()
+
+		got, ok := clone.Constants[0].(*types.Function)
+		require.True(t, ok)
+		require.NotSame(t, fn, got)
+		require.Same(t, typ, got.Typ)
+		require.Equal(t, fn, got)
+
+		got.Code[0] = byte(instr.DROP)
+		got.Locals[0] = types.TypeI64()
+		got.Captures[0] = types.TypeI32()
+		got.Handlers[0].Catch = 9
+		require.Equal(t, byte(instr.NOP), fn.Code[0])
+		require.Equal(t, types.TypeI32(), fn.Locals[0])
+		require.Equal(t, types.TypeI64(), fn.Captures[0])
+		require.Equal(t, 2, fn.Handlers[0].Catch)
+
+		fn.Code[0] = byte(instr.RETURN)
+		require.Equal(t, byte(instr.DROP), got.Code[0])
+	})
+}
+
 func TestProgram_String(t *testing.T) {
 	t.Run("with code", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})

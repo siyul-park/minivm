@@ -84,11 +84,20 @@ var (
 	ErrHandlerRange = errors.New("invalid exception handler range")
 	// ErrHandlerTarget reports an exception handler whose catch target or depth is invalid.
 	ErrHandlerTarget = errors.New("invalid exception handler target")
+	// ErrNil reports a nil program.
+	ErrNil = errors.New("nil program")
+	// ErrNestedFunction reports a function inside an array, map, or struct literal constant.
+	ErrNestedFunction = errors.New("function nested in a literal constant")
 )
 
 // Verify checks every function slot of prog and returns the first violation as
-// a *VerifyError, or nil when the program is well-formed.
+// a *VerifyError, or nil when the program is well-formed. A nil prog returns
+// ErrNil; a function inside a literal constant returns an error wrapping
+// ErrNestedFunction, since only top-level function constants are executable.
 func Verify(prog *Program) error {
+	if prog == nil {
+		return ErrNil
+	}
 	top := &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
 	if err := newChecker(prog, 0, top).run(); err != nil {
 		return err
@@ -96,6 +105,9 @@ func Verify(prog *Program) error {
 	for j, c := range prog.Constants {
 		fn, ok := c.(*types.Function)
 		if !ok {
+			if nested(c) {
+				return fmt.Errorf("%w: constant %d", ErrNestedFunction, j)
+			}
 			continue
 		}
 		if err := newChecker(prog, j+1, fn).run(); err != nil {
@@ -526,7 +538,7 @@ func (c *checker) step(st *stack, inst instr.Instruction, op instr.Opcode, ip in
 		st.drop(len(t.Fields))
 		st.push(slot{kind: types.KindRef, typ: t})
 		return false, nil
-	case instr.MAP_NEW, instr.CLOSURE_NEW:
+	case instr.ARRAY_NEW, instr.MAP_NEW, instr.CLOSURE_NEW:
 		return true, nil
 	}
 
@@ -699,4 +711,25 @@ func unify(a, b types.Kind) types.Kind {
 		return a
 	}
 	return anyKind
+}
+
+// nested reports whether v is a literal holding a function at any depth.
+func nested(v types.Value) bool {
+	var elems []types.Value
+	switch v := v.(type) {
+	case *types.Function:
+		return true
+	case *types.ArrayLiteral:
+		elems = v.Elems
+	case *types.MapLiteral:
+		elems = append(append(elems, v.Keys...), v.Values...)
+	case *types.StructLiteral:
+		elems = v.Fields
+	}
+	for _, elem := range elems {
+		if nested(elem) {
+			return true
+		}
+	}
+	return false
 }

@@ -2,6 +2,7 @@ package program
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/siyul-park/minivm/types"
@@ -68,6 +69,37 @@ func New(instrs []instr.Instruction, options ...func(*Program)) *Program {
 		opt(p)
 	}
 	return p
+}
+
+// Clone returns a snapshot that shares no mutable bytecode with p: Code, Locals,
+// Globals, Constants, Types, and Handlers get fresh slices, and every
+// *types.Function constant is replaced by a copy owning its Code, Locals,
+// Captures, and Handlers. Type objects, including each function's signature,
+// stay shared and must not be mutated. A nil receiver returns nil.
+func (p *Program) Clone() *Program {
+	if p == nil {
+		return nil
+	}
+	c := &Program{
+		Code:      slices.Clone(p.Code),
+		Locals:    slices.Clone(p.Locals),
+		Globals:   slices.Clone(p.Globals),
+		Constants: slices.Clone(p.Constants),
+		Types:     slices.Clone(p.Types),
+		Handlers:  slices.Clone(p.Handlers),
+	}
+	for i, v := range c.Constants {
+		if fn, ok := v.(*types.Function); ok {
+			c.Constants[i] = &types.Function{
+				Typ:      fn.Typ,
+				Locals:   slices.Clone(fn.Locals),
+				Captures: slices.Clone(fn.Captures),
+				Code:     slices.Clone(fn.Code),
+				Handlers: slices.Clone(fn.Handlers),
+			}
+		}
+	}
+	return c
 }
 
 func (p *Program) String() string {

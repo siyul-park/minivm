@@ -123,7 +123,7 @@ func TestCompactPass_Run(t *testing.T) {
 			actual := tt.program
 			var want types.Value
 			if tt.run {
-				before := interp.New(actual, interp.WithTick(1))
+				before := interp.MustNew(actual, interp.WithTick(1))
 				defer before.Close()
 				require.NoError(t, before.Run(context.Background()))
 				var err error
@@ -141,7 +141,7 @@ func TestCompactPass_Run(t *testing.T) {
 				return
 			}
 
-			after := interp.New(actual, interp.WithTick(1))
+			after := interp.MustNew(actual, interp.WithTick(1))
 			defer after.Close()
 			require.NoError(t, after.Run(context.Background()))
 			got, err := after.Pop()

@@ -70,7 +70,7 @@ func TestWithMarshaler(t *testing.T) {
 		}))
 
 	t.Run("registered type", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry(millis)
 		defer i.Close()
 
@@ -80,7 +80,7 @@ func TestWithMarshaler(t *testing.T) {
 	})
 
 	t.Run("declared type drives the enclosing layout", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry(millis)
 		defer i.Close()
 
@@ -107,7 +107,7 @@ func TestWithUnmarshaler(t *testing.T) {
 		}))
 
 	t.Run("registered type", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry(millis)
 		defer i.Close()
 
@@ -117,7 +117,7 @@ func TestWithUnmarshaler(t *testing.T) {
 	})
 
 	t.Run("nested in a struct", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry(millis)
 		defer i.Close()
 		src := types.NewStruct(
@@ -132,7 +132,7 @@ func TestWithUnmarshaler(t *testing.T) {
 	})
 
 	t.Run("unregistered direction is unsupported", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry(interp.WithMarshaler(
 			reflect.TypeFor[codecMillis](), types.TypeI64(),
 			interp.MarshalerFunc(func(_ *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
@@ -147,7 +147,7 @@ func TestWithUnmarshaler(t *testing.T) {
 
 func TestNewRegistry(t *testing.T) {
 	t.Run("standard library defaults", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
@@ -157,7 +157,7 @@ func TestNewRegistry(t *testing.T) {
 	})
 
 	t.Run("registration replaces a default", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry(interp.WithMarshaler(
 			reflect.TypeFor[time.Time](), types.TypeI64(),
 			interp.MarshalerFunc(func(_ *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
@@ -187,7 +187,7 @@ func TestRegistry_Marshal(t *testing.T) {
 			{name: "nil pointer", value: nilCount, want: types.Ref(0)},
 			{name: "value marshaler", value: marshalCustom(9), want: types.I32(9)},
 		} {
-			i := interp.New(program.New(nil))
+			i := interp.MustNew(program.New(nil))
 			r := interp.NewRegistry()
 
 			value, err := r.Marshal(i, tt.value)
@@ -199,7 +199,7 @@ func TestRegistry_Marshal(t *testing.T) {
 
 	t.Run("function receives active context", func(t *testing.T) {
 		var got context.Context
-		setup := interp.New(program.New(nil))
+		setup := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		fn, err := r.Marshal(setup, func(ctx context.Context) int32 {
 			got = ctx
@@ -209,7 +209,7 @@ func TestRegistry_Marshal(t *testing.T) {
 		require.NoError(t, setup.Close())
 
 		prog := program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(fn))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 		ctx := context.WithValue(context.Background(), marshalContextKey(0), "value")
 		require.NoError(t, i.Run(ctx))
@@ -220,7 +220,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 
 	t.Run("a method receives the active context", func(t *testing.T) {
-		setup := interp.New(program.New(nil))
+		setup := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer setup.Close()
 		obj, err := r.Marshal(setup, marshalHostFields{})
@@ -234,7 +234,7 @@ func TestRegistry_Marshal(t *testing.T) {
 			instr.MustNew(instr.CONST_GET, 1),
 			instr.MustNew(instr.CONST_GET, 0),
 			instr.MustNew(instr.CALL)}, program.WithConstants(fn, obj))
-		i := interp.New(prog)
+		i := interp.MustNew(prog)
 		defer i.Close()
 		ctx := context.WithValue(context.Background(), marshalContextKey(0), "value")
 		require.NoError(t, i.Run(ctx))
@@ -244,7 +244,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 
 	t.Run("marshaled function is shared and race-safe across interpreters", func(t *testing.T) {
-		setup := interp.New(program.New(nil))
+		setup := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		v, err := r.Marshal(setup, func(a, b int32) int32 { return a + b })
 		require.NoError(t, err)
@@ -271,9 +271,9 @@ func TestRegistry_Marshal(t *testing.T) {
 				instr.MustNew(instr.CALL)},
 			program.WithConstants(fn))
 
-		i1 := interp.New(prog1)
+		i1 := interp.MustNew(prog1)
 		defer i1.Close()
-		i2 := interp.New(prog2)
+		i2 := interp.MustNew(prog2)
 		defer i2.Close()
 
 		var wg sync.WaitGroup
@@ -301,7 +301,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 
 	t.Run("nested collections", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := struct {
@@ -342,7 +342,7 @@ func TestRegistry_Marshal(t *testing.T) {
 			{name: "a pointer with methods is a view", value: &codecCounted{}, want: &interp.HostStruct{}},
 			{name: "an unexported field forces a view", value: marshalHostFields{}, want: &interp.HostStruct{}},
 		} {
-			i := interp.New(program.New(nil))
+			i := interp.MustNew(program.New(nil))
 			r := interp.NewRegistry()
 			defer i.Close()
 
@@ -353,7 +353,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 
 	t.Run("a struct with unexported state becomes a live view", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
@@ -372,7 +372,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 
 	t.Run("a method reached through a host value mutates the caller", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := &marshalHostFields{}
@@ -390,7 +390,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 
 	t.Run("a marshaled value views the conversion's copy", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := marshalHostFields{}
@@ -454,15 +454,19 @@ func TestRegistry_Marshal(t *testing.T) {
 			},
 		} {
 			prog := program.New(
-				[]instr.Instruction{tc.key, instr.MustNew(instr.MAP_GET)},
+				[]instr.Instruction{instr.MustNew(instr.GLOBAL_GET, 0), tc.key, instr.MustNew(instr.MAP_GET)},
+				program.WithGlobals(types.TypeAny()),
 				program.WithConstants(types.String("a")))
-			i := interp.New(prog)
+			i := interp.MustNew(prog)
 			r := interp.NewRegistry()
 			defer i.Close()
 
 			value, err := r.Marshal(i, tc.value)
 			require.NoError(t, err, tc.name)
 			require.NoError(t, i.Push(value), tc.name)
+			boxed, err := i.PopBoxed()
+			require.NoError(t, err, tc.name)
+			require.NoError(t, i.SetGlobal(0, boxed), tc.name)
 			require.NoError(t, i.Run(context.Background()), tc.name)
 
 			got, err := i.Pop()
@@ -474,7 +478,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	t.Run("a scalar key is stored without a heap reference", func(t *testing.T) {
 		// One heap slot is the permanent null, so this interpreter can allocate
 		// nothing: a key routed through a slot would exhaust the heap here.
-		i := interp.New(program.New(nil), interp.WithHeapLimit(1))
+		i := interp.MustNew(program.New(nil), interp.WithHeapLimit(1))
 		r := interp.NewRegistry()
 		defer i.Close()
 
@@ -486,7 +490,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 
 	t.Run("every scalar key kind reaches its entry", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		text, err := i.Alloc(types.String("a"))
@@ -515,7 +519,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 
 	t.Run("a map key that converts one way only cannot be looked up", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry(interp.WithMarshaler(
 			reflect.TypeFor[codecWide](), types.TypeI32(),
 			interp.MarshalerFunc(func(*interp.Encoder, unsafe.Pointer) (types.Value, error) {
@@ -533,7 +537,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 
 	t.Run("a nil pointer key is a key like any other", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
@@ -549,7 +553,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 
 	t.Run("a host view reads a field holding a VM value", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
@@ -573,7 +577,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 
 	t.Run("a registered marshaler wins over the host rule", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry(interp.WithMarshaler(
 			reflect.TypeFor[codecHeld](), types.TypeI32(),
 			interp.MarshalerFunc(func(_ *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
@@ -587,7 +591,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 
 	t.Run("a method runs against a struct guest code built", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		fn, err := r.Marshal(i, (*marshalHostFields).Bump)
@@ -605,7 +609,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 
 	t.Run("a marshaled alias keeps its target alive", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		addr, err := i.Alloc(types.String("payload"))
@@ -629,7 +633,7 @@ func TestRegistry_Marshal(t *testing.T) {
 			// converting, so only a copying conversion can strand a reference.
 			{name: "struct", value: codecStrings{A: "aaa", B: "bbb", C: "ccc"}},
 			{name: "array", value: [3]string{"aaa", "bbb", "ccc"}}} {
-			i := interp.New(program.New(nil), interp.WithHeapLimit(3))
+			i := interp.MustNew(program.New(nil), interp.WithHeapLimit(3))
 			r := interp.NewRegistry()
 
 			_, err := r.Marshal(i, tt.value)
@@ -643,7 +647,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 
 	t.Run("recursive type", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := &codecNode{Value: 1, Next: &codecNode{Value: 2}}
@@ -658,7 +662,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 
 	t.Run("cycle", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
@@ -681,7 +685,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 
 	t.Run("unsupported type", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
@@ -690,7 +694,7 @@ func TestRegistry_Marshal(t *testing.T) {
 	})
 
 	t.Run("shared nested type", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
@@ -708,9 +712,9 @@ func TestRegistry_Marshal(t *testing.T) {
 
 	t.Run("shared nested type across interpreters", func(t *testing.T) {
 		r := interp.NewRegistry()
-		i1 := interp.New(program.New(nil))
+		i1 := interp.MustNew(program.New(nil))
 		defer i1.Close()
-		i2 := interp.New(program.New(nil))
+		i2 := interp.MustNew(program.New(nil))
 		defer i2.Close()
 
 		var wg sync.WaitGroup
@@ -750,7 +754,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 			{name: "value unmarshaler", value: types.I32(11), dst: &custom, want: marshalCustom(11)},
 			{name: "standard library default", value: types.I64(123), dst: &stamp, want: time.Unix(0, 123)},
 		} {
-			i := interp.New(program.New(nil))
+			i := interp.MustNew(program.New(nil))
 			r := interp.NewRegistry()
 
 			require.NoError(t, r.Unmarshal(i, tt.value, tt.dst), tt.name)
@@ -760,7 +764,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("a boxed ref decodes as the value it names", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
@@ -783,7 +787,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("a function the heap already holds keeps its slot", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
@@ -798,7 +802,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("VM function", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{
@@ -819,7 +823,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 
 	t.Run("VM function context", func(t *testing.T) {
 		var got context.Context
-		i := interp.New(program.New(nil), interp.WithTick(2), interp.WithHook(func(i *interp.Interpreter) error {
+		i := interp.MustNew(program.New(nil), interp.WithTick(2), interp.WithHook(func(i *interp.Interpreter) error {
 			got = i.Context()
 			return nil
 		}))
@@ -856,7 +860,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 
 	t.Run("VM function runs the hook once per instruction of the call under WithTick(1)", func(t *testing.T) {
 		calls := 0
-		i := interp.New(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}), interp.WithTick(1), interp.WithHook(func(*interp.Interpreter) error {
+		i := interp.MustNew(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}), interp.WithTick(1), interp.WithHook(func(*interp.Interpreter) error {
 			calls++
 			return nil
 		}))
@@ -876,7 +880,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("VM function canceled context", func(t *testing.T) {
-		i := interp.New(program.New(nil), interp.WithTick(1))
+		i := interp.MustNew(program.New(nil), interp.WithTick(1))
 		r := interp.NewRegistry()
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
@@ -891,7 +895,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("VM function context in any position is host-only", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		// The VM signature carries the i32 alone: a context.Context stays on
@@ -908,7 +912,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("VM closure with context", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
@@ -927,7 +931,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("function ref", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
@@ -942,7 +946,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("runtime error", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
@@ -960,7 +964,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("signature mismatch", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).MustBuild()
@@ -969,7 +973,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		require.ErrorIs(t, r.Unmarshal(i, fn, &call), interp.ErrTypeMismatch)
 	})
 	t.Run("a host value round-trips unexported state", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := marshalHostFields{Count: 7}
@@ -1000,7 +1004,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 			{name: "overflow", value: types.I64(256), dst: &i8, err: interp.ErrValueOverflow},
 			{name: "type mismatch", value: types.String("x"), dst: &i32, err: interp.ErrTypeMismatch},
 		} {
-			i := interp.New(program.New(nil))
+			i := interp.MustNew(program.New(nil))
 			r := interp.NewRegistry()
 
 			require.ErrorIs(t, r.Unmarshal(i, tt.value, tt.dst), tt.err, tt.name)

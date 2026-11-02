@@ -39,7 +39,7 @@ func TestKernels(t *testing.T) {
 				{name: "jit"},
 			} {
 				t.Run(mode.name, func(t *testing.T) {
-					vm := interp.New(prog, mode.opts...)
+					vm := interp.MustNew(prog, mode.opts...)
 					defer vm.Close()
 					const minimum = 5
 					const maximum = 50
@@ -81,7 +81,7 @@ func benchmarkVM(b *testing.B, prog *program.Program, want types.Value) {
 		{name: "jit"},
 	} {
 		b.Run(mode.name, func(b *testing.B) {
-			vm := interp.New(prog, mode.opts...)
+			vm := interp.MustNew(prog, mode.opts...)
 			defer vm.Close()
 			ctx := context.Background()
 

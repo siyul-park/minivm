@@ -14,7 +14,7 @@ import (
 type decodeCelsius int32
 
 func TestUnmarshalerFunc_Unmarshal(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	defer i.Close()
 
 	u := interp.UnmarshalerFunc(func(_ *interp.Decoder, val types.Value, p unsafe.Pointer) error {
@@ -33,7 +33,7 @@ func TestUnmarshalerFunc_Unmarshal(t *testing.T) {
 }
 
 func TestDecoder_Interp(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	defer i.Close()
 
 	var got *interp.Interpreter
@@ -54,7 +54,7 @@ func TestDecoder_Decode(t *testing.T) {
 	// The injected decoder resolves dependencies through the registry that
 	// started the conversion, so a registration on the dependency applies to
 	// the delegating unmarshaler too.
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	defer i.Close()
 
 	r := interp.NewRegistry(

@@ -144,6 +144,16 @@ const (
 
 const heapRunway = 64
 
+// MustNew is New for known-good programs, such as tests and fixtures. It
+// panics if prog is rejected.
+func MustNew(prog *program.Program, opts ...Option) *Interpreter {
+	i, err := New(prog, opts...)
+	if err != nil {
+		panic(err)
+	}
+	return i
+}
+
 // WithHook installs an execution hook.
 func WithHook(fn func(*Interpreter) error) Option {
 	return func(o *option) { o.hook = fn }
@@ -204,179 +214,18 @@ func WithThreshold(n int) Option {
 	return func(o *option) { o.threshold = n }
 }
 
-// New builds an interpreter for prog. It trusts prog to be well-formed; run
-// program.Verify(prog) beforehand to reject malformed or untrusted bytecode.
-func New(prog *program.Program, opts ...Option) *Interpreter {
-	opt := option{
-		frame: 128,
-		stack: 1024,
-		heap:  128,
-		tick:  128,
+// New builds an interpreter for prog. It verifies and runs a snapshot of prog
+// (program.Program.Clone), so mutating prog afterward, including the bytecode of
+// its function constants, does not change execution. A malformed program
+// returns the *program.VerifyError and a nil prog returns
+// program.ErrNil. The snapshot shares type objects with prog, such as
+// Types and function signatures; they must not be mutated.
+func New(prog *program.Program, opts ...Option) (*Interpreter, error) {
+	snap, err := snapshot(prog)
+	if err != nil {
+		return nil, err
 	}
-	for _, o := range opts {
-		o(&opt)
-	}
-
-	// Raise each capacity below its minimum to that minimum.
-	opt.frame = max(opt.frame, 1)
-	opt.stack = max(opt.stack, 1)
-	opt.heap = max(opt.heap, 0)
-	opt.tick = max(opt.tick, 1)
-
-	activeCodec := opt.codec
-	if activeCodec == nil {
-		activeCodec = NewRegistry()
-	}
-	samples := prof.NewCollector()
-
-	var fuel int64 = -1
-	if opt.fuel > 0 {
-		ticks := (opt.fuel-1)/uint64(opt.tick) + 1
-		fuel = int64(min(ticks, 1<<63-1))
-	}
-
-	i := &Interpreter{
-		hook:        opt.hook,
-		codec:       activeCodec,
-		profiler:    opt.profiler,
-		samples:     samples,
-		types:       prog.Types,
-		constants:   make([]types.Boxed, len(prog.Constants)),
-		globals:     make([]types.Boxed, len(prog.Globals)),
-		globalTypes: prog.Globals,
-		instrs:      make([][]byte, len(prog.Constants)+1),
-		code:        make([][]func(*Interpreter), len(prog.Constants)+1),
-		zeros:       make([][]types.Boxed, len(prog.Constants)+1),
-		coros:       make([]bool, len(prog.Constants)+1),
-		handlers:    make([][]instr.Handler, len(prog.Constants)+1),
-		dynamic:     map[int]bool{},
-		frames:      make([]frame, opt.frame),
-		stack:       make([]types.Boxed, opt.stack),
-		heap:        make([]types.Value, 0, opt.heap),
-		owners:      make(map[types.Value]int),
-		free:        make([]int, 0, opt.heap),
-		rc:          make([]int, 0, opt.heap),
-		tick:        opt.tick,
-		fuel:        fuel,
-		gas:         fuel,
-		limit:       opt.maxHeap,
-	}
-	i.alloc(types.Null)
-
-	// Constants load into the heap through a queue, so nested values are
-	// allocated before the slot that holds them is filled.
-	queue := append([]types.Value(nil), prog.Constants...)
-	slots := make([]func(types.Boxed), len(queue))
-	for index := range queue {
-		slots[index] = func(value types.Boxed) {
-			i.constants[index] = value
-		}
-	}
-
-	dedup := make(map[string]types.Ref)
-	for head := 0; head < len(queue); head++ {
-		value := queue[head]
-		slot := slots[head]
-		var boxed types.Boxed
-		switch value := value.(type) {
-		case types.String:
-			ref, seen := dedup[string(value)]
-			if !seen {
-				ref = types.Ref(i.alloc(value))
-				dedup[string(value)] = ref
-			}
-			boxed = types.BoxRef(int(ref))
-		case *types.ArrayLiteral:
-			array := types.NewArray(value.Typ, make([]types.Boxed, len(value.Elems))...)
-			boxed = types.BoxRef(i.alloc(array))
-			for index, elem := range value.Elems {
-				queue = append(queue, elem)
-				slots = append(slots, func(value types.Boxed) {
-					array.Elems[index] = value
-				})
-			}
-		case *types.MapLiteral:
-			m := types.NewMap(value.Typ)
-			boxed = types.BoxRef(i.alloc(m))
-			for index, key := range value.Keys {
-				var mapKey types.MapKey
-				var storedKey types.Boxed
-				queue = append(queue, key)
-				slots = append(slots, func(value types.Boxed) {
-					mapKey, storedKey = i.mapKey(value)
-				})
-				queue = append(queue, value.Values[index])
-				slots = append(slots, func(value types.Boxed) {
-					old, replaced := m.Set(mapKey, types.MapEntry{Key: storedKey, Value: value})
-					if replaced {
-						i.releaseBox(old.Key)
-						i.releaseBox(old.Value)
-					}
-				})
-			}
-		case *types.StructLiteral:
-			structure := types.NewStruct(value.Typ)
-			boxed = types.BoxRef(i.alloc(structure))
-			for index, elem := range value.Fields {
-				queue = append(queue, elem)
-				slots = append(slots, func(value types.Boxed) {
-					structure.SetField(index, value)
-				})
-			}
-		default:
-			boxed = i.box(value)
-		}
-		slot(boxed)
-		if fn, ok := value.(*types.Function); ok {
-			addr := boxed.Ref()
-			i.instrs[addr] = fn.Code
-			i.handlers[addr] = fn.Handlers
-			i.coros[addr] = i.yields(fn.Code)
-		}
-	}
-
-	i.base = len(i.heap)
-	i.recount()
-	i.target = max(cap(i.heap), i.base+heapRunway)
-	if i.limit > 0 {
-		i.target = max(min(i.target, i.limit), i.base)
-	}
-
-	i.module = &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
-	i.instrs[0] = prog.Code
-	i.zeros[0] = types.Zeros(prog.Locals)
-	i.handlers[0] = prog.Handlers
-	i.coros[0] = i.yields(prog.Code)
-
-	i.seed()
-
-	i.code[0] = i.compile(i.module, i.tick == 1)
-
-	for j, v := range prog.Constants {
-		if fn, ok := v.(*types.Function); ok {
-			i.bind(i.constants[j].Ref(), fn, false)
-		}
-	}
-
-	i.frames[0].code = i.code[0]
-	i.frames[0].bp = i.sp
-	if locals := len(i.zeros[0]); locals > 0 {
-		copy(i.stack[i.sp:i.sp+locals], i.zeros[0])
-		i.sp += locals
-	}
-	i.fp = 1
-	i.fr = &i.frames[0]
-	i.retain(0)
-
-	i.threshold = -1
-	if jitEnabled(opt) {
-		i.threshold = opt.threshold
-		if opt.threshold == 0 {
-			i.heat = dormancy
-		}
-	}
-
-	return i
+	return build(snap, opts...), nil
 }
 
 // Run executes the program until it returns or exits.
@@ -810,6 +659,191 @@ func (i *Interpreter) Close() error {
 		return nil
 	}
 	return i.native.close()
+}
+
+// build constructs an interpreter that owns prog, which the caller has
+// verified and no one else mutates.
+// snapshot returns a verified copy of prog, the only program New and NewPool
+// execute.
+func snapshot(prog *program.Program) (*program.Program, error) {
+	snap := prog.Clone()
+	if err := program.Verify(snap); err != nil {
+		return nil, err
+	}
+	return snap, nil
+}
+
+func build(prog *program.Program, opts ...Option) *Interpreter {
+	opt := option{
+		frame: 128,
+		stack: 1024,
+		heap:  128,
+		tick:  128,
+	}
+	for _, o := range opts {
+		o(&opt)
+	}
+
+	// Raise each capacity below its minimum to that minimum.
+	opt.frame = max(opt.frame, 1)
+	opt.stack = max(opt.stack, 1)
+	opt.heap = max(opt.heap, 0)
+	opt.tick = max(opt.tick, 1)
+
+	activeCodec := opt.codec
+	if activeCodec == nil {
+		activeCodec = NewRegistry()
+	}
+	samples := prof.NewCollector()
+
+	var fuel int64 = -1
+	if opt.fuel > 0 {
+		ticks := (opt.fuel-1)/uint64(opt.tick) + 1
+		fuel = int64(min(ticks, 1<<63-1))
+	}
+
+	i := &Interpreter{
+		hook:        opt.hook,
+		codec:       activeCodec,
+		profiler:    opt.profiler,
+		samples:     samples,
+		types:       prog.Types,
+		constants:   make([]types.Boxed, len(prog.Constants)),
+		globals:     make([]types.Boxed, len(prog.Globals)),
+		globalTypes: prog.Globals,
+		instrs:      make([][]byte, len(prog.Constants)+1),
+		code:        make([][]func(*Interpreter), len(prog.Constants)+1),
+		zeros:       make([][]types.Boxed, len(prog.Constants)+1),
+		coros:       make([]bool, len(prog.Constants)+1),
+		handlers:    make([][]instr.Handler, len(prog.Constants)+1),
+		dynamic:     map[int]bool{},
+		frames:      make([]frame, opt.frame),
+		stack:       make([]types.Boxed, opt.stack),
+		heap:        make([]types.Value, 0, opt.heap),
+		owners:      make(map[types.Value]int),
+		free:        make([]int, 0, opt.heap),
+		rc:          make([]int, 0, opt.heap),
+		tick:        opt.tick,
+		fuel:        fuel,
+		gas:         fuel,
+		limit:       opt.maxHeap,
+	}
+	i.alloc(types.Null)
+
+	// Constants load into the heap through a queue, so nested values are
+	// allocated before the slot that holds them is filled.
+	queue := append([]types.Value(nil), prog.Constants...)
+	slots := make([]func(types.Boxed), len(queue))
+	for index := range queue {
+		slots[index] = func(value types.Boxed) {
+			i.constants[index] = value
+		}
+	}
+
+	dedup := make(map[string]types.Ref)
+	for head := 0; head < len(queue); head++ {
+		value := queue[head]
+		slot := slots[head]
+		var boxed types.Boxed
+		switch value := value.(type) {
+		case types.String:
+			ref, seen := dedup[string(value)]
+			if !seen {
+				ref = types.Ref(i.alloc(value))
+				dedup[string(value)] = ref
+			}
+			boxed = types.BoxRef(int(ref))
+		case *types.ArrayLiteral:
+			array := types.NewArray(value.Typ, make([]types.Boxed, len(value.Elems))...)
+			boxed = types.BoxRef(i.alloc(array))
+			for index, elem := range value.Elems {
+				queue = append(queue, elem)
+				slots = append(slots, func(value types.Boxed) {
+					array.Elems[index] = value
+				})
+			}
+		case *types.MapLiteral:
+			m := types.NewMap(value.Typ)
+			boxed = types.BoxRef(i.alloc(m))
+			for index, key := range value.Keys {
+				var mapKey types.MapKey
+				var storedKey types.Boxed
+				queue = append(queue, key)
+				slots = append(slots, func(value types.Boxed) {
+					mapKey, storedKey = i.mapKey(value)
+				})
+				queue = append(queue, value.Values[index])
+				slots = append(slots, func(value types.Boxed) {
+					old, replaced := m.Set(mapKey, types.MapEntry{Key: storedKey, Value: value})
+					if replaced {
+						i.releaseBox(old.Key)
+						i.releaseBox(old.Value)
+					}
+				})
+			}
+		case *types.StructLiteral:
+			structure := types.NewStruct(value.Typ)
+			boxed = types.BoxRef(i.alloc(structure))
+			for index, elem := range value.Fields {
+				queue = append(queue, elem)
+				slots = append(slots, func(value types.Boxed) {
+					structure.SetField(index, value)
+				})
+			}
+		default:
+			boxed = i.box(value)
+		}
+		slot(boxed)
+		if fn, ok := value.(*types.Function); ok {
+			addr := boxed.Ref()
+			i.instrs[addr] = fn.Code
+			i.handlers[addr] = fn.Handlers
+			i.coros[addr] = i.yields(fn.Code)
+		}
+	}
+
+	i.base = len(i.heap)
+	i.recount()
+	i.target = max(cap(i.heap), i.base+heapRunway)
+	if i.limit > 0 {
+		i.target = max(min(i.target, i.limit), i.base)
+	}
+
+	i.module = &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
+	i.instrs[0] = prog.Code
+	i.zeros[0] = types.Zeros(prog.Locals)
+	i.handlers[0] = prog.Handlers
+	i.coros[0] = i.yields(prog.Code)
+
+	i.seed()
+
+	i.code[0] = i.compile(i.module, i.tick == 1)
+
+	for j, v := range prog.Constants {
+		if fn, ok := v.(*types.Function); ok {
+			i.bind(i.constants[j].Ref(), fn, false)
+		}
+	}
+
+	i.frames[0].code = i.code[0]
+	i.frames[0].bp = i.sp
+	if locals := len(i.zeros[0]); locals > 0 {
+		copy(i.stack[i.sp:i.sp+locals], i.zeros[0])
+		i.sp += locals
+	}
+	i.fp = 1
+	i.fr = &i.frames[0]
+	i.retain(0)
+
+	i.threshold = -1
+	if jitEnabled(opt) {
+		i.threshold = opt.threshold
+		if opt.threshold == 0 {
+			i.heat = dormancy
+		}
+	}
+
+	return i
 }
 
 func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []types.Boxed) (returns []types.Boxed, err error) {
