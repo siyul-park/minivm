@@ -15,9 +15,9 @@ const parseLineLimit = 1 << 20
 func TestParse(t *testing.T) {
 	t.Run("round trip preserves code", func(t *testing.T) {
 		p0 := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.I32_CONST, 2),
-			instr.New(instr.I32_ADD),
+			instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.I32_CONST, 2),
+			instr.MustNew(instr.I32_ADD),
 		})
 		p1, err := program.Parse(strings.NewReader(p0.String()))
 		require.NoError(t, err)
@@ -26,10 +26,10 @@ func TestParse(t *testing.T) {
 
 	t.Run("round trip preserves constants", func(t *testing.T) {
 		p0 := program.New(
-			[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
+			[]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
 			program.WithConstants(
 				types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
-					Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
+					Append(instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.RETURN)).
 					MustBuild(),
 			),
 		)
@@ -137,7 +137,7 @@ func TestParse(t *testing.T) {
 
 	t.Run("round trip preserves handlers", func(t *testing.T) {
 		p0 := program.New(
-			[]instr.Instruction{instr.New(instr.NOP)},
+			[]instr.Instruction{instr.MustNew(instr.NOP)},
 			program.WithHandlers(instr.Handler{Start: 0, End: 5, Catch: 10, Depth: 0}),
 		)
 		p1, err := program.Parse(strings.NewReader(p0.String()))
@@ -147,7 +147,7 @@ func TestParse(t *testing.T) {
 
 	t.Run("round trip preserves all sections", func(t *testing.T) {
 		p0 := program.New(
-			[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
+			[]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
 			program.WithLocals(types.TypeI32()),
 			program.WithGlobals(types.TypeAny()),
 			program.WithConstants(
@@ -156,7 +156,7 @@ func TestParse(t *testing.T) {
 					Returns: []types.Type{types.TypeI64()},
 				}).
 					Locals(types.TypeI32()).
-					Emit(instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).
+					Append(instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)).
 					MustBuild(),
 			),
 			program.WithTypes(types.NewArrayType(types.TypeI32())),
@@ -174,7 +174,7 @@ func TestParse(t *testing.T) {
 
 	t.Run("canonical section order", func(t *testing.T) {
 		p0 := program.New(
-			[]instr.Instruction{instr.New(instr.NOP)},
+			[]instr.Instruction{instr.MustNew(instr.NOP)},
 			program.WithLocals(types.TypeI32()),
 			program.WithGlobals(types.TypeAny()),
 			program.WithConstants(types.I32(42)),
@@ -238,7 +238,7 @@ func TestParse(t *testing.T) {
 	t.Run("long code line", func(t *testing.T) {
 		parsed, err := program.Parse(strings.NewReader("i32.const" + strings.Repeat(" ", 70_000) + "1\n"))
 		require.NoError(t, err)
-		require.Equal(t, program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)}).String(), parsed.String())
+		require.Equal(t, program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}).String(), parsed.String())
 	})
 
 	t.Run("code line limit", func(t *testing.T) {
@@ -246,7 +246,7 @@ func TestParse(t *testing.T) {
 		line := prefix + strings.Repeat(" ", parseLineLimit-len(prefix)-len(suffix)-1) + suffix
 		parsed, err := program.Parse(strings.NewReader(line))
 		require.NoError(t, err)
-		require.Equal(t, program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)}).String(), parsed.String())
+		require.Equal(t, program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}).String(), parsed.String())
 	})
 
 	t.Run("canonicalizes structurally equal struct types", func(t *testing.T) {
@@ -261,7 +261,7 @@ func TestParse(t *testing.T) {
 				types.NewArrayType(types.NewStructType(types.NewStructField(types.TypeI64()))),
 			),
 			program.WithConstants(
-				types.NewFunctionBuilder(fnType).Emit(instr.New(instr.NOP)).MustBuild(),
+				types.NewFunctionBuilder(fnType).Append(instr.MustNew(instr.NOP)).MustBuild(),
 			),
 		)
 		p1, err := program.Parse(strings.NewReader(p0.String()))
@@ -286,12 +286,12 @@ func TestParse(t *testing.T) {
 }
 
 func FuzzParseProgram(f *testing.F) {
-	f.Add(program.New([]instr.Instruction{instr.New(instr.NOP)}).String())
+	f.Add(program.New([]instr.Instruction{instr.MustNew(instr.NOP)}).String())
 	f.Add(program.New(
-		[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.DROP)}, program.WithConstants(types.String("value")), program.WithLocals(types.TypeI32()), program.WithGlobals(types.TypeAny()), program.WithTypes(types.NewArrayType(types.TypeI32())),
+		[]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.DROP)}, program.WithConstants(types.String("value")), program.WithLocals(types.TypeI32()), program.WithGlobals(types.TypeAny()), program.WithTypes(types.NewArrayType(types.TypeI32())),
 	).String())
 	f.Add(program.New(
-		[]instr.Instruction{instr.New(instr.NOP)},
+		[]instr.Instruction{instr.MustNew(instr.NOP)},
 		program.WithConstants(types.String("has  spaces, \"quotes\", and a \t tab")),
 		program.WithTypes(types.NewStructType(
 			types.NewStructField(types.TypeI64(), types.FieldWithName("value")),

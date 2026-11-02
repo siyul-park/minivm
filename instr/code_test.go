@@ -2,6 +2,7 @@ package instr_test
 
 import (
 	"encoding/binary"
+	"math"
 	"strings"
 	"testing"
 
@@ -28,8 +29,12 @@ func fuzzInstruction(op instr.Opcode, data []byte) instr.Instruction {
 	var operands []uint64
 	offset := 0
 	for _, width := range instr.TypeOf(op).Widths {
+		mask := uint64(math.MaxUint64)
+		if w := max(width, -width); w < 8 {
+			mask = 1<<(8*w) - 1
+		}
 		if width > 0 {
-			operands = append(operands, read(offset))
+			operands = append(operands, read(offset)&mask)
 			offset += width
 			continue
 		}
@@ -39,15 +44,15 @@ func fuzzInstruction(op instr.Opcode, data []byte) instr.Instruction {
 		}
 		operands = append(operands, uint64(count))
 		for i := 0; i < count; i++ {
-			operands = append(operands, read(offset+i*(-width)))
+			operands = append(operands, read(offset+i*(-width))&mask)
 		}
 		offset += 1 + count*(-width)
 	}
-	return instr.New(op, operands...)
+	return instr.MustNew(op, operands...)
 }
 
 func TestMarshal(t *testing.T) {
-	insts := []instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD)}
+	insts := []instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_ADD)}
 	code := instr.Marshal(insts)
 	require.Equal(t, []byte{
 		byte(instr.I32_CONST), 1, 0, 0, 0,
@@ -91,13 +96,13 @@ func TestTargets(t *testing.T) {
 	})
 
 	t.Run("non branch", func(t *testing.T) {
-		require.Nil(t, instr.Targets(instr.Marshal([]instr.Instruction{instr.New(instr.NOP)}), 0))
+		require.Nil(t, instr.Targets(instr.Marshal([]instr.Instruction{instr.MustNew(instr.NOP)}), 0))
 	})
 }
 
 func TestFormat(t *testing.T) {
 	t.Run("no branches", func(t *testing.T) {
-		insts := []instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD)}
+		insts := []instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_ADD)}
 		assembly := instr.Format(instr.Marshal(insts))
 		require.Equal(t, "0000:\ti32.const 0x00000001\n0005:\ti32.const 0x00000002\n0010:\ti32.add\n", assembly)
 	})
@@ -155,14 +160,14 @@ func TestFormat(t *testing.T) {
 	t.Run("target past the end falls back to numeric", func(t *testing.T) {
 		// next is 8 and the code is 8 bytes, so 0x0001 lands at 9 -- past the
 		// end, on no boundary at all -- while 0x0000 lands exactly at the end.
-		insts := []instr.Instruction{instr.New(instr.BR_TABLE, 2, 0, 1, 0)}
+		insts := []instr.Instruction{instr.MustNew(instr.BR_TABLE, 2, 0, 1, 0)}
 		assembly := instr.Format(instr.Marshal(insts))
 		require.Equal(t, "0000:\tbr_table 0x02 L0008 0x0001 L0008\nL0008:\n", assembly)
 	})
 }
 
 func TestUnmarshal(t *testing.T) {
-	insts := []instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD)}
+	insts := []instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_ADD)}
 	actual := instr.Unmarshal(instr.Marshal(insts))
 	require.Equal(t, insts, actual)
 }

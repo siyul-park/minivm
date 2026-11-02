@@ -19,7 +19,7 @@ func TestNewFunctionBuilder(t *testing.T) {
 func TestNewFunction(t *testing.T) {
 	typ := &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI64()}}
 	locals := []types.Type{types.TypeAny()}
-	body := []instr.Instruction{instr.New(instr.RETURN)}
+	body := []instr.Instruction{instr.MustNew(instr.RETURN)}
 	fn := types.NewFunction(typ, locals, body)
 	require.Same(t, typ, fn.Typ)
 	require.Equal(t, locals, fn.Locals)
@@ -49,8 +49,29 @@ func TestFunctionBuilder_Captures(t *testing.T) {
 }
 
 func TestFunctionBuilder_Emit(t *testing.T) {
-	fn := types.NewFunctionBuilder(nil).Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).MustBuild()
-	require.Equal(t, []instr.Instruction{instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)}, instr.Unmarshal(fn.Code))
+	t.Run("encodes instruction", func(t *testing.T) {
+		emitted := types.NewFunctionBuilder(nil).Emit(instr.I32_CONST, 42).Emit(instr.RETURN).MustBuild()
+		appended := types.NewFunctionBuilder(nil).Append(instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.RETURN)).MustBuild()
+		require.Equal(t, appended, emitted)
+	})
+
+	t.Run("invalid operands", func(t *testing.T) {
+		fn, err := types.NewFunctionBuilder(nil).Emit(instr.I32_CONST).Build()
+		require.ErrorIs(t, err, instr.ErrOperandCount)
+		require.Nil(t, fn)
+	})
+}
+
+func TestFunctionBuilder_Append(t *testing.T) {
+	t.Run("appends instructions", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(nil).Append(instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.RETURN)).MustBuild()
+		require.Equal(t, []instr.Instruction{instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.RETURN)}, instr.Unmarshal(fn.Code))
+	})
+
+	t.Run("nil instruction", func(t *testing.T) {
+		_, err := types.NewFunctionBuilder(nil).Append(nil).Build()
+		require.ErrorIs(t, err, instr.ErrInvalidInstruction)
+	})
 }
 
 func TestFunctionBuilder_Label(t *testing.T) {
@@ -61,7 +82,7 @@ func TestFunctionBuilder_Label(t *testing.T) {
 func TestFunctionBuilder_Bind(t *testing.T) {
 	b := types.NewFunctionBuilder(nil)
 	end := b.Label()
-	require.Same(t, b, b.Br(end).Emit(instr.New(instr.NOP)).Bind(end).Emit(instr.New(instr.RETURN)))
+	require.Same(t, b, b.Br(end).Append(instr.MustNew(instr.NOP)).Bind(end).Append(instr.MustNew(instr.RETURN)))
 	fn := b.MustBuild()
 	require.Equal(t, 1, instr.ParseI16(fn.Code, 1))
 }
@@ -69,21 +90,21 @@ func TestFunctionBuilder_Bind(t *testing.T) {
 func TestFunctionBuilder_Br(t *testing.T) {
 	b := types.NewFunctionBuilder(nil)
 	end := b.Label()
-	fn := b.Br(end).Emit(instr.New(instr.NOP)).Bind(end).MustBuild()
+	fn := b.Br(end).Append(instr.MustNew(instr.NOP)).Bind(end).MustBuild()
 	require.Equal(t, instr.BR, instr.Instruction(fn.Code).Opcode())
 }
 
 func TestFunctionBuilder_BrIf(t *testing.T) {
 	b := types.NewFunctionBuilder(nil)
 	end := b.Label()
-	fn := b.BrIf(end).Emit(instr.New(instr.NOP)).Bind(end).MustBuild()
+	fn := b.BrIf(end).Append(instr.MustNew(instr.NOP)).Bind(end).MustBuild()
 	require.Equal(t, instr.BR_IF, instr.Instruction(fn.Code).Opcode())
 }
 
 func TestFunctionBuilder_BrTable(t *testing.T) {
 	b := types.NewFunctionBuilder(nil)
 	first, def := b.Label(), b.Label()
-	fn := b.BrTable(def, first).Bind(first).Emit(instr.New(instr.NOP)).Bind(def).MustBuild()
+	fn := b.BrTable(def, first).Bind(first).Append(instr.MustNew(instr.NOP)).Bind(def).MustBuild()
 	require.Equal(t, instr.BR_TABLE, instr.Instruction(fn.Code).Opcode())
 	require.Equal(t, []uint64{1, 0, 1}, instr.Instruction(fn.Code).Operands())
 }
@@ -91,7 +112,7 @@ func TestFunctionBuilder_BrTable(t *testing.T) {
 func TestFunctionBuilder_Try(t *testing.T) {
 	b := types.NewFunctionBuilder(nil)
 	start, end, catch := b.Label(), b.Label(), b.Label()
-	require.Same(t, b, b.Bind(start).Emit(instr.New(instr.NOP)).Bind(end).Emit(instr.New(instr.RETURN)).Bind(catch).Try(start, end, catch, 2))
+	require.Same(t, b, b.Bind(start).Append(instr.MustNew(instr.NOP)).Bind(end).Append(instr.MustNew(instr.RETURN)).Bind(catch).Try(start, end, catch, 2))
 	fn := b.MustBuild()
 	require.Equal(t, []instr.Handler{{Start: 0, End: 1, Catch: 2, Depth: 2}}, fn.Handlers)
 }
@@ -110,9 +131,9 @@ func TestFunctionBuilder_MustBuild(t *testing.T) {
 
 func TestFunctionBuilder_Build(t *testing.T) {
 	t.Run("valid body", func(t *testing.T) {
-		fn, err := types.NewFunctionBuilder(nil).Emit(instr.New(instr.RETURN)).Build()
+		fn, err := types.NewFunctionBuilder(nil).Append(instr.MustNew(instr.RETURN)).Build()
 		require.NoError(t, err)
-		require.Equal(t, []instr.Instruction{instr.New(instr.RETURN)}, instr.Unmarshal(fn.Code))
+		require.Equal(t, []instr.Instruction{instr.MustNew(instr.RETURN)}, instr.Unmarshal(fn.Code))
 	})
 
 	t.Run("unbound label", func(t *testing.T) {
@@ -178,7 +199,7 @@ func TestFunction_String(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 			Captures(types.TypeI32(), types.TypeAny()).
 			Locals(types.TypeI64()).
-			Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN)).
+			Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.RETURN)).
 			MustBuild()
 		require.Contains(t, fn.String(), "capture i32\ncapture any\n")
 	})

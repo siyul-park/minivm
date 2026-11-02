@@ -202,7 +202,7 @@ blk3: (v6:ref) <-- (blk1)
 				b.Emit(instr.LOCAL_GET, 0).BrIf(join)
 				b.Bind(join).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_DIV_S).Emit(instr.RETURN)
 			})}
-		header := instr.New(instr.LOCAL_GET, 0).Width() + instr.New(instr.BR_IF, 0).Width()
+		header := instr.MustNew(instr.LOCAL_GET, 0).Width() + instr.MustNew(instr.BR_IF, 0).Width()
 
 		out, err := transform.Translate(transform.Module{}, 1, fn, header)
 		require.NoError(t, err)
@@ -223,7 +223,7 @@ blk3: (v6:ref) <-- (blk1)
 		b := instr.NewBuilder()
 		header := b.Label()
 		b.Emit(instr.RETURN)
-		headerOffset := instr.New(instr.RETURN).Width()
+		headerOffset := instr.MustNew(instr.RETURN).Width()
 		b.Bind(header).Emit(instr.I32_CONST, 1).Emit(instr.DROP).Br(header)
 		code, err := b.Assemble()
 		require.NoError(t, err)
@@ -323,8 +323,8 @@ blk1: (v5:i32) <-- (blk0)
 	})
 
 	t.Run("leaves an array load at a refuted guard site unguarded", func(t *testing.T) {
-		load := instr.New(instr.LOCAL_GET, 0)
-		index := instr.New(instr.I32_CONST, 0)
+		load := instr.MustNew(instr.LOCAL_GET, 0)
+		index := instr.MustNew(instr.I32_CONST, 0)
 		fn := &types.Function{
 			Typ: &types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32())}, Returns: []types.Type{types.TypeI32()}},
 			Code: assemble(t, func(b *instr.Builder) {
@@ -996,7 +996,7 @@ func TestBorrows(t *testing.T) {
 			fn: types.NewFunction(
 				&types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeAny()}},
 				nil,
-				[]instr.Instruction{instr.New(instr.LOCAL_GET, 1), instr.New(instr.RETURN)},
+				[]instr.Instruction{instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.RETURN)},
 			),
 			want: []bool{false, true},
 		},
@@ -1005,7 +1005,7 @@ func TestBorrows(t *testing.T) {
 			fn: types.NewFunction(
 				&types.FunctionType{Params: []types.Type{types.TypeAny()}},
 				nil,
-				[]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 0), instr.New(instr.RETURN)},
+				[]instr.Instruction{instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 0), instr.MustNew(instr.RETURN)},
 			),
 			want: []bool{false},
 		},
@@ -1014,7 +1014,7 @@ func TestBorrows(t *testing.T) {
 			fn: types.NewFunction(
 				&types.FunctionType{Params: []types.Type{types.TypeAny()}},
 				nil,
-				[]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_TEE, 0), instr.New(instr.RETURN)},
+				[]instr.Instruction{instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_TEE, 0), instr.MustNew(instr.RETURN)},
 			),
 			want: []bool{false},
 		},
@@ -1023,7 +1023,7 @@ func TestBorrows(t *testing.T) {
 			fn: types.NewFunction(
 				&types.FunctionType{Params: []types.Type{types.TypeAny()}},
 				nil,
-				[]instr.Instruction{instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 0), instr.New(instr.RETURN_CALL)},
+				[]instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.RETURN_CALL)},
 			),
 			want: []bool{false},
 		},
@@ -1032,7 +1032,7 @@ func TestBorrows(t *testing.T) {
 			fn: types.NewFunction(
 				&types.FunctionType{Params: []types.Type{types.TypeI64()}},
 				nil,
-				[]instr.Instruction{instr.New(instr.RETURN)},
+				[]instr.Instruction{instr.MustNew(instr.RETURN)},
 			),
 			want: []bool{false},
 		},
@@ -1090,7 +1090,7 @@ func loopFunction(t *testing.T) (*types.Function, int) {
 		Typ:    &types.FunctionType{Returns: []types.Type{types.TypeAny()}},
 		Locals: []types.Type{types.TypeAny(), types.TypeI32()},
 		Code:   instr.Marshal(code),
-	}, instr.New(instr.LOCAL_GET, 0).Width()
+	}, instr.MustNew(instr.LOCAL_GET, 0).Width()
 }
 
 // indirectRecursiveFib builds func(i32, any) i32 calling itself through
@@ -1161,7 +1161,7 @@ func protectedFunction(t *testing.T) (*types.Function, int) {
 	b.Try(start, end, catch, 2)
 	code, err := b.Assemble()
 	require.NoError(t, err)
-	at := instr.New(instr.LOCAL_GET, 0).Width()*2 + instr.New(instr.I32_DIV_S).Width() + instr.New(instr.RETURN).Width()
+	at := instr.MustNew(instr.LOCAL_GET, 0).Width()*2 + instr.MustNew(instr.I32_DIV_S).Width() + instr.MustNew(instr.RETURN).Width()
 	return &types.Function{
 		Typ:      &types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
 		Code:     instr.Marshal(code),

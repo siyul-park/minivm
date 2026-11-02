@@ -27,9 +27,9 @@ go get github.com/siyul-park/minivm
 
 ```go
 prog := program.New([]instr.Instruction{
-    instr.New(instr.I32_CONST, 6),
-    instr.New(instr.I32_CONST, 7),
-    instr.New(instr.I32_MUL),
+    instr.MustNew(instr.I32_CONST, 6),
+    instr.MustNew(instr.I32_CONST, 7),
+    instr.MustNew(instr.I32_MUL),
 })
 
 vm := interp.New(prog)

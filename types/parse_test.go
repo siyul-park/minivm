@@ -18,14 +18,14 @@ func TestParseFunction(t *testing.T) {
 		{
 			name: "no locals",
 			want: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
-				Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN)).
+				Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.RETURN)).
 				MustBuild(),
 		},
 		{
 			name: "with locals",
 			want: types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).
 				Locals(types.TypeI32(), types.TypeI64()).
-				Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
+				Append(instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.RETURN)).
 				MustBuild(),
 		},
 		{
@@ -33,14 +33,14 @@ func TestParseFunction(t *testing.T) {
 			want: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 				Captures(types.TypeI32(), types.TypeAny()).
 				Locals(types.TypeI64()).
-				Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
+				Append(instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.RETURN)).
 				MustBuild(),
 		},
 		{
 			name:  "no offset prefix",
 			lines: []string{"func() i32", "i32.const 42", "return"},
 			want: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
-				Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
+				Append(instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.RETURN)).
 				MustBuild(),
 		},
 		{
@@ -48,7 +48,7 @@ func TestParseFunction(t *testing.T) {
 			lines: []string{"func(i32) i32", "i32", "i64", "i32.const 42", "return"},
 			want: types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).
 				Locals(types.TypeI32(), types.TypeI64()).
-				Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
+				Append(instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.RETURN)).
 				MustBuild(),
 		},
 		{
@@ -57,7 +57,7 @@ func TestParseFunction(t *testing.T) {
 			want: types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 				Captures(types.TypeI32(), types.TypeAny()).
 				Locals(types.TypeI64()).
-				Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
+				Append(instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.RETURN)).
 				MustBuild(),
 		},
 	}

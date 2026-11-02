@@ -43,7 +43,7 @@ func TestWithHandlers(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
-	body := []instr.Instruction{instr.New(instr.I32_CONST, 42), instr.New(instr.DROP)}
+	body := []instr.Instruction{instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.DROP)}
 	prog := program.New(body, program.WithLocals(types.TypeI32()), program.WithGlobals(types.TypeAny()))
 	require.Equal(t, body, instr.Unmarshal(prog.Code))
 	require.Equal(t, []types.Type{types.TypeI32()}, prog.Locals)
@@ -52,7 +52,7 @@ func TestNew(t *testing.T) {
 
 func TestProgram_String(t *testing.T) {
 	t.Run("with code", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})
 		require.Equal(t, ".code\n0000:\tnop\n", prog.String())
 	})
 	t.Run("empty", func(t *testing.T) {

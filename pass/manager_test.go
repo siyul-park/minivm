@@ -22,7 +22,7 @@ func TestRegister(t *testing.T) {
 		return len(prog.Code), nil
 	}))
 
-	got, err := pass.GetResult[int](m, program.New([]instr.Instruction{instr.New(instr.NOP)}))
+	got, err := pass.GetResult[int](m, program.New([]instr.Instruction{instr.MustNew(instr.NOP)}))
 	require.NoError(t, err)
 	require.Equal(t, 1, got)
 }
@@ -53,7 +53,7 @@ func TestGetResult(t *testing.T) {
 			return len(prog.Code), nil
 		}))
 
-		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})
 		first, err := pass.GetResult[int](m, prog)
 		require.NoError(t, err)
 		second, err := pass.GetResult[int](m, prog)
@@ -92,7 +92,7 @@ func TestGetResult(t *testing.T) {
 			return len(prog.Code), nil
 		}))
 
-		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})
 		_, err := pass.GetResult[int](m, prog)
 		require.ErrorIs(t, err, want)
 		got, err := pass.GetResult[int](m, prog)
@@ -113,7 +113,7 @@ func TestManager_Invalidate(t *testing.T) {
 		calls++
 		return len(prog.Code), nil
 	}))
-	prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+	prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})
 	_, err := pass.GetResult[int](m, prog)
 	require.NoError(t, err)
 

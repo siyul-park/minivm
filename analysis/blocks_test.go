@@ -11,7 +11,7 @@ import (
 )
 
 func TestBlocks(t *testing.T) {
-	fn := types.NewFunctionBuilder(nil).Emit(instr.New(instr.NOP)).MustBuild()
+	fn := types.NewFunctionBuilder(nil).Append(instr.MustNew(instr.NOP)).MustBuild()
 	got, err := analysis.Blocks(fn)
 	require.NoError(t, err)
 	require.Equal(t, []*analysis.BasicBlock{{Start: 0, End: 1}}, got)
@@ -28,8 +28,8 @@ func TestCFG_Run(t *testing.T) {
 		err    error
 	}{
 		{
-			fn: types.NewFunctionBuilder(nil).Emit(
-				instr.New(instr.NOP),
+			fn: types.NewFunctionBuilder(nil).Append(
+				instr.MustNew(instr.NOP),
 			).MustBuild(),
 			blocks: []*analysis.BasicBlock{
 				{
@@ -41,8 +41,8 @@ func TestCFG_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunctionBuilder(nil).Emit(
-				instr.New(instr.UNREACHABLE),
+			fn: types.NewFunctionBuilder(nil).Append(
+				instr.MustNew(instr.UNREACHABLE),
 			).MustBuild(),
 			blocks: []*analysis.BasicBlock{
 				{
@@ -54,8 +54,8 @@ func TestCFG_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunctionBuilder(nil).Emit(
-				instr.New(instr.RETURN),
+			fn: types.NewFunctionBuilder(nil).Append(
+				instr.MustNew(instr.RETURN),
 			).MustBuild(),
 			blocks: []*analysis.BasicBlock{
 				{
@@ -67,9 +67,9 @@ func TestCFG_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunctionBuilder(nil).Emit(
-				instr.New(instr.RETURN_CALL),
-				instr.New(instr.I32_CONST, 1),
+			fn: types.NewFunctionBuilder(nil).Append(
+				instr.MustNew(instr.RETURN_CALL),
+				instr.MustNew(instr.I32_CONST, 1),
 			).MustBuild(),
 			blocks: []*analysis.BasicBlock{
 				{Start: 0, End: 1},
@@ -77,10 +77,10 @@ func TestCFG_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunctionBuilder(nil).Emit(
-				instr.New(instr.BR, 5),
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.I32_CONST, 2),
+			fn: types.NewFunctionBuilder(nil).Append(
+				instr.MustNew(instr.BR, 5),
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.I32_CONST, 2),
 			).MustBuild(),
 			blocks: []*analysis.BasicBlock{
 				{
@@ -104,11 +104,11 @@ func TestCFG_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunctionBuilder(nil).Emit(
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.BR_IF, 5),
-				instr.New(instr.I32_CONST, 2),
-				instr.New(instr.I32_CONST, 3),
+			fn: types.NewFunctionBuilder(nil).Append(
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.BR_IF, 5),
+				instr.MustNew(instr.I32_CONST, 2),
+				instr.MustNew(instr.I32_CONST, 3),
 			).MustBuild(),
 			blocks: []*analysis.BasicBlock{
 				{
@@ -133,11 +133,11 @@ func TestCFG_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunctionBuilder(nil).Emit(
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.BR_TABLE, 1, 5, 0),
-				instr.New(instr.I32_CONST, 2),
-				instr.New(instr.I32_CONST, 3),
+			fn: types.NewFunctionBuilder(nil).Append(
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.BR_TABLE, 1, 5, 0),
+				instr.MustNew(instr.I32_CONST, 2),
+				instr.MustNew(instr.I32_CONST, 3),
 			).MustBuild(),
 			blocks: []*analysis.BasicBlock{
 				{
@@ -161,10 +161,10 @@ func TestCFG_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunctionBuilder(nil).Emit(
-				instr.New(instr.NOP),
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.BR, uint64(uint16(-9+1<<16))),
+			fn: types.NewFunctionBuilder(nil).Append(
+				instr.MustNew(instr.NOP),
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.BR, uint64(uint16(-9+1<<16))),
 			).MustBuild(),
 			blocks: []*analysis.BasicBlock{
 				{
@@ -176,11 +176,11 @@ func TestCFG_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunctionBuilder(nil).Emit(
-				instr.New(instr.NOP),
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.BR_IF, uint64(uint16(-9+1<<16))),
-				instr.New(instr.I32_CONST, 2),
+			fn: types.NewFunctionBuilder(nil).Append(
+				instr.MustNew(instr.NOP),
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.BR_IF, uint64(uint16(-9+1<<16))),
+				instr.MustNew(instr.I32_CONST, 2),
 			).MustBuild(),
 			blocks: []*analysis.BasicBlock{
 				{
@@ -198,10 +198,10 @@ func TestCFG_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunctionBuilder(nil).Emit(
-				instr.New(instr.I32_CONST, 0),
-				instr.New(instr.BR_TABLE, 1, uint64(uint16(-11+1<<16)), 0),
-				instr.New(instr.I32_CONST, 2),
+			fn: types.NewFunctionBuilder(nil).Append(
+				instr.MustNew(instr.I32_CONST, 0),
+				instr.MustNew(instr.BR_TABLE, 1, uint64(uint16(-11+1<<16)), 0),
+				instr.MustNew(instr.I32_CONST, 2),
 			).MustBuild(),
 			blocks: []*analysis.BasicBlock{
 				{
@@ -219,23 +219,23 @@ func TestCFG_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunctionBuilder(nil).Emit(
-				instr.New(instr.BR, 10),
+			fn: types.NewFunctionBuilder(nil).Append(
+				instr.MustNew(instr.BR, 10),
 			).MustBuild(),
 			err: analysis.ErrInvalidJump,
 		},
 		{
-			fn: types.NewFunctionBuilder(nil).Emit(
-				instr.New(instr.BR_TABLE, 1, 0, 10),
+			fn: types.NewFunctionBuilder(nil).Append(
+				instr.MustNew(instr.BR_TABLE, 1, 0, 10),
 			).MustBuild(),
 			err: analysis.ErrInvalidJump,
 		},
 		{
-			fn: types.NewFunctionBuilder(nil).Emit(
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.BR_TABLE, 2, 5, 5, 5),
-				instr.New(instr.I32_CONST, 2),
-				instr.New(instr.I32_CONST, 3),
+			fn: types.NewFunctionBuilder(nil).Append(
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.BR_TABLE, 2, 5, 5, 5),
+				instr.MustNew(instr.I32_CONST, 2),
+				instr.MustNew(instr.I32_CONST, 3),
 			).MustBuild(),
 			blocks: []*analysis.BasicBlock{
 				{Start: 0, End: 18, Succs: []int{1}, Preds: nil},
@@ -243,11 +243,11 @@ func TestCFG_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunctionBuilder(nil).Emit(
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.BR_IF, 0),
-				instr.New(instr.I32_CONST, 2),
-				instr.New(instr.I32_CONST, 3),
+			fn: types.NewFunctionBuilder(nil).Append(
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.BR_IF, 0),
+				instr.MustNew(instr.I32_CONST, 2),
+				instr.MustNew(instr.I32_CONST, 3),
 			).MustBuild(),
 			blocks: []*analysis.BasicBlock{
 				{Start: 0, End: 8, Succs: []int{1}, Preds: nil},
@@ -255,10 +255,10 @@ func TestCFG_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunctionBuilder(nil).Emit(
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.BR_IF, 5),
-				instr.New(instr.I32_CONST, 2),
+			fn: types.NewFunctionBuilder(nil).Append(
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.BR_IF, 5),
+				instr.MustNew(instr.I32_CONST, 2),
 			).MustBuild(),
 			blocks: []*analysis.BasicBlock{
 				{Start: 0, End: 8, Succs: []int{1}, Preds: nil},
@@ -266,8 +266,8 @@ func TestCFG_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunctionBuilder(nil).Emit(
-				instr.New(instr.BR, 100),
+			fn: types.NewFunctionBuilder(nil).Append(
+				instr.MustNew(instr.BR, 100),
 			).MustBuild(),
 			err: analysis.ErrInvalidJump,
 		},
@@ -294,9 +294,9 @@ func BenchmarkCFG_Run(b *testing.B) {
 		const n = 10000
 		emit := make([]instr.Instruction, 0, n)
 		for range n {
-			emit = append(emit, instr.New(instr.I32_CONST, 0))
+			emit = append(emit, instr.MustNew(instr.I32_CONST, 0))
 		}
-		fn := types.NewFunctionBuilder(nil).Emit(emit...).MustBuild()
+		fn := types.NewFunctionBuilder(nil).Append(emit...).MustBuild()
 
 		m := pass.NewManager()
 		blocksAnalysis := analysis.NewCFG()

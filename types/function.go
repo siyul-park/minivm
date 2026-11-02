@@ -79,8 +79,14 @@ func (b *FunctionBuilder) Captures(cs ...Type) *FunctionBuilder {
 	return b
 }
 
-// Emit appends instrs to the function body.
-func (b *FunctionBuilder) Emit(instrs ...instr.Instruction) *FunctionBuilder {
+// Emit appends one instruction built from op and operands to the function body.
+func (b *FunctionBuilder) Emit(op instr.Opcode, operands ...uint64) *FunctionBuilder {
+	b.code.Emit(op, operands...)
+	return b
+}
+
+// Append appends pre-built instructions to the function body.
+func (b *FunctionBuilder) Append(instrs ...instr.Instruction) *FunctionBuilder {
 	b.code.Append(instrs...)
 	return b
 }

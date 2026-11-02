@@ -72,25 +72,56 @@ func TestBuilder_Try(t *testing.T) {
 }
 
 func TestBuilder_ConstGet(t *testing.T) {
-	b := program.NewBuilder()
-	b.ConstGet(types.String("x")).ConstGet(types.String("x"))
+	t.Run("interns constant", func(t *testing.T) {
+		b := program.NewBuilder()
+		b.ConstGet(types.String("x")).ConstGet(types.String("x"))
 
-	prog, err := b.Build()
-	require.NoError(t, err)
-	require.Equal(t, []types.Value{types.String("x")}, prog.Constants)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.Equal(t, []types.Value{types.String("x")}, prog.Constants)
 
-	instrs := instr.Unmarshal(prog.Code)
-	require.Equal(t, instr.CONST_GET, instrs[0].Opcode())
-	require.Equal(t, uint64(0), instrs[0].Operand(0))
-	require.Equal(t, uint64(0), instrs[1].Operand(0))
+		instrs := instr.Unmarshal(prog.Code)
+		require.Equal(t, instr.CONST_GET, instrs[0].Opcode())
+		require.Equal(t, uint64(0), instrs[0].Operand(0))
+		require.Equal(t, uint64(0), instrs[1].Operand(0))
+	})
+
+	t.Run("nil value", func(t *testing.T) {
+		prog, err := program.NewBuilder().ConstGet(nil).Build()
+		require.ErrorIs(t, err, program.ErrNilValue)
+		require.Nil(t, prog)
+	})
 }
 
 func TestBuilder_Emit(t *testing.T) {
-	b := program.NewBuilder()
-	require.Same(t, b, b.Emit(instr.I32_CONST, 42).Emit(instr.DROP))
-	prog, err := b.Build()
-	require.NoError(t, err)
-	require.Equal(t, []instr.Instruction{instr.New(instr.I32_CONST, 42), instr.New(instr.DROP)}, instr.Unmarshal(prog.Code))
+	t.Run("encodes instructions", func(t *testing.T) {
+		b := program.NewBuilder()
+		require.Same(t, b, b.Emit(instr.I32_CONST, 42).Emit(instr.DROP))
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.Equal(t, []instr.Instruction{instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.DROP)}, instr.Unmarshal(prog.Code))
+	})
+
+	t.Run("invalid operands", func(t *testing.T) {
+		prog, err := program.NewBuilder().Emit(instr.I32_CONST).Build()
+		require.ErrorIs(t, err, instr.ErrOperandCount)
+		require.Nil(t, prog)
+	})
+}
+
+func TestBuilder_Append(t *testing.T) {
+	t.Run("appends instructions", func(t *testing.T) {
+		b := program.NewBuilder()
+		require.Same(t, b, b.Append(instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.DROP)))
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.Equal(t, []instr.Instruction{instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.DROP)}, instr.Unmarshal(prog.Code))
+	})
+
+	t.Run("nil instruction", func(t *testing.T) {
+		_, err := program.NewBuilder().Append(nil).Build()
+		require.ErrorIs(t, err, instr.ErrInvalidInstruction)
+	})
 }
 
 func TestBuilder_Const(t *testing.T) {
@@ -103,7 +134,11 @@ func TestBuilder_Const(t *testing.T) {
 	})
 
 	t.Run("rejects nil", func(t *testing.T) {
-		require.Equal(t, -1, program.NewBuilder().Const(nil))
+		b := program.NewBuilder()
+		require.Equal(t, -1, b.Const(nil))
+
+		_, err := b.Build()
+		require.ErrorIs(t, err, program.ErrNilValue)
 	})
 
 	t.Run("uses pointer identity", func(t *testing.T) {
@@ -135,6 +170,17 @@ func TestBuilder_Globals(t *testing.T) {
 	require.Equal(t, []types.Type{types.TypeI32(), types.NewArrayType(types.TypeF64())}, prog.Globals)
 }
 
+func TestBuilder_MustBuild(t *testing.T) {
+	t.Run("valid program", func(t *testing.T) {
+		prog := program.NewBuilder().Emit(instr.NOP).MustBuild()
+		require.Equal(t, []instr.Instruction{instr.MustNew(instr.NOP)}, instr.Unmarshal(prog.Code))
+	})
+
+	t.Run("invalid program", func(t *testing.T) {
+		require.Panics(t, func() { program.NewBuilder().Emit(instr.I32_CONST).MustBuild() })
+	})
+}
+
 func TestBuilder_Build(t *testing.T) {
 	t.Run("assembles code and pools", func(t *testing.T) {
 		b := program.NewBuilder()
@@ -159,13 +205,27 @@ func TestBuilder_Build(t *testing.T) {
 		_, err := b.Build()
 		require.ErrorIs(t, err, instr.ErrUnboundLabel)
 	})
+
+	t.Run("foreign label", func(t *testing.T) {
+		_, err := program.NewBuilder().Br(program.NewBuilder().Label()).Build()
+		require.ErrorIs(t, err, instr.ErrForeignLabel)
+	})
 }
 
 func TestBuilder_Type(t *testing.T) {
-	b := program.NewBuilder()
+	t.Run("interns type", func(t *testing.T) {
+		b := program.NewBuilder()
 
-	require.Equal(t, -1, b.Type(nil))
-	require.Equal(t, 0, b.Type(types.TypeI32()))
-	require.Equal(t, 1, b.Type(types.NewArrayType(types.TypeI32())))
-	require.Equal(t, 0, b.Type(types.TypeI32()))
+		require.Equal(t, 0, b.Type(types.TypeI32()))
+		require.Equal(t, 1, b.Type(types.NewArrayType(types.TypeI32())))
+		require.Equal(t, 0, b.Type(types.TypeI32()))
+	})
+
+	t.Run("rejects nil", func(t *testing.T) {
+		b := program.NewBuilder()
+		require.Equal(t, -1, b.Type(nil))
+
+		_, err := b.Build()
+		require.ErrorIs(t, err, program.ErrNilValue)
+	})
 }

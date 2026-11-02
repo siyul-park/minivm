@@ -1,6 +1,8 @@
 package program
 
 import (
+	"errors"
+	"fmt"
 	"reflect"
 
 	"github.com/siyul-park/minivm/instr"
@@ -12,13 +14,22 @@ import (
 // instr.Builder, reference constants and types by value (ConstGet/Type), then
 // Build to resolve branches and collect the pools. Builders are mutable;
 // discard after Build.
+//
+// Errors are sticky like instr.Builder's: Build returns the first one, and a
+// Builder must not be reused after Build. An error recorded by the program
+// itself, such as a nil constant or type, is reported ahead of one recorded by
+// the code stream.
 type Builder struct {
 	code      *instr.Builder
+	err       error
 	constants []types.Value
 	typs      []types.Type
 	locals    []types.Type
 	globals   []types.Type
 }
+
+// ErrNilValue reports a nil constant or type passed to the builder.
+var ErrNilValue = errors.New("nil value")
 
 // NewBuilder returns an empty program builder.
 func NewBuilder() *Builder {
@@ -65,7 +76,11 @@ func (b *Builder) Try(start, end, catch instr.Label, depth int) *Builder {
 
 // ConstGet interns v and emits CONST_GET for its index.
 func (b *Builder) ConstGet(v types.Value) *Builder {
-	return b.Emit(instr.CONST_GET, uint64(b.Const(v)))
+	idx := b.Const(v)
+	if idx < 0 {
+		return b
+	}
+	return b.Emit(instr.CONST_GET, uint64(idx))
 }
 
 // Emit appends one instruction built from op and operands.
@@ -74,14 +89,21 @@ func (b *Builder) Emit(op instr.Opcode, operands ...uint64) *Builder {
 	return b
 }
 
-// Const interns v into the constant pool and returns its index. Comparable
+// Append appends pre-built instructions verbatim.
+func (b *Builder) Append(instrs ...instr.Instruction) *Builder {
+	b.code.Append(instrs...)
+	return b
+}
+
+// Const interns v into the constant pool and returns its index, or -1 and a
+// recorded ErrNilValue when v is nil. Comparable
 // values reuse equal slots; pointer values therefore use identity. Values that
 // cannot be compared are appended because their String form is diagnostic, not
 // an equality contract.
 func (b *Builder) Const(v types.Value) int {
 	typ := reflect.TypeOf(v)
 	if typ == nil {
-		return -1
+		return b.fail("constant")
 	}
 	if typ.Comparable() {
 		for idx, existing := range b.constants {
@@ -117,9 +139,22 @@ func (b *Builder) Globals(ts ...types.Type) *Builder {
 	return b
 }
 
+// MustBuild is like Build but panics on failure. Use it only with statically
+// known-good programs, such as in tests and fixtures.
+func (b *Builder) MustBuild() *Program {
+	prog, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
+	return prog
+}
+
 // Build resolves every branch and returns the assembled program with its
-// constant and type pools.
+// constant and type pools. It returns the first recorded error.
 func (b *Builder) Build() (*Program, error) {
+	if b.err != nil {
+		return nil, b.err
+	}
 	instrs, err := b.code.Assemble()
 	if err != nil {
 		return nil, err
@@ -135,10 +170,11 @@ func (b *Builder) Build() (*Program, error) {
 }
 
 // Type interns t into the type pool and returns its index, reusing an existing
-// slot when an equal type is already present.
+// slot when an equal type is already present. It returns -1 and records
+// ErrNilValue when t is nil.
 func (b *Builder) Type(t types.Type) int {
 	if t == nil {
-		return -1
+		return b.fail("type")
 	}
 	for idx, existing := range b.typs {
 		if existing.Equals(t) {
@@ -148,4 +184,13 @@ func (b *Builder) Type(t types.Type) int {
 	idx := len(b.typs)
 	b.typs = append(b.typs, t)
 	return idx
+}
+
+// fail records ErrNilValue for what unless an error is already recorded, and
+// returns -1 as the missing pool index.
+func (b *Builder) fail(what string) int {
+	if b.err == nil {
+		b.err = fmt.Errorf("%w: %s", ErrNilValue, what)
+	}
+	return -1
 }

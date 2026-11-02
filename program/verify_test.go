@@ -13,7 +13,7 @@ import (
 func TestVerify(t *testing.T) {
 	// Wraps fn as the sole constant of a top-level NOP program.
 	withFunction := func(fn *types.Function) *program.Program {
-		return program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(fn))
+		return program.New([]instr.Instruction{instr.MustNew(instr.NOP)}, program.WithConstants(fn))
 	}
 	// Assembles a program through the label-based builder.
 	assemble := func(emit func(b *program.Builder)) *program.Program {
@@ -40,7 +40,7 @@ func TestVerify(t *testing.T) {
 			b.Emit(instr.DROP)
 		})
 	}
-	f32 := instr.New(instr.F32_CONST, uint64(math.Float32bits(1)))
+	f32 := instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(1)))
 
 	tests := []struct {
 		name     string
@@ -51,9 +51,9 @@ func TestVerify(t *testing.T) {
 		{
 			name: "valid/arithmetic",
 			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.I32_CONST, 2),
-				instr.New(instr.I32_ADD),
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.I32_CONST, 2),
+				instr.MustNew(instr.I32_ADD),
 			}),
 		},
 		{
@@ -61,13 +61,13 @@ func TestVerify(t *testing.T) {
 			// comparison result both satisfy i32 operands.
 			name: "valid/narrow int operands",
 			prog: withFunction(types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI8()}, Returns: []types.Type{types.TypeI32()}}).
-				Emit(
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.I32_LT_S),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_ADD),
-					instr.New(instr.RETURN),
+				Append(
+					instr.MustNew(instr.LOCAL_GET, 0),
+					instr.MustNew(instr.I32_CONST, 1),
+					instr.MustNew(instr.I32_LT_S),
+					instr.MustNew(instr.LOCAL_GET, 0),
+					instr.MustNew(instr.I32_ADD),
+					instr.MustNew(instr.RETURN),
 				).MustBuild()),
 		},
 		{
@@ -76,19 +76,19 @@ func TestVerify(t *testing.T) {
 			// chaining another i32 op on it verifies.
 			name: "valid/narrow bitwise operands",
 			prog: withFunction(types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI8()}, Returns: []types.Type{types.TypeI32()}}).
-				Emit(
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_AND),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.I32_OR),
-					instr.New(instr.RETURN),
+				Append(
+					instr.MustNew(instr.LOCAL_GET, 0),
+					instr.MustNew(instr.LOCAL_GET, 0),
+					instr.MustNew(instr.I32_AND),
+					instr.MustNew(instr.I32_CONST, 1),
+					instr.MustNew(instr.I32_OR),
+					instr.MustNew(instr.RETURN),
 				).MustBuild()),
 		},
 		{
 			name: "calls/function returns",
 			prog: withFunction(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
-				Emit(instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).
+				Append(instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)).
 				MustBuild()),
 		},
 		{
@@ -99,8 +99,8 @@ func TestVerify(t *testing.T) {
 			prog: withFunction(&types.Function{
 				Typ: &types.FunctionType{},
 				Code: instr.Marshal([]instr.Instruction{
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.BR_IF, 0),
+					instr.MustNew(instr.I32_CONST, 1),
+					instr.MustNew(instr.BR_IF, 0),
 				}),
 			}),
 			wantErr: program.ErrInvalidJump,
@@ -108,7 +108,7 @@ func TestVerify(t *testing.T) {
 		{
 			name: "control/function falls through",
 			prog: withFunction(types.NewFunctionBuilder(&types.FunctionType{}).
-				Emit(instr.New(instr.I32_CONST, 1)).
+				Append(instr.MustNew(instr.I32_CONST, 1)).
 				MustBuild()),
 			wantErr:  program.ErrFallThrough,
 			wantSlot: 1,
@@ -116,11 +116,11 @@ func TestVerify(t *testing.T) {
 		{
 			name: "calls/direct call",
 			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 5),
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL),
+				instr.MustNew(instr.I32_CONST, 5),
+				instr.MustNew(instr.CONST_GET, 0),
+				instr.MustNew(instr.CALL),
 			}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).
-				Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).
+				Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.RETURN)).
 				MustBuild())),
 		},
 		{
@@ -144,35 +144,35 @@ func TestVerify(t *testing.T) {
 		{
 			name: "valid/top-level locals",
 			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 7),
-				instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.LOCAL_GET, 0),
-				instr.New(instr.DROP),
+				instr.MustNew(instr.I32_CONST, 7),
+				instr.MustNew(instr.LOCAL_SET, 0),
+				instr.MustNew(instr.LOCAL_GET, 0),
+				instr.MustNew(instr.DROP),
 			}, program.WithLocals(types.TypeI32())),
 		},
 		{
 			name:    "bounds/top-level local",
-			prog:    program.New([]instr.Instruction{instr.New(instr.LOCAL_GET, 0), instr.New(instr.DROP)}),
+			prog:    program.New([]instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.DROP)}),
 			wantErr: program.ErrIndexOutOfRange,
 		},
 		{
 			name:    "bounds/constant index",
-			prog:    program.New([]instr.Instruction{instr.New(instr.CONST_GET, 5)}),
+			prog:    program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 5)}),
 			wantErr: program.ErrIndexOutOfRange,
 		},
 		{
 			name:    "bounds/local index",
-			prog:    program.New([]instr.Instruction{instr.New(instr.LOCAL_GET, 9)}),
+			prog:    program.New([]instr.Instruction{instr.MustNew(instr.LOCAL_GET, 9)}),
 			wantErr: program.ErrIndexOutOfRange,
 		},
 		{
 			name:    "bounds/global index",
-			prog:    program.New([]instr.Instruction{instr.New(instr.GLOBAL_GET, 9)}, program.WithGlobals(types.TypeI32())),
+			prog:    program.New([]instr.Instruction{instr.MustNew(instr.GLOBAL_GET, 9)}, program.WithGlobals(types.TypeI32())),
 			wantErr: program.ErrIndexOutOfRange,
 		},
 		{
 			name:    "stack/underflow",
-			prog:    program.New([]instr.Instruction{instr.New(instr.I32_ADD)}),
+			prog:    program.New([]instr.Instruction{instr.MustNew(instr.I32_ADD)}),
 			wantErr: program.ErrStackUnderflow,
 		},
 		{
@@ -181,43 +181,43 @@ func TestVerify(t *testing.T) {
 			// by their fixed operand kinds.
 			name: "valid/array mutation",
 			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-				instr.New(instr.I32_CONST, 10),
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.ARRAY_APPEND),
-				instr.New(instr.I32_CONST, 0),
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.ARRAY_SLICE),
-				instr.New(instr.I32_CONST, 0),
-				instr.New(instr.ARRAY_DELETE),
-				instr.New(instr.DROP),
+				instr.MustNew(instr.I32_CONST, 0),
+				instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.MustNew(instr.I32_CONST, 10),
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.ARRAY_APPEND),
+				instr.MustNew(instr.I32_CONST, 0),
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.ARRAY_SLICE),
+				instr.MustNew(instr.I32_CONST, 0),
+				instr.MustNew(instr.ARRAY_DELETE),
+				instr.MustNew(instr.DROP),
 			}, program.WithTypes(types.NewArrayType(types.TypeI32()))),
 		},
 		{
 			name:    "stack/array delete underflow",
-			prog:    program.New([]instr.Instruction{instr.New(instr.ARRAY_DELETE)}),
+			prog:    program.New([]instr.Instruction{instr.MustNew(instr.ARRAY_DELETE)}),
 			wantErr: program.ErrStackUnderflow,
 		},
 		{
 			name:    "types/operand mismatch",
-			prog:    program.New([]instr.Instruction{f32, instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD)}),
+			prog:    program.New([]instr.Instruction{f32, instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_ADD)}),
 			wantErr: program.ErrTypeMismatch,
 		},
 		{
 			name:    "types/global set mismatch",
-			prog:    program.New([]instr.Instruction{f32, instr.New(instr.GLOBAL_SET, 0)}, program.WithGlobals(types.TypeI32())),
+			prog:    program.New([]instr.Instruction{f32, instr.MustNew(instr.GLOBAL_SET, 0)}, program.WithGlobals(types.TypeI32())),
 			wantErr: program.ErrTypeMismatch,
 		},
 		{
 			name:    "types/global tee mismatch",
-			prog:    program.New([]instr.Instruction{f32, instr.New(instr.GLOBAL_TEE, 0)}, program.WithGlobals(types.TypeI32())),
+			prog:    program.New([]instr.Instruction{f32, instr.MustNew(instr.GLOBAL_TEE, 0)}, program.WithGlobals(types.TypeI32())),
 			wantErr: program.ErrTypeMismatch,
 		},
 		{
 			name:    "structure/unknown opcode",
 			prog:    &program.Program{Code: []byte{0xFE}},
-			wantErr: program.ErrUnknownOpcode,
+			wantErr: instr.ErrUnknownOpcode,
 		},
 		{
 			name:    "structure/truncated instruction",
@@ -227,35 +227,35 @@ func TestVerify(t *testing.T) {
 		{
 			name: "valid/global index",
 			prog: program.New([]instr.Instruction{
-				instr.New(instr.GLOBAL_GET, 0),
-				instr.New(instr.DROP),
+				instr.MustNew(instr.GLOBAL_GET, 0),
+				instr.MustNew(instr.DROP),
 			}, program.WithGlobals(types.TypeI32())),
 		},
 		{
 			name: "types/dynamic global accepts scalar",
 			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.GLOBAL_SET, 0),
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.GLOBAL_SET, 0),
 			}, program.WithGlobals(types.TypeAny())),
 		},
 		{
 			name: "types/global concrete ref mismatch",
 			prog: program.New([]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.GLOBAL_SET, 0),
+				instr.MustNew(instr.CONST_GET, 0),
+				instr.MustNew(instr.GLOBAL_SET, 0),
 			}, program.WithConstants(types.TypedArray[float32]{1}), program.WithGlobals(types.NewArrayType(types.TypeI32()))),
 			wantErr: program.ErrTypeMismatch,
 		},
 		{
 			name:    "control/invalid jump",
-			prog:    program.New([]instr.Instruction{instr.New(instr.BR, 100)}),
+			prog:    program.New([]instr.Instruction{instr.MustNew(instr.BR, 100)}),
 			wantErr: program.ErrInvalidJump,
 		},
 		{
 			name: "control/branch table target inside instruction",
 			prog: program.New([]instr.Instruction{
-				instr.New(instr.BR_TABLE, 0, 7),
-				instr.New(instr.I64_CONST, uint64(7)<<48),
+				instr.MustNew(instr.BR_TABLE, 0, 7),
+				instr.MustNew(instr.I64_CONST, uint64(7)<<48),
 			}),
 			wantErr: program.ErrInvalidJump,
 		},
@@ -275,16 +275,16 @@ func TestVerify(t *testing.T) {
 		{
 			name: "handlers/target off instruction boundary",
 			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.THROW),
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.THROW),
 			}, program.WithHandlers(instr.Handler{Start: 0, End: 5, Catch: 1})),
 			wantErr: program.ErrHandlerTarget,
 		},
 		{
 			name: "handlers/range out of bounds",
 			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.THROW),
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.THROW),
 			}, program.WithHandlers(instr.Handler{Start: 0, End: 99, Catch: 5})),
 			wantErr: program.ErrHandlerRange,
 		},

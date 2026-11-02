@@ -29,36 +29,36 @@ const pollDeadline = 60 * time.Second
 func indirectFibFunction() *types.Function {
 	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeAny()}, Returns: []types.Type{types.TypeI32()}})
 	small := b.Label()
-	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S)).BrIf(small)
-	b.Emit(
-		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
-		instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL),
-		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_SUB),
-		instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL),
-		instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+	b.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_LT_S)).BrIf(small)
+	b.Append(
+		instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_SUB),
+		instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.CALL),
+		instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_SUB),
+		instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.CALL),
+		instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN),
 	)
-	b.Bind(small).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
+	b.Bind(small).Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.RETURN))
 	return b.MustBuild()
 }
 
 // incFunction returns its one parameter plus one.
 func incFunction() *types.Function {
 	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
-	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
+	b.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN))
 	return b.MustBuild()
 }
 
 // decFunction returns its one parameter minus one.
 func decFunction() *types.Function {
 	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
-	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.RETURN))
+	b.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_SUB), instr.MustNew(instr.RETURN))
 	return b.MustBuild()
 }
 
 // applyFunction calls fn(x) through param 1, a dynamic CALL.
 func applyFunction() *types.Function {
 	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeAny()}, Returns: []types.Type{types.TypeI32()}})
-	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL), instr.New(instr.RETURN))
+	b.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.CALL), instr.MustNew(instr.RETURN))
 	return b.MustBuild()
 }
 
@@ -93,13 +93,13 @@ func guardFunction(limit int, throw bool) *types.Function {
 	raise := b.Label()
 	refuse(b)
 	if throw {
-		b.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, uint64(limit)), instr.New(instr.I32_GE_S)).BrIf(raise)
+		b.Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, uint64(limit)), instr.MustNew(instr.I32_GE_S)).BrIf(raise)
 	}
-	b.Emit(
-		instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 100), instr.New(instr.I32_CONST, uint64(limit)), instr.New(instr.LOCAL_GET, 1),
-		instr.New(instr.I32_SUB), instr.New(instr.I32_DIV_S), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+	b.Append(
+		instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 100), instr.MustNew(instr.I32_CONST, uint64(limit)), instr.MustNew(instr.LOCAL_GET, 1),
+		instr.MustNew(instr.I32_SUB), instr.MustNew(instr.I32_DIV_S), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN),
 	)
-	b.Bind(raise).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.THROW))
+	b.Bind(raise).Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.THROW))
 	return b.MustBuild()
 }
 
@@ -110,9 +110,9 @@ func relayFunction(callee int, guarded bool) *types.Function {
 	if guarded {
 		refuse(b)
 	}
-	b.Emit(
-		instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CONST_GET, uint64(callee)), instr.New(instr.CALL),
-		instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+	b.Append(
+		instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.CONST_GET, uint64(callee)), instr.MustNew(instr.CALL),
+		instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN),
 	)
 	return b.MustBuild()
 }
@@ -122,8 +122,8 @@ func relayFunction(callee int, guarded bool) *types.Function {
 // function never compiles.
 func refuse(b *types.FunctionBuilder) {
 	body := b.Label()
-	b.Emit(instr.New(instr.I32_CONST, 1)).BrIf(body)
-	b.Emit(instr.New(instr.REF_NULL), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET), instr.New(instr.DROP))
+	b.Append(instr.MustNew(instr.I32_CONST, 1)).BrIf(body)
+	b.Append(instr.MustNew(instr.REF_NULL), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.DROP))
 	b.Bind(body)
 }
 
@@ -132,29 +132,29 @@ func refuse(b *types.FunctionBuilder) {
 // work pays for a served call; when global, it passes global 0 instead of
 // s, which the call owns rather than lends.
 func loopFunction(callee int, global bool) *types.Function {
-	arg := instr.New(instr.LOCAL_GET, 0)
+	arg := instr.MustNew(instr.LOCAL_GET, 0)
 	if global {
-		arg = instr.New(instr.GLOBAL_GET, 0)
+		arg = instr.MustNew(instr.GLOBAL_GET, 0)
 	}
 	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32(), types.TypeI32(), types.TypeI32())
 	loop, done, count, counted := b.Label(), b.Label(), b.Label(), b.Label()
-	b.Bind(loop).Emit(instr.New(instr.LOCAL_GET, 3), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_GE_S)).BrIf(done)
-	b.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 4))
-	b.Bind(count).Emit(instr.New(instr.LOCAL_GET, 4), instr.New(instr.I32_CONST, 8), instr.New(instr.I32_GE_S)).BrIf(counted)
-	b.Emit(instr.New(instr.LOCAL_GET, 4), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 4)).Br(count)
-	b.Bind(counted).Emit(
-		arg, instr.New(instr.LOCAL_GET, 3), instr.New(instr.CONST_GET, uint64(callee)), instr.New(instr.CALL),
-		instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2),
-		instr.New(instr.LOCAL_GET, 3), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 3),
+	b.Bind(loop).Append(instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_GE_S)).BrIf(done)
+	b.Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 4))
+	b.Bind(count).Append(instr.MustNew(instr.LOCAL_GET, 4), instr.MustNew(instr.I32_CONST, 8), instr.MustNew(instr.I32_GE_S)).BrIf(counted)
+	b.Append(instr.MustNew(instr.LOCAL_GET, 4), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 4)).Br(count)
+	b.Bind(counted).Append(
+		arg, instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.CONST_GET, uint64(callee)), instr.MustNew(instr.CALL),
+		instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2),
+		instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 3),
 	).Br(loop)
-	b.Bind(done).Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN))
+	b.Bind(done).Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.RETURN))
 	return b.MustBuild()
 }
 
 // bumpFunction is bump(s, x) = x + add.
 func bumpFunction(add int) *types.Function {
 	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
-	b.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, uint64(add)), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
+	b.Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, uint64(add)), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN))
 	return b.MustBuild()
 }
 
@@ -162,7 +162,7 @@ func bumpFunction(add int) *types.Function {
 // dynamic CALL.
 func relayDynamicFunction() *types.Function {
 	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString(), types.TypeI32(), types.TypeAny()}, Returns: []types.Type{types.TypeI32()}})
-	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 2), instr.New(instr.CALL), instr.New(instr.RETURN))
+	b.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.CALL), instr.MustNew(instr.RETURN))
 	return b.MustBuild()
 }
 
@@ -178,13 +178,13 @@ func nativeEntries(profiler *prof.Profiler) float64 {
 func fibFunction() *types.Function {
 	b := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
 	small := b.Label()
-	b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S)).BrIf(small)
-	b.Emit(
-		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_SUB), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-		instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+	b.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_LT_S)).BrIf(small)
+	b.Append(
+		instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_SUB), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
+		instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_SUB), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
+		instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN),
 	)
-	b.Bind(small).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
+	b.Bind(small).Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.RETURN))
 	return b.MustBuild()
 }
 
@@ -330,7 +330,7 @@ func lentProgram(t *testing.T, warm int) *program.Program {
 	t.Helper()
 
 	a := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
-	a.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.RETURN))
+	a.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.RETURN))
 	b := instr.NewBuilder()
 	for _, callee := range []uint64{2, 3} {
 		b.Emit(instr.CONST_GET, callee).Emit(instr.GLOBAL_SET, 0)
@@ -490,13 +490,13 @@ func refArrayProgram(t *testing.T, warm int) *program.Program {
 	rw := types.NewFunctionBuilder(&types.FunctionType{
 		Params: []types.Type{types.NewArrayType(types.TypeAny())}, Returns: []types.Type{types.TypeAny()},
 	})
-	rw.Emit(
-		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET), instr.New(instr.DROP),
-		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0),
-		instr.New(instr.CONST_GET, 1), instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_CONCAT),
-		instr.New(instr.ARRAY_SET),
-		instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
-		instr.New(instr.RETURN),
+	rw.Append(
+		instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.DROP),
+		instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0),
+		instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.STRING_CONCAT),
+		instr.MustNew(instr.ARRAY_SET),
+		instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
+		instr.MustNew(instr.RETURN),
 	)
 	rwFn := rw.MustBuild()
 
@@ -530,14 +530,14 @@ func structTreeProgram(t *testing.T, warm int) *program.Program {
 
 	walk := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{record}, Returns: []types.Type{types.TypeI32()}})
 	header, done := walk.Label(), walk.Label()
-	walk.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_SET, 1))
-	walk.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 2))
+	walk.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_SET, 1))
+	walk.Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 2))
 	walk.Bind(header)
-	walk.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.REF_IS_NULL)).BrIf(done)
-	walk.Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2))
-	walk.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET), instr.New(instr.LOCAL_SET, 1))
+	walk.Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.REF_IS_NULL)).BrIf(done)
+	walk.Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.STRUCT_GET), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2))
+	walk.Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.STRUCT_GET), instr.MustNew(instr.LOCAL_SET, 1))
 	walk.Br(header)
-	walk.Bind(done).Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN))
+	walk.Bind(done).Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.RETURN))
 	walkFn := walk.MustBuild()
 	walkFn.Locals = []types.Type{record, types.TypeI32()}
 
@@ -621,7 +621,7 @@ func mixedProgram(t *testing.T, warm int, other bool) *program.Program {
 	code, err := b.Assemble()
 	require.NoError(t, err)
 	pairBuilder := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
-	pairBuilder.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 100), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
+	pairBuilder.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 100), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN))
 	pair := pairBuilder.MustBuild()
 	return program.New(code, program.WithLocals(types.TypeI32(), types.TypeI32(), types.TypeString()),
 		program.WithConstants(relayDynamicFunction(), bumpFunction(1), bumpFunction(3), types.String("s"), pair))
@@ -763,10 +763,10 @@ func counterProgram(t *testing.T) *program.Program {
 	t.Helper()
 	fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeString(), types.TypeI32()}}).
 		Captures(types.TypeI32(), types.TypeString()).
-		Emit(
-			instr.New(instr.UPVAL_GET, 1), instr.New(instr.UPVAL_SET, 1), instr.New(instr.UPVAL_GET, 1),
-			instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.DUP), instr.New(instr.UPVAL_SET, 0),
-			instr.New(instr.RETURN),
+		Append(
+			instr.MustNew(instr.UPVAL_GET, 1), instr.MustNew(instr.UPVAL_SET, 1), instr.MustNew(instr.UPVAL_GET, 1),
+			instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.DUP), instr.MustNew(instr.UPVAL_SET, 0),
+			instr.MustNew(instr.RETURN),
 		).MustBuild()
 	b := instr.NewBuilder()
 	b.Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 1).Emit(instr.CONST_GET, 0).Emit(instr.CLOSURE_NEW).Emit(instr.LOCAL_SET, 0)

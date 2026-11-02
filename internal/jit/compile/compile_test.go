@@ -231,7 +231,7 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{v}})
 
 		m := new(machine)
-		assembly, err := compile.Lower(b.Build(), m, function(1, 1, instr.New(instr.CALL)), transform.Objects{9: {Function: function(1, 1)}}, 0, false, true)
+		assembly, err := compile.Lower(b.Build(), m, function(1, 1, instr.MustNew(instr.CALL)), transform.Objects{9: {Function: function(1, 1)}}, 0, false, true)
 		require.NoError(t, err)
 		exits := assembly.Exits
 		require.Empty(t, m.spills)
@@ -495,7 +495,7 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
-		caller := function(1, 1, instr.New(instr.CALL))
+		caller := function(1, 1, instr.MustNew(instr.CALL))
 		_, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
 		require.NoError(t, err)
 		require.Contains(t, m.consts, uint64(seed))
@@ -513,7 +513,7 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
-		caller := function(1, 1, instr.New(instr.CALL))
+		caller := function(1, 1, instr.MustNew(instr.CALL))
 		assembly, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
 		require.NoError(t, err)
 		exits := assembly.Exits
@@ -563,7 +563,7 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
-		caller := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeAny()}, Returns: []types.Type{types.TypeI32()}}, Code: instr.Marshal([]instr.Instruction{instr.New(instr.CALL)})}
+		caller := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeAny()}, Returns: []types.Type{types.TypeI32()}}, Code: instr.Marshal([]instr.Instruction{instr.MustNew(instr.CALL)})}
 		assembly, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: target}}, 0, false, true)
 		require.NoError(t, err)
 		exits := assembly.Exits
@@ -587,7 +587,7 @@ func TestLower(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: at, Results: []ssa.Value{got}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
 
-		_, err := compile.Lower(b.Build(), new(machine), function(0, 0, instr.New(instr.CALL)), transform.Objects{2: {Function: target}}, 0, false, true)
+		_, err := compile.Lower(b.Build(), new(machine), function(0, 0, instr.MustNew(instr.CALL)), transform.Objects{2: {Function: target}}, 0, false, true)
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
@@ -627,7 +627,7 @@ func TestLower(t *testing.T) {
 			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
 
 			m := new(machine)
-			caller := function(0, 0, instr.New(instr.CALL))
+			caller := function(0, 0, instr.MustNew(instr.CALL))
 			assembly, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: target}}, 0, false, true)
 			require.NoError(t, err)
 			exits := assembly.Exits
@@ -653,7 +653,7 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
-		caller := function(0, 0, instr.New(instr.CALL))
+		caller := function(0, 0, instr.MustNew(instr.CALL))
 		target := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI64()}, Returns: []types.Type{types.TypeI32()}}}
 		_, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: target}}, 0, false, true)
 		require.NoError(t, err)
@@ -672,7 +672,7 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
-		caller := function(1, 1, instr.New(instr.CALL))
+		caller := function(1, 1, instr.MustNew(instr.CALL))
 		assembly, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
 		require.NoError(t, err)
 		exits := assembly.Exits
@@ -692,7 +692,7 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
-		caller := function(1, 1, instr.New(instr.CALL))
+		caller := function(1, 1, instr.MustNew(instr.CALL))
 		_, err := compile.Lower(b.Build(), m, caller, transform.Objects{9: {Function: caller}}, 9, false, true)
 		require.NoError(t, err)
 		site := m.sites[0]
@@ -711,7 +711,7 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
-		caller := function(1, 1, instr.New(instr.CALL))
+		caller := function(1, 1, instr.MustNew(instr.CALL))
 		_, err := compile.Lower(b.Build(), m, caller, transform.Objects{9: {Function: caller}}, 9, true, false)
 		require.NoError(t, err)
 		site := m.sites[0]
@@ -778,7 +778,7 @@ func TestLower(t *testing.T) {
 		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
-		_, err := compile.Lower(b.Build(), m, function(0, 1, instr.New(instr.CALL)), transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
+		_, err := compile.Lower(b.Build(), m, function(0, 1, instr.MustNew(instr.CALL)), transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
 		require.NoError(t, err)
 		// value is lowered once at its definition, not at the store and the
 		// branch; arg, outside the loop, is loaded at the call only.
@@ -859,7 +859,7 @@ func TestLower(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: at})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
-		_, err := compile.Lower(b.Build(), new(machine), function(0, 0, instr.New(instr.CALL)), nil, 0, false, true)
+		_, err := compile.Lower(b.Build(), new(machine), function(0, 0, instr.MustNew(instr.CALL)), nil, 0, false, true)
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
@@ -877,7 +877,7 @@ func TestLower(t *testing.T) {
 		m := new(machine)
 		caller := &types.Function{
 			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeAny()}, Returns: []types.Type{types.TypeI32()}},
-			Code: instr.Marshal([]instr.Instruction{instr.New(instr.CALL)}),
+			Code: instr.Marshal([]instr.Instruction{instr.MustNew(instr.CALL)}),
 		}
 		assembly, err := compile.Lower(b.Build(), m, caller, nil, 0, false, true)
 		require.NoError(t, err)
@@ -911,7 +911,7 @@ func TestLower(t *testing.T) {
 
 		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64()}}}
 		m := new(machine)
-		_, err := compile.Lower(b.Build(), m, function(0, 0, instr.New(instr.CALL)), transform.Objects{2: {Function: target}}, 0, false, true)
+		_, err := compile.Lower(b.Build(), m, function(0, 0, instr.MustNew(instr.CALL)), transform.Objects{2: {Function: target}}, 0, false, true)
 		require.NoError(t, err)
 		require.Len(t, m.sites, 1)
 		require.Equal(t, []types.Kind{types.KindI64}, m.sites[0].Registers)
@@ -927,7 +927,7 @@ func TestLower(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64(), types.TypeI32(), types.TypeI32()}}}
-		_, err := compile.Lower(b.Build(), new(machine), function(0, 0, instr.New(instr.CALL)), transform.Objects{2: {Function: target}}, 0, false, true)
+		_, err := compile.Lower(b.Build(), new(machine), function(0, 0, instr.MustNew(instr.CALL)), transform.Objects{2: {Function: target}}, 0, false, true)
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 

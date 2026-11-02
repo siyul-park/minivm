@@ -28,50 +28,50 @@ func TestCompactPass_Run(t *testing.T) {
 	}{
 		{
 			name:      "already compact",
-			program:   program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)}),
+			program:   program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}),
 			preserved: true,
 		},
 		{
 			name: "comparable constants",
 			program: program.New(
 				[]instr.Instruction{
-					instr.New(instr.CONST_GET, 1),
-					instr.New(instr.CONST_GET, 2)},
+					instr.MustNew(instr.CONST_GET, 1),
+					instr.MustNew(instr.CONST_GET, 2)},
 				program.WithConstants(types.String("foo"), types.String("bar"), types.String("bar"))),
 			expected: program.New(
 				[]instr.Instruction{
 					instr.Marshal([]instr.Instruction{
-						instr.New(instr.CONST_GET, 0),
-						instr.New(instr.CONST_GET, 0)})},
+						instr.MustNew(instr.CONST_GET, 0),
+						instr.MustNew(instr.CONST_GET, 0)})},
 				program.WithConstants(types.String("bar")))},
 		{
 			name: "equivalent types",
 			program: program.New(
 				[]instr.Instruction{
-					instr.New(instr.STRUCT_NEW_DEFAULT, 0),
-					instr.New(instr.STRUCT_NEW_DEFAULT, 1)},
+					instr.MustNew(instr.STRUCT_NEW_DEFAULT, 0),
+					instr.MustNew(instr.STRUCT_NEW_DEFAULT, 1)},
 				program.WithTypes(
 					types.NewStructType(types.NewStructField(types.TypeF64())),
 					types.NewStructType(types.NewStructField(types.TypeF64())))),
 			expected: program.New(
 				[]instr.Instruction{
 					instr.Marshal([]instr.Instruction{
-						instr.New(instr.STRUCT_NEW_DEFAULT, 0),
-						instr.New(instr.STRUCT_NEW_DEFAULT, 0)})},
+						instr.MustNew(instr.STRUCT_NEW_DEFAULT, 0),
+						instr.MustNew(instr.STRUCT_NEW_DEFAULT, 0)})},
 				program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF64()))))},
 		{
 			name: "all type operands",
 			program: program.New(
 				[]instr.Instruction{
-					instr.New(instr.REF_TEST, 0),
-					instr.New(instr.REF_CAST, 1),
-					instr.New(instr.MAP_NEW_DEFAULT, 2)},
+					instr.MustNew(instr.REF_TEST, 0),
+					instr.MustNew(instr.REF_CAST, 1),
+					instr.MustNew(instr.MAP_NEW_DEFAULT, 2)},
 				program.WithTypes(types.TypeString(), types.TypeError(), types.NewMapType(types.TypeI32(), types.TypeI32()))),
 			expected: program.New(
 				[]instr.Instruction{
-					instr.New(instr.REF_TEST, 0),
-					instr.New(instr.REF_CAST, 1),
-					instr.New(instr.MAP_NEW_DEFAULT, 2)},
+					instr.MustNew(instr.REF_TEST, 0),
+					instr.MustNew(instr.REF_CAST, 1),
+					instr.MustNew(instr.MAP_NEW_DEFAULT, 2)},
 				program.WithTypes(types.TypeString(), types.TypeError(), types.NewMapType(types.TypeI32(), types.TypeI32()))),
 			preserved: true,
 		},
@@ -79,15 +79,15 @@ func TestCompactPass_Run(t *testing.T) {
 			name: "uncomparable constants",
 			program: program.New(
 				[]instr.Instruction{
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CONST_GET, 1)},
+					instr.MustNew(instr.CONST_GET, 0),
+					instr.MustNew(instr.CONST_GET, 1)},
 				program.WithConstants(
 					types.TypedArray[float64]{1},
 					types.TypedArray[float64]{1})),
 			expected: program.New(
 				[]instr.Instruction{
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CONST_GET, 1)},
+					instr.MustNew(instr.CONST_GET, 0),
+					instr.MustNew(instr.CONST_GET, 1)},
 				program.WithConstants(
 					types.TypedArray[float64]{1},
 					types.TypedArray[float64]{1})),
@@ -97,21 +97,21 @@ func TestCompactPass_Run(t *testing.T) {
 			name: "nil constants",
 			program: program.New(
 				[]instr.Instruction{
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CONST_GET, 1)},
+					instr.MustNew(instr.CONST_GET, 0),
+					instr.MustNew(instr.CONST_GET, 1)},
 				program.WithConstants([]types.Value{nil, nil}...)),
 			expected: program.New(
 				[]instr.Instruction{
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CONST_GET, 0)},
+					instr.MustNew(instr.CONST_GET, 0),
+					instr.MustNew(instr.CONST_GET, 0)},
 				program.WithConstants([]types.Value{nil}...))},
 		{
 			name: "preserves execution",
 			program: program.New(
 				[]instr.Instruction{
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CONST_GET, 1),
-					instr.New(instr.I32_ADD)},
+					instr.MustNew(instr.CONST_GET, 0),
+					instr.MustNew(instr.CONST_GET, 1),
+					instr.MustNew(instr.I32_ADD)},
 				program.WithConstants(types.I32(21), types.I32(21))),
 			preserved: false,
 			run:       true,

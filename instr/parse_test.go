@@ -64,7 +64,7 @@ func TestParseI8(t *testing.T) {
 }
 
 func TestParseI16(t *testing.T) {
-	instruction := instr.New(instr.BR, uint64(uint16(-9+1<<16)))
+	instruction := instr.MustNew(instr.BR, uint64(uint16(-9+1<<16)))
 	require.Equal(t, -9, instr.ParseI16(instruction, 1))
 
 	code := []byte{0x00, 0x80, 0xFF, 0x7F}
@@ -95,19 +95,19 @@ func TestParseAll(t *testing.T) {
 	t.Run("multi-line basic", func(t *testing.T) {
 		got, err := instr.ParseAll(strings.NewReader("i32.const 1\ni32.const 2\ni32.add"))
 		require.NoError(t, err)
-		require.Equal(t, []instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD)}, got)
+		require.Equal(t, []instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_ADD)}, got)
 	})
 
 	t.Run("multi-line blank lines skipped", func(t *testing.T) {
 		got, err := instr.ParseAll(strings.NewReader("\ni32.const 1\n\ni32.add\n"))
 		require.NoError(t, err)
-		require.Equal(t, []instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD)}, got)
+		require.Equal(t, []instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD)}, got)
 	})
 
 	t.Run("multi-line long line", func(t *testing.T) {
 		got, err := instr.ParseAll(strings.NewReader("i32.const" + strings.Repeat(" ", 70_000) + "1\n"))
 		require.NoError(t, err)
-		require.Equal(t, []instr.Instruction{instr.New(instr.I32_CONST, 1)}, got)
+		require.Equal(t, []instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}, got)
 	})
 
 	t.Run("multi-line limit", func(t *testing.T) {
@@ -115,7 +115,7 @@ func TestParseAll(t *testing.T) {
 		line := prefix + strings.Repeat(" ", parseLineLimit-len(prefix)-len(suffix)-1) + suffix
 		got, err := instr.ParseAll(strings.NewReader(line))
 		require.NoError(t, err)
-		require.Equal(t, []instr.Instruction{instr.New(instr.I32_CONST, 1)}, got)
+		require.Equal(t, []instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}, got)
 	})
 
 	t.Run("multi-line oversized line", func(t *testing.T) {
@@ -132,14 +132,14 @@ func TestParseAll(t *testing.T) {
 	})
 
 	t.Run("round-trip with Format", func(t *testing.T) {
-		original := []instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD)}
+		original := []instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_ADD)}
 		got, err := instr.ParseAll(strings.NewReader(instr.Format(instr.Marshal(original))))
 		require.NoError(t, err)
 		require.Equal(t, original, got)
 	})
 
 	t.Run("round-trip br_table", func(t *testing.T) {
-		original := []instr.Instruction{instr.New(instr.BR_TABLE, 2, 0, 1, 0)}
+		original := []instr.Instruction{instr.MustNew(instr.BR_TABLE, 2, 0, 1, 0)}
 		got, err := instr.ParseAll(strings.NewReader(instr.Format(instr.Marshal(original))))
 		require.NoError(t, err)
 		require.Equal(t, original, got)
@@ -149,9 +149,9 @@ func TestParseAll(t *testing.T) {
 		got, err := instr.ParseAll(strings.NewReader("br done\nnop\ndone:\nreturn"))
 		require.NoError(t, err)
 		require.Equal(t, []instr.Instruction{
-			instr.New(instr.BR, uint64(uint16(1))),
-			instr.New(instr.NOP),
-			instr.New(instr.RETURN),
+			instr.MustNew(instr.BR, uint64(uint16(1))),
+			instr.MustNew(instr.NOP),
+			instr.MustNew(instr.RETURN),
 		}, got)
 	})
 
@@ -159,8 +159,8 @@ func TestParseAll(t *testing.T) {
 		got, err := instr.ParseAll(strings.NewReader("loop:\nnop\nbr loop"))
 		require.NoError(t, err)
 		require.Equal(t, []instr.Instruction{
-			instr.New(instr.NOP),
-			instr.New(instr.BR, uint64(uint16(-4+1<<16))),
+			instr.MustNew(instr.NOP),
+			instr.MustNew(instr.BR, uint64(uint16(-4+1<<16))),
 		}, got)
 	})
 
@@ -168,9 +168,9 @@ func TestParseAll(t *testing.T) {
 		got, err := instr.ParseAll(strings.NewReader("br_if done\nnop\ndone:\nreturn"))
 		require.NoError(t, err)
 		require.Equal(t, []instr.Instruction{
-			instr.New(instr.BR_IF, uint64(uint16(1))),
-			instr.New(instr.NOP),
-			instr.New(instr.RETURN),
+			instr.MustNew(instr.BR_IF, uint64(uint16(1))),
+			instr.MustNew(instr.NOP),
+			instr.MustNew(instr.RETURN),
 		}, got)
 	})
 
@@ -179,10 +179,10 @@ func TestParseAll(t *testing.T) {
 			"br_table 0x02 case0 case1 def\ncase0:\nnop\ncase1:\nnop\ndef:\nreturn"))
 		require.NoError(t, err)
 		require.Equal(t, []instr.Instruction{
-			instr.New(instr.BR_TABLE, 2, uint64(0), uint64(1), uint64(2)),
-			instr.New(instr.NOP),
-			instr.New(instr.NOP),
-			instr.New(instr.RETURN),
+			instr.MustNew(instr.BR_TABLE, 2, uint64(0), uint64(1), uint64(2)),
+			instr.MustNew(instr.NOP),
+			instr.MustNew(instr.NOP),
+			instr.MustNew(instr.RETURN),
 		}, got)
 	})
 
@@ -190,9 +190,9 @@ func TestParseAll(t *testing.T) {
 		got, err := instr.ParseAll(strings.NewReader("br_table 0x01 case0 0x0004\ncase0:\nnop\nreturn"))
 		require.NoError(t, err)
 		require.Equal(t, []instr.Instruction{
-			instr.New(instr.BR_TABLE, 1, uint64(0), uint64(4)),
-			instr.New(instr.NOP),
-			instr.New(instr.RETURN),
+			instr.MustNew(instr.BR_TABLE, 1, uint64(0), uint64(4)),
+			instr.MustNew(instr.NOP),
+			instr.MustNew(instr.RETURN),
 		}, got)
 	})
 
@@ -280,83 +280,83 @@ func TestParse(t *testing.T) {
 	}{
 		{
 			line: "nop",
-			want: instr.New(instr.NOP),
+			want: instr.MustNew(instr.NOP),
 		},
 		{
 			line: "i32.const 0x0000002a",
-			want: instr.New(instr.I32_CONST, 42),
+			want: instr.MustNew(instr.I32_CONST, 42),
 		},
 		{
 			line: "i32.const 42",
-			want: instr.New(instr.I32_CONST, 42),
+			want: instr.MustNew(instr.I32_CONST, 42),
 		},
 		{
 			line: "i32.const -1",
-			want: instr.New(instr.I32_CONST, 0xFFFFFFFF), // int32(-1) bit pattern
+			want: instr.MustNew(instr.I32_CONST, 0xFFFFFFFF), // int32(-1) bit pattern
 		},
 		{
 			line: "i64.const 0x000000000000002a",
-			want: instr.New(instr.I64_CONST, 42),
+			want: instr.MustNew(instr.I64_CONST, 42),
 		},
 		{
 			line: "f32.const 0x3F800000",
-			want: instr.New(instr.F32_CONST, uint64(math.Float32bits(1.0))),
+			want: instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(1.0))),
 		},
 		{
 			line: "f32.const 1.0",
-			want: instr.New(instr.F32_CONST, uint64(math.Float32bits(1.0))),
+			want: instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(1.0))),
 		},
 		{
 			line: "f64.const 3.14",
-			want: instr.New(instr.F64_CONST, math.Float64bits(3.14)),
+			want: instr.MustNew(instr.F64_CONST, math.Float64bits(3.14)),
 		},
 		{
 			line: "i32.add",
-			want: instr.New(instr.I32_ADD),
+			want: instr.MustNew(instr.I32_ADD),
 		},
 		{
 			line: "br 0x0005",
-			want: instr.New(instr.BR, 5),
+			want: instr.MustNew(instr.BR, 5),
 		},
 		{
 			line: "br 5",
-			want: instr.New(instr.BR, 5),
+			want: instr.MustNew(instr.BR, 5),
 		},
 		{
 			line: "local.get 0x02",
-			want: instr.New(instr.LOCAL_GET, 2),
+			want: instr.MustNew(instr.LOCAL_GET, 2),
 		},
 		{
 			line: "closure.new",
-			want: instr.New(instr.CLOSURE_NEW),
+			want: instr.MustNew(instr.CLOSURE_NEW),
 		},
 		{
 			line: "upval.get 0x01",
-			want: instr.New(instr.UPVAL_GET, 1),
+			want: instr.MustNew(instr.UPVAL_GET, 1),
 		},
 		{
 			line: "ref.new",
-			want: instr.New(instr.REF_NEW),
+			want: instr.MustNew(instr.REF_NEW),
 		},
 		{
 			line: "string.iter",
-			want: instr.New(instr.STRING_ITER),
+			want: instr.MustNew(instr.STRING_ITER),
 		},
 		{
 			line: "br_table 0x02 0x0000 0x0001 0x0000",
-			want: instr.New(instr.BR_TABLE, 2, 0, 1, 0),
+			want: instr.MustNew(instr.BR_TABLE, 2, 0, 1, 0),
 		},
 		{
 			line: "br_table 0x00 0x0000",
-			want: instr.New(instr.BR_TABLE, 0, 0),
+			want: instr.MustNew(instr.BR_TABLE, 0, 0),
 		},
 		{
 			line: "0000:\ti32.const 0x00000001",
-			want: instr.New(instr.I32_CONST, 1),
+			want: instr.MustNew(instr.I32_CONST, 1),
 		},
 		{
 			line: "0010:   i32.add",
-			want: instr.New(instr.I32_ADD),
+			want: instr.MustNew(instr.I32_ADD),
 		},
 		{
 			line: "",

@@ -30,6 +30,7 @@ type emitter struct {
 	fixes  []fix
 	stack  []ssa.Value
 	needed ssa.Value
+	failed bool
 }
 
 type fix struct {
@@ -54,7 +55,11 @@ func emit(function *ssa.Function, constants *pool, module bool, base int) ([]byt
 		if !e.assign() {
 			return nil, nil, false
 		}
-		if e.walk() {
+		walked := e.walk()
+		if e.failed {
+			return nil, nil, false
+		}
+		if walked {
 			code, ok := e.link()
 			return code, e.locals, ok
 		}
@@ -222,7 +227,7 @@ func (e *emitter) open(id int) bool {
 		return true
 	}
 	for i := len(params) - 1; i >= 0; i-- {
-		e.write(instr.New(instr.LOCAL_SET, uint64(e.home[params[i]])))
+		e.write(instr.LOCAL_SET, uint64(e.home[params[i]]))
 	}
 	return true
 }
@@ -233,17 +238,15 @@ func (e *emitter) perform(operation ssa.Operation) bool {
 	}
 	switch operation.Op {
 	case ssa.OpConst:
-		inst, ok := e.constant(e.function.Type(operation.Results[0]), operation.Const)
-		if !ok {
+		if !e.constant(e.function.Type(operation.Results[0]), operation.Const) {
 			return false
 		}
-		e.write(inst)
 	case ssa.OpLoad:
-		e.write(instr.New(spaceOps[operation.Slot.Space].read, uint64(operation.Slot.Index)))
+		e.write(spaceOps[operation.Slot.Space].read, uint64(operation.Slot.Index))
 	case ssa.OpStore:
-		e.write(instr.New(spaceOps[operation.Slot.Space].write, uint64(operation.Slot.Index)))
+		e.write(spaceOps[operation.Slot.Space].write, uint64(operation.Slot.Index))
 	default:
-		e.write(instr.New(operation.Code))
+		e.write(operation.Code)
 	}
 	e.stack = e.stack[:len(e.stack)-len(operation.Args)]
 	return e.results(operation.Results)
@@ -256,7 +259,7 @@ func (e *emitter) close(id int) bool {
 		if !e.load(term.Args) {
 			return false
 		}
-		e.write(instr.New(instr.RETURN))
+		e.write(instr.RETURN)
 	case ssa.OpComplete:
 		if !e.module || !e.carry(term.Args) {
 			return false
@@ -311,7 +314,7 @@ func (e *emitter) load(args []ssa.Value) bool {
 			e.needed = v
 			return false
 		}
-		e.write(instr.New(instr.LOCAL_GET, uint64(slot)))
+		e.write(instr.LOCAL_GET, uint64(slot))
 		e.stack = append(e.stack, v)
 	}
 	return true
@@ -331,9 +334,9 @@ func (e *emitter) results(results []ssa.Value) bool {
 			return true
 		}
 		if e.homed[v] {
-			e.write(instr.New(instr.LOCAL_SET, uint64(e.home[v])))
+			e.write(instr.LOCAL_SET, uint64(e.home[v]))
 		} else {
-			e.write(instr.New(instr.DROP))
+			e.write(instr.DROP)
 		}
 		e.stack = e.stack[:len(e.stack)-1]
 	}
@@ -347,33 +350,38 @@ func (e *emitter) leave(id, next int) {
 }
 
 func (e *emitter) branch(operation instr.Opcode, block int) {
-	e.write(instr.New(operation, 0))
+	e.write(operation, 0)
 	e.fixes = append(e.fixes, fix{at: len(e.code) - 1, block: block})
 }
 
 func (e *emitter) table(edges []ssa.Edge) {
 	operands := make([]uint64, len(edges)+1)
 	operands[0] = uint64(len(edges) - 1)
-	e.write(instr.New(instr.BR_TABLE, operands...))
+	e.write(instr.BR_TABLE, operands...)
 	for i, edge := range edges {
 		e.fixes = append(e.fixes, fix{at: len(e.code) - 1, operand: i + 1, block: edge.Block})
 	}
 }
 
-func (e *emitter) constant(t ssa.Type, w uint64) (instr.Instruction, bool) {
+func (e *emitter) constant(t ssa.Type, w uint64) bool {
 	var c types.Boxed
 	switch t {
 	case ssa.TypeI32:
-		return instr.New(instr.I32_CONST, uint64(uint32(w))), true
+		e.write(instr.I32_CONST, uint64(uint32(w)))
+		return true
 	case ssa.TypeI64:
-		return instr.New(instr.I64_CONST, w), true
+		e.write(instr.I64_CONST, w)
+		return true
 	case ssa.TypeF32:
-		return instr.New(instr.F32_CONST, uint64(uint32(w))), true
+		e.write(instr.F32_CONST, uint64(uint32(w)))
+		return true
 	case ssa.TypeF64:
-		return instr.New(instr.F64_CONST, w), true
+		e.write(instr.F64_CONST, w)
+		return true
 	case ssa.TypeRef:
 		if w == uint64(types.BoxedNull) {
-			return instr.New(instr.REF_NULL), true
+			e.write(instr.REF_NULL)
+			return true
 		}
 		c = types.Boxed(w)
 	case ssa.TypeI1:
@@ -383,9 +391,10 @@ func (e *emitter) constant(t ssa.Type, w uint64) (instr.Instruction, bool) {
 	}
 	index, ok := e.constants.intern(c)
 	if !ok || index > math.MaxUint16 {
-		return nil, false
+		return false
 	}
-	return instr.New(instr.CONST_GET, uint64(index)), true
+	e.write(instr.CONST_GET, uint64(index))
+	return true
 }
 
 func (e *emitter) link() ([]byte, bool) {
@@ -411,12 +420,17 @@ func (e *emitter) link() ([]byte, bool) {
 	return instr.Marshal(e.code), true
 }
 
-func (e *emitter) write(inst instr.Instruction) {
-	if inst.Opcode() == instr.LOCAL_GET && len(e.code) > e.floor {
-		if last := e.code[len(e.code)-1]; last.Opcode() == instr.LOCAL_SET && last.Operand(0) == inst.Operand(0) {
-			e.code[len(e.code)-1] = instr.New(instr.LOCAL_TEE, inst.Operand(0))
-			return
+func (e *emitter) write(op instr.Opcode, operands ...uint64) {
+	if op == instr.LOCAL_GET && len(e.code) > e.floor {
+		if last := e.code[len(e.code)-1]; last.Opcode() == instr.LOCAL_SET && last.Operand(0) == operands[0] {
+			e.code = e.code[:len(e.code)-1]
+			op = instr.LOCAL_TEE
 		}
+	}
+	inst, err := instr.New(op, operands...)
+	if err != nil {
+		e.failed = true
+		return
 	}
 	e.code = append(e.code, inst)
 }

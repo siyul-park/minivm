@@ -22,7 +22,7 @@ func TestHeaders(t *testing.T) {
 		code, err := b.Assemble()
 		require.NoError(t, err)
 		fn := &types.Function{Locals: []types.Type{types.TypeI32()}, Code: instr.Marshal(code)}
-		headerOffset := instr.New(instr.I32_CONST, 0).Width() + instr.New(instr.LOCAL_SET, 0).Width()
+		headerOffset := instr.MustNew(instr.I32_CONST, 0).Width() + instr.MustNew(instr.LOCAL_SET, 0).Width()
 
 		got, err := analysis.Headers(fn)
 		require.NoError(t, err)
@@ -30,7 +30,7 @@ func TestHeaders(t *testing.T) {
 	})
 
 	t.Run("finds none in straight-line code", func(t *testing.T) {
-		fn := &types.Function{Code: instr.Marshal([]instr.Instruction{instr.New(instr.RETURN)})}
+		fn := &types.Function{Code: instr.Marshal([]instr.Instruction{instr.MustNew(instr.RETURN)})}
 
 		got, err := analysis.Headers(fn)
 		require.NoError(t, err)
@@ -38,7 +38,7 @@ func TestHeaders(t *testing.T) {
 	})
 
 	t.Run("propagates an invalid jump", func(t *testing.T) {
-		fn := types.NewFunctionBuilder(nil).Emit(instr.New(instr.BR, 10)).MustBuild()
+		fn := types.NewFunctionBuilder(nil).Append(instr.MustNew(instr.BR, 10)).MustBuild()
 
 		_, err := analysis.Headers(fn)
 		require.ErrorIs(t, err, analysis.ErrInvalidJump)

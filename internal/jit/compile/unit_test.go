@@ -24,8 +24,8 @@ type stub struct{}
 
 // totalTest is total's offset of its loop test, where its header's entry
 // state resumes.
-var totalTest = 2*(instr.New(instr.I32_CONST, 0).Width()+instr.New(instr.LOCAL_SET, 1).Width()) +
-	instr.New(instr.LOCAL_GET, 1).Width() + instr.New(instr.I32_CONST, 4).Width()
+var totalTest = 2*(instr.MustNew(instr.I32_CONST, 0).Width()+instr.MustNew(instr.LOCAL_SET, 1).Width()) +
+	instr.MustNew(instr.LOCAL_GET, 1).Width() + instr.MustNew(instr.I32_CONST, 4).Width()
 
 func (stub) Arch() asm.Arch { panic("unused") }
 
@@ -184,7 +184,7 @@ func TestCompile(t *testing.T) {
 			Locals: []types.Type{types.TypeI32(), types.TypeI32()},
 			Code:   instr.Marshal(code),
 		}
-		entry := instr.New(instr.I32_CONST, 0).Width()*2 + instr.New(instr.LOCAL_SET, 1).Width()
+		entry := instr.MustNew(instr.I32_CONST, 0).Width()*2 + instr.MustNew(instr.LOCAL_SET, 1).Width()
 
 		for _, tier := range []jit.Tier{jit.Baseline, jit.Optimized} {
 
@@ -217,8 +217,8 @@ func TestCompile(t *testing.T) {
 			Locals: []types.Type{types.TypeI32(), types.TypeI64()},
 			Code:   instr.Marshal(code),
 		}
-		entry := instr.New(instr.I32_CONST, 0).Width() + instr.New(instr.LOCAL_SET, 1).Width() +
-			instr.New(instr.I64_CONST, 0).Width() + instr.New(instr.LOCAL_SET, 2).Width()
+		entry := instr.MustNew(instr.I32_CONST, 0).Width() + instr.MustNew(instr.LOCAL_SET, 1).Width() +
+			instr.MustNew(instr.I64_CONST, 0).Width() + instr.MustNew(instr.LOCAL_SET, 2).Width()
 
 		stack := []types.Boxed{types.BoxI32(5), types.BoxI32(0), types.BoxI64(0)}
 		u := compile.Unit{Address: 1, Function: fn, Tier: jit.Optimized, IP: entry, OSR: true}
