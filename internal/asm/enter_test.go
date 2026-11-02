@@ -44,7 +44,7 @@ func grow(n int) int {
 }
 
 func TestEnter(t *testing.T) {
-	testenv.MustHaveNative(t)
+	testenv.MustHaveArch(t, "arm64")
 
 	t.Run("returns when the code returns", func(t *testing.T) {
 		s, err := asm.NewState(4096)
@@ -108,7 +108,7 @@ func TestEnter(t *testing.T) {
 }
 
 func TestResume(t *testing.T) {
-	testenv.MustHaveNative(t)
+	testenv.MustHaveArch(t, "arm64")
 
 	t.Run("continues with the registers Go set", func(t *testing.T) {
 		s, err := asm.NewState(4096)

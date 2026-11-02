@@ -118,7 +118,7 @@ func read(ctx *jit.Context, v jit.Value) uint64 {
 }
 
 func TestNew(t *testing.T) {
-	testenv.MustHaveNative(t)
+	testenv.MustHaveArch(t, "arm64")
 
 	t.Run("runs a translated function over the VM stack", func(t *testing.T) {
 		fn := function(t, []types.Type{types.TypeI32(), types.TypeI32()}, nil, func(b *instr.Builder) {

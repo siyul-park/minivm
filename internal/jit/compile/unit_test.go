@@ -119,7 +119,7 @@ func TestCompile(t *testing.T) {
 	})
 
 	t.Run("runs the sum loop at every tier", func(t *testing.T) {
-		testenv.MustHaveNative(t)
+		testenv.MustHaveArch(t, "arm64")
 		for _, tier := range []jit.Tier{jit.Baseline, jit.Optimized} {
 			stack := []types.Boxed{types.BoxI32(10), 0, 0}
 			ctx, trap := run(t, compile.Unit{Address: 1, Function: sum(t), Tier: tier}, stack)
@@ -130,7 +130,7 @@ func TestCompile(t *testing.T) {
 	})
 
 	t.Run("bounds a counted array loop behind a guard that deopts at its header for a shorter array", func(t *testing.T) {
-		testenv.MustHaveNative(t)
+		testenv.MustHaveArch(t, "arm64")
 		code, err := compile.Compile(compile.Unit{Address: 1, Function: total(t), Tier: jit.Optimized}, arm64.New())
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, code.Free()) })
@@ -166,7 +166,7 @@ func TestCompile(t *testing.T) {
 	})
 
 	t.Run("compiles and runs an OSR unit at every tier", func(t *testing.T) {
-		testenv.MustHaveNative(t)
+		testenv.MustHaveArch(t, "arm64")
 
 		b := instr.NewBuilder()
 		header, done := b.Label(), b.Label()
@@ -199,7 +199,7 @@ func TestCompile(t *testing.T) {
 	})
 
 	t.Run("compiles and runs an OSR unit whose loop carries an i64 local", func(t *testing.T) {
-		testenv.MustHaveNative(t)
+		testenv.MustHaveArch(t, "arm64")
 
 		b := instr.NewBuilder()
 		header, done := b.Label(), b.Label()
@@ -287,7 +287,7 @@ func TestCompile(t *testing.T) {
 	})
 
 	t.Run("runs fib through its own native code at every tier", func(t *testing.T) {
-		testenv.MustHaveNative(t)
+		testenv.MustHaveArch(t, "arm64")
 
 		b := instr.NewBuilder()
 		small := b.Label()
@@ -314,7 +314,7 @@ func TestCompile(t *testing.T) {
 	})
 
 	t.Run("rereads a register-passed parameter after a call spills it", func(t *testing.T) {
-		testenv.MustHaveNative(t)
+		testenv.MustHaveArch(t, "arm64")
 
 		b := instr.NewBuilder()
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
@@ -345,7 +345,7 @@ func TestCompile(t *testing.T) {
 	})
 
 	t.Run("rereads a register-passed parameter a loop stores to", func(t *testing.T) {
-		testenv.MustHaveNative(t)
+		testenv.MustHaveArch(t, "arm64")
 
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
@@ -372,7 +372,7 @@ func TestCompile(t *testing.T) {
 	})
 
 	t.Run("passes each scalar parameter kind in registers through the Go entry and a native call", func(t *testing.T) {
-		testenv.MustHaveNative(t)
+		testenv.MustHaveArch(t, "arm64")
 		for _, c := range []struct {
 			typ  types.Type
 			x, y types.Boxed
@@ -407,7 +407,7 @@ func TestCompile(t *testing.T) {
 	})
 
 	t.Run("rereads a register-passed parameter stored before the read", func(t *testing.T) {
-		testenv.MustHaveNative(t)
+		testenv.MustHaveArch(t, "arm64")
 		b := instr.NewBuilder()
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)

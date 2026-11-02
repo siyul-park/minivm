@@ -1,5 +1,9 @@
 package asm
 
+// Native reports whether native code can run on this architecture: Enter and
+// Resume execute it here and panic where Native is false.
+const Native = true
+
 // Enter runs native code at code on the state's native stack until that
 // activation returns or exits. It reports whether the activation is
 // suspended at an exit, for Resume, rather than returned.

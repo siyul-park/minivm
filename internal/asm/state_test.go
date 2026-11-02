@@ -24,7 +24,7 @@ func TestNewState(t *testing.T) {
 }
 
 func TestState_PC(t *testing.T) {
-	testenv.MustHaveNative(t)
+	testenv.MustHaveArch(t, "arm64")
 	s, err := asm.NewState(4096)
 	require.NoError(t, err)
 	address, size := linkExit(t)
@@ -37,7 +37,7 @@ func TestState_PC(t *testing.T) {
 }
 
 func TestState_Exited(t *testing.T) {
-	testenv.MustHaveNative(t)
+	testenv.MustHaveArch(t, "arm64")
 	s, err := asm.NewState(4096)
 	require.NoError(t, err)
 	require.False(t, s.Exited())
@@ -51,7 +51,7 @@ func TestState_Exited(t *testing.T) {
 }
 
 func TestState_Abandon(t *testing.T) {
-	testenv.MustHaveNative(t)
+	testenv.MustHaveArch(t, "arm64")
 	s, err := asm.NewState(4096)
 	require.NoError(t, err)
 	probe, _ := linkExit(t, arm64.ADDI(arm64.X0, arm64.SP, 16))
@@ -91,7 +91,7 @@ func TestState_SetReg(t *testing.T) {
 }
 
 func TestState_Slot(t *testing.T) {
-	testenv.MustHaveNative(t)
+	testenv.MustHaveArch(t, "arm64")
 	s, err := asm.NewState(4096)
 	require.NoError(t, err)
 	a := asm.New(arm64.New())
@@ -116,7 +116,7 @@ func TestState_Slot(t *testing.T) {
 
 func TestState_Word(t *testing.T) {
 	t.Run("reads a word of the native stack by address", func(t *testing.T) {
-		testenv.MustHaveNative(t)
+		testenv.MustHaveArch(t, "arm64")
 		s, err := asm.NewState(4096)
 		require.NoError(t, err)
 		address, _ := linkExit(t,

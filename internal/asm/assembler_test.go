@@ -513,7 +513,7 @@ func TestAssembler_Build(t *testing.T) {
 		), code)
 	})
 	t.Run("runs a value spilled across an exit", func(t *testing.T) {
-		testenv.MustHaveNative(t)
+		testenv.MustHaveArch(t, "arm64")
 		s, err := asm.NewState(4096)
 		require.NoError(t, err)
 		exit := []asm.Instruction{

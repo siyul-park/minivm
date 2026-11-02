@@ -46,7 +46,7 @@ func TestContext_Layout(t *testing.T) {
 
 func TestEnter(t *testing.T) {
 	t.Run("returns when the code returns", func(t *testing.T) {
-		testenv.MustHaveNative(t)
+		testenv.MustHaveArch(t, "arm64")
 		ctx, err := jit.NewContext(4096)
 		require.NoError(t, err)
 
@@ -54,7 +54,7 @@ func TestEnter(t *testing.T) {
 	})
 
 	t.Run("reports the trap and exit native code wrote", func(t *testing.T) {
-		testenv.MustHaveNative(t)
+		testenv.MustHaveArch(t, "arm64")
 		ctx, err := jit.NewContext(4096)
 		require.NoError(t, err)
 		code := link(t, append([]asm.Instruction{arm64.MOVI(arm64.X0, 42)}, exit(7, jit.TrapDeopt)...)...)
@@ -67,7 +67,7 @@ func TestEnter(t *testing.T) {
 
 func TestResume(t *testing.T) {
 	t.Run("returns when the resumed code returns", func(t *testing.T) {
-		testenv.MustHaveNative(t)
+		testenv.MustHaveArch(t, "arm64")
 		ctx, err := jit.NewContext(4096)
 		require.NoError(t, err)
 		code := link(t, exit(1, jit.TrapBridge)...)
@@ -77,7 +77,7 @@ func TestResume(t *testing.T) {
 	})
 
 	t.Run("reports the next trap", func(t *testing.T) {
-		testenv.MustHaveNative(t)
+		testenv.MustHaveArch(t, "arm64")
 		ctx, err := jit.NewContext(4096)
 		require.NoError(t, err)
 		code := link(t, append(exit(1, jit.TrapBridge), exit(2, jit.TrapDeopt)...)...)
@@ -102,7 +102,7 @@ func TestNewContext(t *testing.T) {
 }
 
 func TestContext_Trap(t *testing.T) {
-	testenv.MustHaveNative(t)
+	testenv.MustHaveArch(t, "arm64")
 	ctx, err := jit.NewContext(4096)
 	require.NoError(t, err)
 	require.Equal(t, jit.TrapReturn, ctx.Trap())
@@ -123,7 +123,7 @@ func TestContext_Read(t *testing.T) {
 	})
 
 	t.Run("outer activation reads the spill slot at the record's SP", func(t *testing.T) {
-		testenv.MustHaveNative(t)
+		testenv.MustHaveArch(t, "arm64")
 		ctx, err := jit.NewContext(4096)
 		require.NoError(t, err)
 		a := asm.New(arm64.New())
@@ -160,7 +160,7 @@ func TestContext_Read(t *testing.T) {
 	})
 
 	t.Run("innermost spilled value reads the suspended native stack slot", func(t *testing.T) {
-		testenv.MustHaveNative(t)
+		testenv.MustHaveArch(t, "arm64")
 		ctx, err := jit.NewContext(4096)
 		require.NoError(t, err)
 		a := asm.New(arm64.New())
