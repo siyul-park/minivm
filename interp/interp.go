@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"reflect"
+	"slices"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
@@ -58,6 +59,7 @@ type Interpreter struct {
 	fr      *frame
 	stack   []types.Boxed
 	heap    []types.Value
+	source  []types.Value
 	base    int
 	target  int
 	owners  map[types.Value]int
@@ -241,7 +243,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		profiler:    opt.profiler,
 		samples:     samples,
 		types:       prog.Types,
-		constants:   make([]types.Boxed, len(prog.Constants)),
+		source:      prog.Constants,
 		globals:     make([]types.Boxed, len(prog.Globals)),
 		globalTypes: prog.Globals,
 		instrs:      make([][]byte, len(prog.Constants)+1),
@@ -261,82 +263,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		gas:         fuel,
 		limit:       opt.maxHeap,
 	}
-	i.alloc(types.Null)
-
-	// Constants load into the heap through a queue, so nested values are
-	// allocated before the slot that holds them is filled.
-	queue := append([]types.Value(nil), prog.Constants...)
-	slots := make([]func(types.Boxed), len(queue))
-	for index := range queue {
-		slots[index] = func(value types.Boxed) {
-			i.constants[index] = value
-		}
-	}
-
-	dedup := make(map[string]types.Ref)
-	for head := 0; head < len(queue); head++ {
-		value := queue[head]
-		slot := slots[head]
-		var boxed types.Boxed
-		switch value := value.(type) {
-		case types.String:
-			ref, seen := dedup[string(value)]
-			if !seen {
-				ref = types.Ref(i.alloc(value))
-				dedup[string(value)] = ref
-			}
-			boxed = types.BoxRef(int(ref))
-		case *types.ArrayLiteral:
-			array := types.NewArray(value.Typ, make([]types.Boxed, len(value.Elems))...)
-			boxed = types.BoxRef(i.alloc(array))
-			for index, elem := range value.Elems {
-				queue = append(queue, elem)
-				slots = append(slots, func(value types.Boxed) {
-					array.Elems[index] = value
-				})
-			}
-		case *types.MapLiteral:
-			m := types.NewMap(value.Typ)
-			boxed = types.BoxRef(i.alloc(m))
-			for index, key := range value.Keys {
-				var mapKey types.MapKey
-				var storedKey types.Boxed
-				queue = append(queue, key)
-				slots = append(slots, func(value types.Boxed) {
-					mapKey, storedKey = i.mapKey(value)
-				})
-				queue = append(queue, value.Values[index])
-				slots = append(slots, func(value types.Boxed) {
-					old, replaced := m.Set(mapKey, types.MapEntry{Key: storedKey, Value: value})
-					if replaced {
-						i.releaseBox(old.Key)
-						i.releaseBox(old.Value)
-					}
-				})
-			}
-		case *types.StructLiteral:
-			structure := types.NewStruct(value.Typ)
-			boxed = types.BoxRef(i.alloc(structure))
-			for index, elem := range value.Fields {
-				queue = append(queue, elem)
-				slots = append(slots, func(value types.Boxed) {
-					structure.SetField(index, value)
-				})
-			}
-		default:
-			boxed = i.box(value)
-		}
-		slot(boxed)
-		if fn, ok := value.(*types.Function); ok {
-			addr := boxed.Ref()
-			i.instrs[addr] = fn.Code
-			i.handlers[addr] = fn.Handlers
-			i.coros[addr] = i.yields(fn.Code)
-		}
-	}
-
-	i.base = len(i.heap)
-	i.recount()
+	i.load(prog.Constants)
 	i.target = max(cap(i.heap), i.base+heapRunway)
 	if i.limit > 0 {
 		i.target = max(min(i.target, i.limit), i.base)
@@ -771,15 +698,18 @@ func (i *Interpreter) Reset() {
 
 	i.gas = i.fuel
 
-	heap := i.heap[:cap(i.heap)]
-	clear(heap[i.base:])
-	i.heap = heap[:i.base]
-	rc := i.rc[:cap(i.rc)]
-	clear(rc[i.base:])
-	i.rc = rc[:i.base]
-	i.recount()
+	// Constants reload from the program into the same addresses, so no
+	// mutable constant keeps a ref into the freed dynamic region.
+	clear(i.heap[:cap(i.heap)])
+	i.heap = i.heap[:0]
+	clear(i.rc[:cap(i.rc)])
+	i.rc = i.rc[:0]
 	i.free = i.free[:0]
 	i.tail = nil
+	target := i.target
+	i.target = 0
+	i.load(i.source)
+	i.target = target
 
 	i.seed()
 	i.pace()
@@ -1113,6 +1043,90 @@ func (i *Interpreter) decoder(r *Registry) *Decoder {
 	d := &i.dec
 	*d = Decoder{interp: i, registry: r}
 	return d
+}
+
+// load fills an empty heap with the null slot and the constants, then takes
+// the constant region as the baseline. Mutable constants are copied so the
+// interpreter owns every object it mutates.
+func (i *Interpreter) load(constants []types.Value) {
+	i.alloc(types.Null)
+
+	// Constants load into the heap through a queue, so nested values are
+	// allocated before the slot that holds them is filled.
+	queue := append([]types.Value(nil), constants...)
+	// A background compile reads the previous slice, so reloading builds a new one.
+	i.constants = make([]types.Boxed, len(constants))
+	slots := make([]func(types.Boxed), len(queue))
+	for index := range queue {
+		slots[index] = func(value types.Boxed) {
+			i.constants[index] = value
+		}
+	}
+
+	dedup := make(map[string]types.Ref)
+	for head := 0; head < len(queue); head++ {
+		value := queue[head]
+		slot := slots[head]
+		var boxed types.Boxed
+		switch value := value.(type) {
+		case types.String:
+			ref, seen := dedup[string(value)]
+			if !seen {
+				ref = types.Ref(i.alloc(value))
+				dedup[string(value)] = ref
+			}
+			boxed = types.BoxRef(int(ref))
+		case *types.ArrayLiteral:
+			array := types.NewArray(value.Typ, make([]types.Boxed, len(value.Elems))...)
+			boxed = types.BoxRef(i.alloc(array))
+			for index, elem := range value.Elems {
+				queue = append(queue, elem)
+				slots = append(slots, func(value types.Boxed) {
+					array.Elems[index] = value
+				})
+			}
+		case *types.MapLiteral:
+			m := types.NewMap(value.Typ)
+			boxed = types.BoxRef(i.alloc(m))
+			for index, key := range value.Keys {
+				var mapKey types.MapKey
+				var storedKey types.Boxed
+				queue = append(queue, key)
+				slots = append(slots, func(value types.Boxed) {
+					mapKey, storedKey = i.mapKey(value)
+				})
+				queue = append(queue, value.Values[index])
+				slots = append(slots, func(value types.Boxed) {
+					old, replaced := m.Set(mapKey, types.MapEntry{Key: storedKey, Value: value})
+					if replaced {
+						i.releaseBox(old.Key)
+						i.releaseBox(old.Value)
+					}
+				})
+			}
+		case *types.StructLiteral:
+			structure := types.NewStruct(value.Typ)
+			boxed = types.BoxRef(i.alloc(structure))
+			for index, elem := range value.Fields {
+				queue = append(queue, elem)
+				slots = append(slots, func(value types.Boxed) {
+					structure.SetField(index, value)
+				})
+			}
+		default:
+			boxed = i.box(clone(value))
+		}
+		slot(boxed)
+		if fn, ok := value.(*types.Function); ok {
+			addr := boxed.Ref()
+			i.instrs[addr] = fn.Code
+			i.handlers[addr] = fn.Handlers
+			i.coros[addr] = i.yields(fn.Code)
+		}
+	}
+
+	i.base = len(i.heap)
+	i.recount()
 }
 
 // recount rebuilds baseline counts from constant roots and heap edges after
@@ -1631,6 +1645,59 @@ func (i *Interpreter) box(val types.Value) types.Boxed {
 	default:
 		return types.BoxRef(i.alloc(v))
 	}
+}
+
+// clone returns val, copying a mutable constant so that the interpreter, not
+// the program, owns the object it mutates. Immutable values are returned as is.
+func clone(val types.Value) types.Value {
+	switch v := val.(type) {
+	case *types.Array:
+		return types.NewArray(v.Typ, slices.Clone(v.Elems)...)
+	case *types.Struct:
+		s := types.NewStruct(v.Typ)
+		copy(s.Data, v.Data)
+		return s
+	case *types.Map:
+		m := types.NewMapWithCapacity(v.Typ, v.Len())
+		m.Zero = v.Zero
+		v.Range(func(key types.MapKey, entry types.MapEntry) { m.Set(key, entry) })
+		return m
+	case types.TypedArray[bool]:
+		return slices.Clone(v)
+	case types.TypedArray[int8]:
+		return slices.Clone(v)
+	case types.TypedArray[int32]:
+		return slices.Clone(v)
+	case types.TypedArray[int64]:
+		return slices.Clone(v)
+	case types.TypedArray[float32]:
+		return slices.Clone(v)
+	case types.TypedArray[float64]:
+		return slices.Clone(v)
+	case *types.TypedMap[bool]:
+		return cloneMap(v)
+	case *types.TypedMap[int8]:
+		return cloneMap(v)
+	case *types.TypedMap[int32]:
+		return cloneMap(v)
+	case *types.TypedMap[int64]:
+		return cloneMap(v)
+	case *types.TypedMap[float32]:
+		return cloneMap(v)
+	case *types.TypedMap[float64]:
+		return cloneMap(v)
+	case *types.TypedMap[string]:
+		return cloneMap(v)
+	default:
+		return val
+	}
+}
+
+func cloneMap[K comparable](m *types.TypedMap[K]) *types.TypedMap[K] {
+	c := types.NewTypedMap[K](m.Typ, m.Len())
+	c.Zero = m.Zero
+	m.Range(func(key K, value types.Boxed) { c.Set(key, value) })
+	return c
 }
 
 func (i *Interpreter) boxI64(val int64) types.Boxed {
