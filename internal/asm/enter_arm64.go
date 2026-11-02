@@ -2,7 +2,8 @@ package asm
 
 // Enter runs native code at code on the state's native stack until that
 // activation returns or exits. It reports whether the activation is
-// suspended at an exit, for Resume, rather than returned.
+// suspended at an exit, for Resume, rather than returned. Native code runs
+// only where a host JIT backend exists.
 func Enter(code uintptr, s *State) bool {
 	enter(code, s)
 	return s.Exited()

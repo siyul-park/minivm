@@ -5,7 +5,8 @@ package asm
 import "runtime"
 
 // Enter cannot run on this architecture: no native code can be published
-// for it, so reaching here is a programmer error.
+// for it, so reaching here is a programmer error. Native code runs only
+// where a host JIT backend exists.
 func Enter(uintptr, *State) bool {
 	panic("asm: native execution is unsupported on " + runtime.GOARCH)
 }
@@ -15,4 +16,7 @@ func Resume(*State) bool {
 	panic("asm: native execution is unsupported on " + runtime.GOARCH)
 }
 
-func exitPC() uintptr { return 0 }
+// exitPC is no stub: nothing native runs here to call one.
+func exitPC() uintptr {
+	return 0
+}

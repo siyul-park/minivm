@@ -3,7 +3,6 @@ package interp
 import (
 	"errors"
 	"maps"
-	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -12,8 +11,8 @@ import (
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/jit"
-	"github.com/siyul-park/minivm/internal/jit/arm64"
 	"github.com/siyul-park/minivm/internal/jit/compile"
+	"github.com/siyul-park/minivm/internal/jit/host"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/transform"
 	"github.com/siyul-park/minivm/types"
@@ -279,6 +278,9 @@ var callouts = [256]callout{
 	},
 }
 
+// hasJIT reports whether the host architecture has a JIT backend.
+var _, hasJIT = host.New()
+
 // newNative builds i's JIT runtime: live at once for a fixed threshold,
 // dormant for the automatic one.
 func newNative(i *Interpreter, threshold int) *native {
@@ -351,7 +353,7 @@ func (n *native) wake(i *Interpreter) bool {
 func newShared(i *Interpreter) *shared {
 	r := &shared{
 		store:  jit.NewStore(len(i.code)),
-		queue:  compile.NewQueue(func() compile.Machine { return arm64.New() }, 1),
+		queue:  compile.NewQueue(func() compile.Machine { m, _ := host.New(); return m }, 1),
 		module: newModule(i),
 		calls:  make([]atomic.Int64, len(i.code)),
 	}
@@ -1635,10 +1637,11 @@ func same(a, b transform.Module) bool {
 }
 
 // jitEnabled reports whether opt selects the JIT: WithThreshold(n) with n >=
-// 0, on arm64, with a tick above 1: a tick of 1 is exact execution, every
-// instruction boundary observable, which native code does not expose.
+// 0, on a host with a JIT backend, with a tick above 1: a tick of 1 is exact
+// execution, every instruction boundary observable, which native code does
+// not expose.
 func jitEnabled(opt option) bool {
-	return opt.threshold >= 0 && runtime.GOARCH == "arm64" && opt.tick > 1
+	return opt.threshold >= 0 && hasJIT && opt.tick > 1
 }
 
 // index is the two-byte type index the operation at code[0] carries, read

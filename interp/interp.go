@@ -200,8 +200,8 @@ func WithFuel(val uint64) Option {
 // the JIT starts once the program has done enough work to repay a compile and
 // adapts its thresholds from runtime metrics. n > 0 compiles a
 // *types.Function after n calls and a loop after n back edges. n < 0 disables
-// the JIT. The JIT also requires runtime.GOARCH == "arm64" and a WithTick
-// above 1.
+// the JIT. The JIT also requires a JIT backend for runtime.GOARCH (arm64 today) and a
+// WithTick above 1.
 func WithThreshold(n int) Option {
 	return func(o *option) { o.threshold = n }
 }
