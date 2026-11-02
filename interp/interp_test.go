@@ -7975,6 +7975,7 @@ func TestInterpreter_Run(t *testing.T) {
 	t.Run("shares one mutable constant between its positions", func(t *testing.T) {
 		typ := types.NewArrayType(types.TypeI32())
 		shared := types.NewArray(typ, types.BoxI32(1))
+		typed := types.TypedArray[int32]{1}
 
 		tests := []struct {
 			name      string
@@ -7997,6 +7998,12 @@ func TestInterpreter_Run(t *testing.T) {
 				write: []instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET)},
 				read:  []instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET)},
 			},
+			{
+				name:      "typed array",
+				constants: []types.Value{typed, typed},
+				write:     []instr.Instruction{instr.New(instr.CONST_GET, 0)},
+				read:      []instr.Instruction{instr.New(instr.CONST_GET, 1)},
+			},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
@@ -8017,6 +8024,7 @@ func TestInterpreter_Run(t *testing.T) {
 					vm.Reset()
 				}
 				require.Equal(t, types.BoxI32(1), shared.Elems[0])
+				require.Equal(t, int32(1), typed[0])
 			})
 		}
 	})

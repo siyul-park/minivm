@@ -134,6 +134,13 @@ type option struct {
 	threshold int
 }
 
+// sliceIdentity names a slice-backed value by its type and backing array.
+type sliceIdentity struct {
+	typ reflect.Type
+	ptr unsafe.Pointer
+	len int
+}
+
 // park is the ip a frame waits at while the JIT wakes: past any code.
 const park = math.MaxInt
 
@@ -1072,12 +1079,13 @@ func (i *Interpreter) load(constants []types.Value) {
 	dedup := make(map[string]types.Ref)
 	// An object reachable from several positions is copied once, so every
 	// position shares the interpreter-owned copy as the program shared the source.
-	copies := make(map[types.Value]types.Boxed)
+	copies := make(map[any]types.Boxed)
 	for head := 0; head < len(queue); head++ {
 		value := queue[head]
 		slot := slots[head]
-		if aliasable(value) {
-			if shared, ok := copies[value]; ok {
+		key, keyed := identity(value)
+		if keyed {
+			if shared, ok := copies[key]; ok {
 				slot(shared)
 				continue
 			}
@@ -1130,8 +1138,8 @@ func (i *Interpreter) load(constants []types.Value) {
 		default:
 			boxed = i.box(clone(value))
 		}
-		if aliasable(value) {
-			copies[value] = boxed
+		if keyed {
+			copies[key] = boxed
 		}
 		slot(boxed)
 		if fn, ok := value.(*types.Function); ok {
@@ -2091,6 +2099,19 @@ func (i *Interpreter) wake() {
 // aliasable reports whether val is a pointer, the only shape two slots can
 // share. A pointer is stored directly in the interface word and is comparable,
 // so the interface itself keys the index.
+// identity returns what makes two constants the same object: the pointer for a
+// pointer value, the backing array for a non-empty slice.
+func identity(val types.Value) (any, bool) {
+	if aliasable(val) {
+		return val, true
+	}
+	v := reflect.ValueOf(val)
+	if v.Kind() == reflect.Slice && v.Len() > 0 {
+		return sliceIdentity{typ: v.Type(), ptr: v.UnsafePointer(), len: v.Len()}, true
+	}
+	return nil, false
+}
+
 func aliasable(val types.Value) bool {
 	typ := reflect.TypeOf(val)
 	return typ != nil && typ.Kind() == reflect.Pointer
