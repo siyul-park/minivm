@@ -1070,9 +1070,18 @@ func (i *Interpreter) load(constants []types.Value) {
 	// with the entry that replaced it.
 	var replaced []types.Boxed
 	dedup := make(map[string]types.Ref)
+	// An object reachable from several positions is copied once, so every
+	// position shares the interpreter-owned copy as the program shared the source.
+	copies := make(map[types.Value]types.Boxed)
 	for head := 0; head < len(queue); head++ {
 		value := queue[head]
 		slot := slots[head]
+		if aliasable(value) {
+			if shared, ok := copies[value]; ok {
+				slot(shared)
+				continue
+			}
+		}
 		var boxed types.Boxed
 		switch value := value.(type) {
 		case types.String:
@@ -1120,6 +1129,9 @@ func (i *Interpreter) load(constants []types.Value) {
 			}
 		default:
 			boxed = i.box(clone(value))
+		}
+		if aliasable(value) {
+			copies[value] = boxed
 		}
 		slot(boxed)
 		if fn, ok := value.(*types.Function); ok {

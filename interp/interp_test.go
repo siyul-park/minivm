@@ -7972,6 +7972,55 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 	})
 
+	t.Run("shares one mutable constant between its positions", func(t *testing.T) {
+		typ := types.NewArrayType(types.TypeI32())
+		shared := types.NewArray(typ, types.BoxI32(1))
+
+		tests := []struct {
+			name      string
+			constants []types.Value
+			write     []instr.Instruction
+			read      []instr.Instruction
+		}{
+			{
+				name:      "two constants",
+				constants: []types.Value{shared, shared},
+				write:     []instr.Instruction{instr.New(instr.CONST_GET, 0)},
+				read:      []instr.Instruction{instr.New(instr.CONST_GET, 1)},
+			},
+			{
+				name: "nested twice",
+				constants: []types.Value{&types.ArrayLiteral{
+					Typ:   types.NewArrayType(typ),
+					Elems: []types.Value{shared, shared},
+				}},
+				write: []instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET)},
+				read:  []instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET)},
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				code := slices.Concat(tt.write,
+					[]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 9), instr.New(instr.ARRAY_SET)},
+					tt.read,
+					[]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET)})
+				prog := program.New(code, program.WithConstants(tt.constants...))
+				require.NoError(t, program.Verify(prog))
+
+				vm := interp.New(prog, interp.WithThreshold(-1))
+				defer vm.Close()
+				for range 2 {
+					require.NoError(t, vm.Run(context.Background()))
+					got, err := vm.PopBoxed()
+					require.NoError(t, err)
+					require.Equal(t, types.BoxI32(9), got)
+					vm.Reset()
+				}
+				require.Equal(t, types.BoxI32(1), shared.Elems[0])
+			})
+		}
+	})
+
 	t.Run("covers every runtime opcode", func(t *testing.T) {
 		covered := make(map[instr.Opcode]struct{})
 		names := make(map[string]int)
