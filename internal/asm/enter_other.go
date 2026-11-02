@@ -15,4 +15,7 @@ func Resume(*State) bool {
 	panic("asm: native execution is unsupported on " + runtime.GOARCH)
 }
 
-func exitPC() uintptr { return 0 }
+// exitPC is no stub: nothing native runs here to call one.
+func exitPC() uintptr {
+	return 0
+}
