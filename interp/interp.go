@@ -279,9 +279,11 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 
 	i.code[0] = i.compile(i.module, i.tick == 1)
 
-	for j, v := range prog.Constants {
-		if fn, ok := v.(*types.Function); ok {
-			i.bind(i.constants[j].Ref(), fn, false)
+	// Functions nested in array, map, or struct constants live in the constant
+	// region too, so the region is scanned rather than the top-level list.
+	for addr := 1; addr < i.base; addr++ {
+		if fn, ok := i.heap[addr].(*types.Function); ok {
+			i.bind(addr, fn, false)
 		}
 	}
 
@@ -1063,6 +1065,10 @@ func (i *Interpreter) load(constants []types.Value) {
 		}
 	}
 
+	// A map literal can repeat a key. The entry it replaces is reconciled once
+	// the counts are established, because a deduplicated string may be shared
+	// with the entry that replaced it.
+	var replaced []types.Boxed
 	dedup := make(map[string]types.Ref)
 	for head := 0; head < len(queue); head++ {
 		value := queue[head]
@@ -1097,10 +1103,9 @@ func (i *Interpreter) load(constants []types.Value) {
 				})
 				queue = append(queue, value.Values[index])
 				slots = append(slots, func(value types.Boxed) {
-					old, replaced := m.Set(mapKey, types.MapEntry{Key: storedKey, Value: value})
-					if replaced {
-						i.releaseBox(old.Key)
-						i.releaseBox(old.Value)
+					old, ok := m.Set(mapKey, types.MapEntry{Key: storedKey, Value: value})
+					if ok {
+						replaced = append(replaced, old.Key, old.Value)
 					}
 				})
 			}
@@ -1119,6 +1124,7 @@ func (i *Interpreter) load(constants []types.Value) {
 		slot(boxed)
 		if fn, ok := value.(*types.Function); ok {
 			addr := boxed.Ref()
+			i.fit(addr + 1)
 			i.instrs[addr] = fn.Code
 			i.handlers[addr] = fn.Handlers
 			i.coros[addr] = i.yields(fn.Code)
@@ -1127,6 +1133,19 @@ func (i *Interpreter) load(constants []types.Value) {
 
 	i.base = len(i.heap)
 	i.recount()
+	// Holding each replaced ref across its release frees only what the map no
+	// longer reaches.
+	for _, old := range replaced {
+		i.retainBox(old)
+		i.releaseBox(old)
+	}
+}
+
+// fit grows the per-function tables to n entries, keeping what they hold.
+func (i *Interpreter) fit(n int) {
+	i.instrs = slices.Grow(i.instrs, max(n-len(i.instrs), 0))[:max(n, len(i.instrs))]
+	i.handlers = slices.Grow(i.handlers, max(n-len(i.handlers), 0))[:max(n, len(i.handlers))]
+	i.coros = slices.Grow(i.coros, max(n-len(i.coros), 0))[:max(n, len(i.coros))]
 }
 
 // recount rebuilds baseline counts from constant roots and heap edges after

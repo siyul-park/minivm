@@ -7924,6 +7924,54 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, types.BoxI32(3), got)
 	})
 
+	t.Run("runs a map constant with a repeated key and equal values", func(t *testing.T) {
+		b := program.NewBuilder()
+		b.ConstGet(&types.MapLiteral{
+			Typ:    types.NewMapType(types.TypeI32(), types.TypeString()),
+			Keys:   []types.Value{types.I32(1), types.I32(1)},
+			Values: []types.Value{types.String("same"), types.String("same")},
+		}).Emit(instr.I32_CONST, 1).Emit(instr.MAP_GET)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+
+		vm := interp.New(prog, interp.WithThreshold(-1))
+		defer vm.Close()
+		for range 2 {
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.String("same"), got)
+			vm.Reset()
+		}
+	})
+
+	t.Run("calls a function nested in an array constant", func(t *testing.T) {
+		fnType := &types.FunctionType{Returns: []types.Type{types.TypeI32()}}
+		fn := types.NewFunctionBuilder(fnType).
+			Emit(instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).
+			MustBuild()
+
+		b := program.NewBuilder()
+		b.ConstGet(&types.ArrayLiteral{
+			Typ:   types.NewArrayType(fnType),
+			Elems: []types.Value{fn},
+		}).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.CALL)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+
+		vm := interp.New(prog, interp.WithThreshold(-1))
+		defer vm.Close()
+		for range 2 {
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(7), got)
+			vm.Reset()
+		}
+	})
+
 	t.Run("covers every runtime opcode", func(t *testing.T) {
 		covered := make(map[instr.Opcode]struct{})
 		names := make(map[string]int)
