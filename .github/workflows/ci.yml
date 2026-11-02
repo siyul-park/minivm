@@ -35,11 +35,36 @@ jobs:
           key: ${{ runner.os }}-${{ matrix.go }}-${{ hashFiles('**/go.sum') }}
           restore-keys: ${{ runner.os }}-${{ matrix.go }}-${{ hashFiles('**/go.sum') }}
 
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      # The programs the Lighthouse checks run: formatters and linters, each in
+      # the bubblewrap sandbox. Versions match the ones the checks are made with.
+      - name: Install Lighthouse Tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          # Ubuntu 24.04 restricts the unprivileged user namespaces bubblewrap needs.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          npm install -g prettier@3.9.10 markdownlint-cli2@0.24.0
+          pipx install ruff==0.17.3
+          curl -fsSL https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-x86_64-unknown-linux-gnu.tar.gz \
+            | sudo tar -xz -C /usr/local/bin --strip-components=1 lychee-x86_64-unknown-linux-gnu/lychee
+
+      - name: Install Lighthouse
+        uses: siyul-park/lighthouse@v0.0.0-e966f4a998ac
+        with:
+          version: 0.0.0-e966f4a998ac
+
       - name: Initialize Project
         run: make init
 
       - name: Run Checks
         run: make check
+        env:
+          # CI trusts the project to run the programs it names.
+          LIGHTHOUSE_TRUST: "1"
 
   coverage:
     needs: check
