@@ -23,6 +23,7 @@ Semantics originate in bytecode; SSA and machine forms refine representation, no
 | `internal/codegen` | generated threaded handlers and fusion |
 | `internal/graph` | CFG analysis |
 | `internal/ssa` | SSA IR and verification |
+| `internal/transform` | bytecode↔SSA conversion, SSA transforms, JIT feedback model |
 | `internal/asm` | machine IR, register allocation, encoding, linking, executable memory, native stack and trampoline |
 | `internal/asm/arm64` | ARM64 encoding |
 | `internal/jit` | native runtime contract shared by the interpreter and the compiler; publishes and retires native code (`Code`, `Store`) |
@@ -30,7 +31,6 @@ Semantics originate in bytecode; SSA and machine forms refine representation, no
 | `internal/jit/arm64` | ARM64 lowering of SSA operations |
 | `pass` | pass API, lifecycle, pipelines, analysis cache |
 | `analysis` | reusable read-only facts |
-| `transform` | bytecode transforms, bytecode↔SSA conversion, SSA transforms |
 | `optimize` | optimization composition |
 | `prof` | execution sampling, metrics, aggregation |
 | `debug` | debugging policy |
@@ -41,12 +41,12 @@ Behavior `MUST` follow dominant ownership, not import convenience; an owner `MUS
 ## Dependencies
 
 - `instr` and `internal/graph` `MUST` remain leaf-like.
-- `internal/ssa` and `transform` `MUST NOT` depend on runtime or target packages.
+- `internal/ssa` and `internal/transform` `MUST NOT` depend on runtime or target packages.
 - `internal/asm` MUST remain below the runtime and compiler layers and MUST NOT own JIT or interpreter exit semantics; it may own the low-level native-stack and trampoline mechanics required to enter, suspend, and resume native code.
 - `internal/jit` MUST NOT import `interp`.
 - ARM64 encoding MUST stay under `internal/asm/arm64`.
 - `internal/jit/compile` MUST NOT name a physical register or target instruction; `internal/jit/arm64` MUST NOT walk SSA control flow.
-- The native compiler MUST NOT become a dependency of `internal/ssa*` or `transform`.
+- The native compiler MUST NOT become a dependency of `internal/ssa*` or `internal/transform`.
 - `program.Verify` `MUST` stay independent of runtime and optimization policy.
 
 ## Execution
@@ -76,7 +76,7 @@ The following invariants `MUST` hold:
 
 ## Native Boundary
 
-The native tier consumes `transform`, `internal/ssa`, and `internal/asm`; `interp` owns native entry, exit, materialization, and tiering.
+The native tier consumes `internal/transform`, `internal/ssa`, and `internal/asm`; `interp` owns native entry, exit, materialization, and tiering.
 
 ## Related
 
