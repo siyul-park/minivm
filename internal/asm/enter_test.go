@@ -7,6 +7,7 @@ import (
 
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/asm/arm64"
+	"github.com/siyul-park/minivm/internal/testenv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,6 +44,8 @@ func grow(n int) int {
 }
 
 func TestEnter(t *testing.T) {
+	testenv.MustHaveArch(t, "arm64")
+
 	t.Run("returns when the code returns", func(t *testing.T) {
 		s, err := asm.NewState(4096)
 		require.NoError(t, err)
@@ -105,6 +108,8 @@ func TestEnter(t *testing.T) {
 }
 
 func TestResume(t *testing.T) {
+	testenv.MustHaveArch(t, "arm64")
+
 	t.Run("continues with the registers Go set", func(t *testing.T) {
 		s, err := asm.NewState(4096)
 		require.NoError(t, err)

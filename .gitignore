@@ -49,3 +49,4 @@ __pycache__/
 .lighthouse/*.db*
 .lighthouse/local.toml
 .lighthouse/cache/
+node_modules/
