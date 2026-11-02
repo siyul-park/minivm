@@ -7,16 +7,15 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/siyul-park/minivm/internal/asm"
+	"github.com/siyul-park/minivm/internal/jit/host"
 )
 
-// MustHaveNative skips the test unless native code can run here, as asm.Native
-// reports. Use it for a test that runs guest programs through whatever native
-// backend the architecture has.
-func MustHaveNative(t testing.TB) {
+// MustHaveJIT skips the test unless the host has a JIT backend, as host.New
+// reports. Use it for a test that runs guest programs through that backend.
+func MustHaveJIT(t testing.TB) {
 	t.Helper()
-	if !asm.Native {
-		t.Skip("native execution is unsupported on " + runtime.GOARCH)
+	if _, ok := host.New(); !ok {
+		t.Skip("no JIT backend for " + runtime.GOARCH)
 	}
 }
 

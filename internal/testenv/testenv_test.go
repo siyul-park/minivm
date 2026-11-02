@@ -4,19 +4,20 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/siyul-park/minivm/internal/asm"
+	"github.com/siyul-park/minivm/internal/jit/host"
 	"github.com/siyul-park/minivm/internal/testenv"
 	"github.com/stretchr/testify/require"
 )
 
-func TestMustHaveNative(t *testing.T) {
+func TestMustHaveJIT(t *testing.T) {
 	var skipped bool
 	t.Run("probe", func(t *testing.T) {
 		defer func() { skipped = t.Skipped() }()
-		testenv.MustHaveNative(t)
+		testenv.MustHaveJIT(t)
 	})
 
-	require.Equal(t, !asm.Native, skipped)
+	_, ok := host.New()
+	require.Equal(t, !ok, skipped)
 }
 
 func TestMustHaveArch(t *testing.T) {

@@ -4,12 +4,9 @@ package asm
 
 import "runtime"
 
-// Native reports whether native code can run on this architecture: Enter and
-// Resume execute it where Native is true and panic here.
-const Native = false
-
 // Enter cannot run on this architecture: no native code can be published
-// for it, so reaching here is a programmer error.
+// for it, so reaching here is a programmer error. Native code runs only
+// where a host JIT backend exists.
 func Enter(uintptr, *State) bool {
 	panic("asm: native execution is unsupported on " + runtime.GOARCH)
 }
