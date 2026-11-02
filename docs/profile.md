@@ -18,7 +18,8 @@ Lower ticks increase both density and cost. Debugger and REPL `.profile` use exa
 
 ```go
 p := prof.New()
-vm := interp.MustNew(prog, interp.WithProfiler(p))
+vm, err := interp.New(prog, interp.WithProfiler(p))
+if err != nil { return err }
 if err := vm.Run(ctx); err != nil { return err }
 if err := vm.Close(); err != nil { return err }
 metrics := p.Metrics()
