@@ -73,7 +73,7 @@ Published strings are immutable. Concatenation `MAY` reuse interpreter-local app
 
 `Reset` invalidates runtime objects and may reuse cleared generic-array storage; reused headers `MUST` have no prior type or contents.
 
-Host refs use the same retain/release model. Host values `MUST NOT` implicitly own VM refs. Host API details belong to `host-integration.md`.
+Host refs use the same retain/release model. Host values `MUST NOT` implicitly own VM refs; a value returned by `Marshal` owns the refs it holds until the VM takes it. Per-API ownership belongs to `host-integration.md`.
 
 ## Related
 

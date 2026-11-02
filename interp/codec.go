@@ -259,8 +259,13 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 	return &Registry{entries: r.entries}
 }
 
-// Marshal converts v to a VM value; a nil v marshals to null.
-func (r *Registry) Marshal(i *Interpreter, v any) (types.Value, error) {
+// Marshal converts v to a VM value; a nil v marshals to null. It transfers the
+// heap refs the value holds to the caller, so the caller MUST hand the value to
+// Push, Alloc, or Store, or drop it with Alloc then Release. A value that holds
+// no refs, such as a scalar, a string, a slice, a map, or a function, needs
+// nothing. A panic in a conversion returns as an error.
+func (r *Registry) Marshal(i *Interpreter, v any) (val types.Value, err error) {
+	defer i.guard(&err)
 	rv := reflect.ValueOf(v)
 	if !rv.IsValid() {
 		return types.Null, nil
@@ -274,7 +279,7 @@ func (r *Registry) Marshal(i *Interpreter, v any) (types.Value, error) {
 	defer runtime.KeepAlive(holder)
 
 	e := i.encoder(r)
-	val, err := c.value(e, holder.UnsafePointer())
+	val, err = c.value(e, holder.UnsafePointer())
 	if err != nil {
 		e.discard()
 		return nil, err
@@ -282,11 +287,16 @@ func (r *Registry) Marshal(i *Interpreter, v any) (types.Value, error) {
 	return val, nil
 }
 
-// Unmarshal writes val into dst. val may be a slot the guest handed over or a
+// Unmarshal borrows val and writes a copy of it into dst, which holds no VM
+// reference afterward. A Go func converted from a VM function calls val, so the
+// caller keeps val alive for as long as it uses the func; declare a trailing
+// error result on the func type, because without one a failed call panics. A
+// panic in a conversion returns as an error. val may be a slot the guest handed over or a
 // standalone value: the slot resolves here, once, so every compiled conversion
 // sees the value it names. A container resolves its own elements, because a
 // container holds slots however it was reached.
-func (r *Registry) Unmarshal(i *Interpreter, val types.Value, dst any) error {
+func (r *Registry) Unmarshal(i *Interpreter, val types.Value, dst any) (err error) {
+	defer i.guard(&err)
 	rv := reflect.ValueOf(dst)
 	if !rv.IsValid() || rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return fmt.Errorf("%w: destination must be non-nil pointer", ErrInvalidUnmarshalTarget)

@@ -11,6 +11,12 @@ import (
 // HostFunction exposes a Go function to the VM. The codec produces one for a
 // marshaled Go function, and host code may build one directly with
 // NewHostFunction.
+//
+// Fn borrows params for the call: the VM keeps and later releases their refs,
+// so Fn retains any it keeps. Fn transfers each ref in its results to the VM,
+// which takes one owned reference per KindRef result; returning a param as a
+// result hands that param's reference on. A non-nil error ends the call and the
+// results are ignored.
 type HostFunction struct {
 	Typ *types.FunctionType
 	Fn  func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error)

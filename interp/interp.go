@@ -1,3 +1,14 @@
+// Package interp executes verified programs and connects them to Go.
+//
+// Prefer the highest layer that fits; docs/host-integration.md owns the
+// contracts:
+//
+//  1. Registry and the codec: Interpreter.Marshal and Interpreter.Unmarshal
+//     convert plain Go values and funcs. A Go func becomes a VM function, and a
+//     VM function becomes a typed Go func that takes a leading context.Context
+//     and returns a trailing error.
+//  2. HostFunction with types.Boxed, for hot paths that need no conversion.
+//  3. Alloc, Retain, and Release, only to hold references across calls.
 package interp
 
 import (
@@ -291,7 +302,7 @@ func (i *Interpreter) Frame(n int) (fn, ip int, err error) {
 	return f.addr, f.ip, nil
 }
 
-// Const returns a constant by index.
+// Const borrows the constant at idx; the constant pool keeps its reference.
 func (i *Interpreter) Const(idx int) (types.Boxed, error) {
 	if idx < 0 || idx >= len(i.constants) {
 		return 0, ErrSegmentationFault
@@ -299,7 +310,7 @@ func (i *Interpreter) Const(idx int) (types.Boxed, error) {
 	return i.constants[idx], nil
 }
 
-// Global returns a global by index.
+// Global borrows the global at idx; the slot keeps its reference.
 func (i *Interpreter) Global(idx int) (types.Boxed, error) {
 	if idx < 0 || idx >= len(i.globals) {
 		return 0, ErrSegmentationFault
@@ -307,11 +318,10 @@ func (i *Interpreter) Global(idx int) (types.Boxed, error) {
 	return i.globals[idx], nil
 }
 
-// SetGlobal writes val into global slot idx, releasing the reference the slot
-// previously held. Ownership of a different KindRef val transfers into the
-// slot: the caller must not release it afterward, and should Retain first to
-// keep an independent reference. Reassigning the current value is a no-op and
-// leaves the caller's ownership unchanged.
+// SetGlobal transfers a different KindRef val to global slot idx and releases the
+// reference the slot held: the caller MUST NOT release val afterward, and
+// retains first to keep an independent reference. Reassigning the current value
+// is a no-op that leaves the caller's ownership unchanged.
 func (i *Interpreter) SetGlobal(idx int, val types.Boxed) error {
 	if idx < 0 || idx >= len(i.globals) {
 		return ErrSegmentationFault
@@ -337,7 +347,7 @@ func (i *Interpreter) SetGlobal(idx int, val types.Boxed) error {
 	return nil
 }
 
-// Local returns a local by index.
+// Local borrows the local at idx; the slot keeps its reference.
 func (i *Interpreter) Local(idx int) (types.Boxed, error) {
 	f := i.fr
 	addr := f.bp + idx
@@ -347,11 +357,10 @@ func (i *Interpreter) Local(idx int) (types.Boxed, error) {
 	return i.stack[addr], nil
 }
 
-// SetLocal writes val into local slot idx, releasing the reference the slot
-// previously held. Ownership of a different KindRef val transfers into the
-// slot: the caller must not release it afterward, and should Retain first to
-// keep an independent reference. Reassigning the current value is a no-op and
-// leaves the caller's ownership unchanged.
+// SetLocal transfers a different KindRef val to local slot idx and releases the
+// reference the slot held: the caller MUST NOT release val afterward, and
+// retains first to keep an independent reference. Reassigning the current value
+// is a no-op that leaves the caller's ownership unchanged.
 func (i *Interpreter) SetLocal(idx int, val types.Boxed) error {
 	f := i.fr
 	addr := f.bp + idx
@@ -372,7 +381,8 @@ func (i *Interpreter) SetLocal(idx int, val types.Boxed) error {
 	return nil
 }
 
-// Load returns and owns a heap value.
+// Load borrows the heap value at addr: the reference count is unchanged, so the
+// value stays valid only while the caller or the VM holds a reference to it.
 func (i *Interpreter) Load(addr int) (types.Value, error) {
 	if !i.alive(addr) {
 		return nil, ErrSegmentationFault
@@ -382,8 +392,9 @@ func (i *Interpreter) Load(addr int) (types.Value, error) {
 	return val, nil
 }
 
-// Store replaces the value at addr. Concrete values transfer unique slot
-// ownership; an existing heap ref is accepted only when it already names addr.
+// Store transfers a concrete val to the slot at addr and releases the value it
+// replaces. val MUST NOT already be VM-owned; a heap ref is accepted only when
+// it already names addr.
 func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 	defer i.guard(&err)
 	if !i.alive(addr) {
@@ -429,7 +440,10 @@ func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 	return nil
 }
 
-// Alloc allocates or retains a heap value.
+// Alloc transfers a concrete val to a new heap slot and returns the one
+// reference the caller owns, which the caller MUST release or hand to the VM.
+// val MUST NOT already be VM-owned. Given an existing heap ref, Alloc adds one
+// owner to it instead.
 func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 	defer i.guard(&err)
 	switch v := val.(type) {
@@ -462,7 +476,8 @@ func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 	return addr, nil
 }
 
-// Retain adds one heap reference.
+// Retain retains addr for the caller, who owns the added reference and MUST
+// release it or hand it to the VM.
 func (i *Interpreter) Retain(addr int) (types.Value, error) {
 	if !i.alive(addr) {
 		return nil, ErrSegmentationFault
@@ -473,7 +488,8 @@ func (i *Interpreter) Retain(addr int) (types.Value, error) {
 	return val, nil
 }
 
-// Release drops one heap reference.
+// Release releases one reference the caller owns; the value is reclaimed with
+// its last reference.
 func (i *Interpreter) Release(addr int) error {
 	if !i.alive(addr) {
 		return ErrSegmentationFault
@@ -503,7 +519,9 @@ func (i *Interpreter) HeapLen() int {
 	return len(i.heap)
 }
 
-// Push adds a value to the operand stack.
+// Push transfers val to the operand stack. The reference of a heap ref val
+// moves into the stack, so the caller MUST NOT release it afterward; retain
+// first to keep an independent reference.
 func (i *Interpreter) Push(val types.Value) (err error) {
 	defer i.guard(&err)
 	if i.sp == len(i.stack) {
@@ -521,7 +539,9 @@ func (i *Interpreter) Push(val types.Value) (err error) {
 	return nil
 }
 
-// Pop removes and returns the top stack value.
+// Pop releases the stack's reference to the top value and returns the detached
+// value. The heap refs a value holds are released with its last reference, so
+// read them before Pop or keep them alive with Retain.
 func (i *Interpreter) Pop() (types.Value, error) {
 	if i.sp == 0 {
 		return nil, ErrStackUnderflow
@@ -535,9 +555,8 @@ func (i *Interpreter) Pop() (types.Value, error) {
 	return val, nil
 }
 
-// PopBoxed returns the raw stack word without allocating. For KindRef it transfers
-// stack ownership to the caller; Pop instead releases that ownership while returning
-// the detached value.
+// PopBoxed transfers the stack word's reference to the caller without
+// allocating; the caller MUST release a KindRef result or hand it to the VM.
 func (i *Interpreter) PopBoxed() (types.Boxed, error) {
 	if i.sp == 0 {
 		return 0, ErrStackUnderflow
@@ -634,14 +653,17 @@ func (i *Interpreter) Reset() {
 	i.pace()
 }
 
-// Marshal converts a host value to a VM value.
+// Marshal transfers the heap refs of the returned value to the caller, which
+// MUST hand the value to Push, Alloc, or Store, or drop it with Alloc then
+// Release. See Registry.Marshal.
 func (i *Interpreter) Marshal(v any) (val types.Value, err error) {
 	defer i.guard(&err)
 	return i.codec.Marshal(i, v)
 }
 
-// Unmarshal converts a VM value to a host value.
-func (i *Interpreter) Unmarshal(v types.Value, dst any) error {
+// Unmarshal borrows v. See Registry.Unmarshal.
+func (i *Interpreter) Unmarshal(v types.Value, dst any) (err error) {
+	defer i.guard(&err)
 	return i.codec.Unmarshal(i, v, dst)
 }
 
