@@ -1,3 +1,13 @@
+# The one place for pinned tool versions: init and CI install exactly these.
+# LIGHTHOUSE_VERSION is read from .lighthouse-version.
+LIGHTHOUSE_VERSION := $(shell cat .lighthouse-version)
+PRETTIER_VERSION := 3.9.10
+MARKDOWNLINT_CLI2_VERSION := 0.24.0
+RUFF_VERSION := 0.17.3
+LYCHEE_VERSION := 0.24.2
+# Where install-lighthouse and install-lint-tools put executables (<prefix>/bin).
+PREFIX ?= $(HOME)/.local
+
 # Measured on the coverage runner after the JIT removal; the next rebuild may
 # change this baseline only with measured coverage evidence.
 coverage-min ?= 83.7
@@ -18,16 +28,44 @@ endif
 
 PROJECT = $(shell basename -s .git $(shell git config --get remote.origin.url))
 
-.PHONY: init install-tools install-modules generate build clean tidy update clean-sum clean-cache sync check check-generated check-tidy check-fmt check-arm64 check-inline test coverage coverage-check benchmark lighthouse lint fmt vet doc fuzz
+.PHONY: init install-tools install-lighthouse install-lint-tools install-modules generate build clean tidy update clean-sum clean-cache sync check check-generated check-tidy check-fmt check-arm64 check-inline test coverage coverage-check benchmark lighthouse lint fmt vet doc fuzz
 all: lint test build
 
 init:
 	@$(MAKE) install-tools
 	@$(MAKE) install-modules
+	@$(MAKE) install-lighthouse
+	@$(MAKE) install-lint-tools
 
 install-tools:
 	@go install golang.org/x/tools/cmd/godoc@latest
 	@go install golang.org/x/tools/cmd/goimports@latest
+
+install-lighthouse:
+	@work="$$(mktemp -d)"; \
+	trap 'rm -rf "$$work"' EXIT; \
+	curl -fsSL -o "$$work/install.sh" https://github.com/siyul-park/lighthouse/releases/download/v$(LIGHTHOUSE_VERSION)/install.sh; \
+	sh "$$work/install.sh" --version $(LIGHTHOUSE_VERSION) --prefix $(PREFIX)
+
+# ruff comes from pipx: ubuntu-24.04 (runner and desktop) marks the system
+# Python externally managed, so pip install --user fails there, and the runner
+# image ships pipx. lychee is a release tarball for the host OS and arch.
+install-lint-tools:
+	@npm install -g prettier@$(PRETTIER_VERSION) markdownlint-cli2@$(MARKDOWNLINT_CLI2_VERSION)
+	@pipx install --force ruff==$(RUFF_VERSION)
+	@case "$$(uname -s)-$$(uname -m)" in \
+		Linux-x86_64) target=x86_64-unknown-linux-gnu ;; \
+		Linux-aarch64|Linux-arm64) target=aarch64-unknown-linux-gnu ;; \
+		Darwin-arm64) target=aarch64-apple-darwin ;; \
+		Darwin-x86_64) target=x86_64-apple-darwin ;; \
+		*) echo "lychee has no release for $$(uname -s)-$$(uname -m)" >&2; exit 1 ;; \
+	esac; \
+	work="$$(mktemp -d)"; \
+	trap 'rm -rf "$$work"' EXIT; \
+	curl -fsSL -o "$$work/lychee.tar.gz" https://github.com/lycheeverse/lychee/releases/download/lychee-v$(LYCHEE_VERSION)/lychee-$$target.tar.gz; \
+	tar -xzf "$$work/lychee.tar.gz" -C "$$work"; \
+	mkdir -p $(PREFIX)/bin; \
+	install "$$(find "$$work" -name lychee -type f | head -n 1)" $(PREFIX)/bin/lychee
 
 install-modules:
 	@go install -v ./...

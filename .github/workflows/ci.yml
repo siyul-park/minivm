@@ -12,8 +12,7 @@ jobs:
     strategy:
       matrix:
         os: [ ubuntu-24.04 ]
-        go: [ '1.26.2' ]
-    name: Check ${{ matrix.os }} @ Go ${{ matrix.go }}
+    name: Check ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout Code
@@ -24,7 +23,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: ${{ matrix.go }}
+          go-version-file: .go-version
 
       - name: Cache Go Modules and Build
         uses: actions/cache@v6
@@ -32,30 +31,23 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ runner.os }}-${{ matrix.go }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: ${{ runner.os }}-${{ matrix.go }}-${{ hashFiles('**/go.sum') }}
+          key: ${{ runner.os }}-${{ hashFiles('.go-version', '**/go.sum') }}
+          restore-keys: ${{ runner.os }}-${{ hashFiles('.go-version', '**/go.sum') }}
 
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version-file: .node-version
 
-      # The programs the Lighthouse checks run: formatters and linters, each in
-      # the bubblewrap sandbox. Versions match the ones the checks are made with.
-      - name: Install Lighthouse Tools
+      # OS-level setup that needs sudo. Tool versions live in the Makefile and
+      # .lighthouse-version; make init installs them.
+      - name: Set up Sandbox
         run: |
           sudo apt-get update && sudo apt-get install -y bubblewrap
           # Ubuntu 24.04 restricts the unprivileged user namespaces bubblewrap needs.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          npm install -g prettier@3.9.10 markdownlint-cli2@0.24.0
-          pipx install ruff==0.17.3
-          curl -fsSL https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-x86_64-unknown-linux-gnu.tar.gz \
-            | sudo tar -xz -C /usr/local/bin --strip-components=1 lychee-x86_64-unknown-linux-gnu/lychee
-
-      - name: Install Lighthouse
-        uses: siyul-park/lighthouse@v0.0.0-707a2cd944e4
-        with:
-          version: 0.0.0-707a2cd944e4
+          # make init installs lighthouse and the lint tools under ~/.local/bin.
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Initialize Project
         run: make init
@@ -78,7 +70,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26.2'
+          go-version-file: .go-version
 
       - name: Initialize Project
         run: make init
@@ -104,7 +96,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version-file: .go-version
           cache: true
           cache-dependency-path: |
             go.sum
