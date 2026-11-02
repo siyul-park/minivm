@@ -3,5 +3,5 @@
 // the backends because they import jit.
 //
 // Adding an architecture means one host_<arch>.go and narrowing the !arm64
-// build tag of host_other.go. Nothing else changes.
+// build tag of host_unsupported.go. Nothing else changes.
 package host

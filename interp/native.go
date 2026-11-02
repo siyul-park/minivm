@@ -1637,8 +1637,9 @@ func same(a, b transform.Module) bool {
 }
 
 // jitEnabled reports whether opt selects the JIT: WithThreshold(n) with n >=
-// 0, on a host with a JIT backend, with a tick above 1: a tick of 1 is exact execution, every
-// instruction boundary observable, which native code does not expose.
+// 0, on a host with a JIT backend, with a tick above 1: a tick of 1 is exact
+// execution, every instruction boundary observable, which native code does
+// not expose.
 func jitEnabled(opt option) bool {
 	return opt.threshold >= 0 && hasJIT && opt.tick > 1
 }
