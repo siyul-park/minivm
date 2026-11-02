@@ -1,12 +1,17 @@
 # The one place for pinned tool versions: init and CI install exactly these.
-# LIGHTHOUSE_VERSION is read from .lighthouse-version.
+# LIGHTHOUSE_VERSION is read from .lighthouse-version; the npm tools
+# (prettier, markdownlint-cli2) are pinned in package.json and package-lock.json.
 LIGHTHOUSE_VERSION := $(shell cat .lighthouse-version)
-PRETTIER_VERSION := 3.9.10
-MARKDOWNLINT_CLI2_VERSION := 0.24.0
 RUFF_VERSION := 0.17.3
 LYCHEE_VERSION := 0.24.2
+# SHA-256 of each lychee release archive, verified before it is extracted.
+LYCHEE_SHA256_x86_64-unknown-linux-gnu := 1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a
+LYCHEE_SHA256_aarch64-unknown-linux-gnu := 91a7bd65685da41b90ccb9bc867a3d649a7818042dae04ff405e55a25bddee4c
+LYCHEE_SHA256_aarch64-apple-darwin := c9d3740ea2d891854d37116c9fba840f37b6e7c89d330e7db84ac333631c4977
+LYCHEE_SHA256_x86_64-apple-darwin := 887503a9cff667d322b8d0892b40bf49976eb9507af8483220a3706cdad55978
 # Where install-lighthouse and install-lint-tools put executables (<prefix>/bin).
 PREFIX ?= $(HOME)/.local
+export PATH := $(PREFIX)/bin:$(CURDIR)/node_modules/.bin:$(PATH)
 
 # Measured on the coverage runner after the JIT removal; the next rebuild may
 # change this baseline only with measured coverage evidence.
@@ -44,27 +49,28 @@ install-tools:
 install-lighthouse:
 	@work="$$(mktemp -d)"; \
 	trap 'rm -rf "$$work"' EXIT; \
-	curl -fsSL -o "$$work/install.sh" https://github.com/siyul-park/lighthouse/releases/download/v$(LIGHTHOUSE_VERSION)/install.sh; \
+	curl -fsSL -o "$$work/install.sh" https://github.com/siyul-park/lighthouse/releases/download/v$(LIGHTHOUSE_VERSION)/install.sh && \
 	sh "$$work/install.sh" --version $(LIGHTHOUSE_VERSION) --prefix $(PREFIX)
 
 # ruff comes from pipx: ubuntu-24.04 (runner and desktop) marks the system
 # Python externally managed, so pip install --user fails there, and the runner
 # image ships pipx. lychee is a release tarball for the host OS and arch.
 install-lint-tools:
-	@npm install -g prettier@$(PRETTIER_VERSION) markdownlint-cli2@$(MARKDOWNLINT_CLI2_VERSION)
-	@pipx install --force ruff==$(RUFF_VERSION)
+	@npm ci
+	@PIPX_BIN_DIR=$(PREFIX)/bin pipx install --force ruff==$(RUFF_VERSION)
 	@case "$$(uname -s)-$$(uname -m)" in \
-		Linux-x86_64) target=x86_64-unknown-linux-gnu ;; \
-		Linux-aarch64|Linux-arm64) target=aarch64-unknown-linux-gnu ;; \
-		Darwin-arm64) target=aarch64-apple-darwin ;; \
-		Darwin-x86_64) target=x86_64-apple-darwin ;; \
+		Linux-x86_64) target=x86_64-unknown-linux-gnu; sha=$(LYCHEE_SHA256_x86_64-unknown-linux-gnu) ;; \
+		Linux-aarch64|Linux-arm64) target=aarch64-unknown-linux-gnu; sha=$(LYCHEE_SHA256_aarch64-unknown-linux-gnu) ;; \
+		Darwin-arm64) target=aarch64-apple-darwin; sha=$(LYCHEE_SHA256_aarch64-apple-darwin) ;; \
+		Darwin-x86_64) target=x86_64-apple-darwin; sha=$(LYCHEE_SHA256_x86_64-apple-darwin) ;; \
 		*) echo "lychee has no release for $$(uname -s)-$$(uname -m)" >&2; exit 1 ;; \
 	esac; \
 	work="$$(mktemp -d)"; \
 	trap 'rm -rf "$$work"' EXIT; \
-	curl -fsSL -o "$$work/lychee.tar.gz" https://github.com/lycheeverse/lychee/releases/download/lychee-v$(LYCHEE_VERSION)/lychee-$$target.tar.gz; \
-	tar -xzf "$$work/lychee.tar.gz" -C "$$work"; \
-	mkdir -p $(PREFIX)/bin; \
+	curl -fsSL -o "$$work/lychee.tar.gz" https://github.com/lycheeverse/lychee/releases/download/lychee-v$(LYCHEE_VERSION)/lychee-$$target.tar.gz && \
+	echo "$$sha  $$work/lychee.tar.gz" | shasum -a 256 -c - && \
+	tar -xzf "$$work/lychee.tar.gz" -C "$$work" && \
+	mkdir -p $(PREFIX)/bin && \
 	install "$$(find "$$work" -name lychee -type f | head -n 1)" $(PREFIX)/bin/lychee
 
 install-modules:

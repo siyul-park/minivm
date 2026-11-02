@@ -7,6 +7,9 @@ concurrency:
 on:
   push:
 
+permissions:
+  contents: read
+
 jobs:
   check:
     strategy:
@@ -46,8 +49,6 @@ jobs:
           sudo apt-get update && sudo apt-get install -y bubblewrap
           # Ubuntu 24.04 restricts the unprivileged user namespaces bubblewrap needs.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          # make init installs lighthouse and the lint tools under ~/.local/bin.
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Initialize Project
         run: make init
