@@ -20,7 +20,8 @@ The debugger exposes breakpoints, stepping, bytecode location, frames, stack, lo
 ```go
 dbg := debug.NewDebugger()
 dbg.Break(0, 5)
-vm := interp.MustNew(prog, interp.WithHook(dbg.Hook), interp.WithTick(1))
+vm, err := interp.New(prog, interp.WithHook(dbg.Hook), interp.WithTick(1))
+if err != nil { return err }
 defer vm.Close()
 
 for {

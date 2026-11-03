@@ -11,6 +11,33 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// The README Quick Start mirrors this example.
+func ExampleNew() {
+	prog := program.NewBuilder().
+		Emit(instr.I32_CONST, 6).
+		Emit(instr.I32_CONST, 7).
+		Emit(instr.I32_MUL).
+		MustBuild()
+
+	vm, err := interp.New(prog) // verifies prog before it can run
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer vm.Close()
+
+	if err := vm.Run(context.Background()); err != nil {
+		fmt.Println(err)
+		return
+	}
+	result, err := vm.Pop()
+	fmt.Println(result, err)
+
+	// Output:
+	// 42 <nil>
+}
+
+// The README "Call Go from bytecode" section mirrors this example.
 func ExampleInterpreter_Marshal() {
 	add := func(ctx context.Context, a, b int64) (int64, error) { return a + b, nil }
 	typ := &types.FunctionType{
@@ -99,6 +126,7 @@ func ExampleInterpreter_Unmarshal() {
 	// {1 2} [a b] map[n:7]
 }
 
+// The README "Call bytecode from Go" section mirrors this example.
 func ExampleRegistry_Unmarshal() {
 	vm, err := interp.New(program.New(nil))
 	if err != nil {

@@ -12,7 +12,7 @@
 Run dynamic logic inside Go with explicit resource limits, typed host calls, and a threaded semantic baseline.
 
 - **Bounded execution** — stack, heap, frame depth, fuel, hooks, context.
-- **Direct host calls** — typed, reflection-free `HostFunction` path.
+- **Go interop** — Go values and funcs convert both ways; a typed `HostFunction` path for hot calls.
 - **Native tier** — ARM64 execution, on by default, with threaded fallback.
 
 ```bash
@@ -26,23 +26,33 @@ go get github.com/siyul-park/minivm
 Build and run a bytecode program that calculates `6 × 7`:
 
 ```go
-prog := program.New([]instr.Instruction{
-    instr.MustNew(instr.I32_CONST, 6),
-    instr.MustNew(instr.I32_CONST, 7),
-    instr.MustNew(instr.I32_MUL),
-})
+prog, err := program.NewBuilder().
+    Emit(instr.I32_CONST, 6).
+    Emit(instr.I32_CONST, 7).
+    Emit(instr.I32_MUL).
+    Build()
+if err != nil {
+    log.Fatal(err)
+}
 
-vm := interp.MustNew(prog)
+vm, err := interp.New(prog) // verifies prog before it can run
+if err != nil {
+    log.Fatal(err)
+}
 defer vm.Close()
 
 if err := vm.Run(context.Background()); err != nil {
     log.Fatal(err)
 }
 
-result, _ := vm.Pop() // types.I32(42)
+result, err := vm.Pop()
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println(result) // 42
 ```
 
-minivm keeps the execution model explicit: bytecode in, controlled runtime, typed value out.
+minivm keeps the execution model explicit: bytecode in, verified runtime, typed value out. Fuel and heap are unlimited by default; set `interp.WithFuel` and `interp.WithHeapLimit` (plus a cancellable context) for untrusted bytecode. Runnable versions of every example here are in [`interp/example_test.go`](interp/example_test.go).
 
 ## Why minivm
 
@@ -64,24 +74,76 @@ minivm keeps the execution model explicit: bytecode in, controlled runtime, type
 
 ## Call Go from Bytecode
 
-Expose Go behavior through a typed host function:
+`Marshal` turns an ordinary Go func into a VM function. A leading `context.Context` receives the running context; a trailing `error` becomes a VM error.
 
 ```go
-lookup := interp.NewHostFunction(
-    &types.FunctionType{
-        Params:  []types.Type{types.TypeI32()},
-        Returns: []types.Type{types.TypeI32()},
-    },
-    func(vm *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error) {
-        price := db.GetPrice(int(params[0].I32()))
-        return []types.Boxed{types.BoxI32(price)}, nil
-    },
-)
+add := func(ctx context.Context, a, b int64) (int64, error) { return a + b, nil }
+typ := &types.FunctionType{
+    Params:  []types.Type{types.TypeI64(), types.TypeI64()},
+    Returns: []types.Type{types.TypeI64()},
+}
+prog, err := program.NewBuilder().
+    Globals(typ).
+    Emit(instr.I64_CONST, 2).
+    Emit(instr.I64_CONST, 3).
+    Emit(instr.GLOBAL_GET, 0).
+    Emit(instr.CALL).
+    Build()
+if err != nil {
+    log.Fatal(err)
+}
+
+vm, err := interp.New(prog)
+if err != nil {
+    log.Fatal(err)
+}
+defer vm.Close()
+
+fn, err := vm.Marshal(add)
+if err != nil {
+    log.Fatal(err)
+}
+addr, err := vm.Alloc(fn) // the caller owns this reference
+if err != nil {
+    log.Fatal(err)
+}
+if err := vm.SetGlobal(0, types.BoxRef(addr)); err != nil { // the global takes it
+    log.Fatal(err)
+}
+if err := vm.Run(context.Background()); err != nil {
+    log.Fatal(err)
+}
+result, err := vm.Pop()
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println(result) // 5
 ```
 
-Parameters and results stay in typed `[]types.Boxed` values. The direct path does not require reflection or `interface{}` boxing.
+For hot calls, `interp.NewHostFunction` takes and returns `[]types.Boxed` directly, with no reflection.
 
-See [Host Integration](docs/host-integration.md) for marshaling, host objects, and lifetime rules.
+## Call Bytecode from Go
+
+`Unmarshal` turns a VM function into a typed Go func:
+
+```go
+ctx := context.Background()
+
+// addr holds a VM function; see ExampleRegistry_Unmarshal in interp/example_test.go for the full setup.
+var inc func(context.Context, int64) (int64, error)
+if err := vm.Unmarshal(types.BoxRef(addr), &inc); err != nil {
+    log.Fatal(err)
+}
+n, err := inc(ctx, 41)
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println(n) // 42
+```
+
+Declare a trailing `error` on the func type: without one, a failed call panics. Calling it while `vm.Run` is active returns `interp.ErrInterpreterBusy`.
+
+See [Host Integration](docs/host-integration.md) for the conversion table, ownership of each API, and the low-level `HostFunction` path.
 
 ## Performance
 
@@ -91,32 +153,41 @@ Threaded execution is the semantic baseline. ARM64 native execution is on by def
 
 ### Verify untrusted bytecode
 
+`interp.New` and `interp.NewPool` verify a snapshot of the program and run only that snapshot, so later changes to `prog` cannot bypass verification. The snapshot covers code and constants; type objects (for example function signatures) are shared with `prog` and MUST NOT be mutated after construction (see [Verification](docs/verification.md)). To check bytecode without building an interpreter:
+
 ```go
 if err := program.Verify(prog); err != nil {
     log.Fatal(err)
 }
 ```
 
-The verifier rejects malformed control flow, invalid stack behavior, and type mismatches before execution. The `run` CLI verifies loaded programs by default.
+The verifier rejects malformed control flow, invalid stack behavior, and type mismatches.
 
-### Optimize ahead of execution
+### Optimize bytecode
 
 ```go
 prog, err := optimize.New(optimize.O2).Optimize(prog)
+if err != nil {
+    log.Fatal(err)
+}
 ```
 
-Optimization levels range from local constant folding and deduplication to dead-code elimination and cross-block global value numbering.
+The bytecode optimizer rewrites a program before it runs. It does not verify and may panic on malformed input, so run `program.Verify` first. Levels range from constant folding and dead-code elimination to common-subexpression elimination, promotion, and loop-invariant hoisting.
 
 ### Control execution
 
 ```go
-vm := interp.MustNew(prog,
+vm, err := interp.New(prog,
     interp.WithStack(4096),
     interp.WithHeap(512),
     interp.WithFrame(256),
     interp.WithFuel(10_000),
     interp.WithTick(128),
 )
+if err != nil {
+    log.Fatal(err)
+}
+defer vm.Close()
 ```
 
 Use hooks for policy checks and `debug.NewDebugger` with `WithHook(dbg.Hook)` and `WithTick(1)` for instruction-accurate breakpoints and stepping ([Debugging](docs/debugging.md)).
@@ -124,7 +195,7 @@ Use hooks for policy checks and `debug.NewDebugger` with `WithHook(dbg.Hook)` an
 ## Architecture
 
 ```text
-Program → Verify → optimize? → threaded ⇄ native (ARM64)
+Program → Verify → optimize? → interp.New (verify) → threaded ⇄ native (ARM64)
 ```
 
 The threaded interpreter is the semantic baseline and complete execution engine. On ARM64 the JIT adds native execution for hot functions once a program has run long enough to repay a compile (`WithThreshold`); unsupported paths return to threaded execution.
@@ -142,7 +213,7 @@ The instruction set is WebAssembly-inspired but intentionally custom. It uses on
 |---|---|
 | Threaded interpreter | ✅ Available |
 | Static bytecode verifier | ✅ Available |
-| AOT optimizer (`O1`-`O3`) | ✅ Available |
+| Bytecode optimizer (`optimize.O1`-`O3`) | ✅ Available |
 | ARM64 native tier (on by default, `interp.WithThreshold`) | ✅ Available |
 | Debugger and profiler | ✅ Available |
 | x86-64 native backend | 🔲 Not implemented |

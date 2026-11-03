@@ -44,7 +44,7 @@ The REPL `MUST` accept one instruction per line; the accumulated program runs an
 
 ## Debugging
 
-`.debug` installs `interp.Debugger`; breakpoints persist across debug sessions and `.reset` clears them.
+`.debug` installs a `debug.NewDebugger` through `interp.WithHook(dbg.Hook)`; breakpoints persist across debug sessions and `.reset` clears them.
 
 ### Breakpoints
 
@@ -94,7 +94,7 @@ Stops occur before the displayed instruction; the displayed IP is the next byte 
 
 ## Precision
 
-`.debug` uses `WithTick(1)` through `interp.WithDebugger`, preserving bytecode boundaries.
+`.debug` runs with `interp.WithTick(1)`, preserving bytecode boundaries.
 
 ## Branches
 
