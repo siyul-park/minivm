@@ -172,7 +172,7 @@ func TestNew(t *testing.T) {
 		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
 		exit := exits[ctx.Exit()]
 		require.Equal(t, jit.ExitDeopt, exit.Kind)
-		require.Equal(t, 2*instr.New(instr.LOCAL_GET, 0).Width(), exit.Frame.IP)
+		require.Equal(t, 2*instr.MustNew(instr.LOCAL_GET, 0).Width(), exit.Frame.IP)
 		require.Equal(t, []uint64{6, 0}, operands(ctx, exit.Frame))
 	})
 
@@ -577,7 +577,7 @@ func TestNew(t *testing.T) {
 		// directly as SSA: Code must hold a real CALL at IP 0.
 		caller := &types.Function{
 			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32()}},
-			Code: instr.Marshal([]instr.Instruction{instr.New(instr.CALL)}),
+			Code: instr.Marshal([]instr.Instruction{instr.MustNew(instr.CALL)}),
 		}
 		cb := ssa.New("caller")
 		centry := cb.Block()
@@ -1028,7 +1028,7 @@ func TestNew(t *testing.T) {
 			b.Br(header)
 			b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.RETURN)
 		})
-		entry := instr.New(instr.I32_CONST, 0).Width()*2 + instr.New(instr.LOCAL_SET, 1).Width()
+		entry := instr.MustNew(instr.I32_CONST, 0).Width()*2 + instr.MustNew(instr.LOCAL_SET, 1).Width()
 		f, err := transform.Translate(transform.Module{}, 1, fn, entry)
 		require.NoError(t, err)
 		require.Len(t, f.Block(0).Params, 1)
@@ -1052,7 +1052,7 @@ func TestNew(t *testing.T) {
 			b.Bind(join)
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_DIV_S).Emit(instr.RETURN)
 		})
-		entry := instr.New(instr.LOCAL_GET, 0).Width() + instr.New(instr.BR_IF, 0).Width()
+		entry := instr.MustNew(instr.LOCAL_GET, 0).Width() + instr.MustNew(instr.BR_IF, 0).Width()
 		f, err := transform.Translate(transform.Module{}, 1, fn, entry)
 		require.NoError(t, err)
 		require.Empty(t, f.Block(0).Params)
@@ -1068,7 +1068,7 @@ func TestNew(t *testing.T) {
 		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
 		exit := exits[ctx.Exit()]
 		require.Equal(t, jit.ExitDeopt, exit.Kind)
-		require.Equal(t, entry+instr.New(instr.LOCAL_GET, 0).Width()*2, exit.Frame.IP)
+		require.Equal(t, entry+instr.MustNew(instr.LOCAL_GET, 0).Width()*2, exit.Frame.IP)
 		require.Equal(t, []uint64{6, 0}, operands(ctx, exit.Frame))
 	})
 
@@ -1081,7 +1081,7 @@ func TestNew(t *testing.T) {
 		require.NoError(t, err)
 		fn := &types.Function{Code: instr.Marshal(code)}
 
-		entry := instr.New(instr.I32_CONST, 0).Width() + instr.New(instr.BR_IF, 0).Width()
+		entry := instr.MustNew(instr.I32_CONST, 0).Width() + instr.MustNew(instr.BR_IF, 0).Width()
 		f, err := transform.Translate(transform.Module{}, 0, fn, entry)
 		require.NoError(t, err)
 		require.Empty(t, f.Block(0).Params)

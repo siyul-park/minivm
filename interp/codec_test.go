@@ -208,7 +208,7 @@ func TestRegistry_Marshal(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, setup.Close())
 
-		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(fn))
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(fn))
 		i := interp.New(prog)
 		defer i.Close()
 		ctx := context.WithValue(context.Background(), marshalContextKey(0), "value")
@@ -231,9 +231,9 @@ func TestRegistry_Marshal(t *testing.T) {
 		// The receiver is the first parameter, so guest code pushes the host
 		// value ahead of the function it calls.
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 1),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CALL)}, program.WithConstants(fn, obj))
+			instr.MustNew(instr.CONST_GET, 1),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CALL)}, program.WithConstants(fn, obj))
 		i := interp.New(prog)
 		defer i.Close()
 		ctx := context.WithValue(context.Background(), marshalContextKey(0), "value")
@@ -258,17 +258,17 @@ func TestRegistry_Marshal(t *testing.T) {
 
 		prog1 := program.New(
 			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.I32_CONST, 2),
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL)},
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.I32_CONST, 2),
+				instr.MustNew(instr.CONST_GET, 0),
+				instr.MustNew(instr.CALL)},
 			program.WithConstants(fn))
 		prog2 := program.New(
 			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 10),
-				instr.New(instr.I32_CONST, 20),
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL)},
+				instr.MustNew(instr.I32_CONST, 10),
+				instr.MustNew(instr.I32_CONST, 20),
+				instr.MustNew(instr.CONST_GET, 0),
+				instr.MustNew(instr.CALL)},
 			program.WithConstants(fn))
 
 		i1 := interp.New(prog1)
@@ -419,42 +419,42 @@ func TestRegistry_Marshal(t *testing.T) {
 			{
 				name:  "concrete primitive key",
 				value: map[int32]int32{1: 7},
-				key:   instr.New(instr.I32_CONST, 1),
+				key:   instr.MustNew(instr.I32_CONST, 1),
 				want:  types.I32(7),
 			},
 			{
 				name:  "primitive key in a dynamic map",
 				value: map[any]int32{int32(1): 7},
-				key:   instr.New(instr.I32_CONST, 1),
+				key:   instr.MustNew(instr.I32_CONST, 1),
 				want:  types.I32(7),
 			},
 			{
 				name:  "string key",
 				value: map[string]int32{"a": 7},
-				key:   instr.New(instr.CONST_GET, 0),
+				key:   instr.MustNew(instr.CONST_GET, 0),
 				want:  types.I32(7),
 			},
 			{
 				name:  "string key in a dynamic map",
 				value: map[any]int32{"a": 7},
-				key:   instr.New(instr.CONST_GET, 0),
+				key:   instr.MustNew(instr.CONST_GET, 0),
 				want:  types.I32(7),
 			},
 			{
 				name:  "dynamic key outside the canonical Go type",
 				value: map[any]int32{true: 7},
-				key:   instr.New(instr.I32_CONST, 1),
+				key:   instr.MustNew(instr.I32_CONST, 1),
 				want:  types.I32(0),
 			},
 			{
 				name:  "i64 key past the boxed payload",
 				value: map[int64]int32{1 << 50: 7},
-				key:   instr.New(instr.I64_CONST, 1<<50),
+				key:   instr.MustNew(instr.I64_CONST, 1<<50),
 				want:  types.I32(7),
 			},
 		} {
 			prog := program.New(
-				[]instr.Instruction{tc.key, instr.New(instr.MAP_GET)},
+				[]instr.Instruction{tc.key, instr.MustNew(instr.MAP_GET)},
 				program.WithConstants(types.String("a")))
 			i := interp.New(prog)
 			r := interp.NewRegistry()
@@ -786,8 +786,8 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
-			instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)).MustBuild()
 		addr, err := i.Alloc(fn)
 		require.NoError(t, err)
 
@@ -802,7 +802,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		r := interp.NewRegistry()
 		defer i.Close()
 		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params: []types.Type{types.TypeI32(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild()
+			Params: []types.Type{types.TypeI32(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN)).MustBuild()
 
 		var add func(int32, int32) (int32, error)
 		require.NoError(t, r.Unmarshal(i, fn, &add))
@@ -825,8 +825,8 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		}))
 		defer i.Close()
 		r := interp.NewRegistry()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
-			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.NOP), instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)).MustBuild()
 		addr, err := i.Alloc(fn)
 		require.NoError(t, err)
 		defer func() { require.NoError(t, i.Release(addr)) }()
@@ -856,14 +856,14 @@ func TestRegistry_Unmarshal(t *testing.T) {
 
 	t.Run("VM function runs the hook once per instruction of the call under WithTick(1)", func(t *testing.T) {
 		calls := 0
-		i := interp.New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)}), interp.WithTick(1), interp.WithHook(func(*interp.Interpreter) error {
+		i := interp.New(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}), interp.WithTick(1), interp.WithHook(func(*interp.Interpreter) error {
 			calls++
 			return nil
 		}))
 		defer i.Close()
 		r := interp.NewRegistry()
-		body := []instr.Instruction{instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)}
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(body...).MustBuild()
+		body := []instr.Instruction{instr.MustNew(instr.NOP), instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)}
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(body...).MustBuild()
 
 		var call func() (int32, error)
 		require.NoError(t, r.Unmarshal(i, fn, &call))
@@ -879,8 +879,8 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		i := interp.New(program.New(nil), interp.WithTick(1))
 		r := interp.NewRegistry()
 		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
-			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.NOP), instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)).MustBuild()
 
 		var call func(context.Context) (int32, error)
 		require.NoError(t, r.Unmarshal(i, fn, &call))
@@ -898,7 +898,7 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		// the host side wherever it sits, so a method expression whose receiver
 		// comes first is no different from a plain leading context.
 		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).MustBuild()
+			Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.RETURN)).MustBuild()
 
 		var call func(int32, context.Context) (int32, error)
 		require.NoError(t, r.Unmarshal(i, fn, &call))
@@ -911,8 +911,8 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
-			instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)).MustBuild()
 		fnAddr, err := i.Alloc(fn)
 		require.NoError(t, err)
 		closureAddr, err := i.Alloc(types.NewClosure(fn.Typ, types.Ref(fnAddr), nil))
@@ -930,8 +930,8 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
-			instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)).MustBuild()
 		addr, err := i.Alloc(fn)
 		require.NoError(t, err)
 
@@ -945,8 +945,8 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		i := interp.New(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_DIV_S), instr.New(instr.RETURN)).MustBuild()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_DIV_S), instr.MustNew(instr.RETURN)).MustBuild()
 
 		var call func() (int32, error)
 		require.NoError(t, r.Unmarshal(i, fn, &call))

@@ -26,35 +26,109 @@ func TestBuilder_Label(t *testing.T) {
 }
 
 func TestBuilder_Bind(t *testing.T) {
-	b := instr.NewBuilder()
-	start, end := b.Label(), b.Label()
-	require.Same(t, b, b.Bind(start).Emit(instr.NOP).Emit(instr.NOP).Bind(end))
+	t.Run("fixes label", func(t *testing.T) {
+		b := instr.NewBuilder()
+		start, end := b.Label(), b.Label()
+		require.Same(t, b, b.Bind(start).Emit(instr.NOP).Emit(instr.NOP).Bind(end))
 
-	b.Try(start, end, end, 0)
+		b.Try(start, end, end, 0)
 
-	_, err := b.Assemble()
-	require.NoError(t, err)
-	require.Equal(t, []instr.Handler{{Start: 0, End: 2, Catch: 2, Depth: 0}}, b.Handlers())
+		_, err := b.Assemble()
+		require.NoError(t, err)
+		require.Equal(t, []instr.Handler{{Start: 0, End: 2, Catch: 2, Depth: 0}}, b.Handlers())
+	})
+
+	t.Run("zero label", func(t *testing.T) {
+		_, err := instr.NewBuilder().Bind(instr.Label{}).Assemble()
+		require.ErrorIs(t, err, instr.ErrForeignLabel)
+	})
+
+	t.Run("foreign label", func(t *testing.T) {
+		_, err := instr.NewBuilder().Bind(instr.NewBuilder().Label()).Assemble()
+		require.ErrorIs(t, err, instr.ErrForeignLabel)
+	})
+
+	t.Run("duplicate bind", func(t *testing.T) {
+		b := instr.NewBuilder()
+		l := b.Label()
+		_, err := b.Bind(l).Emit(instr.NOP).Bind(l).Assemble()
+		require.ErrorIs(t, err, instr.ErrBoundLabel)
+	})
 }
 
 func TestBuilder_Emit(t *testing.T) {
-	b := instr.NewBuilder()
-	b.Emit(instr.I32_CONST, 42)
+	t.Run("encodes instruction", func(t *testing.T) {
+		b := instr.NewBuilder()
+		b.Emit(instr.I32_CONST, 42)
 
-	instrs, err := b.Assemble()
-	require.NoError(t, err)
-	require.Equal(t, instr.I32_CONST, instrs[0].Opcode())
-	require.Equal(t, uint64(42), instrs[0].Operand(0))
+		instrs, err := b.Assemble()
+		require.NoError(t, err)
+		require.Equal(t, instr.I32_CONST, instrs[0].Opcode())
+		require.Equal(t, uint64(42), instrs[0].Operand(0))
+	})
+
+	t.Run("invalid operands", func(t *testing.T) {
+		instrs, err := instr.NewBuilder().Emit(instr.LOCAL_GET).Assemble()
+		require.ErrorIs(t, err, instr.ErrOperandCount)
+		require.Nil(t, instrs)
+	})
+
+	t.Run("first error is sticky", func(t *testing.T) {
+		b := instr.NewBuilder()
+		b.Emit(instr.LOCAL_GET).Emit(instr.NOP).Emit(instr.Opcode(0xFF)).Bind(instr.Label{}).Append(nil)
+
+		instrs, err := b.Assemble()
+		require.ErrorIs(t, err, instr.ErrOperandCount)
+		require.NotErrorIs(t, err, instr.ErrUnknownOpcode)
+		require.Nil(t, instrs)
+	})
 }
 
 func TestBuilder_Append(t *testing.T) {
-	b := instr.NewBuilder()
-	b.Append(instr.New(instr.NOP), instr.New(instr.RETURN))
+	t.Run("appends instructions", func(t *testing.T) {
+		b := instr.NewBuilder()
+		b.Append(instr.MustNew(instr.NOP), instr.MustNew(instr.RETURN))
 
-	instrs, err := b.Assemble()
-	require.NoError(t, err)
-	require.Equal(t, instr.NOP, instrs[0].Opcode())
-	require.Equal(t, instr.RETURN, instrs[1].Opcode())
+		instrs, err := b.Assemble()
+		require.NoError(t, err)
+		require.Equal(t, instr.NOP, instrs[0].Opcode())
+		require.Equal(t, instr.RETURN, instrs[1].Opcode())
+	})
+
+	t.Run("nil instruction", func(t *testing.T) {
+		_, err := instr.NewBuilder().Append(instr.MustNew(instr.NOP), nil).Assemble()
+		require.ErrorIs(t, err, instr.ErrInvalidInstruction)
+	})
+
+	t.Run("empty instruction", func(t *testing.T) {
+		_, err := instr.NewBuilder().Append(instr.Instruction{}).Assemble()
+		require.ErrorIs(t, err, instr.ErrInvalidInstruction)
+	})
+
+	t.Run("unknown opcode", func(t *testing.T) {
+		_, err := instr.NewBuilder().Append(instr.Instruction{0xFF}).Assemble()
+		require.ErrorIs(t, err, instr.ErrInvalidInstruction)
+	})
+
+	t.Run("truncated operand", func(t *testing.T) {
+		_, err := instr.NewBuilder().Append(instr.Instruction{byte(instr.BR), 0}).Assemble()
+		require.ErrorIs(t, err, instr.ErrInvalidInstruction)
+	})
+
+	t.Run("truncated table", func(t *testing.T) {
+		_, err := instr.NewBuilder().Append(instr.Instruction{byte(instr.BR_TABLE), 2, 0, 0}).Assemble()
+		require.ErrorIs(t, err, instr.ErrInvalidInstruction)
+	})
+
+	t.Run("missing table count", func(t *testing.T) {
+		_, err := instr.NewBuilder().Append(instr.Instruction{byte(instr.BR_TABLE)}).Assemble()
+		require.ErrorIs(t, err, instr.ErrInvalidInstruction)
+	})
+
+	t.Run("trailing bytes", func(t *testing.T) {
+		_, err := instr.NewBuilder().Append(instr.Instruction{byte(instr.NOP), 0}).Assemble()
+		require.ErrorIs(t, err, instr.ErrInvalidInstruction)
+	})
 }
 
 func TestBuilder_Br(t *testing.T) {
@@ -78,42 +152,104 @@ func TestBuilder_Br(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, instr.ParseI16(instrs[0], 1))
 	})
+
+	t.Run("zero label", func(t *testing.T) {
+		_, err := instr.NewBuilder().Br(instr.Label{}).Assemble()
+		require.ErrorIs(t, err, instr.ErrForeignLabel)
+	})
+
+	t.Run("foreign label", func(t *testing.T) {
+		_, err := instr.NewBuilder().Br(instr.NewBuilder().Label()).Assemble()
+		require.ErrorIs(t, err, instr.ErrForeignLabel)
+	})
 }
 
 func TestBuilder_BrIf(t *testing.T) {
-	b := instr.NewBuilder()
-	end := b.Label()
-	b.BrIf(end).Emit(instr.NOP).Bind(end).Emit(instr.RETURN)
+	t.Run("forward", func(t *testing.T) {
+		b := instr.NewBuilder()
+		end := b.Label()
+		b.BrIf(end).Emit(instr.NOP).Bind(end).Emit(instr.RETURN)
 
-	instrs, err := b.Assemble()
-	require.NoError(t, err)
-	require.Equal(t, instr.BR_IF, instrs[0].Opcode())
-	require.Equal(t, 1, instr.ParseI16(instrs[0], 1))
+		instrs, err := b.Assemble()
+		require.NoError(t, err)
+		require.Equal(t, instr.BR_IF, instrs[0].Opcode())
+		require.Equal(t, 1, instr.ParseI16(instrs[0], 1))
+	})
+
+	t.Run("zero label", func(t *testing.T) {
+		_, err := instr.NewBuilder().BrIf(instr.Label{}).Assemble()
+		require.ErrorIs(t, err, instr.ErrForeignLabel)
+	})
+
+	t.Run("foreign label", func(t *testing.T) {
+		_, err := instr.NewBuilder().BrIf(instr.NewBuilder().Label()).Assemble()
+		require.ErrorIs(t, err, instr.ErrForeignLabel)
+	})
 }
 
 func TestBuilder_BrTable(t *testing.T) {
-	b := instr.NewBuilder()
-	zero := b.Label()
-	one := b.Label()
-	def := b.Label()
-	b.BrTable(def, zero, one).
-		Bind(zero).Emit(instr.NOP).
-		Bind(one).Emit(instr.NOP).
-		Bind(def).Emit(instr.RETURN)
+	t.Run("targets and default", func(t *testing.T) {
+		b := instr.NewBuilder()
+		zero := b.Label()
+		one := b.Label()
+		def := b.Label()
+		b.BrTable(def, zero, one).
+			Bind(zero).Emit(instr.NOP).
+			Bind(one).Emit(instr.NOP).
+			Bind(def).Emit(instr.RETURN)
 
-	instrs, err := b.Assemble()
-	require.NoError(t, err)
-	require.Equal(t, instr.BR_TABLE, instrs[0].Opcode())
-	require.Equal(t, []uint64{2, 0, 1, 2}, instrs[0].Operands())
+		instrs, err := b.Assemble()
+		require.NoError(t, err)
+		require.Equal(t, instr.BR_TABLE, instrs[0].Opcode())
+		require.Equal(t, []uint64{2, 0, 1, 2}, instrs[0].Operands())
+	})
+
+	t.Run("zero default", func(t *testing.T) {
+		b := instr.NewBuilder()
+		_, err := b.BrTable(instr.Label{}, b.Label()).Assemble()
+		require.ErrorIs(t, err, instr.ErrForeignLabel)
+	})
+
+	t.Run("foreign target", func(t *testing.T) {
+		b := instr.NewBuilder()
+		_, err := b.BrTable(b.Label(), instr.NewBuilder().Label()).Assemble()
+		require.ErrorIs(t, err, instr.ErrForeignLabel)
+	})
+
+	t.Run("too many targets", func(t *testing.T) {
+		b := instr.NewBuilder()
+		targets := make([]instr.Label, 256)
+		for i := range targets {
+			targets[i] = b.Label()
+		}
+		_, err := b.BrTable(b.Label(), targets...).Assemble()
+		require.ErrorIs(t, err, instr.ErrOperandRange)
+	})
 }
 
 func TestBuilder_Try(t *testing.T) {
-	b := instr.NewBuilder()
-	start, end, catch := b.Label(), b.Label(), b.Label()
-	require.Same(t, b, b.Try(start, end, catch, 2))
+	t.Run("unbound labels", func(t *testing.T) {
+		b := instr.NewBuilder()
+		start, end, catch := b.Label(), b.Label(), b.Label()
+		require.Same(t, b, b.Try(start, end, catch, 2))
 
-	_, err := b.Assemble()
-	require.ErrorIs(t, err, instr.ErrUnboundLabel)
+		_, err := b.Assemble()
+		require.ErrorIs(t, err, instr.ErrUnboundLabel)
+	})
+
+	t.Run("zero label", func(t *testing.T) {
+		b := instr.NewBuilder()
+		l := b.Label()
+		_, err := b.Try(l, l, instr.Label{}, 0).Assemble()
+		require.ErrorIs(t, err, instr.ErrForeignLabel)
+	})
+
+	t.Run("foreign label", func(t *testing.T) {
+		b := instr.NewBuilder()
+		l := b.Label()
+		_, err := b.Try(l, instr.NewBuilder().Label(), l, 0).Assemble()
+		require.ErrorIs(t, err, instr.ErrForeignLabel)
+	})
 }
 
 func TestBuilder_Assemble(t *testing.T) {

@@ -53,8 +53,8 @@ var (
 	zeroTypes  = []types.Type{types.TypeI32(), types.TypeI8(), types.TypeI1(), types.TypeI64(), types.TypeF32(), types.TypeF64(), types.TypeString(), types.TypeAny()}
 	zeroValues = []types.Value{types.Null, types.Null, types.F64(0), types.F32(0), types.I64(0), types.I1(false), types.I8(0), types.I32(0)}
 	zeroReads  = []instr.Instruction{
-		instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 3),
-		instr.New(instr.LOCAL_GET, 4), instr.New(instr.LOCAL_GET, 5), instr.New(instr.LOCAL_GET, 6), instr.New(instr.LOCAL_GET, 7),
+		instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.LOCAL_GET, 3),
+		instr.MustNew(instr.LOCAL_GET, 4), instr.MustNew(instr.LOCAL_GET, 5), instr.MustNew(instr.LOCAL_GET, 6), instr.MustNew(instr.LOCAL_GET, 7),
 	}
 )
 
@@ -64,143 +64,143 @@ var runTests = []struct {
 	err     error
 }{
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.NOP)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.NOP)}),
 		values:  []types.Value{types.I32(1)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.UNREACHABLE)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.UNREACHABLE)}),
 		err:     interp.ErrUnreachableExecuted,
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.DROP)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.DROP)}),
 		values:  []types.Value{types.I32(1)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7), instr.New(instr.DUP)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.DUP)}),
 		values:  []types.Value{types.I32(7), types.I32(7)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.SWAP)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.SWAP)}),
 		values:  []types.Value{types.I32(1), types.I32(2)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 1), instr.New(instr.SELECT),
+			instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.SELECT),
 		}),
 		values: []types.Value{types.I32(10)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.BR, 5),
-			instr.New(instr.I32_CONST, 999),
-			instr.New(instr.I32_CONST, 1),
+			instr.MustNew(instr.BR, 5),
+			instr.MustNew(instr.I32_CONST, 999),
+			instr.MustNew(instr.I32_CONST, 1),
 		}),
 		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.BR_IF, 5),
-			instr.New(instr.I32_CONST, 999),
-			instr.New(instr.I32_CONST, 1),
+			instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.BR_IF, 5),
+			instr.MustNew(instr.I32_CONST, 999),
+			instr.MustNew(instr.I32_CONST, 1),
 		}),
 		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 0),
-			instr.New(instr.BR_TABLE, 1, 5, 0),
-			instr.New(instr.I32_CONST, 999),
-			instr.New(instr.I32_CONST, 1),
+			instr.MustNew(instr.I32_CONST, 0),
+			instr.MustNew(instr.BR_TABLE, 1, 5, 0),
+			instr.MustNew(instr.I32_CONST, 999),
+			instr.MustNew(instr.I32_CONST, 1),
 		}),
 		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CALL),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CALL),
 		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
-			Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).MustBuild())),
+			Append(instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.RETURN)).MustBuild())),
 		values: []types.Value{types.I32(42)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CALL),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CALL),
 		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32(), types.TypeI32()}}).
-			Emit(instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.RETURN)).MustBuild())),
+			Append(instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.RETURN)).MustBuild())),
 		values: []types.Value{types.I32(20), types.I32(10)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.RETURN_CALL),
+			instr.MustNew(instr.I32_CONST, 5),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.RETURN_CALL),
 		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).
-			Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild())),
+			Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN)).MustBuild())),
 		values: []types.Value{types.I32(6)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.RETURN_CALL),
+			instr.MustNew(instr.I32_CONST, 5),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.RETURN_CALL),
 		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).
 			Locals(types.TypeI32()).
-			Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 100), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild())),
+			Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 100), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN)).MustBuild())),
 		values: []types.Value{types.I32(105)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.YIELD)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.YIELD)}),
 		err:     interp.ErrYield,
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CALL),
-			instr.New(instr.I32_CONST, 41),
-			instr.New(instr.RESUME),
-			instr.New(instr.CORO_VALUE),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CALL),
+			instr.MustNew(instr.I32_CONST, 41),
+			instr.MustNew(instr.RESUME),
+			instr.MustNew(instr.CORO_VALUE),
 		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
-			Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.YIELD), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild())),
+			Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN)).MustBuild())),
 		values: []types.Value{types.I32(42)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CALL),
-			instr.New(instr.CORO_DONE),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CALL),
+			instr.MustNew(instr.CORO_DONE),
 		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
-			Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.YIELD), instr.New(instr.RETURN)).MustBuild())),
+			Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.RETURN)).MustBuild())),
 		values: []types.Value{types.I1(false)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CALL),
-			instr.New(instr.CORO_VALUE),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CALL),
+			instr.MustNew(instr.CORO_VALUE),
 		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
-			Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.YIELD), instr.New(instr.RETURN)).MustBuild())),
+			Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.RETURN)).MustBuild())),
 		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 3), instr.New(instr.GLOBAL_SET, 0), instr.New(instr.GLOBAL_GET, 0),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.GLOBAL_SET, 0), instr.MustNew(instr.GLOBAL_GET, 0),
 		}, program.WithGlobals(types.TypeI32())),
 		values: []types.Value{types.I32(3)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 6), instr.New(instr.GLOBAL_TEE, 0)}, program.WithGlobals(types.TypeI32())),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 6), instr.MustNew(instr.GLOBAL_TEE, 0)}, program.WithGlobals(types.TypeI32())),
 		values:  []types.Value{types.I32(6)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5), instr.New(instr.LOCAL_SET, 0), instr.New(instr.LOCAL_GET, 0),
+			instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.LOCAL_SET, 0), instr.MustNew(instr.LOCAL_GET, 0),
 		}, program.WithLocals(types.TypeI32())),
 		values: []types.Value{types.I32(5)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 9), instr.New(instr.LOCAL_TEE, 0)}, program.WithLocals(types.TypeI32())),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 9), instr.MustNew(instr.LOCAL_TEE, 0)}, program.WithLocals(types.TypeI32())),
 		values:  []types.Value{types.I32(9)},
 	},
 	{
@@ -209,821 +209,821 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.GLOBAL_GET, 2), instr.New(instr.GLOBAL_GET, 3),
-			instr.New(instr.GLOBAL_GET, 4), instr.New(instr.GLOBAL_GET, 5), instr.New(instr.GLOBAL_GET, 6), instr.New(instr.GLOBAL_GET, 7),
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.GLOBAL_GET, 1), instr.MustNew(instr.GLOBAL_GET, 2), instr.MustNew(instr.GLOBAL_GET, 3),
+			instr.MustNew(instr.GLOBAL_GET, 4), instr.MustNew(instr.GLOBAL_GET, 5), instr.MustNew(instr.GLOBAL_GET, 6), instr.MustNew(instr.GLOBAL_GET, 7),
 		}, program.WithGlobals(zeroTypes...)),
 		values: zeroValues,
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(zeroFunction())),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(zeroFunction())),
 		values:  zeroValues,
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL)}, program.WithConstants(zeroFunction())),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CLOSURE_NEW), instr.MustNew(instr.CALL)}, program.WithConstants(zeroFunction())),
 		values:  zeroValues,
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.RETURN_CALL)}, program.WithConstants(zeroFunction())),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.RETURN_CALL)}, program.WithConstants(zeroFunction())),
 		values:  zeroValues,
 	},
 	{
 
-		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(
-			types.NewFunctionBuilder(&types.FunctionType{Returns: zeroTypes}).Locals(types.TypeI32()).Emit(
-				instr.New(instr.I32_CONST, 7), instr.New(instr.LOCAL_SET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.RETURN_CALL),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(
+			types.NewFunctionBuilder(&types.FunctionType{Returns: zeroTypes}).Locals(types.TypeI32()).Append(
+				instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.LOCAL_SET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.RETURN_CALL),
 			).MustBuild(),
 			zeroFunction(),
 		)),
 		values: zeroValues,
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0)}, program.WithConstants(types.I32(11))),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0)}, program.WithConstants(types.I32(11))),
 		values:  []types.Value{types.I32(11)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CLOSURE_NEW),
-			instr.New(instr.CALL),
+			instr.MustNew(instr.I32_CONST, 7),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CLOSURE_NEW),
+			instr.MustNew(instr.CALL),
 		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
-			Captures(types.TypeI32()).Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.RETURN)).MustBuild())),
+			Captures(types.TypeI32()).Append(instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.RETURN)).MustBuild())),
 		values: []types.Value{types.I32(7)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 0),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CLOSURE_NEW),
-			instr.New(instr.CALL),
+			instr.MustNew(instr.I32_CONST, 0),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CLOSURE_NEW),
+			instr.MustNew(instr.CALL),
 		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
-			Captures(types.TypeI32()).Emit(
-			instr.New(instr.I32_CONST, 99), instr.New(instr.UPVAL_SET, 0), instr.New(instr.UPVAL_GET, 0), instr.New(instr.RETURN),
+			Captures(types.TypeI32()).Append(
+			instr.MustNew(instr.I32_CONST, 99), instr.MustNew(instr.UPVAL_SET, 0), instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.RETURN),
 		).MustBuild())),
 		values: []types.Value{types.I32(99)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.REF_NULL)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.REF_NULL)}),
 		values:  []types.Value{types.Null},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.REF_NEW)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.REF_NEW)}),
 		values:  []types.Value{types.I32(5)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 9), instr.New(instr.REF_NEW), instr.New(instr.REF_GET)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 9), instr.MustNew(instr.REF_NEW), instr.MustNew(instr.REF_GET)}),
 		values:  []types.Value{types.I32(9)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), instr.New(instr.DUP),
-			instr.New(instr.I32_CONST, 77), instr.New(instr.REF_SET),
-			instr.New(instr.REF_GET),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.REF_NEW), instr.MustNew(instr.DUP),
+			instr.MustNew(instr.I32_CONST, 77), instr.MustNew(instr.REF_SET),
+			instr.MustNew(instr.REF_GET),
 		}),
 		values: []types.Value{types.I32(77)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.DUP),
-			instr.New(instr.I32_CONST, 77), instr.New(instr.REF_SET),
-		}, program.WithConstants(types.NewFunctionBuilder(nil).Emit(instr.New(instr.RETURN)).MustBuild())),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CLOSURE_NEW), instr.MustNew(instr.DUP),
+			instr.MustNew(instr.I32_CONST, 77), instr.MustNew(instr.REF_SET),
+		}, program.WithConstants(types.NewFunctionBuilder(nil).Append(instr.MustNew(instr.RETURN)).MustBuild())),
 		err: interp.ErrTypeMismatch,
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.REF_TEST, 0)}, program.WithTypes(types.TypeI32())),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.REF_TEST, 0)}, program.WithTypes(types.TypeI32())),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.REF_CAST, 0)}, program.WithTypes(types.TypeI32())),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.REF_CAST, 0)}, program.WithTypes(types.TypeI32())),
 		values:  []types.Value{types.I32(5)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.REF_NULL), instr.New(instr.REF_IS_NULL)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.REF_NULL), instr.MustNew(instr.REF_IS_NULL)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.REF_NULL), instr.New(instr.REF_NULL), instr.New(instr.REF_EQ)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.REF_NULL), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.REF_EQ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.REF_NULL), instr.New(instr.I32_CONST, 5), instr.New(instr.REF_NEW), instr.New(instr.REF_NE)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.REF_NULL), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.REF_NEW), instr.MustNew(instr.REF_NE)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 42)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 42)}),
 		values:  []types.Value{types.I32(42)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_ADD)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_ADD)}),
 		values:  []types.Value{types.I32(5)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_SUB)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_SUB)}),
 		values:  []types.Value{types.I32(2)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 4), instr.New(instr.I32_MUL)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_CONST, 4), instr.MustNew(instr.I32_MUL)}),
 		values:  []types.Value{types.I32(12)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, i32operand(-7)), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_DIV_S),
+			instr.MustNew(instr.I32_CONST, i32operand(-7)), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_DIV_S),
 		}),
 		values: []types.Value{types.I32(-3)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_DIV_U),
+			instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_DIV_U),
 		}),
 		values: []types.Value{types.I32(int32(uint32(math.MaxUint32) / 2))},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, i32operand(-7)), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_REM_S),
+			instr.MustNew(instr.I32_CONST, i32operand(-7)), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_REM_S),
 		}),
 		values: []types.Value{types.I32(-1)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_REM_U),
+			instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_REM_U),
 		}),
 		values: []types.Value{types.I32(int32(uint32(math.MaxUint32) % 3))},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_SHL)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_SHL)}),
 		values:  []types.Value{types.I32(8)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, i32operand(-8)), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SHR_S),
+			instr.MustNew(instr.I32_CONST, i32operand(-8)), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_SHR_S),
 		}),
 		values: []types.Value{types.I32(-4)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SHR_U),
+			instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_SHR_U),
 		}),
 		values: []types.Value{types.I32(int32(uint32(math.MaxUint32) >> 1))},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 12), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_AND)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 12), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_AND)}),
 		values:  []types.Value{types.I32(8)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 12), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_OR)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 12), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_OR)}),
 		values:  []types.Value{types.I32(14)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 12), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_XOR)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 12), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_XOR)}),
 		values:  []types.Value{types.I32(6)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CLZ)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CLZ)}),
 		values:  []types.Value{types.I32(31)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 8), instr.New(instr.I32_CTZ)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 8), instr.MustNew(instr.I32_CTZ)}),
 		values:  []types.Value{types.I32(3)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7), instr.New(instr.I32_POPCNT)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.I32_POPCNT)}),
 		values:  []types.Value{types.I32(3)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 4), instr.New(instr.I32_ROTL)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 4), instr.MustNew(instr.I32_ROTL)}),
 		values:  []types.Value{types.I32(16)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 16), instr.New(instr.I32_CONST, 4), instr.New(instr.I32_ROTR)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 16), instr.MustNew(instr.I32_CONST, 4), instr.MustNew(instr.I32_ROTR)}),
 		values:  []types.Value{types.I32(1)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 255), instr.New(instr.I32_EXTEND8_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 255), instr.MustNew(instr.I32_EXTEND8_S)}),
 		values:  []types.Value{types.I32(-1)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 65535), instr.New(instr.I32_EXTEND16_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 65535), instr.MustNew(instr.I32_EXTEND16_S)}),
 		values:  []types.Value{types.I32(-1)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_EQZ)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_EQZ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 5), instr.New(instr.I32_EQ)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.I32_EQ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 6), instr.New(instr.I32_NE)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.I32_CONST, 6), instr.MustNew(instr.I32_NE)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LT_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_LT_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LT_U)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_LT_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_GT_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_GT_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_GT_U)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_GT_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_LE_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_LE_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_U)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_LE_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_GE_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_GE_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_GE_U)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_GE_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_I64_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_TO_I64_S)}),
 		values:  []types.Value{types.I64(-1)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_I64_U)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_TO_I64_U)}),
 		values:  []types.Value{types.I64(int64(uint32(math.MaxUint32)))},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_F32_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_TO_F32_S)}),
 		values:  []types.Value{types.F32(float32(int32(-1)))},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_F32_U)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_TO_F32_U)}),
 		values:  []types.Value{types.F32(float32(uint32(math.MaxUint32)))},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_F64_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_TO_F64_S)}),
 		values:  []types.Value{types.F64(float64(int32(-1)))},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_F64_U)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_TO_F64_U)}),
 		values:  []types.Value{types.F64(float64(uint32(math.MaxUint32)))},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1))), instr.New(instr.I32_REINTERPRET_F32)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(1))), instr.MustNew(instr.I32_REINTERPRET_F32)}),
 		values:  []types.Value{types.I32(int32(math.Float32bits(1)))},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 42)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 42)}),
 		values:  []types.Value{types.I64(42)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 2), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_ADD)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 2), instr.MustNew(instr.I64_CONST, 3), instr.MustNew(instr.I64_ADD)}),
 		values:  []types.Value{types.I64(5)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 5), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_SUB)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 5), instr.MustNew(instr.I64_CONST, 3), instr.MustNew(instr.I64_SUB)}),
 		values:  []types.Value{types.I64(2)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 3), instr.New(instr.I64_CONST, 4), instr.New(instr.I64_MUL)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 3), instr.MustNew(instr.I64_CONST, 4), instr.MustNew(instr.I64_MUL)}),
 		values:  []types.Value{types.I64(12)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I64_CONST, i64operand(-7)), instr.New(instr.I64_CONST, 2), instr.New(instr.I64_DIV_S),
+			instr.MustNew(instr.I64_CONST, i64operand(-7)), instr.MustNew(instr.I64_CONST, 2), instr.MustNew(instr.I64_DIV_S),
 		}),
 		values: []types.Value{types.I64(-3)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 2), instr.New(instr.I64_DIV_U),
+			instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_CONST, 2), instr.MustNew(instr.I64_DIV_U),
 		}),
 		values: []types.Value{types.I64(int64(uint64(math.MaxUint64) / 2))},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I64_CONST, i64operand(-7)), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_REM_S),
+			instr.MustNew(instr.I64_CONST, i64operand(-7)), instr.MustNew(instr.I64_CONST, 3), instr.MustNew(instr.I64_REM_S),
 		}),
 		values: []types.Value{types.I64(-1)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_REM_U),
+			instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_CONST, 3), instr.MustNew(instr.I64_REM_U),
 		}),
 		values: []types.Value{types.I64(int64(uint64(math.MaxUint64) % 3))},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 1), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_SHL)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 1), instr.MustNew(instr.I64_CONST, 3), instr.MustNew(instr.I64_SHL)}),
 		values:  []types.Value{types.I64(8)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I64_CONST, i64operand(-8)), instr.New(instr.I64_CONST, 1), instr.New(instr.I64_SHR_S),
+			instr.MustNew(instr.I64_CONST, i64operand(-8)), instr.MustNew(instr.I64_CONST, 1), instr.MustNew(instr.I64_SHR_S),
 		}),
 		values: []types.Value{types.I64(-4)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 1), instr.New(instr.I64_SHR_U),
+			instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_CONST, 1), instr.MustNew(instr.I64_SHR_U),
 		}),
 		values: []types.Value{types.I64(int64(uint64(math.MaxUint64) >> 1))},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 12), instr.New(instr.I64_CONST, 10), instr.New(instr.I64_XOR)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 12), instr.MustNew(instr.I64_CONST, 10), instr.MustNew(instr.I64_XOR)}),
 		values:  []types.Value{types.I64(6)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 12), instr.New(instr.I64_CONST, 10), instr.New(instr.I64_AND)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 12), instr.MustNew(instr.I64_CONST, 10), instr.MustNew(instr.I64_AND)}),
 		values:  []types.Value{types.I64(8)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 12), instr.New(instr.I64_CONST, 10), instr.New(instr.I64_OR)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 12), instr.MustNew(instr.I64_CONST, 10), instr.MustNew(instr.I64_OR)}),
 		values:  []types.Value{types.I64(14)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 1), instr.New(instr.I64_CLZ)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 1), instr.MustNew(instr.I64_CLZ)}),
 		values:  []types.Value{types.I64(63)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 8), instr.New(instr.I64_CTZ)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 8), instr.MustNew(instr.I64_CTZ)}),
 		values:  []types.Value{types.I64(3)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 7), instr.New(instr.I64_POPCNT)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 7), instr.MustNew(instr.I64_POPCNT)}),
 		values:  []types.Value{types.I64(3)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 1), instr.New(instr.I64_CONST, 4), instr.New(instr.I64_ROTL)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 1), instr.MustNew(instr.I64_CONST, 4), instr.MustNew(instr.I64_ROTL)}),
 		values:  []types.Value{types.I64(16)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 16), instr.New(instr.I64_CONST, 4), instr.New(instr.I64_ROTR)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 16), instr.MustNew(instr.I64_CONST, 4), instr.MustNew(instr.I64_ROTR)}),
 		values:  []types.Value{types.I64(1)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 255), instr.New(instr.I64_EXTEND8_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 255), instr.MustNew(instr.I64_EXTEND8_S)}),
 		values:  []types.Value{types.I64(-1)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 65535), instr.New(instr.I64_EXTEND16_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 65535), instr.MustNew(instr.I64_EXTEND16_S)}),
 		values:  []types.Value{types.I64(-1)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, uint64(uint32(math.MaxUint32))), instr.New(instr.I64_EXTEND32_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, uint64(uint32(math.MaxUint32))), instr.MustNew(instr.I64_EXTEND32_S)}),
 		values:  []types.Value{types.I64(-1)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_EQZ)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 0), instr.MustNew(instr.I64_EQZ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 5), instr.New(instr.I64_CONST, 5), instr.New(instr.I64_EQ)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 5), instr.MustNew(instr.I64_CONST, 5), instr.MustNew(instr.I64_EQ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 5), instr.New(instr.I64_CONST, 6), instr.New(instr.I64_NE)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 5), instr.MustNew(instr.I64_CONST, 6), instr.MustNew(instr.I64_NE)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 0), instr.New(instr.I64_LT_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_CONST, 0), instr.MustNew(instr.I64_LT_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 0), instr.New(instr.I64_LT_U)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_CONST, 0), instr.MustNew(instr.I64_LT_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_GT_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 0), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_GT_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_GT_U)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 0), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_GT_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_LE_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_LE_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 0), instr.New(instr.I64_LE_U)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_CONST, 0), instr.MustNew(instr.I64_LE_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_CONST, 0), instr.New(instr.I64_GE_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 0), instr.MustNew(instr.I64_CONST, 0), instr.MustNew(instr.I64_GE_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_GE_U)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 0), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_GE_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, uint64(int64(1)<<32+1)), instr.New(instr.I64_TO_I32)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, uint64(int64(1)<<32+1)), instr.MustNew(instr.I64_TO_I32)}),
 		values:  []types.Value{types.I32(1)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_TO_F32_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_TO_F32_S)}),
 		values:  []types.Value{types.F32(float32(int64(-1)))},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_TO_F32_U)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_TO_F32_U)}),
 		values:  []types.Value{types.F32(float32(uint64(math.MaxUint64)))},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_TO_F64_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_TO_F64_S)}),
 		values:  []types.Value{types.F64(float64(int64(-1)))},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_TO_F64_U)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_TO_F64_U)}),
 		values:  []types.Value{types.F64(float64(uint64(math.MaxUint64)))},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(1)), instr.New(instr.I64_REINTERPRET_F64)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F64_CONST, math.Float64bits(1)), instr.MustNew(instr.I64_REINTERPRET_F64)}),
 		values:  []types.Value{types.I64(int64(math.Float64bits(1)))},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5)))}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(1.5)))}),
 		values:  []types.Value{types.F32(1.5)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2.25))), instr.New(instr.F32_ADD),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(1.5))), instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(2.25))), instr.MustNew(instr.F32_ADD),
 		}),
 		values: []types.Value{types.F32(3.75)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(5.5))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2.25))), instr.New(instr.F32_SUB),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(5.5))), instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(2.25))), instr.MustNew(instr.F32_SUB),
 		}),
 		values: []types.Value{types.F32(3.25)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(2.5))), instr.New(instr.F32_CONST, uint64(math.Float32bits(4))), instr.New(instr.F32_MUL),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(2.5))), instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(4))), instr.MustNew(instr.F32_MUL),
 		}),
 		values: []types.Value{types.F32(10)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(10))), instr.New(instr.F32_CONST, uint64(math.Float32bits(4))), instr.New(instr.F32_DIV),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(10))), instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(4))), instr.MustNew(instr.F32_DIV),
 		}),
 		values: []types.Value{types.F32(2.5)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(-7))), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_REM),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(-7))), instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(3))), instr.MustNew(instr.F32_REM),
 		}),
 		values: []types.Value{types.F32(-1)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(-7))), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_MOD),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(-7))), instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(3))), instr.MustNew(instr.F32_MOD),
 		}),
 		values: []types.Value{types.F32(2)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))), instr.New(instr.F32_CONST, 0), instr.New(instr.F32_REM),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(1))), instr.MustNew(instr.F32_CONST, 0), instr.MustNew(instr.F32_REM),
 		}),
 		err: interp.ErrDivideByZero,
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))), instr.New(instr.F32_CONST, 0), instr.New(instr.F32_MOD),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(1))), instr.MustNew(instr.F32_CONST, 0), instr.MustNew(instr.F32_MOD),
 		}),
 		err: interp.ErrDivideByZero,
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-3.5))), instr.New(instr.F32_ABS)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(-3.5))), instr.MustNew(instr.F32_ABS)}),
 		values:  []types.Value{types.F32(3.5)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(3.5))), instr.New(instr.F32_NEG)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(3.5))), instr.MustNew(instr.F32_NEG)}),
 		values:  []types.Value{types.F32(-3.5)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(9))), instr.New(instr.F32_SQRT)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(9))), instr.MustNew(instr.F32_SQRT)}),
 		values:  []types.Value{types.F32(3)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1.2))), instr.New(instr.F32_CEIL)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(1.2))), instr.MustNew(instr.F32_CEIL)}),
 		values:  []types.Value{types.F32(2)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1.8))), instr.New(instr.F32_FLOOR)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(1.8))), instr.MustNew(instr.F32_FLOOR)}),
 		values:  []types.Value{types.F32(1)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-1.8))), instr.New(instr.F32_TRUNC)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(-1.8))), instr.MustNew(instr.F32_TRUNC)}),
 		values:  []types.Value{types.F32(-1)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(2.5))), instr.New(instr.F32_NEAREST)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(2.5))), instr.MustNew(instr.F32_NEAREST)}),
 		values:  []types.Value{types.F32(2)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_CONST, uint64(math.Float32bits(5))), instr.New(instr.F32_MIN),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(3))), instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(5))), instr.MustNew(instr.F32_MIN),
 		}),
 		values: []types.Value{types.F32(3)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_CONST, uint64(math.Float32bits(5))), instr.New(instr.F32_MAX),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(3))), instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(5))), instr.MustNew(instr.F32_MAX),
 		}),
 		values: []types.Value{types.F32(5)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_CONST, uint64(math.Float32bits(-1))), instr.New(instr.F32_COPYSIGN),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(3))), instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(-1))), instr.MustNew(instr.F32_COPYSIGN),
 		}),
 		values: []types.Value{types.F32(-3)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_EQ),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(2))), instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(2))), instr.MustNew(instr.F32_EQ),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_NE),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(2))), instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(3))), instr.MustNew(instr.F32_NE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_LT),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(2))), instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(3))), instr.MustNew(instr.F32_LT),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_GT),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(3))), instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(2))), instr.MustNew(instr.F32_GT),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_LE),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(2))), instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(2))), instr.MustNew(instr.F32_LE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_GE),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(2))), instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(2))), instr.MustNew(instr.F32_GE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-3.7))), instr.New(instr.F32_TO_I32_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(-3.7))), instr.MustNew(instr.F32_TO_I32_S)}),
 		values:  []types.Value{types.I32(-3)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(3.7))), instr.New(instr.F32_TO_I32_U)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(3.7))), instr.MustNew(instr.F32_TO_I32_U)}),
 		values:  []types.Value{types.I32(3)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-3.7))), instr.New(instr.F32_TO_I64_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(-3.7))), instr.MustNew(instr.F32_TO_I64_S)}),
 		values:  []types.Value{types.I64(-3)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(3.7))), instr.New(instr.F32_TO_I64_U)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(3.7))), instr.MustNew(instr.F32_TO_I64_U)}),
 		values:  []types.Value{types.I64(3)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5))), instr.New(instr.F32_TO_F64)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(1.5))), instr.MustNew(instr.F32_TO_F64)}),
 		values:  []types.Value{types.F64(float64(float32(1.5)))},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, uint64(math.Float32bits(1))), instr.New(instr.F32_REINTERPRET_I32)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, uint64(math.Float32bits(1))), instr.MustNew(instr.F32_REINTERPRET_I32)}),
 		values:  []types.Value{types.F32(1)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(2.5))}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F64_CONST, math.Float64bits(2.5))}),
 		values:  []types.Value{types.F64(2.5)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F64_CONST, math.Float64bits(1.5)), instr.New(instr.F64_CONST, math.Float64bits(2.25)), instr.New(instr.F64_ADD),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(1.5)), instr.MustNew(instr.F64_CONST, math.Float64bits(2.25)), instr.MustNew(instr.F64_ADD),
 		}),
 		values: []types.Value{types.F64(3.75)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F64_CONST, math.Float64bits(5.5)), instr.New(instr.F64_CONST, math.Float64bits(2.25)), instr.New(instr.F64_SUB),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(5.5)), instr.MustNew(instr.F64_CONST, math.Float64bits(2.25)), instr.MustNew(instr.F64_SUB),
 		}),
 		values: []types.Value{types.F64(3.25)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.F64_CONST, math.Float64bits(4)), instr.New(instr.F64_MUL),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(2.5)), instr.MustNew(instr.F64_CONST, math.Float64bits(4)), instr.MustNew(instr.F64_MUL),
 		}),
 		values: []types.Value{types.F64(10)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F64_CONST, math.Float64bits(10)), instr.New(instr.F64_CONST, math.Float64bits(4)), instr.New(instr.F64_DIV),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(10)), instr.MustNew(instr.F64_CONST, math.Float64bits(4)), instr.MustNew(instr.F64_DIV),
 		}),
 		values: []types.Value{types.F64(2.5)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F64_CONST, math.Float64bits(-7)), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_REM),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(-7)), instr.MustNew(instr.F64_CONST, math.Float64bits(3)), instr.MustNew(instr.F64_REM),
 		}),
 		values: []types.Value{types.F64(-1)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F64_CONST, math.Float64bits(-7)), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_MOD),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(-7)), instr.MustNew(instr.F64_CONST, math.Float64bits(3)), instr.MustNew(instr.F64_MOD),
 		}),
 		values: []types.Value{types.F64(2)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F64_CONST, math.Float64bits(1)), instr.New(instr.F64_CONST, 0), instr.New(instr.F64_REM),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(1)), instr.MustNew(instr.F64_CONST, 0), instr.MustNew(instr.F64_REM),
 		}),
 		err: interp.ErrDivideByZero,
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F64_CONST, math.Float64bits(1)), instr.New(instr.F64_CONST, 0), instr.New(instr.F64_MOD),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(1)), instr.MustNew(instr.F64_CONST, 0), instr.MustNew(instr.F64_MOD),
 		}),
 		err: interp.ErrDivideByZero,
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(-3.5)), instr.New(instr.F64_ABS)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F64_CONST, math.Float64bits(-3.5)), instr.MustNew(instr.F64_ABS)}),
 		values:  []types.Value{types.F64(3.5)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(3.5)), instr.New(instr.F64_NEG)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F64_CONST, math.Float64bits(3.5)), instr.MustNew(instr.F64_NEG)}),
 		values:  []types.Value{types.F64(-3.5)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(9)), instr.New(instr.F64_SQRT)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F64_CONST, math.Float64bits(9)), instr.MustNew(instr.F64_SQRT)}),
 		values:  []types.Value{types.F64(3)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(1.2)), instr.New(instr.F64_CEIL)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F64_CONST, math.Float64bits(1.2)), instr.MustNew(instr.F64_CEIL)}),
 		values:  []types.Value{types.F64(2)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(1.8)), instr.New(instr.F64_FLOOR)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F64_CONST, math.Float64bits(1.8)), instr.MustNew(instr.F64_FLOOR)}),
 		values:  []types.Value{types.F64(1)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(-1.8)), instr.New(instr.F64_TRUNC)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F64_CONST, math.Float64bits(-1.8)), instr.MustNew(instr.F64_TRUNC)}),
 		values:  []types.Value{types.F64(-1)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.F64_NEAREST)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F64_CONST, math.Float64bits(2.5)), instr.MustNew(instr.F64_NEAREST)}),
 		values:  []types.Value{types.F64(2)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_CONST, math.Float64bits(5)), instr.New(instr.F64_MIN),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(3)), instr.MustNew(instr.F64_CONST, math.Float64bits(5)), instr.MustNew(instr.F64_MIN),
 		}),
 		values: []types.Value{types.F64(3)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_CONST, math.Float64bits(5)), instr.New(instr.F64_MAX),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(3)), instr.MustNew(instr.F64_CONST, math.Float64bits(5)), instr.MustNew(instr.F64_MAX),
 		}),
 		values: []types.Value{types.F64(5)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_CONST, math.Float64bits(-1)), instr.New(instr.F64_COPYSIGN),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(3)), instr.MustNew(instr.F64_CONST, math.Float64bits(-1)), instr.MustNew(instr.F64_COPYSIGN),
 		}),
 		values: []types.Value{types.F64(-3)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_EQ),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(2)), instr.MustNew(instr.F64_CONST, math.Float64bits(2)), instr.MustNew(instr.F64_EQ),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_NE),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(2)), instr.MustNew(instr.F64_CONST, math.Float64bits(3)), instr.MustNew(instr.F64_NE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_LT),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(2)), instr.MustNew(instr.F64_CONST, math.Float64bits(3)), instr.MustNew(instr.F64_LT),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_GT),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(3)), instr.MustNew(instr.F64_CONST, math.Float64bits(2)), instr.MustNew(instr.F64_GT),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_LE),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(2)), instr.MustNew(instr.F64_CONST, math.Float64bits(2)), instr.MustNew(instr.F64_LE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_GE),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(2)), instr.MustNew(instr.F64_CONST, math.Float64bits(2)), instr.MustNew(instr.F64_GE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(-3.7)), instr.New(instr.F64_TO_I32_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F64_CONST, math.Float64bits(-3.7)), instr.MustNew(instr.F64_TO_I32_S)}),
 		values:  []types.Value{types.I32(-3)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(3.7)), instr.New(instr.F64_TO_I32_U)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F64_CONST, math.Float64bits(3.7)), instr.MustNew(instr.F64_TO_I32_U)}),
 		values:  []types.Value{types.I32(3)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(-3.7)), instr.New(instr.F64_TO_I64_S)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F64_CONST, math.Float64bits(-3.7)), instr.MustNew(instr.F64_TO_I64_S)}),
 		values:  []types.Value{types.I64(-3)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(3.7)), instr.New(instr.F64_TO_I64_U)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F64_CONST, math.Float64bits(3.7)), instr.MustNew(instr.F64_TO_I64_U)}),
 		values:  []types.Value{types.I64(3)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(1.5)), instr.New(instr.F64_TO_F32)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.F64_CONST, math.Float64bits(1.5)), instr.MustNew(instr.F64_TO_F32)}),
 		values:  []types.Value{types.F32(1.5)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, math.Float64bits(1)), instr.New(instr.F64_REINTERPRET_I64)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, math.Float64bits(1)), instr.MustNew(instr.F64_REINTERPRET_I64)}),
 		values:  []types.Value{types.F64(1)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 72), instr.New(instr.I32_CONST, 105), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW, 0),
-			instr.New(instr.STRING_NEW_UTF32),
+			instr.MustNew(instr.I32_CONST, 72), instr.MustNew(instr.I32_CONST, 105), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_NEW, 0),
+			instr.MustNew(instr.STRING_NEW_UTF32),
 		}, program.WithTypes(types.TypeI32Array())),
 		values: []types.Value{types.String("Hi")},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_LEN)}, program.WithConstants(types.String("Hi"))),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.STRING_LEN)}, program.WithConstants(types.String("Hi"))),
 		values:  []types.Value{types.I32(2)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT)},
+		program: program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT)},
 			program.WithConstants(types.String("Hi"), types.String("There"))),
 		values: []types.Value{types.String("HiThere")},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_EQ)},
+		program: program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_EQ)},
 			program.WithConstants(types.String("Go"), types.String("Go"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_NE)},
+		program: program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_NE)},
 			program.WithConstants(types.String("Go"), types.String("No"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
-			instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_EQ),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT),
+			instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.STRING_EQ),
 		}, program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
-			instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_NE),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT),
+			instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.STRING_NE),
 		}, program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"))),
 		values: []types.Value{types.I1(false)},
 	},
 	{
 		program: program.New([]instr.Instruction{
 
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
-			instr.New(instr.DROP),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_EQ),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT),
+			instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT),
+			instr.MustNew(instr.DROP),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.STRING_EQ),
 		}, program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere")),
 			program.WithLocals(types.TypeString())),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT)}, program.WithConstants(types.String(""), types.String(""))),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT)}, program.WithConstants(types.String(""), types.String(""))),
 		values:  []types.Value{types.String("")},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_CONCAT),
-			instr.New(instr.DROP),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 3), instr.New(instr.STRING_EQ),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT),
+			instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.STRING_CONCAT),
+			instr.MustNew(instr.DROP),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CONST_GET, 3), instr.MustNew(instr.STRING_EQ),
 		}, program.WithConstants(
 			types.String("abc"), types.String("def"), types.String("0123456789abcdef"), types.String("abcdef")),
 			program.WithLocals(types.TypeString())),
@@ -1031,138 +1031,138 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT), instr.New(instr.DROP),
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 2), instr.New(instr.STRING_CONCAT),
-			instr.New(instr.CONST_GET, 3), instr.New(instr.STRING_EQ),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT), instr.MustNew(instr.DROP),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.STRING_CONCAT),
+			instr.MustNew(instr.CONST_GET, 3), instr.MustNew(instr.STRING_EQ),
 		}, program.WithConstants(types.String("a"), types.String("b"), types.String("c"), types.String("ac"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.REF_NULL), instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_EQ),
+			instr.MustNew(instr.REF_NULL), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.STRING_EQ),
 		}, program.WithConstants(types.String("Go"))),
 		err: interp.ErrTypeMismatch,
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_LT)},
+		program: program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_LT)},
 			program.WithConstants(types.String("Go"), types.String("No"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_GT)},
+		program: program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_GT)},
 			program.WithConstants(types.String("No"), types.String("Go"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_LE)},
+		program: program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_LE)},
 			program.WithConstants(types.String("Go"), types.String("Go"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_GE)},
+		program: program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_GE)},
 			program.WithConstants(types.String("Go"), types.String("Go"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_ENCODE_UTF32)}, program.WithConstants(types.String("Hi"))),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.STRING_ENCODE_UTF32)}, program.WithConstants(types.String("Hi"))),
 		values:  []types.Value{types.TypedArray[int32]{72, 105}},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 30), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 30), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW, 0),
 		}, program.WithTypes(types.TypeI32Array())),
 		values: []types.Value{types.TypedArray[int32]{10, 20, 30}},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0)}, program.WithTypes(types.TypeI32Array())),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0)}, program.WithTypes(types.TypeI32Array())),
 		values:  []types.Value{types.TypedArray[int32]{0, 0, 0}},
 	},
 	{
 		program: program.New(
-			[]instr.Instruction{instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0)},
+			[]instr.Instruction{instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0)},
 			program.WithTypes(types.NewArrayType(types.TypeAny())),
 		),
 		values: []types.Value{types.NewArray(types.NewArrayType(types.TypeAny()), types.BoxedNull, types.BoxedNull)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW, 0),
-			instr.New(instr.ARRAY_LEN),
+			instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_NEW, 0),
+			instr.MustNew(instr.ARRAY_LEN),
 		}, program.WithTypes(types.TypeI32Array())),
 		values: []types.Value{types.I32(2)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 100), instr.New(instr.I32_CONST, 200), instr.New(instr.I32_CONST, 300), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 100), instr.MustNew(instr.I32_CONST, 200), instr.MustNew(instr.I32_CONST, 300), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_GET),
 		}, program.WithTypes(types.TypeI32Array())),
 		values: []types.Value{types.I32(200)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
-			instr.New(instr.DUP),
-			instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 99), instr.New(instr.ARRAY_SET),
-			instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW, 0),
+			instr.MustNew(instr.DUP),
+			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 99), instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
 		}, program.WithTypes(types.TypeI32Array())),
 		values: []types.Value{types.I32(99)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.DUP),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 7), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_FILL),
-			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.DUP),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_FILL),
+			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_GET),
 		}, program.WithTypes(types.TypeI32Array())),
 		values: []types.Value{types.I32(7)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.DUP),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.F64_CONST, math.Float64bits(1.5)), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_FILL),
-			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.DUP),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.F64_CONST, math.Float64bits(1.5)), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_FILL),
+			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_GET),
 		}, program.WithTypes(types.TypeF64Array())),
 		values: []types.Value{types.F64(1.5)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.DUP),
-			instr.New(instr.I32_CONST, 0),
-			instr.New(instr.I32_CONST, 9), instr.New(instr.I32_CONST, 8), instr.New(instr.I32_CONST, 7), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
-			instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_COPY),
-			instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.DUP),
+			instr.MustNew(instr.I32_CONST, 0),
+			instr.MustNew(instr.I32_CONST, 9), instr.MustNew(instr.I32_CONST, 8), instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_COPY),
+			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
 		}, program.WithTypes(types.TypeI32Array())),
 		values: []types.Value{types.I32(9)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW, 0),
-			instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 4), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_APPEND),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_CONST, 4), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_APPEND),
 		}, program.WithTypes(types.TypeI32Array())),
 		values: []types.Value{types.TypedArray[int32]{1, 2, 3, 4}},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_DELETE),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_DELETE),
 		}, program.WithTypes(types.TypeI32Array())),
 		values: []types.Value{types.I32(2)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 30), instr.New(instr.I32_CONST, 40), instr.New(instr.I32_CONST, 4), instr.New(instr.ARRAY_NEW, 0),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_SLICE),
+			instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 30), instr.MustNew(instr.I32_CONST, 40), instr.MustNew(instr.I32_CONST, 4), instr.MustNew(instr.ARRAY_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_SLICE),
 		}, program.WithTypes(types.TypeI32Array())),
 		values: []types.Value{types.TypedArray[int32]{20, 30}},
 	},
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
 		},
 			program.WithTypes(types.NewArrayType(types.TypeAny())),
 			program.WithLocals(types.TypeI32Array()),
@@ -1172,8 +1172,8 @@ var runTests = []struct {
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
 		},
 			program.WithConstants(types.TypedArray[float32]{1.5}),
 			program.WithLocals(types.TypeI32Array()),
@@ -1182,7 +1182,7 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.F64_CONST, math.Float64bits(2.5)), instr.MustNew(instr.STRUCT_NEW, 0),
 		}, program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64())))),
 		values: []types.Value{types.NewStruct(
 			types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64())),
@@ -1190,38 +1190,38 @@ var runTests = []struct {
 		)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.STRUCT_NEW_DEFAULT, 0)},
+		program: program.New([]instr.Instruction{instr.MustNew(instr.STRUCT_NEW_DEFAULT, 0)},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64())))),
 		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64())))},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.STRUCT_NEW_DEFAULT, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
-			instr.New(instr.REF_IS_NULL),
+			instr.MustNew(instr.STRUCT_NEW_DEFAULT, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.STRUCT_GET),
+			instr.MustNew(instr.REF_IS_NULL),
 		}, program.WithTypes(types.NewStructType(types.NewStructField(types.TypeAny())))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET),
+			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.F64_CONST, math.Float64bits(2.5)), instr.MustNew(instr.STRUCT_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.STRUCT_GET),
 		}, program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64())))),
 		values: []types.Value{types.F64(2.5)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
-			instr.New(instr.DUP),
-			instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 99), instr.New(instr.STRUCT_SET),
-			instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.F64_CONST, math.Float64bits(2.5)), instr.MustNew(instr.STRUCT_NEW, 0),
+			instr.MustNew(instr.DUP),
+			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 99), instr.MustNew(instr.STRUCT_SET),
+			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.STRUCT_GET),
 		}, program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64())))),
 		values: []types.Value{types.I32(99)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.F64_CONST, math.Float64bits(2.5)), instr.MustNew(instr.STRUCT_NEW, 0),
+			instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.STRUCT_GET),
 		},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64()))),
 			program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64()))),
@@ -1230,9 +1230,9 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET),
+			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.F64_CONST, math.Float64bits(2.5)), instr.MustNew(instr.STRUCT_NEW, 0),
+			instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.STRUCT_GET),
 		},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64()))),
 			program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64()))),
@@ -1241,9 +1241,9 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 0), instr.New(instr.STRUCT_GET),
+			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.F64_CONST, math.Float64bits(2.5)), instr.MustNew(instr.STRUCT_NEW, 0),
+			instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.STRUCT_GET),
 		},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64()))),
 			program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64()))),
@@ -1253,9 +1253,9 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.STRUCT_NEW, 0),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.STRUCT_NEW, 0),
+			instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.STRUCT_GET),
 		},
 			program.WithConstants(types.String("hi")),
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeString()))),
@@ -1265,29 +1265,29 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5), instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+			instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.STRUCT_GET),
 		}, program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32())))),
 		err: interp.ErrTypeMismatch,
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.STRUCT_GET),
 		}, program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32())))),
 		err: interp.ErrTypeMismatch,
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.REF_NULL), instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+			instr.MustNew(instr.REF_NULL), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.STRUCT_GET),
 		}, program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32())))),
 		err: interp.ErrTypeMismatch,
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 9), instr.New(instr.STRUCT_NEW, 0),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET),
+			instr.MustNew(instr.I32_CONST, 9), instr.MustNew(instr.STRUCT_NEW, 0),
+			instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.STRUCT_GET),
 		},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32()))),
 			program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64()))),
@@ -1296,9 +1296,9 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7), instr.New(instr.STRUCT_NEW, 0),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 5), instr.New(instr.STRUCT_GET),
+			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.STRUCT_NEW, 0),
+			instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.STRUCT_GET),
 		},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32()))),
 			program.WithLocals(types.NewStructType(types.NewStructField(types.TypeI32()))),
@@ -1307,9 +1307,9 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW, 0),
-			instr.New(instr.GLOBAL_SET, 0),
-			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_NEW, 0),
+			instr.MustNew(instr.GLOBAL_SET, 0),
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_GET),
 		},
 			program.WithTypes(types.TypeI32Array()),
 			program.WithGlobals(types.TypeI32Array()),
@@ -1318,9 +1318,9 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
-			instr.New(instr.GLOBAL_SET, 0),
-			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.F64_CONST, math.Float64bits(2.5)), instr.MustNew(instr.STRUCT_NEW, 0),
+			instr.MustNew(instr.GLOBAL_SET, 0),
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.STRUCT_GET),
 		},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64()))),
 			program.WithGlobals(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64()))),
@@ -1330,9 +1330,9 @@ var runTests = []struct {
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.GLOBAL_SET, 0),
-			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.GLOBAL_SET, 0),
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
 		},
 			program.WithTypes(types.NewArrayType(types.TypeAny())),
 			program.WithGlobals(types.TypeI32Array()),
@@ -1342,8 +1342,8 @@ var runTests = []struct {
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.GLOBAL_SET, 0),
-			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.GLOBAL_SET, 0),
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
 		},
 			program.WithConstants(types.TypedArray[float32]{1.5}),
 			program.WithGlobals(types.TypeI32Array()),
@@ -1352,44 +1352,44 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5), instr.New(instr.GLOBAL_SET, 0),
-			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.GLOBAL_SET, 0),
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
 		}, program.WithGlobals(types.TypeI32Array())),
 		err: interp.ErrTypeMismatch,
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5), instr.New(instr.GLOBAL_SET, 0),
-			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
+			instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.GLOBAL_SET, 0),
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.STRUCT_GET),
 		}, program.WithGlobals(types.NewStructType(types.NewStructField(types.TypeI32())))),
 		err: interp.ErrTypeMismatch,
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW, 0),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CLOSURE_NEW),
-			instr.New(instr.CALL),
+			instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_NEW, 0),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CLOSURE_NEW),
+			instr.MustNew(instr.CALL),
 		},
 			program.WithTypes(types.TypeI32Array()),
 			program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 				Captures(types.TypeI32Array()).
-				Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET), instr.New(instr.RETURN)).
+				Append(instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.RETURN)).
 				MustBuild()),
 		),
 		values: []types.Value{types.I32(20)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CLOSURE_NEW),
-			instr.New(instr.CALL),
+			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.F64_CONST, math.Float64bits(2.5)), instr.MustNew(instr.STRUCT_NEW, 0),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CLOSURE_NEW),
+			instr.MustNew(instr.CALL),
 		},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64()))),
 			program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 				Captures(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64()))).
-				Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET), instr.New(instr.RETURN)).
+				Append(instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.STRUCT_GET), instr.MustNew(instr.RETURN)).
 				MustBuild()),
 		),
 		values: []types.Value{types.I32(7)},
@@ -1397,15 +1397,15 @@ var runTests = []struct {
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CLOSURE_NEW),
-			instr.New(instr.CALL),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CLOSURE_NEW),
+			instr.MustNew(instr.CALL),
 		},
 			program.WithTypes(types.NewArrayType(types.TypeAny())),
 			program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 				Captures(types.TypeI32Array()).
-				Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET), instr.New(instr.RETURN)).
+				Append(instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.RETURN)).
 				MustBuild()),
 		),
 		values: []types.Value{types.Null},
@@ -1413,16 +1413,16 @@ var runTests = []struct {
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CONST_GET, 1),
-			instr.New(instr.CLOSURE_NEW),
-			instr.New(instr.CALL),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CONST_GET, 1),
+			instr.MustNew(instr.CLOSURE_NEW),
+			instr.MustNew(instr.CALL),
 		},
 			program.WithConstants(
 				types.TypedArray[float32]{1.5},
 				types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeF32()}}).
 					Captures(types.TypeI32Array()).
-					Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET), instr.New(instr.RETURN)).
+					Append(instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.RETURN)).
 					MustBuild(),
 			),
 		),
@@ -1430,210 +1430,210 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CLOSURE_NEW),
-			instr.New(instr.CALL),
+			instr.MustNew(instr.I32_CONST, 5),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CLOSURE_NEW),
+			instr.MustNew(instr.CALL),
 		},
 			program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 				Captures(types.TypeI32Array()).
-				Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET), instr.New(instr.RETURN)).
+				Append(instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.RETURN)).
 				MustBuild()),
 		),
 		err: interp.ErrTypeMismatch,
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CLOSURE_NEW),
-			instr.New(instr.CALL),
+			instr.MustNew(instr.I32_CONST, 5),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CLOSURE_NEW),
+			instr.MustNew(instr.CALL),
 		},
 			program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 				Captures(types.NewStructType(types.NewStructField(types.TypeI32()))).
-				Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET), instr.New(instr.RETURN)).
+				Append(instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.STRUCT_GET), instr.MustNew(instr.RETURN)).
 				MustBuild()),
 		),
 		err: interp.ErrTypeMismatch,
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_NEW, 0),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_GET),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_GET),
 		}, program.WithTypes(types.NewMapType(types.TypeI32(), types.TypeI32()))),
 		values: []types.Value{types.I32(10)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 2), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
-			instr.New(instr.MAP_GET),
+			instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT),
+			instr.MustNew(instr.MAP_GET),
 		}, program.WithTypes(types.NewMapType(types.TypeString(), types.TypeI32())),
 			program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"))),
 		values: []types.Value{types.I32(10)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
-			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
-			instr.New(instr.CONST_GET, 2), instr.New(instr.MAP_GET),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT),
+			instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.MAP_GET),
 		}, program.WithTypes(types.NewMapType(types.TypeString(), types.TypeI32())),
 			program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"))),
 		values: []types.Value{types.I32(10)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 2), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT),
-			instr.New(instr.MAP_GET),
+			instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT),
+			instr.MustNew(instr.MAP_GET),
 		}, program.WithTypes(types.NewMapType(types.TypeAny(), types.TypeI32())),
 			program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"))),
 		values: []types.Value{types.I32(10)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 0), instr.New(instr.I32_EQZ),
-			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
-			instr.New(instr.I32_CONST, 0), instr.New(instr.I32_EQZ), instr.New(instr.MAP_GET),
+			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_EQZ),
+			instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_EQZ), instr.MustNew(instr.MAP_GET),
 		}, program.WithTypes(types.NewMapType(types.TypeAny(), types.TypeI32()))),
 		values: []types.Value{types.I32(10)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 4), instr.New(instr.MAP_NEW_DEFAULT, 0),
-			instr.New(instr.MAP_LEN),
+			instr.MustNew(instr.I32_CONST, 4), instr.MustNew(instr.MAP_NEW_DEFAULT, 0),
+			instr.MustNew(instr.MAP_LEN),
 		}, program.WithTypes(types.NewMapType(types.TypeI32(), types.TypeI32()))),
 		values: []types.Value{types.I32(0)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_NEW, 0),
-			instr.New(instr.MAP_LEN),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.MAP_LEN),
 		}, program.WithTypes(types.NewMapType(types.TypeI32(), types.TypeI32()))),
 		values: []types.Value{types.I32(2)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
-			instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_GET),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.MAP_GET),
 		}, program.WithTypes(types.NewMapType(types.TypeI32(), types.TypeI32()))),
 		values: []types.Value{types.I32(0)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.I32_CONST, 42),
-			instr.New(instr.REF_NEW),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.MAP_NEW, 0),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.MAP_GET),
+			instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.I32_CONST, 42),
+			instr.MustNew(instr.REF_NEW),
+			instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.MAP_GET),
 		}, program.WithTypes(types.NewMapType(types.TypeI32(), types.TypeAny()))),
 		values: []types.Value{types.I32(42)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_LOOKUP),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_LOOKUP),
 		}, program.WithTypes(types.NewMapType(types.TypeI32(), types.TypeI32()))),
 		values: []types.Value{types.I1(true), types.I32(10)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
-			instr.New(instr.DUP),
-			instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 20), instr.New(instr.MAP_SET),
-			instr.New(instr.MAP_LEN),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.DUP),
+			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.MAP_SET),
+			instr.MustNew(instr.MAP_LEN),
 		}, program.WithTypes(types.NewMapType(types.TypeI32(), types.TypeI32()))),
 		values: []types.Value{types.I32(2)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_NEW, 0),
-			instr.New(instr.DUP),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_DELETE),
-			instr.New(instr.MAP_LEN),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.DUP),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_DELETE),
+			instr.MustNew(instr.MAP_LEN),
 		}, program.WithTypes(types.NewMapType(types.TypeI32(), types.TypeI32()))),
 		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
-			instr.New(instr.DUP),
-			instr.New(instr.MAP_CLEAR),
-			instr.New(instr.MAP_LEN),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.DUP),
+			instr.MustNew(instr.MAP_CLEAR),
+			instr.MustNew(instr.MAP_LEN),
 		}, program.WithTypes(types.NewMapType(types.TypeI32(), types.TypeI32()))),
 		values: []types.Value{types.I32(0)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_NEW, 0),
-			instr.New(instr.MAP_KEYS), instr.New(instr.ARRAY_LEN),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.MAP_KEYS), instr.MustNew(instr.ARRAY_LEN),
 		}, program.WithTypes(types.NewMapType(types.TypeI32(), types.TypeI32()))),
 		values: []types.Value{types.I32(2)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
-			instr.New(instr.MAP_ITER), instr.New(instr.CORO_VALUE),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.MAP_ITER), instr.MustNew(instr.CORO_VALUE),
 		}, program.WithTypes(types.NewMapType(types.TypeI32(), types.TypeI32()))),
 		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 99),
-			instr.New(instr.THROW),
-			instr.New(instr.I32_CONST, 0),
+			instr.MustNew(instr.I32_CONST, 99),
+			instr.MustNew(instr.THROW),
+			instr.MustNew(instr.I32_CONST, 0),
 		}, program.WithHandlers(instr.Handler{Start: 0, End: 6, Catch: 11, Depth: 0})),
 		values: []types.Value{types.I32(99)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 7), instr.New(instr.ERROR_NEW)}),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.ERROR_NEW)}),
 		values:  []types.Value{types.NewError(types.ErrorCode(7), "5", types.BoxI32(5))},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 7), instr.New(instr.ERROR_NEW), instr.New(instr.ERROR_GET),
+			instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.ERROR_NEW), instr.MustNew(instr.ERROR_GET),
 		}),
 		values: []types.Value{types.I32(5)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 7), instr.New(instr.ERROR_NEW), instr.New(instr.ERROR_CODE),
+			instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.ERROR_NEW), instr.MustNew(instr.ERROR_CODE),
 		}),
 		values: []types.Value{types.I32(7)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_ITER), instr.New(instr.CORO_VALUE)}, program.WithConstants(types.String("Hi"))),
+		program: program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.STRING_ITER), instr.MustNew(instr.CORO_VALUE)}, program.WithConstants(types.String("Hi"))),
 		values:  []types.Value{types.I32(72)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.ARRAY_GET),
 		}, program.WithConstants(types.TypedArray[int32]{3, 5})),
 		values: []types.Value{types.I32(5)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.I32_CONST, 0),
-			instr.New(instr.STRUCT_GET),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.I32_CONST, 0),
+			instr.MustNew(instr.STRUCT_GET),
 		}, program.WithConstants(types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32())), types.BoxI32(7)))),
 		values: []types.Value{types.I32(7)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.REF_GET),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.REF_GET),
 		}, program.WithConstants(types.I64(math.MaxInt64))),
 		values: []types.Value{types.I64(math.MaxInt64)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 4),
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_CONST, 4),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
 		}, program.WithConstants(interp.NewHostFunction(
 			&types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
 			func(_ *interp.Interpreter, args []types.Boxed) ([]types.Boxed, error) {
@@ -1644,67 +1644,67 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.ARRAY_GET),
 		}, program.WithTypes(types.TypeI32Array())),
 		err: interp.ErrIndexOutOfRange,
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 9), instr.New(instr.ARRAY_SET),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.I32_CONST, 9), instr.MustNew(instr.ARRAY_SET),
 		}, program.WithTypes(types.TypeI32Array())),
 		err: interp.ErrIndexOutOfRange,
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 7), instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_FILL),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.ARRAY_FILL),
 		}, program.WithTypes(types.TypeI32Array())),
 		err: interp.ErrIndexOutOfRange,
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_DELETE),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.ARRAY_DELETE),
 		}, program.WithTypes(types.TypeI32Array())),
 		err: interp.ErrIndexOutOfRange,
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.I32_CONST, 0),
-			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 5),
-			instr.New(instr.ARRAY_COPY),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.I32_CONST, 0),
+			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 5),
+			instr.MustNew(instr.ARRAY_COPY),
 		}, program.WithTypes(types.TypeI32Array())),
 		err: interp.ErrIndexOutOfRange,
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
-			instr.New(instr.I32_CONST, 2),
-			instr.New(instr.I32_CONST, 4), instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 6), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
-			instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, uint64(^uint32(0))),
-			instr.New(instr.ARRAY_COPY),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 2),
+			instr.MustNew(instr.I32_CONST, 4), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.I32_CONST, 6), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, uint64(^uint32(0))),
+			instr.MustNew(instr.ARRAY_COPY),
 		}, program.WithTypes(types.TypeI32Array())),
 		err: interp.ErrIndexOutOfRange,
 	},
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 42), instr.New(instr.ARRAY_SET),
-			instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_GET),
 		}, program.WithConstants(types.TypedArray[int32]{1, 2, 3})),
 		values: []types.Value{types.I32(42)},
 	},
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 42), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_GET),
 		},
 			program.WithTypes(types.TypeI32Array()),
 			program.WithLocals(types.TypeI32Array()),
@@ -1714,10 +1714,10 @@ var runTests = []struct {
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.GLOBAL_SET, 0),
-			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 42), instr.New(instr.ARRAY_SET),
-			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.GLOBAL_SET, 0),
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_GET),
 		},
 			program.WithTypes(types.TypeI32Array()),
 			program.WithGlobals(types.TypeI32Array()),
@@ -1727,16 +1727,16 @@ var runTests = []struct {
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CLOSURE_NEW),
-			instr.New(instr.CALL),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CLOSURE_NEW),
+			instr.MustNew(instr.CALL),
 		},
 			program.WithTypes(types.TypeI32Array()),
 			program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 				Captures(types.TypeI32Array()).
-				Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 42), instr.New(instr.ARRAY_SET),
-					instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET), instr.New(instr.RETURN)).
+				Append(instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.ARRAY_SET),
+					instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.RETURN)).
 				MustBuild()),
 		),
 		values: []types.Value{types.I32(42)},
@@ -1744,10 +1744,10 @@ var runTests = []struct {
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
 		},
 			program.WithTypes(types.TypeI1Array()),
 			program.WithLocals(types.TypeI1Array()),
@@ -1757,10 +1757,10 @@ var runTests = []struct {
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 7), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
 		},
 			program.WithTypes(types.TypeI8Array()),
 			program.WithLocals(types.TypeI8Array()),
@@ -1770,10 +1770,10 @@ var runTests = []struct {
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 42), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
 		},
 			program.WithTypes(types.TypeI32Array()),
 			program.WithLocals(types.TypeI32Array()),
@@ -1783,10 +1783,10 @@ var runTests = []struct {
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I64_CONST, i64operand(42)), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I64_CONST, i64operand(42)), instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
 		},
 			program.WithTypes(types.TypeI64Array()),
 			program.WithLocals(types.TypeI64Array()),
@@ -1796,10 +1796,10 @@ var runTests = []struct {
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5))), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(1.5))), instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
 		},
 			program.WithTypes(types.TypeF32Array()),
 			program.WithLocals(types.TypeF32Array()),
@@ -1809,10 +1809,10 @@ var runTests = []struct {
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.F64_CONST, math.Float64bits(2.5)), instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
 		},
 			program.WithTypes(types.TypeF64Array()),
 			program.WithLocals(types.TypeF64Array()),
@@ -1822,10 +1822,10 @@ var runTests = []struct {
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 42), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
 		},
 			program.WithTypes(types.NewArrayType(types.TypeAny())),
 			program.WithLocals(types.TypeI32Array()),
@@ -1835,9 +1835,9 @@ var runTests = []struct {
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
 		},
 			program.WithConstants(types.TypedArray[float32]{1.5}),
 			program.WithLocals(types.TypeI32Array()),
@@ -1847,9 +1847,9 @@ var runTests = []struct {
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 9), instr.New(instr.ARRAY_SET),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.I32_CONST, 9), instr.MustNew(instr.ARRAY_SET),
 		},
 			program.WithTypes(types.TypeI32Array()),
 			program.WithLocals(types.TypeI32Array()),
@@ -1859,8 +1859,8 @@ var runTests = []struct {
 	{
 
 		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5), instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 9), instr.New(instr.ARRAY_SET),
+			instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 9), instr.MustNew(instr.ARRAY_SET),
 		}, program.WithLocals(types.TypeI32Array())),
 		err: interp.ErrTypeMismatch,
 	},
@@ -1918,7 +1918,7 @@ func (v *marshalBenchMethods) Bump(n int32) int32 {
 func zeroFunction() *types.Function {
 	return types.NewFunctionBuilder(&types.FunctionType{Returns: zeroTypes}).
 		Locals(zeroTypes...).
-		Emit(append(slices.Clone(zeroReads), instr.New(instr.RETURN))...).
+		Append(append(slices.Clone(zeroReads), instr.MustNew(instr.RETURN))...).
 		MustBuild()
 }
 
@@ -1972,46 +1972,46 @@ func structSumTree(depth, repeats int32) *program.Program {
 		Locals(types.TypeAny())
 	buildDone := buildBuilder.Label()
 	buildFn := buildBuilder.
-		Emit(
-			instr.New(instr.STRUCT_NEW_DEFAULT, 0), instr.New(instr.LOCAL_SET, 1),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 0),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.STRUCT_SET),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_S),
+		Append(
+			instr.MustNew(instr.STRUCT_NEW_DEFAULT, 0), instr.MustNew(instr.LOCAL_SET, 1),
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 0),
+			instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.STRUCT_SET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_LE_S),
 		).
 		BrIf(buildDone).
-		Emit(
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-			instr.New(instr.STRUCT_SET),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 2),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-			instr.New(instr.STRUCT_SET),
+		Append(
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_SUB),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
+			instr.MustNew(instr.STRUCT_SET),
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 2),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_SUB),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
+			instr.MustNew(instr.STRUCT_SET),
 		).
 		Bind(buildDone).
-		Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.RETURN)).
+		Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.RETURN)).
 		MustBuild()
 
 	sumBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 		Params(nodeType)
 	nullCase := sumBuilder.Label()
 	sumFn := sumBuilder.
-		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.REF_IS_NULL)).
+		Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.REF_IS_NULL)).
 		BrIf(nullCase).
-		Emit(
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET),
-			instr.New(instr.CONST_GET, 1), instr.New(instr.CALL),
-			instr.New(instr.I32_ADD),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.STRUCT_GET),
-			instr.New(instr.CONST_GET, 1), instr.New(instr.CALL),
-			instr.New(instr.I32_ADD),
-			instr.New(instr.RETURN),
+		Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.STRUCT_GET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.STRUCT_GET),
+			instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL),
+			instr.MustNew(instr.I32_ADD),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.STRUCT_GET),
+			instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL),
+			instr.MustNew(instr.I32_ADD),
+			instr.MustNew(instr.RETURN),
 		).
 		Bind(nullCase).
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN)).
+		Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.RETURN)).
 		MustBuild()
 
 	b := program.NewBuilder()
@@ -2103,27 +2103,27 @@ func arraySumUpvalue(size, repeats int32) *program.Program {
 	outerLoop, outerDone := sumBuilder.Label(), sumBuilder.Label()
 	innerLoop, innerDone := sumBuilder.Label(), sumBuilder.Label()
 	sumFn := sumBuilder.
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 2)).
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 0)).
+		Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 2)).
+		Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 0)).
 		Bind(outerLoop).
-		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, uint64(uint32(repeats))), instr.New(instr.I32_GE_S)).
+		Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, uint64(uint32(repeats))), instr.MustNew(instr.I32_GE_S)).
 		BrIf(outerDone).
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1)).
+		Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 1)).
 		Bind(innerLoop).
-		Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, uint64(uint32(size))), instr.New(instr.I32_GE_S)).
+		Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, uint64(uint32(size))), instr.MustNew(instr.I32_GE_S)).
 		BrIf(innerDone).
-		Emit(
-			instr.New(instr.LOCAL_GET, 2),
-			instr.New(instr.UPVAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.ARRAY_GET),
-			instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
+		Append(
+			instr.MustNew(instr.LOCAL_GET, 2),
+			instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2),
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 1),
 		).
 		Br(innerLoop).
 		Bind(innerDone).
-		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 0)).
+		Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 0)).
 		Br(outerLoop).
 		Bind(outerDone).
-		Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN)).
+		Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.RETURN)).
 		MustBuild()
 
 	b := program.NewBuilder()
@@ -2244,37 +2244,37 @@ func arrayFillUpvalue(size, repeats int32) *program.Program {
 	innerLoop, innerDone := fillBuilder.Label(), fillBuilder.Label()
 	sumLoop, sumDone := fillBuilder.Label(), fillBuilder.Label()
 	fillFn := fillBuilder.
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 0)).
+		Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 0)).
 		Bind(outerLoop).
-		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, uint64(uint32(repeats))), instr.New(instr.I32_GE_S)).
+		Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, uint64(uint32(repeats))), instr.MustNew(instr.I32_GE_S)).
 		BrIf(outerDone).
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1)).
+		Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 1)).
 		Bind(innerLoop).
-		Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, uint64(uint32(size))), instr.New(instr.I32_GE_S)).
+		Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, uint64(uint32(size))), instr.MustNew(instr.I32_GE_S)).
 		BrIf(innerDone).
-		Emit(
-			instr.New(instr.UPVAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 1), instr.New(instr.ARRAY_SET),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
+		Append(
+			instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 1),
 		).
 		Br(innerLoop).
 		Bind(innerDone).
-		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 0)).
+		Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 0)).
 		Br(outerLoop).
 		Bind(outerDone).
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 2)).
-		Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1)).
+		Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 2)).
+		Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 1)).
 		Bind(sumLoop).
-		Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, uint64(uint32(size))), instr.New(instr.I32_GE_S)).
+		Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, uint64(uint32(size))), instr.MustNew(instr.I32_GE_S)).
 		BrIf(sumDone).
-		Emit(
-			instr.New(instr.LOCAL_GET, 2),
-			instr.New(instr.UPVAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.ARRAY_GET),
-			instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
+		Append(
+			instr.MustNew(instr.LOCAL_GET, 2),
+			instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2),
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 1),
 		).
 		Br(sumLoop).
 		Bind(sumDone).
-		Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN)).
+		Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.RETURN)).
 		MustBuild()
 
 	b := program.NewBuilder()
@@ -2325,7 +2325,7 @@ func TestWithHook(t *testing.T) {
 		{
 			name: "arithmetic",
 			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD),
+				instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_ADD),
 			}),
 			want: types.I32(3),
 			ops:  3,
@@ -2333,9 +2333,9 @@ func TestWithHook(t *testing.T) {
 		{
 			name: "local arithmetic store",
 			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 5), instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.LOCAL_GET, 0),
+				instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.LOCAL_SET, 0),
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 0),
+				instr.MustNew(instr.LOCAL_GET, 0),
 			}, program.WithLocals(types.TypeI32())),
 			want: types.I32(8),
 			ops:  7,
@@ -2343,7 +2343,7 @@ func TestWithHook(t *testing.T) {
 		{
 			name: "typed array load",
 			prog: program.New([]instr.Instruction{
-				instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET),
+				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_GET),
 			}, program.WithConstants(types.TypedArray[int32]{3, 5})),
 			want: types.I32(5),
 			ops:  3,
@@ -2382,7 +2382,7 @@ func TestWithCodec(t *testing.T) {
 
 func TestWithProfiler(t *testing.T) {
 	profiler := prof.New()
-	i := interp.New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)}), interp.WithProfiler(profiler), interp.WithTick(1))
+	i := interp.New(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}), interp.WithProfiler(profiler), interp.WithTick(1))
 	defer i.Close()
 	require.NoError(t, i.Run(context.Background()))
 
@@ -2394,11 +2394,11 @@ func TestWithProfiler(t *testing.T) {
 
 func TestWithFrame(t *testing.T) {
 	t.Run("function call overflows once frames are exhausted", func(t *testing.T) {
-		selfFn := types.NewFunctionBuilder(&types.FunctionType{}).Emit(
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		selfFn := types.NewFunctionBuilder(&types.FunctionType{}).Append(
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
 		).MustBuild()
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
 		}, program.WithConstants(selfFn))
 		i := interp.New(prog, interp.WithFrame(3))
 		defer i.Close()
@@ -2411,11 +2411,11 @@ func TestWithFrame(t *testing.T) {
 			func(_ *interp.Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
 				return []types.Boxed{types.BoxI32(1)}, nil
 			})
-		fillFn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
-			instr.New(instr.CONST_GET, 1), instr.New(instr.CALL), instr.New(instr.RETURN),
+		fillFn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL), instr.MustNew(instr.RETURN),
 		).MustBuild()
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
 		}, program.WithConstants(fillFn, hostFn))
 		i := interp.New(prog, interp.WithFrame(2))
 		defer i.Close()
@@ -2430,7 +2430,7 @@ func TestWithFrame(t *testing.T) {
 func TestWithStack(t *testing.T) {
 	t.Run("reports overflow", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 3),
 		})
 		i := interp.New(prog, interp.WithStack(2))
 		defer i.Close()
@@ -2440,7 +2440,7 @@ func TestWithStack(t *testing.T) {
 
 	t.Run("zero normalizes to one slot", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1),
+			instr.MustNew(instr.I32_CONST, 1),
 		})
 		i := interp.New(prog, interp.WithStack(0))
 		defer i.Close()
@@ -2455,9 +2455,9 @@ func TestWithStack(t *testing.T) {
 func TestWithHeap(t *testing.T) {
 	t.Run("initial capacity grows", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
-			instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW),
-			instr.New(instr.I32_CONST, 3), instr.New(instr.REF_NEW),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.REF_NEW),
+			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.REF_NEW),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.REF_NEW),
 		})
 		i := interp.New(prog, interp.WithHeap(1))
 		defer i.Close()
@@ -2480,7 +2480,7 @@ func TestWithHeap(t *testing.T) {
 
 	t.Run("negative capacity normalizes", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.REF_NEW),
 		})
 		i := interp.New(prog, interp.WithHeap(-1))
 		defer i.Close()
@@ -2579,7 +2579,7 @@ func TestWithHeap(t *testing.T) {
 
 func TestWithHeapLimit(t *testing.T) {
 	t.Run("rejects live heap at limit", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW)})
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.REF_NEW)})
 		i := interp.New(prog, interp.WithHeapLimit(1))
 		defer i.Close()
 
@@ -2775,7 +2775,7 @@ func TestWithHeapLimit(t *testing.T) {
 func TestWithTick(t *testing.T) {
 	calls := 0
 	prog := program.New([]instr.Instruction{
-		instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 4),
+		instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_CONST, 4),
 	})
 	i := interp.New(prog, interp.WithTick(2), interp.WithHook(func(i *interp.Interpreter) error {
 		calls++
@@ -2789,7 +2789,7 @@ func TestWithTick(t *testing.T) {
 
 func TestWithFuel(t *testing.T) {
 	prog := program.New([]instr.Instruction{
-		instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD),
+		instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_ADD),
 	})
 	i := interp.New(prog, interp.WithTick(1), interp.WithFuel(2))
 	defer i.Close()
@@ -3085,9 +3085,9 @@ func TestWithThreshold(t *testing.T) {
 
 		g := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
 		refuse(g)
-		g.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
+		g.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.RETURN))
 		f := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).
-			Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.CALL), instr.New(instr.RETURN)).
+			Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL), instr.MustNew(instr.RETURN)).
 			MustBuild()
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
@@ -3188,10 +3188,10 @@ func TestWithThreshold(t *testing.T) {
 
 		inc := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
 		refuse(inc)
-		inc.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
+		inc.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN))
 		dec := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
 		refuse(dec)
-		dec.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.RETURN))
+		dec.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_SUB), instr.MustNew(instr.RETURN))
 		b := instr.NewBuilder()
 		b.Emit(instr.I32_CONST, 7).Emit(instr.GLOBAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
 		code, err := b.Assemble()
@@ -3238,8 +3238,8 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("runs code shorter than a Go entry threaded by default", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		for _, prog := range []*program.Program{
-			program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.NOP)}),
-			program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(incFunction())),
+			program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.NOP)}),
+			program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(incFunction())),
 		} {
 			profiler := prof.New()
 			vm := interp.New(prog, interp.WithProfiler(profiler))
@@ -3580,13 +3580,13 @@ func TestWithThreshold(t *testing.T) {
 		nan := uint64(math.Float32bits(float32(math.NaN())))
 		b := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}})
 		for _, op := range []instr.Opcode{instr.F32_EQ, instr.F32_NE, instr.F32_LE} {
-			b.Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 0))
-			b.Emit(instr.New(instr.F32_CONST, nan), instr.New(instr.F32_CONST, nan), instr.New(op), instr.New(instr.SELECT))
+			b.Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 0))
+			b.Append(instr.MustNew(instr.F32_CONST, nan), instr.MustNew(instr.F32_CONST, nan), instr.MustNew(op), instr.MustNew(instr.SELECT))
 			if op != instr.F32_EQ {
-				b.Emit(instr.New(instr.I32_ADD))
+				b.Append(instr.MustNew(instr.I32_ADD))
 			}
 		}
-		fn := b.Emit(instr.New(instr.RETURN)).MustBuild()
+		fn := b.Append(instr.MustNew(instr.RETURN)).MustBuild()
 
 		module := instr.NewBuilder()
 		loop, done := module.Label(), module.Label()
@@ -4483,12 +4483,12 @@ func TestWithThreshold(t *testing.T) {
 
 		fb := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
 		small := fb.Label()
-		fb.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_LT_S)).BrIf(small)
-		fb.Emit(
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+		fb.Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_LT_S)).BrIf(small)
+		fb.Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_SUB),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN),
 		)
-		fb.Bind(small).Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.RETURN))
+		fb.Bind(small).Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.RETURN))
 		rec := fb.MustBuild()
 
 		mb := instr.NewBuilder()
@@ -4550,12 +4550,12 @@ func TestWithThreshold(t *testing.T) {
 		deep := []interp.Option{interp.WithFrame(1024), interp.WithStack(1 << 14)}
 		sumrecBuilder := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
 		zero := sumrecBuilder.Label()
-		sumrecBuilder.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_EQZ)).BrIf(zero)
-		sumrecBuilder.Emit(
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
-			instr.New(instr.CONST_GET, uint64(1)), instr.New(instr.CALL), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+		sumrecBuilder.Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_EQZ)).BrIf(zero)
+		sumrecBuilder.Append(
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_SUB),
+			instr.MustNew(instr.CONST_GET, uint64(1)), instr.MustNew(instr.CALL), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN),
 		)
-		sumrecBuilder.Bind(zero).Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN))
+		sumrecBuilder.Bind(zero).Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.RETURN))
 		sumrec := sumrecBuilder.MustBuild()
 		for _, c := range []struct {
 			name string
@@ -4657,13 +4657,13 @@ func TestWithThreshold(t *testing.T) {
 
 		held := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
 		refuse(held)
-		held.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
+		held.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.RETURN))
 		served := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
-		served.Emit(instr.New(instr.I32_CONST, 0))
+		served.Append(instr.MustNew(instr.I32_CONST, 0))
 		for range 16 {
-			served.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.CALL), instr.New(instr.I32_ADD))
+			served.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL), instr.MustNew(instr.I32_ADD))
 		}
-		served.Emit(instr.New(instr.RETURN))
+		served.Append(instr.MustNew(instr.RETURN))
 
 		b := instr.NewBuilder()
 		b.Emit(instr.I32_CONST, 1).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
@@ -4766,15 +4766,15 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			coldBuilder := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString(), types.TypeI32(), types.TypeI32(), types.TypeAny()}, Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32(), types.TypeI32())
 			coldLoop, coldDone, hit, next := coldBuilder.Label(), coldBuilder.Label(), coldBuilder.Label(), coldBuilder.Label()
-			coldBuilder.Bind(coldLoop).Emit(instr.New(instr.LOCAL_GET, 5), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_GE_S)).BrIf(coldDone)
-			coldBuilder.Emit(instr.New(instr.LOCAL_GET, 5), instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_EQ)).BrIf(hit)
-			coldBuilder.Emit(instr.New(instr.LOCAL_GET, 5)).Br(next)
-			coldBuilder.Bind(hit).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 5), instr.New(instr.LOCAL_GET, 3), instr.New(instr.CALL))
-			coldBuilder.Bind(next).Emit(
-				instr.New(instr.LOCAL_GET, 4), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 4),
-				instr.New(instr.LOCAL_GET, 5), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 5),
+			coldBuilder.Bind(coldLoop).Append(instr.MustNew(instr.LOCAL_GET, 5), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_GE_S)).BrIf(coldDone)
+			coldBuilder.Append(instr.MustNew(instr.LOCAL_GET, 5), instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_EQ)).BrIf(hit)
+			coldBuilder.Append(instr.MustNew(instr.LOCAL_GET, 5)).Br(next)
+			coldBuilder.Bind(hit).Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 5), instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.CALL))
+			coldBuilder.Bind(next).Append(
+				instr.MustNew(instr.LOCAL_GET, 4), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 4),
+				instr.MustNew(instr.LOCAL_GET, 5), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 5),
 			).Br(coldLoop)
-			coldBuilder.Bind(coldDone).Emit(instr.New(instr.LOCAL_GET, 4), instr.New(instr.RETURN))
+			coldBuilder.Bind(coldDone).Append(instr.MustNew(instr.LOCAL_GET, 4), instr.MustNew(instr.RETURN))
 			cold := coldBuilder.MustBuild()
 			prog := program.New(code, program.WithLocals(types.TypeI32(), types.TypeI32(), types.TypeString()),
 				program.WithConstants(cold, bumpFunction(1), types.String("s")))
@@ -4845,15 +4845,15 @@ func TestWithThreshold(t *testing.T) {
 		s := types.String("s")
 
 		co := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString(), types.TypeI32()}, Returns: []types.Type{types.TypeAny()}}).
-			Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.YIELD), instr.New(instr.RETURN)).MustBuild()
+			Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.YIELD), instr.MustNew(instr.RETURN)).MustBuild()
 		drive := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32())
 		loop, done := drive.Label(), drive.Label()
-		drive.Bind(loop).Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_GE_S)).BrIf(done)
-		drive.Emit(
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 2), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.DROP),
-			instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2),
+		drive.Bind(loop).Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_GE_S)).BrIf(done)
+		drive.Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.DROP),
+			instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2),
 		).Br(loop)
-		drive.Bind(done).Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN))
+		drive.Bind(done).Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.RETURN))
 		for _, c := range []struct {
 			name string
 			prog *program.Program
@@ -4962,9 +4962,9 @@ func TestWithThreshold(t *testing.T) {
 
 		held := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString()}, Returns: []types.Type{types.TypeString()}})
 		refuse(held)
-		inner := held.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).MustBuild()
+		inner := held.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.RETURN)).MustBuild()
 		outer := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString()}, Returns: []types.Type{types.TypeString()}}).
-			Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.RETURN)).MustBuild()
+			Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.RETURN)).MustBuild()
 
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
@@ -5243,16 +5243,16 @@ func TestWithThreshold(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		fnBuilder := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI64()}, Returns: []types.Type{types.TypeI64()}})
 		small := fnBuilder.Label()
-		fnBuilder.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_CONST, 2), instr.New(instr.I64_LT_S)).BrIf(small)
-		fnBuilder.Emit(
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_CONST, 1), instr.New(instr.I64_SUB), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_CONST, 2), instr.New(instr.I64_SUB), instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-			instr.New(instr.I64_ADD), instr.New(instr.RETURN),
+		fnBuilder.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I64_CONST, 2), instr.MustNew(instr.I64_LT_S)).BrIf(small)
+		fnBuilder.Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I64_CONST, 1), instr.MustNew(instr.I64_SUB), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I64_CONST, 2), instr.MustNew(instr.I64_SUB), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
+			instr.MustNew(instr.I64_ADD), instr.MustNew(instr.RETURN),
 		)
-		fnBuilder.Bind(small).Emit(
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.I64_CONST, 1), instr.New(instr.I64_CONST, 50), instr.New(instr.I64_SHL), instr.New(instr.I64_ADD),
-			instr.New(instr.RETURN),
+		fnBuilder.Bind(small).Append(
+			instr.MustNew(instr.LOCAL_GET, 0),
+			instr.MustNew(instr.I64_CONST, 1), instr.MustNew(instr.I64_CONST, 50), instr.MustNew(instr.I64_SHL), instr.MustNew(instr.I64_ADD),
+			instr.MustNew(instr.RETURN),
 		)
 		fn := fnBuilder.MustBuild()
 		b := instr.NewBuilder()
@@ -5491,9 +5491,9 @@ func TestWithThreshold(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		seed := int64(-3750763034362895579)
 		fnBuilder := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32())}, Returns: []types.Type{types.TypeI64()}})
-		fnBuilder.Emit(instr.New(instr.I64_CONST, uint64(seed)))
-		fnBuilder.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.ARRAY_LEN), instr.New(instr.DROP))
-		fnBuilder.Emit(instr.New(instr.RETURN))
+		fnBuilder.Append(instr.MustNew(instr.I64_CONST, uint64(seed)))
+		fnBuilder.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.ARRAY_LEN), instr.MustNew(instr.DROP))
+		fnBuilder.Append(instr.MustNew(instr.RETURN))
 		fn := fnBuilder.MustBuild()
 		elem := types.NewArrayType(types.TypeI32())
 		b := instr.NewBuilder()
@@ -5760,14 +5760,14 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		rareBuilder := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32(), types.TypeI32())
 		rareLoop, rareDone := rareBuilder.Label(), rareBuilder.Label()
-		rareBuilder.Bind(rareLoop).Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_GE_S)).BrIf(rareDone)
-		rareBuilder.Emit(
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.I32_NE),
-			instr.New(instr.CONST_GET, uint64(1)), instr.New(instr.CALL),
-			instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
+		rareBuilder.Bind(rareLoop).Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_GE_S)).BrIf(rareDone)
+		rareBuilder.Append(
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_SUB), instr.MustNew(instr.I32_NE),
+			instr.MustNew(instr.CONST_GET, uint64(1)), instr.MustNew(instr.CALL),
+			instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2),
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 1),
 		).Br(rareLoop)
-		rareBuilder.Bind(rareDone).Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN))
+		rareBuilder.Bind(rareDone).Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.RETURN))
 		rare := rareBuilder.MustBuild()
 		prog := program.New(code, program.WithLocals(types.TypeI32(), types.TypeI32()),
 			program.WithConstants(rare, divFunction(t)), program.WithHandlers(b.Handlers()...))
@@ -5839,16 +5839,16 @@ func TestWithThreshold(t *testing.T) {
 		protectedBuilder := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).
 			Locals(types.TypeI32(), types.TypeI32(), types.TypeString())
 		protectedLoop, protectedDone, start, end, catch, next := protectedBuilder.Label(), protectedBuilder.Label(), protectedBuilder.Label(), protectedBuilder.Label(), protectedBuilder.Label(), protectedBuilder.Label()
-		protectedBuilder.Emit(instr.New(instr.CONST_GET, 1), instr.New(instr.LOCAL_SET, 3))
-		protectedBuilder.Bind(protectedLoop).Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_GE_S)).BrIf(protectedDone)
-		protectedBuilder.Bind(start).Emit(
-			instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 6400),
-			instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.I32_CONST, 63), instr.New(instr.I32_AND),
-			instr.New(instr.I32_DIV_S), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2))
+		protectedBuilder.Append(instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.LOCAL_SET, 3))
+		protectedBuilder.Bind(protectedLoop).Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_GE_S)).BrIf(protectedDone)
+		protectedBuilder.Bind(start).Append(
+			instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 6400),
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.I32_CONST, 63), instr.MustNew(instr.I32_AND),
+			instr.MustNew(instr.I32_DIV_S), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2))
 		protectedBuilder.Bind(end).Br(next)
-		protectedBuilder.Bind(catch).Emit(instr.New(instr.DROP), instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 1000), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2))
-		protectedBuilder.Bind(next).Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1)).Br(protectedLoop)
-		protectedBuilder.Bind(protectedDone).Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN))
+		protectedBuilder.Bind(catch).Append(instr.MustNew(instr.DROP), instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 1000), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2))
+		protectedBuilder.Bind(next).Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 1)).Br(protectedLoop)
+		protectedBuilder.Bind(protectedDone).Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.RETURN))
 		protectedBuilder.Try(start, end, catch, 4)
 		protected := protectedBuilder.MustBuild()
 		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithConstants(protected, types.String("owned")))
@@ -5904,15 +5904,15 @@ func TestWithThreshold(t *testing.T) {
 		const calls, batches = 32, 64
 		thrower := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
 		raise := thrower.Label()
-		thrower.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 15), instr.New(instr.I32_AND), instr.New(instr.I32_CONST, 15), instr.New(instr.I32_EQ)).BrIf(raise)
-		thrower.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
-		thrower.Bind(raise).Emit(instr.New(instr.CONST_GET, 2), instr.New(instr.THROW))
+		thrower.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 15), instr.MustNew(instr.I32_AND), instr.MustNew(instr.I32_CONST, 15), instr.MustNew(instr.I32_EQ)).BrIf(raise)
+		thrower.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.RETURN))
+		thrower.Bind(raise).Append(instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.THROW))
 
 		guard := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
 		start, end, catch := guard.Label(), guard.Label(), guard.Label()
-		guard.Bind(start).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.CALL))
-		guard.Bind(end).Emit(instr.New(instr.RETURN))
-		guard.Bind(catch).Emit(instr.New(instr.STRING_LEN), instr.New(instr.RETURN))
+		guard.Bind(start).Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL))
+		guard.Bind(end).Append(instr.MustNew(instr.RETURN))
+		guard.Bind(catch).Append(instr.MustNew(instr.STRING_LEN), instr.MustNew(instr.RETURN))
 		guard.Try(start, end, catch, 1)
 
 		b := instr.NewBuilder()
@@ -6152,21 +6152,21 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("sums a typed i32 array in a calling function", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		identBuilder := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
-		identBuilder.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
+		identBuilder.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.RETURN))
 		ident := identBuilder.MustBuild()
 		sum := types.NewFunctionBuilder(&types.FunctionType{
 			Params: []types.Type{types.NewArrayType(types.TypeI32())}, Returns: []types.Type{types.TypeI32()},
 		})
 		header, done := sum.Label(), sum.Label()
-		sum.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 1))
-		sum.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 2))
+		sum.Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 1))
+		sum.Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 2))
 		sum.Bind(header)
-		sum.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 0), instr.New(instr.ARRAY_LEN), instr.New(instr.I32_GE_S)).BrIf(done)
-		sum.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.CALL), instr.New(instr.DROP))
-		sum.Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.ARRAY_GET), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2))
-		sum.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1))
+		sum.Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.ARRAY_LEN), instr.MustNew(instr.I32_GE_S)).BrIf(done)
+		sum.Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL), instr.MustNew(instr.DROP))
+		sum.Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2))
+		sum.Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 1))
 		sum.Br(header)
-		sum.Bind(done).Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN))
+		sum.Bind(done).Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.RETURN))
 		sumFn := sum.MustBuild()
 		sumFn.Locals = []types.Type{types.TypeI32(), types.TypeI32()}
 
@@ -6277,7 +6277,7 @@ func TestWithThreshold(t *testing.T) {
 		at := types.NewFunctionBuilder(&types.FunctionType{
 			Params: []types.Type{types.NewArrayType(types.TypeI32()), types.TypeI32()}, Returns: []types.Type{types.TypeI32()},
 		})
-		at.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.ARRAY_GET), instr.New(instr.RETURN))
+		at.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.RETURN))
 		atFn := at.MustBuild()
 		arr := types.NewArray(types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
 
@@ -6326,7 +6326,7 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("deopts a host array that fails its shape guard", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		ln := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.NewArrayType(types.TypeI32())}, Returns: []types.Type{types.TypeI32()}})
-		ln.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.ARRAY_LEN), instr.New(instr.RETURN))
+		ln.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.ARRAY_LEN), instr.MustNew(instr.RETURN))
 		lnFn := ln.MustBuild()
 
 		b := instr.NewBuilder()
@@ -6400,9 +6400,9 @@ func TestWithThreshold(t *testing.T) {
 			Params: []types.Type{types.NewArrayType(types.TypeI32()), types.TypeI32()}, Returns: []types.Type{types.TypeI32()},
 		}).Locals(types.TypeI32())
 		count, counted := at.Label(), at.Label()
-		at.Bind(count).Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 8), instr.New(instr.I32_GE_S)).BrIf(counted)
-		at.Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2)).Br(count)
-		at.Bind(counted).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.ARRAY_GET), instr.New(instr.RETURN))
+		at.Bind(count).Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 8), instr.MustNew(instr.I32_GE_S)).BrIf(counted)
+		at.Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2)).Br(count)
+		at.Bind(counted).Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.RETURN))
 		arr := types.NewArray(types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
 
 		b := instr.NewBuilder()
@@ -7322,7 +7322,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 
 		wrap := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeAny()}, Returns: []types.Type{types.TypeI32()}})
-		wrap.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL), instr.New(instr.RETURN))
+		wrap.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.CALL), instr.MustNew(instr.RETURN))
 		prog := program.New(code, program.WithLocals(types.TypeI32(), types.TypeAny()),
 			program.WithConstants(incFunction(), wrap.MustBuild()))
 		want := runProgram(t, prog)
@@ -7436,15 +7436,15 @@ func TestWithThreshold(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		counter := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
 			Captures(types.TypeI32()).
-			Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.DUP), instr.New(instr.UPVAL_SET, 0), instr.New(instr.RETURN)).
+			Append(instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.DUP), instr.MustNew(instr.UPVAL_SET, 0), instr.MustNew(instr.RETURN)).
 			MustBuild()
 		gb := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeAny(), types.TypeI32())
 		loop, done := gb.Label(), gb.Label()
-		gb.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.LOCAL_SET, 1))
-		gb.Bind(loop).Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 64), instr.New(instr.I32_GE_S)).BrIf(done)
-		gb.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL), instr.New(instr.DROP))
-		gb.Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 2)).Br(loop)
-		gb.Bind(done).Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL), instr.New(instr.RETURN))
+		gb.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CLOSURE_NEW), instr.MustNew(instr.LOCAL_SET, 1))
+		gb.Bind(loop).Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 64), instr.MustNew(instr.I32_GE_S)).BrIf(done)
+		gb.Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.CALL), instr.MustNew(instr.DROP))
+		gb.Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2)).Br(loop)
+		gb.Bind(done).Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.CALL), instr.MustNew(instr.RETURN))
 		b := instr.NewBuilder()
 		b.Emit(instr.I32_CONST, 7).Emit(instr.CONST_GET, 1).Emit(instr.CALL)
 		code, err := b.Assemble()
@@ -7496,21 +7496,21 @@ func TestWithThreshold(t *testing.T) {
 		const calls = 64
 		fb := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeI1()}, Returns: []types.Type{types.TypeI32()}}).Captures(types.TypeI32())
 		loop, done, slow := fb.Label(), fb.Label(), fb.Label()
-		fb.Bind(loop).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_EQZ)).BrIf(done)
-		fb.Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.UPVAL_SET, 0))
-		fb.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.LOCAL_SET, 0)).Br(loop)
-		fb.Bind(done).Emit(instr.New(instr.LOCAL_GET, 1)).BrIf(slow)
-		fb.Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.RETURN))
-		fb.Bind(slow).Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW, 0), instr.New(instr.ARRAY_LEN))
-		fb.Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_ADD), instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
+		fb.Bind(loop).Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_EQZ)).BrIf(done)
+		fb.Append(instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.UPVAL_SET, 0))
+		fb.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_SUB), instr.MustNew(instr.LOCAL_SET, 0)).Br(loop)
+		fb.Bind(done).Append(instr.MustNew(instr.LOCAL_GET, 1)).BrIf(slow)
+		fb.Append(instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.RETURN))
+		fb.Bind(slow).Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW, 0), instr.MustNew(instr.ARRAY_LEN))
+		fb.Append(instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN))
 		gb := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeAny(), types.TypeI32(), types.TypeI32())
 		loop, done = gb.Label(), gb.Label()
-		gb.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.LOCAL_SET, 0))
-		gb.Bind(loop).Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, calls), instr.New(instr.I32_GE_S)).BrIf(done)
-		gb.Emit(instr.New(instr.I32_CONST, 100), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, calls-1), instr.New(instr.I32_EQ))
-		gb.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.CALL), instr.New(instr.LOCAL_SET, 2))
-		gb.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1)).Br(loop)
-		gb.Bind(done).Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.RETURN))
+		gb.Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CLOSURE_NEW), instr.MustNew(instr.LOCAL_SET, 0))
+		gb.Bind(loop).Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, calls), instr.MustNew(instr.I32_GE_S)).BrIf(done)
+		gb.Append(instr.MustNew(instr.I32_CONST, 100), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, calls-1), instr.MustNew(instr.I32_EQ))
+		gb.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.LOCAL_SET, 2))
+		gb.Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 1)).Br(loop)
+		gb.Bind(done).Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.RETURN))
 		b := instr.NewBuilder()
 		b.Emit(instr.CONST_GET, 1).Emit(instr.CALL)
 		code, err := b.Assemble()
@@ -7561,7 +7561,7 @@ func TestWithThreshold(t *testing.T) {
 		const n = 200_000
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeString()}}).
 			Captures(types.TypeString()).
-			Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.RETURN)).
+			Append(instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.RETURN)).
 			MustBuild()
 		b := instr.NewBuilder()
 		loop, done, inner, innerDone := b.Label(), b.Label(), b.Label(), b.Label()
@@ -7617,11 +7617,11 @@ func TestWithThreshold(t *testing.T) {
 		const calls = 200
 		fb := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeI1()}, Returns: []types.Type{types.TypeI32()}}).Captures(types.TypeI32())
 		loop, done, read := fb.Label(), fb.Label(), fb.Label()
-		fb.Bind(loop).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_EQZ)).BrIf(done)
-		fb.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB), instr.New(instr.LOCAL_SET, 0)).Br(loop)
-		fb.Bind(done).Emit(instr.New(instr.LOCAL_GET, 1)).BrIf(read)
-		fb.Emit(instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN))
-		fb.Bind(read).Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.RETURN))
+		fb.Bind(loop).Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_EQZ)).BrIf(done)
+		fb.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_SUB), instr.MustNew(instr.LOCAL_SET, 0)).Br(loop)
+		fb.Bind(done).Append(instr.MustNew(instr.LOCAL_GET, 1)).BrIf(read)
+		fb.Append(instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN))
+		fb.Bind(read).Append(instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.RETURN))
 		b := instr.NewBuilder()
 		loop, done = b.Label(), b.Label()
 		b.Bind(loop)
@@ -7769,9 +7769,9 @@ func TestWithThreshold(t *testing.T) {
 		} {
 			fb := types.NewFunctionBuilder(&types.FunctionType{Params: c.params, Returns: c.params[:1]})
 			for i := range c.params {
-				fb.Emit(instr.New(instr.LOCAL_GET, uint64(i)))
+				fb.Append(instr.MustNew(instr.LOCAL_GET, uint64(i)))
 			}
-			fn := fb.Emit(instr.New(c.code), instr.New(instr.RETURN)).MustBuild()
+			fn := fb.Append(instr.MustNew(c.code), instr.MustNew(instr.RETURN)).MustBuild()
 
 			for _, args := range c.args {
 
@@ -7830,8 +7830,8 @@ func TestWithThreshold(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		profiler := prof.New()
 		bad := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
-			Emit(instr.New(instr.BR, 10)).MustBuild()
-		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)}, program.WithConstants(bad))
+			Append(instr.MustNew(instr.BR, 10)).MustBuild()
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}, program.WithConstants(bad))
 		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 
@@ -7844,7 +7844,7 @@ func TestWithThreshold(t *testing.T) {
 
 func TestNew(t *testing.T) {
 	t.Run("runs a program", func(t *testing.T) {
-		i := interp.New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5)}))
+		i := interp.New(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 5)}))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -7855,7 +7855,7 @@ func TestNew(t *testing.T) {
 
 	t.Run("interns duplicate string constants", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_EQ),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_EQ),
 		}, program.WithConstants(types.String("same"), types.String("same")))
 		i := interp.New(prog)
 		defer i.Close()
@@ -7949,7 +7949,7 @@ func TestInterpreter_Run(t *testing.T) {
 	t.Run("calls a function nested in an array constant", func(t *testing.T) {
 		fnType := &types.FunctionType{Returns: []types.Type{types.TypeI32()}}
 		fn := types.NewFunctionBuilder(fnType).
-			Emit(instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).
+			Emit(instr.I32_CONST, 7).Emit(instr.RETURN).
 			MustBuild()
 
 		b := program.NewBuilder()
@@ -7986,8 +7986,8 @@ func TestInterpreter_Run(t *testing.T) {
 			{
 				name:      "two constants",
 				constants: []types.Value{shared, shared},
-				write:     []instr.Instruction{instr.New(instr.CONST_GET, 0)},
-				read:      []instr.Instruction{instr.New(instr.CONST_GET, 1)},
+				write:     []instr.Instruction{instr.MustNew(instr.CONST_GET, 0)},
+				read:      []instr.Instruction{instr.MustNew(instr.CONST_GET, 1)},
 			},
 			{
 				name: "nested twice",
@@ -7995,22 +7995,22 @@ func TestInterpreter_Run(t *testing.T) {
 					Typ:   types.NewArrayType(typ),
 					Elems: []types.Value{shared, shared},
 				}},
-				write: []instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET)},
-				read:  []instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET)},
+				write: []instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET)},
+				read:  []instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_GET)},
 			},
 			{
 				name:      "typed array",
 				constants: []types.Value{typed, typed},
-				write:     []instr.Instruction{instr.New(instr.CONST_GET, 0)},
-				read:      []instr.Instruction{instr.New(instr.CONST_GET, 1)},
+				write:     []instr.Instruction{instr.MustNew(instr.CONST_GET, 0)},
+				read:      []instr.Instruction{instr.MustNew(instr.CONST_GET, 1)},
 			},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				code := slices.Concat(tt.write,
-					[]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 9), instr.New(instr.ARRAY_SET)},
+					[]instr.Instruction{instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 9), instr.MustNew(instr.ARRAY_SET)},
 					tt.read,
-					[]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET)})
+					[]instr.Instruction{instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET)})
 				prog := program.New(code, program.WithConstants(tt.constants...))
 				require.NoError(t, program.Verify(prog))
 
@@ -8116,7 +8116,7 @@ func TestInterpreter_Run(t *testing.T) {
 		callee := types.NewFunctionBuilder(&types.FunctionType{
 			Params:  []types.Type{types.TypeAny()},
 			Returns: []types.Type{types.TypeI32()},
-		}).Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN)).MustBuild()
+		}).Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.RETURN)).MustBuild()
 
 		b := program.NewBuilder()
 		fn := b.Const(callee)
@@ -8148,15 +8148,15 @@ func TestInterpreter_Run(t *testing.T) {
 			Returns: []types.Type{types.TypeI32()},
 		}).Locals(types.TypeI32())
 		done := fb.Label()
-		fb.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_EQZ)).BrIf(done)
-		fb.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB))
-		fb.Emit(instr.New(instr.CONST_GET, 0), instr.New(instr.RETURN_CALL))
+		fb.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_EQZ)).BrIf(done)
+		fb.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_SUB))
+		fb.Append(instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.RETURN_CALL))
 		fb.Bind(done)
-		fb.Emit(instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN))
+		fb.Append(instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN))
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 2000),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CALL),
+			instr.MustNew(instr.I32_CONST, 2000),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CALL),
 		}, program.WithConstants(fb.MustBuild()))
 		require.NoError(t, program.Verify(prog))
 
@@ -8214,12 +8214,12 @@ func TestInterpreter_Run(t *testing.T) {
 			{name: "f64", typ: types.TypeF64(), initial: types.BoxF64(1), replacement: types.BoxF64(2), want: types.F64(2)},
 		} {
 			prog := program.New([]instr.Instruction{
-				instr.New(instr.GLOBAL_GET, 0),
-				instr.New(instr.REF_NEW),
-				instr.New(instr.DUP),
-				instr.New(instr.GLOBAL_GET, 1),
-				instr.New(instr.REF_SET),
-				instr.New(instr.REF_GET),
+				instr.MustNew(instr.GLOBAL_GET, 0),
+				instr.MustNew(instr.REF_NEW),
+				instr.MustNew(instr.DUP),
+				instr.MustNew(instr.GLOBAL_GET, 1),
+				instr.MustNew(instr.REF_SET),
+				instr.MustNew(instr.REF_GET),
 			}, program.WithGlobals(tt.typ, tt.typ))
 			i := interp.New(prog)
 			require.NoError(t, i.SetGlobal(0, tt.initial), tt.name)
@@ -8245,11 +8245,11 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 
 		huge := int64(1) << 50
-		fn := types.NewFunctionBuilder(nil).Emit(instr.New(instr.RETURN)).MustBuild()
-		coroutine := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.YIELD),
-			instr.New(instr.RETURN),
+		fn := types.NewFunctionBuilder(nil).Append(instr.MustNew(instr.RETURN)).MustBuild()
+		coroutine := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.YIELD),
+			instr.MustNew(instr.RETURN),
 		).MustBuild()
 		for _, tt := range []struct {
 			name string
@@ -8259,140 +8259,140 @@ func TestInterpreter_Run(t *testing.T) {
 			{
 				name: "integer arithmetic",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 20),
-					instr.New(instr.I32_CONST, 22),
-					instr.New(instr.I32_ADD),
+					instr.MustNew(instr.I32_CONST, 20),
+					instr.MustNew(instr.I32_CONST, 22),
+					instr.MustNew(instr.I32_ADD),
 				}),
 			},
 			{
 				name: "local arithmetic store",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 5),
-					instr.New(instr.LOCAL_SET, 0),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 3),
-					instr.New(instr.I32_ADD),
-					instr.New(instr.LOCAL_SET, 0),
-					instr.New(instr.LOCAL_GET, 0),
+					instr.MustNew(instr.I32_CONST, 5),
+					instr.MustNew(instr.LOCAL_SET, 0),
+					instr.MustNew(instr.LOCAL_GET, 0),
+					instr.MustNew(instr.I32_CONST, 3),
+					instr.MustNew(instr.I32_ADD),
+					instr.MustNew(instr.LOCAL_SET, 0),
+					instr.MustNew(instr.LOCAL_GET, 0),
 				}, program.WithLocals(types.TypeI32())),
 			},
 			{
 				name: "global mutation",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 7),
-					instr.New(instr.GLOBAL_SET, 0),
-					instr.New(instr.GLOBAL_GET, 0),
+					instr.MustNew(instr.I32_CONST, 7),
+					instr.MustNew(instr.GLOBAL_SET, 0),
+					instr.MustNew(instr.GLOBAL_GET, 0),
 				}, program.WithGlobals(types.TypeI32())),
 			},
 			{
 				name: "array access",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.ARRAY_GET),
+					instr.MustNew(instr.CONST_GET, 0),
+					instr.MustNew(instr.I32_CONST, 1),
+					instr.MustNew(instr.ARRAY_GET),
 				}, program.WithConstants(types.TypedArray[int32]{10, 20, 30})),
 			},
 			{
 				name: "coroutine state",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CALL),
-					instr.New(instr.CORO_DONE),
+					instr.MustNew(instr.CONST_GET, 0),
+					instr.MustNew(instr.CALL),
+					instr.MustNew(instr.CORO_DONE),
 				}, program.WithConstants(coroutine)),
 			},
 			{
 				name: "promoted i64 eqz branch",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I64_CONST, i64operand(huge)),
-					instr.New(instr.I64_EQZ),
-					instr.New(instr.BR_IF, 0),
+					instr.MustNew(instr.I64_CONST, i64operand(huge)),
+					instr.MustNew(instr.I64_EQZ),
+					instr.MustNew(instr.BR_IF, 0),
 				}),
 			},
 			{
 				name: "promoted i64 comparison branch",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I64_CONST, i64operand(huge)),
-					instr.New(instr.I64_CONST, i64operand(huge)),
-					instr.New(instr.I64_EQ),
-					instr.New(instr.BR_IF, 0),
+					instr.MustNew(instr.I64_CONST, i64operand(huge)),
+					instr.MustNew(instr.I64_CONST, i64operand(huge)),
+					instr.MustNew(instr.I64_EQ),
+					instr.MustNew(instr.BR_IF, 0),
 				}),
 			},
 			{
 				name: "promoted i64 local binary",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I64_CONST, i64operand(1)),
-					instr.New(instr.LOCAL_SET, 0),
-					instr.New(instr.I64_CONST, i64operand(huge)),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I64_ADD),
-					instr.New(instr.DROP),
+					instr.MustNew(instr.I64_CONST, i64operand(1)),
+					instr.MustNew(instr.LOCAL_SET, 0),
+					instr.MustNew(instr.I64_CONST, i64operand(huge)),
+					instr.MustNew(instr.LOCAL_GET, 0),
+					instr.MustNew(instr.I64_ADD),
+					instr.MustNew(instr.DROP),
 				}, program.WithLocals(types.TypeI64())),
 			},
 			{
 				name: "local ref drop",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 7),
-					instr.New(instr.REF_NEW),
-					instr.New(instr.LOCAL_SET, 0),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.DROP),
+					instr.MustNew(instr.I32_CONST, 7),
+					instr.MustNew(instr.REF_NEW),
+					instr.MustNew(instr.LOCAL_SET, 0),
+					instr.MustNew(instr.LOCAL_GET, 0),
+					instr.MustNew(instr.DROP),
 				}, program.WithLocals(types.TypeAny())),
 			},
 			{
 				name: "function constant drop",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.DROP),
+					instr.MustNew(instr.CONST_GET, 0),
+					instr.MustNew(instr.DROP),
 				}, program.WithConstants(fn)),
 			},
 			{
 				name: "string constant drop",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.DROP),
+					instr.MustNew(instr.CONST_GET, 0),
+					instr.MustNew(instr.DROP),
 				}, program.WithConstants(types.String("value"))),
 			},
 			{
 				name: "i32 divide by zero",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 90),
-					instr.New(instr.I32_CONST, 0),
-					instr.New(instr.I32_DIV_S),
+					instr.MustNew(instr.I32_CONST, 90),
+					instr.MustNew(instr.I32_CONST, 0),
+					instr.MustNew(instr.I32_DIV_S),
 				}),
 				err: interp.ErrDivideByZero,
 			},
 			{
 				name: "promoted i64 divide by zero",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I64_CONST, i64operand(huge)),
-					instr.New(instr.I64_CONST, 0),
-					instr.New(instr.I64_DIV_S),
+					instr.MustNew(instr.I64_CONST, i64operand(huge)),
+					instr.MustNew(instr.I64_CONST, 0),
+					instr.MustNew(instr.I64_DIV_S),
 				}),
 				err: interp.ErrDivideByZero,
 			},
 			{
 				name: "promoted i64 local divide by zero",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I64_CONST, i64operand(huge)),
-					instr.New(instr.LOCAL_SET, 0),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I64_CONST, 0),
-					instr.New(instr.I64_DIV_S),
+					instr.MustNew(instr.I64_CONST, i64operand(huge)),
+					instr.MustNew(instr.LOCAL_SET, 0),
+					instr.MustNew(instr.LOCAL_GET, 0),
+					instr.MustNew(instr.I64_CONST, 0),
+					instr.MustNew(instr.I64_DIV_S),
 				}, program.WithLocals(types.TypeI64())),
 				err: interp.ErrDivideByZero,
 			},
 			{
 				name: "module completion adopts a borrowed constant reference",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.CONST_GET, 0),
+					instr.MustNew(instr.CONST_GET, 0),
 				}, program.WithConstants(types.TypedArray[int32]{1, 2, 3})),
 			},
 			{
 				name: "owned reference dropped before module completion",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.REF_NULL),
-					instr.New(instr.DROP),
-					instr.New(instr.CONST_GET, 0),
+					instr.MustNew(instr.REF_NULL),
+					instr.MustNew(instr.DROP),
+					instr.MustNew(instr.CONST_GET, 0),
 				}, program.WithConstants(types.TypedArray[int32]{1, 2, 3})),
 			},
 		} {
@@ -8442,10 +8442,10 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("resumes an entry-frame yield on the next call", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.YIELD),
-			instr.New(instr.I32_CONST, 2),
-			instr.New(instr.I32_ADD),
+			instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.YIELD),
+			instr.MustNew(instr.I32_CONST, 2),
+			instr.MustNew(instr.I32_ADD),
 		})
 		i := interp.New(prog)
 		defer i.Close()
@@ -8459,10 +8459,10 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("SELECT keeps the selected ref and releases the discarded one", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
-			instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.SELECT),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.REF_NEW),
+			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.REF_NEW),
+			instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.SELECT),
 		})
 		i := interp.New(prog)
 		defer i.Close()
@@ -8481,9 +8481,9 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("GLOBAL_TEE retains the ref stored into the global", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
-			instr.New(instr.GLOBAL_TEE, 0),
-			instr.New(instr.DROP),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.REF_NEW),
+			instr.MustNew(instr.GLOBAL_TEE, 0),
+			instr.MustNew(instr.DROP),
 		}, program.WithGlobals(types.TypeAny()))
 		i := interp.New(prog)
 		defer i.Close()
@@ -8500,9 +8500,9 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("LOCAL_TEE retains the ref stored into the local", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
-			instr.New(instr.LOCAL_TEE, 0),
-			instr.New(instr.DROP),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.REF_NEW),
+			instr.MustNew(instr.LOCAL_TEE, 0),
+			instr.MustNew(instr.DROP),
 		}, program.WithLocals(types.TypeI32Array()))
 		i := interp.New(prog)
 		defer i.Close()
@@ -8526,34 +8526,34 @@ func TestInterpreter_Run(t *testing.T) {
 			{
 				name: "REF_EQ",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
-					instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW),
-					instr.New(instr.REF_EQ),
+					instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.REF_NEW),
+					instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.REF_NEW),
+					instr.MustNew(instr.REF_EQ),
 				}),
 				released: []int{1, 2},
 			},
 			{
 				name: "REF_NE",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
-					instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW),
-					instr.New(instr.REF_NE),
+					instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.REF_NEW),
+					instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.REF_NEW),
+					instr.MustNew(instr.REF_NE),
 				}),
 				released: []int{1, 2},
 			},
 			{
 				name: "REF_TEST",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
-					instr.New(instr.REF_TEST, 0),
+					instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.REF_NEW),
+					instr.MustNew(instr.REF_TEST, 0),
 				}, program.WithTypes(types.TypeI32())),
 				released: []int{1},
 			},
 			{
 				name: "REF_IS_NULL",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
-					instr.New(instr.REF_IS_NULL),
+					instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.REF_NEW),
+					instr.MustNew(instr.REF_IS_NULL),
 				}),
 				released: []int{1},
 			},
@@ -8571,8 +8571,8 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("STRUCT_NEW_DEFAULT reports stack overflow before mutating sp", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.STRUCT_NEW_DEFAULT, 0),
+			instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.STRUCT_NEW_DEFAULT, 0),
 		}, program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32()))))
 		i := interp.New(prog, interp.WithStack(1))
 		defer i.Close()
@@ -8590,55 +8590,55 @@ func TestInterpreter_Run(t *testing.T) {
 			{
 				name: "LOCAL_GET one past the current locals",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.DROP),
-					instr.New(instr.LOCAL_GET, 0),
+					instr.MustNew(instr.DROP),
+					instr.MustNew(instr.LOCAL_GET, 0),
 				}, program.WithLocals(types.TypeI32())),
 				opts: []interp.Option{interp.WithTick(1)},
 			},
 			{
 				name: "LOCAL_GET undeclared",
-				prog: program.New([]instr.Instruction{instr.New(instr.LOCAL_GET, 0)}),
+				prog: program.New([]instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0)}),
 				opts: []interp.Option{interp.WithTick(1)},
 			},
 			{
 				name: "LOCAL_SET one past the current locals",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.DROP),
-					instr.New(instr.DROP),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.LOCAL_SET, 1),
+					instr.MustNew(instr.DROP),
+					instr.MustNew(instr.DROP),
+					instr.MustNew(instr.I32_CONST, 1),
+					instr.MustNew(instr.LOCAL_SET, 1),
 				}, program.WithLocals(types.TypeI32(), types.TypeI32())),
 				opts: []interp.Option{interp.WithTick(1)},
 			},
 			{
 				name: "LOCAL_TEE one past the current locals",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.DROP),
-					instr.New(instr.DROP),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.LOCAL_TEE, 1),
+					instr.MustNew(instr.DROP),
+					instr.MustNew(instr.DROP),
+					instr.MustNew(instr.I32_CONST, 1),
+					instr.MustNew(instr.LOCAL_TEE, 1),
 				}, program.WithLocals(types.TypeI32(), types.TypeI32())),
 				opts: []interp.Option{interp.WithTick(1)},
 			},
 			{
 				name: "GLOBAL_SET undeclared",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.GLOBAL_SET, 0),
+					instr.MustNew(instr.I32_CONST, 1),
+					instr.MustNew(instr.GLOBAL_SET, 0),
 				}),
 			},
 			{
 				name: "GLOBAL_TEE undeclared",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.GLOBAL_TEE, 0),
+					instr.MustNew(instr.I32_CONST, 1),
+					instr.MustNew(instr.GLOBAL_TEE, 0),
 				}),
 			},
 			{
 				name: "ARRAY_NEW_DEFAULT negative size",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, i32operand(-1)),
-					instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+					instr.MustNew(instr.I32_CONST, i32operand(-1)),
+					instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
 				}, program.WithTypes(types.TypeI32Array())),
 			},
 		} {
@@ -8651,11 +8651,11 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("reads kind-correct zeros from unseeded globals", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.GLOBAL_GET, 0),
-			instr.New(instr.I32_CONST, i32operand(2)),
-			instr.New(instr.I32_ADD),
-			instr.New(instr.GLOBAL_GET, 1),
-			instr.New(instr.GLOBAL_GET, 2),
+			instr.MustNew(instr.GLOBAL_GET, 0),
+			instr.MustNew(instr.I32_CONST, i32operand(2)),
+			instr.MustNew(instr.I32_ADD),
+			instr.MustNew(instr.GLOBAL_GET, 1),
+			instr.MustNew(instr.GLOBAL_GET, 2),
 		}, program.WithGlobals(types.TypeI32(), types.TypeF64(), types.TypeAny()))
 		i := interp.New(prog)
 		defer i.Close()
@@ -8675,11 +8675,11 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("GLOBAL_GET declares and reads an I32 global when fused", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5),
-			instr.New(instr.GLOBAL_SET, 0),
-			instr.New(instr.GLOBAL_GET, 0),
-			instr.New(instr.I32_CONST, i32operand(2)),
-			instr.New(instr.I32_ADD),
+			instr.MustNew(instr.I32_CONST, 5),
+			instr.MustNew(instr.GLOBAL_SET, 0),
+			instr.MustNew(instr.GLOBAL_GET, 0),
+			instr.MustNew(instr.I32_CONST, i32operand(2)),
+			instr.MustNew(instr.I32_ADD),
 		}, program.WithGlobals(types.TypeI32()))
 		i := interp.New(prog)
 		defer i.Close()
@@ -8693,19 +8693,19 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("ARRAY_FILL releases every overwritten ref element", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 1),
-			instr.New(instr.DUP), instr.New(instr.I32_CONST, 0),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.ARRAY_SET),
-			instr.New(instr.DUP), instr.New(instr.I32_CONST, 1),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.ARRAY_SET),
-			instr.New(instr.DUP), instr.New(instr.I32_CONST, 2),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.ARRAY_SET),
-			instr.New(instr.DUP), instr.New(instr.I32_CONST, 0),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_FILL),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 1),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.I32_CONST, 0),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.I32_CONST, 2),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.I32_CONST, 0),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_FILL),
 		}, program.WithTypes(types.TypeI32Array(), types.NewArrayType(types.TypeI32Array())))
 		i := interp.New(prog)
 		defer i.Close()
@@ -8729,8 +8729,8 @@ func TestInterpreter_Run(t *testing.T) {
 				return []types.Boxed{types.BoxI32(args[0].I32() * args[1].I32())}, nil
 			})
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 6), instr.New(instr.I32_CONST, 7),
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			instr.MustNew(instr.I32_CONST, 6), instr.MustNew(instr.I32_CONST, 7),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
 		}, program.WithConstants(hostFn))
 		i := interp.New(prog, interp.WithTick(1))
 		defer i.Close()
@@ -8754,8 +8754,8 @@ func TestInterpreter_Run(t *testing.T) {
 					return []types.Boxed{types.BoxI32(1)}, nil
 				})
 			prog := program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 9), instr.New(instr.REF_NEW),
-				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+				instr.MustNew(instr.I32_CONST, 9), instr.MustNew(instr.REF_NEW),
+				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
 			}, program.WithConstants(hostFn))
 			i := interp.New(prog, tt.opts...)
 
@@ -8779,8 +8779,8 @@ func TestInterpreter_Run(t *testing.T) {
 					return []types.Boxed{args[0]}, nil
 				})
 			prog := program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 9),
-				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+				instr.MustNew(instr.I32_CONST, 9),
+				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
 			}, program.WithConstants(hostFn))
 			i := interp.New(prog, tt.opts...)
 
@@ -8802,7 +8802,7 @@ func TestInterpreter_Run(t *testing.T) {
 				return []types.Boxed{v}, nil
 			})
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
 		}, program.WithConstants(hostFn))
 		i := interp.New(prog, interp.WithTick(1))
 		defer i.Close()
@@ -8820,8 +8820,8 @@ func TestInterpreter_Run(t *testing.T) {
 				return []types.Boxed{types.BoxI32(1)}, nil
 			})
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I64_CONST, i64operand(huge)),
-			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+			instr.MustNew(instr.I64_CONST, i64operand(huge)),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
 		}, program.WithConstants(hostFn))
 		i := interp.New(prog)
 		defer i.Close()
@@ -8833,15 +8833,15 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("UPVAL_GET retains a ref capture", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{}).
-			Captures(types.TypeAny()).Emit(
-			instr.New(instr.UPVAL_GET, 0), instr.New(instr.DROP),
-			instr.New(instr.RETURN),
+			Captures(types.TypeAny()).Append(
+			instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.DROP),
+			instr.MustNew(instr.RETURN),
 		).MustBuild()
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5), instr.New(instr.REF_NEW),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CLOSURE_NEW),
-			instr.New(instr.CALL),
+			instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.REF_NEW),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CLOSURE_NEW),
+			instr.MustNew(instr.CALL),
 		}, program.WithConstants(fn))
 
 		maxRC := 0
@@ -8859,16 +8859,16 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("UPVAL_SET releases the overwritten ref capture", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
-			Captures(types.TypeAny()).Emit(
-			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
-			instr.New(instr.UPVAL_SET, 0),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN),
+			Captures(types.TypeAny()).Append(
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.REF_NEW),
+			instr.MustNew(instr.UPVAL_SET, 0),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.RETURN),
 		).MustBuild()
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 5), instr.New(instr.REF_NEW),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CLOSURE_NEW),
-			instr.New(instr.CALL),
+			instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.REF_NEW),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CLOSURE_NEW),
+			instr.MustNew(instr.CALL),
 		}, program.WithConstants(fn))
 		i := interp.New(prog)
 		defer i.Close()
@@ -8882,17 +8882,17 @@ func TestInterpreter_Run(t *testing.T) {
 		oldHuge := int64(1) << 50
 		newHuge := int64(1) << 51
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI64()}}).
-			Captures(types.TypeI64()).Emit(
-			instr.New(instr.I64_CONST, i64operand(newHuge)),
-			instr.New(instr.UPVAL_SET, 0),
-			instr.New(instr.UPVAL_GET, 0),
-			instr.New(instr.RETURN),
+			Captures(types.TypeI64()).Append(
+			instr.MustNew(instr.I64_CONST, i64operand(newHuge)),
+			instr.MustNew(instr.UPVAL_SET, 0),
+			instr.MustNew(instr.UPVAL_GET, 0),
+			instr.MustNew(instr.RETURN),
 		).MustBuild()
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I64_CONST, i64operand(oldHuge)),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CLOSURE_NEW),
-			instr.New(instr.CALL),
+			instr.MustNew(instr.I64_CONST, i64operand(oldHuge)),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CLOSURE_NEW),
+			instr.MustNew(instr.CALL),
 		}, program.WithConstants(fn))
 		i := interp.New(prog)
 		defer i.Close()
@@ -8904,33 +8904,33 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("fused loaders compute the same result", func(t *testing.T) {
 		upvalI32Const := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
-			Captures(types.TypeI32()).Emit(
-			instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+			Captures(types.TypeI32()).Append(
+			instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN),
 		).MustBuild()
 		upvalI64Const := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI64()}}).
-			Captures(types.TypeI64()).Emit(
-			instr.New(instr.UPVAL_GET, 0), instr.New(instr.I64_CONST, i64operand(3)), instr.New(instr.I64_ADD), instr.New(instr.RETURN),
+			Captures(types.TypeI64()).Append(
+			instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.I64_ADD), instr.MustNew(instr.RETURN),
 		).MustBuild()
 		upvalF32Const := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeF32()}}).
-			Captures(types.TypeF32()).Emit(
-			instr.New(instr.UPVAL_GET, 0), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_ADD), instr.New(instr.RETURN),
+			Captures(types.TypeF32()).Append(
+			instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(3))), instr.MustNew(instr.F32_ADD), instr.MustNew(instr.RETURN),
 		).MustBuild()
 		upvalF64Const := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeF64()}}).
-			Captures(types.TypeF64()).Emit(
-			instr.New(instr.UPVAL_GET, 0), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_ADD), instr.New(instr.RETURN),
+			Captures(types.TypeF64()).Append(
+			instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.F64_CONST, math.Float64bits(3)), instr.MustNew(instr.F64_ADD), instr.MustNew(instr.RETURN),
 		).MustBuild()
 		upvalLocal := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
-			Captures(types.TypeI32()).Locals(types.TypeI32()).Emit(
-			instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.UPVAL_GET, 0), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+			Captures(types.TypeI32()).Locals(types.TypeI32()).Append(
+			instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN),
 		).MustBuild()
 		globalUpval := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI64()}}).
-			Captures(types.TypeI64()).Emit(
-			instr.New(instr.GLOBAL_GET, 0), instr.New(instr.UPVAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.RETURN),
+			Captures(types.TypeI64()).Append(
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I64_ADD), instr.MustNew(instr.RETURN),
 		).MustBuild()
 		upvalPair := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
-			Captures(types.TypeI32(), types.TypeI32()).Emit(
-			instr.New(instr.UPVAL_GET, 0), instr.New(instr.UPVAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+			Captures(types.TypeI32(), types.TypeI32()).Append(
+			instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.UPVAL_GET, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN),
 		).MustBuild()
 
 		for _, tt := range []struct {
@@ -8942,79 +8942,79 @@ func TestInterpreter_Run(t *testing.T) {
 			{
 				name: "local and local i64",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I64_CONST, i64operand(5)), instr.New(instr.LOCAL_SET, 0),
-					instr.New(instr.I64_CONST, i64operand(3)), instr.New(instr.LOCAL_SET, 1),
-					instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_ADD),
+					instr.MustNew(instr.I64_CONST, i64operand(5)), instr.MustNew(instr.LOCAL_SET, 0),
+					instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.LOCAL_SET, 1),
+					instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I64_ADD),
 				}, program.WithLocals(types.TypeI64(), types.TypeI64())),
 				want: types.I64(8),
 			},
 			{
 				name: "local and local f32",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.F32_CONST, uint64(math.Float32bits(5))), instr.New(instr.LOCAL_SET, 0),
-					instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.LOCAL_SET, 1),
-					instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.F32_ADD),
+					instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(5))), instr.MustNew(instr.LOCAL_SET, 0),
+					instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(3))), instr.MustNew(instr.LOCAL_SET, 1),
+					instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.F32_ADD),
 				}, program.WithLocals(types.TypeF32(), types.TypeF32())),
 				want: types.F32(8),
 			},
 			{
 				name: "local and local f64",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.F64_CONST, math.Float64bits(5)), instr.New(instr.LOCAL_SET, 0),
-					instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.LOCAL_SET, 1),
-					instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_ADD),
+					instr.MustNew(instr.F64_CONST, math.Float64bits(5)), instr.MustNew(instr.LOCAL_SET, 0),
+					instr.MustNew(instr.F64_CONST, math.Float64bits(3)), instr.MustNew(instr.LOCAL_SET, 1),
+					instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.F64_ADD),
 				}, program.WithLocals(types.TypeF64(), types.TypeF64())),
 				want: types.F64(8),
 			},
 			{
 				name: "upval and i32 constant",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
+					instr.MustNew(instr.I32_CONST, i32operand(5)), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CLOSURE_NEW), instr.MustNew(instr.CALL),
 				}, program.WithConstants(upvalI32Const)),
 				want: types.I32(8),
 			},
 			{
 				name: "upval and i64 constant",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I64_CONST, i64operand(5)), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
+					instr.MustNew(instr.I64_CONST, i64operand(5)), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CLOSURE_NEW), instr.MustNew(instr.CALL),
 				}, program.WithConstants(upvalI64Const)),
 				want: types.I64(8),
 			},
 			{
 				name: "upval and f32 constant",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.F32_CONST, uint64(math.Float32bits(5))), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
+					instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(5))), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CLOSURE_NEW), instr.MustNew(instr.CALL),
 				}, program.WithConstants(upvalF32Const)),
 				want: types.F32(8),
 			},
 			{
 				name: "upval and f64 constant",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.F64_CONST, math.Float64bits(5)), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
+					instr.MustNew(instr.F64_CONST, math.Float64bits(5)), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CLOSURE_NEW), instr.MustNew(instr.CALL),
 				}, program.WithConstants(upvalF64Const)),
 				want: types.F64(8),
 			},
 			{
 				name: "upval and local",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
+					instr.MustNew(instr.I32_CONST, i32operand(5)), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CLOSURE_NEW), instr.MustNew(instr.CALL),
 				}, program.WithConstants(upvalLocal)),
 				want: types.I32(8),
 			},
 			{
 				name: "global and i32 constant",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.GLOBAL_SET, 0),
-					instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.I32_ADD),
+					instr.MustNew(instr.I32_CONST, i32operand(5)), instr.MustNew(instr.GLOBAL_SET, 0),
+					instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.I32_ADD),
 				}, program.WithGlobals(types.TypeI32())),
 				want: types.I32(8),
 			},
 			{
 				name: "two globals",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.GLOBAL_SET, 0),
-					instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.GLOBAL_SET, 1),
-					instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.I32_ADD),
+					instr.MustNew(instr.I32_CONST, i32operand(5)), instr.MustNew(instr.GLOBAL_SET, 0),
+					instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.GLOBAL_SET, 1),
+					instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.GLOBAL_GET, 1), instr.MustNew(instr.I32_ADD),
 				}, program.WithGlobals(types.TypeI32(), types.TypeI32())),
 				want: types.I32(8),
 			},
@@ -9022,9 +9022,9 @@ func TestInterpreter_Run(t *testing.T) {
 
 				name: "two globals unfused",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.GLOBAL_SET, 0),
-					instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.GLOBAL_SET, 1),
-					instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.I32_ADD),
+					instr.MustNew(instr.I32_CONST, i32operand(5)), instr.MustNew(instr.GLOBAL_SET, 0),
+					instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.GLOBAL_SET, 1),
+					instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.GLOBAL_GET, 1), instr.MustNew(instr.I32_ADD),
 				}, program.WithGlobals(types.TypeI32(), types.TypeI32())),
 				opts: []interp.Option{interp.WithTick(1)},
 				want: types.I32(8),
@@ -9032,16 +9032,16 @@ func TestInterpreter_Run(t *testing.T) {
 			{
 				name: "global and upval",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I64_CONST, i64operand(5)), instr.New(instr.GLOBAL_SET, 0),
-					instr.New(instr.I64_CONST, i64operand(3)), instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
+					instr.MustNew(instr.I64_CONST, i64operand(5)), instr.MustNew(instr.GLOBAL_SET, 0),
+					instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CLOSURE_NEW), instr.MustNew(instr.CALL),
 				}, program.WithConstants(globalUpval), program.WithGlobals(types.TypeI64())),
 				want: types.I64(8),
 			},
 			{
 				name: "two upvals",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.I32_CONST, i32operand(3)),
-					instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
+					instr.MustNew(instr.I32_CONST, i32operand(5)), instr.MustNew(instr.I32_CONST, i32operand(3)),
+					instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CLOSURE_NEW), instr.MustNew(instr.CALL),
 				}, program.WithConstants(upvalPair)),
 				want: types.I32(8),
 			},
@@ -9060,10 +9060,10 @@ func TestInterpreter_Run(t *testing.T) {
 
 		huge := int64(1) << 62
 		upval := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI64()}}).
-			Captures(types.TypeI64()).Emit(
-			instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.UPVAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.DROP),
-			instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.UPVAL_GET, 0), instr.New(instr.I64_ADD),
-			instr.New(instr.RETURN),
+			Captures(types.TypeI64()).Append(
+			instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I64_ADD), instr.MustNew(instr.DROP),
+			instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I64_ADD),
+			instr.MustNew(instr.RETURN),
 		).MustBuild()
 
 		for _, tt := range []struct {
@@ -9075,9 +9075,9 @@ func TestInterpreter_Run(t *testing.T) {
 			{
 				name: "repeated local reads keep the local reference",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I64_CONST, i64operand(huge)), instr.New(instr.LOCAL_SET, 0),
-					instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.DROP),
-					instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_ADD),
+					instr.MustNew(instr.I64_CONST, i64operand(huge)), instr.MustNew(instr.LOCAL_SET, 0),
+					instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I64_ADD), instr.MustNew(instr.DROP),
+					instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I64_ADD),
 				}, program.WithLocals(types.TypeI64())),
 				want: types.I64(huge + 1),
 				refs: 1,
@@ -9085,9 +9085,9 @@ func TestInterpreter_Run(t *testing.T) {
 			{
 				name: "mixed local reads keep the local reference",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I64_CONST, i64operand(huge)), instr.New(instr.LOCAL_SET, 0),
-					instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.I64_ADD), instr.New(instr.DROP),
-					instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_ADD),
+					instr.MustNew(instr.I64_CONST, i64operand(huge)), instr.MustNew(instr.LOCAL_SET, 0),
+					instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.I64_ADD), instr.MustNew(instr.DROP),
+					instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I64_ADD),
 				}, program.WithLocals(types.TypeI64())),
 				want: types.I64(2 * huge),
 				refs: 1,
@@ -9095,9 +9095,9 @@ func TestInterpreter_Run(t *testing.T) {
 			{
 				name: "repeated global reads keep the global reference",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I64_CONST, i64operand(huge)), instr.New(instr.GLOBAL_SET, 0),
-					instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.DROP),
-					instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I64_ADD),
+					instr.MustNew(instr.I64_CONST, i64operand(huge)), instr.MustNew(instr.GLOBAL_SET, 0),
+					instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.I64_ADD), instr.MustNew(instr.DROP),
+					instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.I64_ADD),
 				}, program.WithGlobals(types.TypeI64())),
 				want: types.I64(huge + 1),
 				refs: 1,
@@ -9105,8 +9105,8 @@ func TestInterpreter_Run(t *testing.T) {
 			{
 				name: "repeated upval reads preserve the captured value",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I64_CONST, i64operand(huge)),
-					instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
+					instr.MustNew(instr.I64_CONST, i64operand(huge)),
+					instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CLOSURE_NEW), instr.MustNew(instr.CALL),
 				}, program.WithConstants(upval)),
 				want: types.I64(huge + 1),
 				refs: 1,
@@ -9114,9 +9114,9 @@ func TestInterpreter_Run(t *testing.T) {
 			{
 				name: "paired global reads preserve the global reference",
 				prog: program.New([]instr.Instruction{
-					instr.New(instr.I64_CONST, i64operand(huge)), instr.New(instr.GLOBAL_SET, 0),
-					instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.DROP),
-					instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I64_ADD),
+					instr.MustNew(instr.I64_CONST, i64operand(huge)), instr.MustNew(instr.GLOBAL_SET, 0),
+					instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.I64_ADD), instr.MustNew(instr.DROP),
+					instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.I64_ADD),
 				}, program.WithGlobals(types.TypeI64())),
 				want: types.I64(2 * huge),
 				refs: 1,
@@ -9144,33 +9144,33 @@ func TestInterpreter_Run(t *testing.T) {
 	t.Run("keeps coroutine captures live without duplicate collector edges", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{
 			Params:  []types.Type{types.TypeAny()},
-			Returns: []types.Type{types.TypeI32()}}).Captures(types.TypeAny()).Emit(
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.UPVAL_GET, 0),
-			instr.New(instr.I32_CONST, 30),
-			instr.New(instr.REF_NEW),
-			instr.New(instr.YIELD),
-			instr.New(instr.DROP),
-			instr.New(instr.REF_GET),
-			instr.New(instr.SWAP),
-			instr.New(instr.REF_GET),
-			instr.New(instr.I32_ADD),
-			instr.New(instr.RETURN)).MustBuild()
+			Returns: []types.Type{types.TypeI32()}}).Captures(types.TypeAny()).Append(
+			instr.MustNew(instr.LOCAL_GET, 0),
+			instr.MustNew(instr.UPVAL_GET, 0),
+			instr.MustNew(instr.I32_CONST, 30),
+			instr.MustNew(instr.REF_NEW),
+			instr.MustNew(instr.YIELD),
+			instr.MustNew(instr.DROP),
+			instr.MustNew(instr.REF_GET),
+			instr.MustNew(instr.SWAP),
+			instr.MustNew(instr.REF_GET),
+			instr.MustNew(instr.I32_ADD),
+			instr.MustNew(instr.RETURN)).MustBuild()
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 10),
-			instr.New(instr.REF_NEW),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CLOSURE_NEW),
-			instr.New(instr.DUP),
-			instr.New(instr.I32_CONST, 20),
-			instr.New(instr.REF_NEW),
-			instr.New(instr.SWAP),
-			instr.New(instr.CALL),
-			instr.New(instr.DUP),
-			instr.New(instr.CORO_VALUE),
-			instr.New(instr.REF_GET),
-			instr.New(instr.RESUME),
-			instr.New(instr.CORO_VALUE)}, program.WithConstants(fn))
+			instr.MustNew(instr.I32_CONST, 10),
+			instr.MustNew(instr.REF_NEW),
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CLOSURE_NEW),
+			instr.MustNew(instr.DUP),
+			instr.MustNew(instr.I32_CONST, 20),
+			instr.MustNew(instr.REF_NEW),
+			instr.MustNew(instr.SWAP),
+			instr.MustNew(instr.CALL),
+			instr.MustNew(instr.DUP),
+			instr.MustNew(instr.CORO_VALUE),
+			instr.MustNew(instr.REF_GET),
+			instr.MustNew(instr.RESUME),
+			instr.MustNew(instr.CORO_VALUE)}, program.WithConstants(fn))
 		collected := false
 		var callableStoreErr error
 		var coroutineStoreErr error
@@ -9231,7 +9231,7 @@ func TestInterpreter_Run(t *testing.T) {
 				name: "function",
 				tail: types.NewFunctionBuilder(nil).
 					Returns(types.TypeI32()).
-					Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
+					Append(instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.RETURN)).
 					MustBuild(),
 			},
 			{
@@ -9245,19 +9245,19 @@ func TestInterpreter_Run(t *testing.T) {
 		} {
 			fn := types.NewFunctionBuilder(nil).
 				Returns(types.TypeI32()).
-				Emit(
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.YIELD),
-					instr.New(instr.DROP),
-					instr.New(instr.CONST_GET, 1),
-					instr.New(instr.RETURN_CALL)).
+				Append(
+					instr.MustNew(instr.I32_CONST, 1),
+					instr.MustNew(instr.YIELD),
+					instr.MustNew(instr.DROP),
+					instr.MustNew(instr.CONST_GET, 1),
+					instr.MustNew(instr.RETURN_CALL)).
 				MustBuild()
 			prog := program.New([]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL),
-				instr.New(instr.REF_NULL),
-				instr.New(instr.RESUME),
-				instr.New(instr.CORO_VALUE)}, program.WithConstants(fn, tt.tail))
+				instr.MustNew(instr.CONST_GET, 0),
+				instr.MustNew(instr.CALL),
+				instr.MustNew(instr.REF_NULL),
+				instr.MustNew(instr.RESUME),
+				instr.MustNew(instr.CORO_VALUE)}, program.WithConstants(fn, tt.tail))
 			vm := interp.New(prog)
 
 			require.NoError(t, vm.Run(context.Background()), tt.name)
@@ -9271,33 +9271,33 @@ func TestInterpreter_Run(t *testing.T) {
 	t.Run("releases discarded coroutine completion values", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(nil).
 			Returns(types.TypeAny(), types.TypeAny()).
-			Emit(
-				instr.New(instr.I32_CONST, 0),
-				instr.New(instr.YIELD),
-				instr.New(instr.DROP),
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.REF_NEW),
-				instr.New(instr.I32_CONST, 2),
-				instr.New(instr.REF_NEW),
-				instr.New(instr.RETURN)).
+			Append(
+				instr.MustNew(instr.I32_CONST, 0),
+				instr.MustNew(instr.YIELD),
+				instr.MustNew(instr.DROP),
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.REF_NEW),
+				instr.MustNew(instr.I32_CONST, 2),
+				instr.MustNew(instr.REF_NEW),
+				instr.MustNew(instr.RETURN)).
 			MustBuild()
 		prog := program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CALL),
-			instr.New(instr.REF_NULL),
-			instr.New(instr.RESUME),
-			instr.New(instr.DUP),
-			instr.New(instr.CORO_VALUE),
-			instr.New(instr.REF_GET),
-			instr.New(instr.SWAP),
-			instr.New(instr.DROP),
-			instr.New(instr.DROP),
-			instr.New(instr.I32_CONST, 3),
-			instr.New(instr.REF_NEW),
-			instr.New(instr.I32_CONST, 4),
-			instr.New(instr.REF_NEW),
-			instr.New(instr.I32_CONST, 5),
-			instr.New(instr.REF_NEW)}, program.WithConstants(fn))
+			instr.MustNew(instr.CONST_GET, 0),
+			instr.MustNew(instr.CALL),
+			instr.MustNew(instr.REF_NULL),
+			instr.MustNew(instr.RESUME),
+			instr.MustNew(instr.DUP),
+			instr.MustNew(instr.CORO_VALUE),
+			instr.MustNew(instr.REF_GET),
+			instr.MustNew(instr.SWAP),
+			instr.MustNew(instr.DROP),
+			instr.MustNew(instr.DROP),
+			instr.MustNew(instr.I32_CONST, 3),
+			instr.MustNew(instr.REF_NEW),
+			instr.MustNew(instr.I32_CONST, 4),
+			instr.MustNew(instr.REF_NEW),
+			instr.MustNew(instr.I32_CONST, 5),
+			instr.MustNew(instr.REF_NEW)}, program.WithConstants(fn))
 		vm := interp.New(prog,
 			interp.WithHeap(5),
 			interp.WithHeapLimit(5))
@@ -9310,7 +9310,7 @@ func TestInterpreter_Run(t *testing.T) {
 
 func TestInterpreter_Context(t *testing.T) {
 	var got context.Context
-	prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+	prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})
 	i := interp.New(prog, interp.WithTick(1), interp.WithHook(func(i *interp.Interpreter) error {
 		got = i.Context()
 		return nil
@@ -9323,7 +9323,7 @@ func TestInterpreter_Context(t *testing.T) {
 }
 
 func TestInterpreter_FP(t *testing.T) {
-	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.YIELD), instr.New(instr.NOP)})
+	prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.NOP)})
 	i := interp.New(prog)
 	defer i.Close()
 
@@ -9332,7 +9332,7 @@ func TestInterpreter_FP(t *testing.T) {
 }
 
 func TestInterpreter_Opcode(t *testing.T) {
-	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.YIELD), instr.New(instr.NOP)})
+	prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.NOP)})
 	i := interp.New(prog)
 	defer i.Close()
 
@@ -9343,7 +9343,7 @@ func TestInterpreter_Opcode(t *testing.T) {
 }
 
 func TestInterpreter_Func(t *testing.T) {
-	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.YIELD), instr.New(instr.NOP)})
+	prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.NOP)})
 	i := interp.New(prog)
 	defer i.Close()
 
@@ -9352,7 +9352,7 @@ func TestInterpreter_Func(t *testing.T) {
 }
 
 func TestInterpreter_IP(t *testing.T) {
-	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.YIELD), instr.New(instr.NOP)})
+	prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.NOP)})
 	i := interp.New(prog)
 	defer i.Close()
 
@@ -9361,7 +9361,7 @@ func TestInterpreter_IP(t *testing.T) {
 }
 
 func TestInterpreter_Frame(t *testing.T) {
-	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.YIELD), instr.New(instr.NOP)})
+	prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.NOP)})
 	i := interp.New(prog)
 	defer i.Close()
 
@@ -9382,7 +9382,7 @@ func TestInterpreter_Const(t *testing.T) {
 }
 
 func TestInterpreter_Global(t *testing.T) {
-	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 4), instr.New(instr.GLOBAL_SET, 0)}, program.WithGlobals(types.TypeI32()))
+	prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 4), instr.MustNew(instr.GLOBAL_SET, 0)}, program.WithGlobals(types.TypeI32()))
 	i := interp.New(prog)
 	defer i.Close()
 
@@ -9394,7 +9394,7 @@ func TestInterpreter_Global(t *testing.T) {
 
 func TestInterpreter_SetGlobal(t *testing.T) {
 	t.Run("sets scalar", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.GLOBAL_SET, 0)}, program.WithGlobals(types.TypeI32()))
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.GLOBAL_SET, 0)}, program.WithGlobals(types.TypeI32()))
 		i := interp.New(prog)
 		defer i.Close()
 
@@ -9478,7 +9478,7 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 
 func TestInterpreter_Local(t *testing.T) {
 	prog := program.New([]instr.Instruction{
-		instr.New(instr.I32_CONST, 6), instr.New(instr.LOCAL_SET, 0), instr.New(instr.YIELD),
+		instr.MustNew(instr.I32_CONST, 6), instr.MustNew(instr.LOCAL_SET, 0), instr.MustNew(instr.YIELD),
 	}, program.WithLocals(types.TypeI32()))
 	i := interp.New(prog)
 	defer i.Close()
@@ -9491,7 +9491,7 @@ func TestInterpreter_Local(t *testing.T) {
 
 func TestInterpreter_SetLocal(t *testing.T) {
 	t.Run("sets scalar", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.YIELD)}, program.WithLocals(types.TypeI32()))
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.YIELD)}, program.WithLocals(types.TypeI32()))
 		i := interp.New(prog)
 		defer i.Close()
 
@@ -10009,7 +10009,7 @@ func TestInterpreter_Len(t *testing.T) {
 func TestInterpreter_Flush(t *testing.T) {
 	t.Run("publishes pending samples to the profiler", func(t *testing.T) {
 		profiler := prof.New()
-		i := interp.New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)}), interp.WithProfiler(profiler), interp.WithTick(1))
+		i := interp.New(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}), interp.WithProfiler(profiler), interp.WithTick(1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 
@@ -10020,7 +10020,7 @@ func TestInterpreter_Flush(t *testing.T) {
 	})
 
 	t.Run("does nothing without a profiler", func(t *testing.T) {
-		i := interp.New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)}), interp.WithTick(1))
+		i := interp.New(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)}), interp.WithTick(1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 
@@ -10039,7 +10039,7 @@ func TestInterpreter_Reset(t *testing.T) {
 	})
 
 	t.Run("restarts module after unpopped result", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7)})
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 7)})
 		i := interp.New(prog)
 		defer i.Close()
 
@@ -10165,7 +10165,7 @@ func TestInterpreter_Reset(t *testing.T) {
 	t.Run("preserves arrays detached by pop", func(t *testing.T) {
 		typ := types.NewArrayType(types.TypeAny())
 		prog := program.New(
-			[]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0)},
+			[]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0)},
 			program.WithTypes(typ),
 		)
 		i := interp.New(prog)
@@ -10189,7 +10189,7 @@ func TestInterpreter_Reset(t *testing.T) {
 	t.Run("preserves arrays reclaimed before reset", func(t *testing.T) {
 		typ := types.NewArrayType(types.TypeAny())
 		prog := program.New(
-			[]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0)},
+			[]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0)},
 			program.WithTypes(typ),
 		)
 		i := interp.New(prog)
@@ -10278,7 +10278,7 @@ func BenchmarkNew(b *testing.B) {
 	})
 
 	b.Run("Program", func(b *testing.B) {
-		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 42)})
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 42)})
 		var vm *interp.Interpreter
 		var closeErr error
 		var elapsed time.Duration
@@ -10389,13 +10389,13 @@ func BenchmarkInterpreter_Reset(b *testing.B) {
 		{
 			name: "Scalar",
 			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 42), instr.New(instr.GLOBAL_SET, 0),
+				instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.GLOBAL_SET, 0),
 			}, program.WithGlobals(types.TypeI32())),
 		},
 		{
 			name: "Heap",
 			prog: program.New([]instr.Instruction{
-				instr.New(instr.I32_CONST, 8), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.MustNew(instr.I32_CONST, 8), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
 			}, program.WithTypes(types.NewArrayType(types.TypeAny()))),
 		},
 	}

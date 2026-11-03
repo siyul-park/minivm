@@ -208,7 +208,7 @@ func Parse(line string) (Instruction, error) {
 		return nil, fmt.Errorf("%s: %w", mnemonic, err)
 	}
 
-	return New(op, operands...), nil
+	return New(op, operands...)
 }
 
 // define binds name to the next instruction Builder emits, failing if an
@@ -227,7 +227,7 @@ func (lt *labelTable) describe(lines []int, err error) error {
 	switch {
 	case errors.Is(err, ErrUnboundLabel):
 		for _, name := range lt.names {
-			if b.labels[lt.byName[name]] < 0 {
+			if b.labels[lt.byName[name].n] < 0 {
 				return fmt.Errorf("line %d: %w: %q", lt.refLine[name], ErrUnboundLabel, name)
 			}
 		}
@@ -237,13 +237,13 @@ func (lt *labelTable) describe(lines []int, err error) error {
 			pos[i+1] = pos[i] + inst.Width()
 		}
 		for i, fx := range b.fixups {
-			target := b.labels[fx.label]
+			target := b.labels[fx.label.n]
 			if target < 0 {
 				continue
 			}
 			offset := pos[target] - pos[fx.branch+1]
 			if offset < math.MinInt16 || offset > math.MaxInt16 {
-				return fmt.Errorf("line %d: %w: %q", lines[i], ErrOffsetRange, lt.names[int(fx.label)])
+				return fmt.Errorf("line %d: %w: %q", lines[i], ErrOffsetRange, lt.names[fx.label.n])
 			}
 		}
 	}
@@ -301,7 +301,10 @@ func parseBranch(op Opcode, mnemonic string, fields []string, lt *labelTable, li
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", mnemonic, err)
 		}
-		inst := New(op, val)
+		inst, err := New(op, val)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", mnemonic, err)
+		}
 		if ref == nil {
 			return inst, nil, nil
 		}
@@ -338,7 +341,11 @@ func parseBranch(op Opcode, mnemonic string, fields []string, lt *labelTable, li
 				refs = append(refs, branchRef{operand: 1 + i, label: *ref})
 			}
 		}
-		return New(op, operands...), refs, nil
+		inst, err := New(op, operands...)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", mnemonic, err)
+		}
+		return inst, refs, nil
 
 	default:
 		return nil, nil, fmt.Errorf("%s: not a branch opcode", mnemonic)

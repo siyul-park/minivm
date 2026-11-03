@@ -68,8 +68,6 @@ const anyKind = instr.KindAny
 var (
 	// ErrTruncated reports an instruction cut off by the end of its code.
 	ErrTruncated = errors.New("truncated instruction")
-	// ErrUnknownOpcode reports an opcode with no encoding.
-	ErrUnknownOpcode = errors.New("unknown opcode")
 	// ErrIndexOutOfRange reports an operand index outside its pool or frame.
 	ErrIndexOutOfRange = errors.New("operand index out of range")
 	// ErrStackUnderflow reports an instruction that pops more values than the stack holds.
@@ -173,7 +171,7 @@ func (c *checker) structure() error {
 	for ip := 0; ip < len(c.code); {
 		op := instr.Opcode(c.code[ip])
 		if !instr.Valid(op) {
-			return c.fail(ip, op, ErrUnknownOpcode)
+			return c.fail(ip, op, instr.ErrUnknownOpcode)
 		}
 		width, ok := c.width(ip)
 		if !ok || ip+width > len(c.code) {

@@ -19,7 +19,7 @@ func TestNewDebugger(t *testing.T) {
 func TestDebugger_Hook(t *testing.T) {
 	dbg := debug.NewDebugger()
 	id := dbg.Break(0, 0)
-	vm := interp.New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7)}),
+	vm := interp.New(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 7)}),
 		interp.WithHook(dbg.Hook), interp.WithTick(1))
 	defer vm.Close()
 
@@ -32,7 +32,7 @@ func TestDebugger_Stop(t *testing.T) {
 	dbg := debug.NewDebugger()
 	require.Zero(t, dbg.Stop())
 	id := dbg.Break(0, 0)
-	vm := interp.New(program.New([]instr.Instruction{instr.New(instr.NOP)}),
+	vm := interp.New(program.New([]instr.Instruction{instr.MustNew(instr.NOP)}),
 		interp.WithHook(dbg.Hook), interp.WithTick(1))
 	defer vm.Close()
 
@@ -43,7 +43,7 @@ func TestDebugger_Stop(t *testing.T) {
 func TestDebugger_Reset(t *testing.T) {
 	dbg := debug.NewDebugger()
 	id := dbg.Break(0, 1)
-	prog := program.New([]instr.Instruction{instr.New(instr.NOP), instr.New(instr.NOP)})
+	prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP), instr.MustNew(instr.NOP)})
 	vm := interp.New(prog, interp.WithHook(dbg.Hook), interp.WithTick(1))
 	defer vm.Close()
 
@@ -71,7 +71,7 @@ func TestDebugger_Continue(t *testing.T) {
 	dbg := debug.NewDebugger()
 	dbg.Continue()
 	dbg.Break(0, 0)
-	vm := interp.New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7)}),
+	vm := interp.New(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 7)}),
 		interp.WithHook(dbg.Hook), interp.WithTick(1))
 	defer vm.Close()
 
@@ -84,10 +84,10 @@ func TestDebugger_Continue(t *testing.T) {
 }
 
 func TestDebugger_Step(t *testing.T) {
-	callee := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
-		instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
+	callee := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
+		instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)).MustBuild()
 	prog := program.New([]instr.Instruction{
-		instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.DROP)}, program.WithConstants(callee))
+		instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.DROP)}, program.WithConstants(callee))
 	dbg := debug.NewDebugger()
 	dbg.Break(0, 3)
 	vm := interp.New(prog, interp.WithHook(dbg.Hook), interp.WithTick(1))
@@ -103,10 +103,10 @@ func TestDebugger_Step(t *testing.T) {
 
 func TestDebugger_Next(t *testing.T) {
 	debug.NewDebugger().Next()
-	callee := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
-		instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
+	callee := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
+		instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)).MustBuild()
 	prog := program.New([]instr.Instruction{
-		instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.DROP)}, program.WithConstants(callee))
+		instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.DROP)}, program.WithConstants(callee))
 	dbg := debug.NewDebugger()
 	dbg.Break(0, 3)
 	vm := interp.New(prog, interp.WithHook(dbg.Hook), interp.WithTick(1))
@@ -123,10 +123,10 @@ func TestDebugger_Next(t *testing.T) {
 
 func TestDebugger_Finish(t *testing.T) {
 	debug.NewDebugger().Finish()
-	callee := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Emit(
-		instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).MustBuild()
+	callee := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
+		instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)).MustBuild()
 	prog := program.New([]instr.Instruction{
-		instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.DROP)}, program.WithConstants(callee))
+		instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.DROP)}, program.WithConstants(callee))
 	dbg := debug.NewDebugger()
 	dbg.Break(0, 3)
 	vm := interp.New(prog, interp.WithHook(dbg.Hook), interp.WithTick(1))
@@ -157,7 +157,7 @@ func TestDebugger_BreakIf(t *testing.T) {
 		dbg := debug.NewDebugger()
 		id := dbg.BreakIf(0, 5, func(vm *interp.Interpreter) bool { return vm.Len() == 1 })
 		vm := interp.New(program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7), instr.New(instr.DROP)}), interp.WithHook(dbg.Hook), interp.WithTick(1))
+			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.DROP)}), interp.WithHook(dbg.Hook), interp.WithTick(1))
 		defer vm.Close()
 
 		require.ErrorIs(t, vm.Run(context.Background()), debug.ErrStopped)
@@ -169,7 +169,7 @@ func TestDebugger_BreakIf(t *testing.T) {
 		dbg := debug.NewDebugger()
 		dbg.BreakIf(0, 5, func(*interp.Interpreter) bool { return false })
 		vm := interp.New(program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7), instr.New(instr.DROP)}), interp.WithHook(dbg.Hook), interp.WithTick(1))
+			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.DROP)}), interp.WithHook(dbg.Hook), interp.WithTick(1))
 		defer vm.Close()
 
 		require.NoError(t, vm.Run(context.Background()))

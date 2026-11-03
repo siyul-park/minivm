@@ -19,7 +19,7 @@ import (
 
 func TestNewPool(t *testing.T) {
 	t.Run("normalizes non-positive size", func(t *testing.T) {
-		p := interp.NewPool(program.New([]instr.Instruction{instr.New(instr.NOP)}), 0)
+		p := interp.NewPool(program.New([]instr.Instruction{instr.MustNew(instr.NOP)}), 0)
 		defer p.Close()
 		first, err := p.Get(context.Background())
 		require.NoError(t, err)
@@ -34,7 +34,7 @@ func TestNewPool(t *testing.T) {
 
 func TestPool_Get(t *testing.T) {
 	t.Run("reuses an idle interpreter", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})
 		p := interp.NewPool(prog, 1)
 		defer p.Close()
 
@@ -48,7 +48,7 @@ func TestPool_Get(t *testing.T) {
 	})
 
 	t.Run("returns context error while waiting", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})
 		p := interp.NewPool(prog, 1)
 		defer p.Close()
 
@@ -71,7 +71,7 @@ func TestPool_Get(t *testing.T) {
 	})
 
 	t.Run("returns ErrPoolClosed once closed", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})
 		p := interp.NewPool(prog, 1)
 		require.NoError(t, p.Close())
 
@@ -351,7 +351,7 @@ func TestPool_Get(t *testing.T) {
 
 func TestPool_Put(t *testing.T) {
 	t.Run("returns interpreter to idle after resetting state", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)})
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)})
 		p := interp.NewPool(prog, 1)
 		defer p.Close()
 
@@ -369,7 +369,7 @@ func TestPool_Put(t *testing.T) {
 	})
 
 	t.Run("nil is a no-op", func(t *testing.T) {
-		p := interp.NewPool(program.New([]instr.Instruction{instr.New(instr.NOP)}), 1)
+		p := interp.NewPool(program.New([]instr.Instruction{instr.MustNew(instr.NOP)}), 1)
 		defer p.Close()
 		p.Put(nil)
 	})
@@ -377,7 +377,7 @@ func TestPool_Put(t *testing.T) {
 
 func TestPool_Close(t *testing.T) {
 	t.Run("releases idle interpreters and is idempotent", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})
 		p := interp.NewPool(prog, 1)
 
 		i, err := p.Get(context.Background())
