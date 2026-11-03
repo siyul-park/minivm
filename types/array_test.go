@@ -27,6 +27,24 @@ func TestNewArrayType(t *testing.T) {
 	require.Equal(t, types.TypeI32(), typ.Elem)
 }
 
+func TestTypedArray_Clone(t *testing.T) {
+	t.Run("int32", func(t *testing.T) {
+		src := types.TypedArray[int32]{1, 2}
+		c := src.Clone()
+		require.Equal(t, src, c)
+		c[0] = 9
+		require.Equal(t, int32(1), src[0])
+	})
+
+	t.Run("float64", func(t *testing.T) {
+		src := types.TypedArray[float64]{1.5, 2.5}
+		c := src.Clone()
+		require.Equal(t, src, c)
+		c[1] = 9
+		require.Equal(t, 2.5, src[1])
+	})
+}
+
 func TestArray_Kind(t *testing.T) {
 	require.Equal(t, types.KindRef, types.NewArray(types.NewArrayType(types.TypeAny())).Kind())
 }
@@ -54,6 +72,18 @@ func TestArray_Refs(t *testing.T) {
 
 		require.Equal(t, []types.Ref{9, 1, 3}, a.Refs([]types.Ref{9}))
 	})
+}
+
+func TestArray_Clone(t *testing.T) {
+	typ := types.NewArrayType(types.TypeAny())
+	src := types.NewArray(typ, types.BoxRef(1), types.BoxRef(2))
+	c := src.Clone()
+
+	require.Same(t, typ, c.Typ)
+	require.Equal(t, src.Elems, c.Elems)
+
+	c.Elems[0] = types.BoxRef(9)
+	require.Equal(t, types.BoxRef(1), src.Elems[0])
 }
 
 func TestArray_String(t *testing.T) {

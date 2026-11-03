@@ -40,6 +40,12 @@ type Iterator interface {
 // one type; its methods (String, IsNumeric, Size) live on instr.Kind.
 type Kind = instr.Kind
 
+// cloner is implemented by the mutable value types, each returning a shallow
+// copy of itself.
+type cloner interface {
+	cloneValue() Value
+}
+
 const (
 	// KindF64 is the f64 value kind.
 	KindF64 = instr.KindF64
@@ -67,6 +73,15 @@ func IsNull(v Value) bool {
 	default:
 		return false
 	}
+}
+
+// Clone returns a shallow copy of a mutable value, so mutating the copy leaves v
+// alone; boxed elements are shared. An immutable value is returned as is.
+func Clone(v Value) Value {
+	if c, ok := v.(cloner); ok {
+		return c.cloneValue()
+	}
+	return v
 }
 
 // Kinds projects each Type in ts to its Kind. Returns nil for an empty
