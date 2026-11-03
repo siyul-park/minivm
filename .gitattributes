@@ -1,1 +1,2 @@
 .lighthouse/decisions.jsonl merge=union
+package-lock.json linguist-generated=true

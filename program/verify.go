@@ -11,7 +11,8 @@ import (
 
 // VerifyError reports the first violation found in a program, located by
 // function slot (0 = top-level code, j+1 = constant j, matching the
-// interpreter's compiled code layout) and instruction byte offset.
+// interpreter's compiled code layout) and instruction byte offset. A function
+// nested in a literal constant j reports slot j+1.
 type VerifyError struct {
 	Slot   int
 	IP     int
@@ -86,14 +87,12 @@ var (
 	ErrHandlerTarget = errors.New("invalid exception handler target")
 	// ErrNil reports a nil program.
 	ErrNil = errors.New("nil program")
-	// ErrNestedFunction reports a function inside an array, map, or struct literal constant.
-	ErrNestedFunction = errors.New("function nested in a literal constant")
 )
 
 // Verify checks every function slot of prog and returns the first violation as
-// a *VerifyError, or nil when the program is well-formed. A nil prog returns
-// ErrNil; a function inside a literal constant returns an error wrapping
-// ErrNestedFunction, since only top-level function constants are executable.
+// a *VerifyError, or nil when the program is well-formed. Every function
+// reachable from a constant is checked, including one nested in an array, map,
+// or struct literal. A nil prog returns ErrNil.
 func Verify(prog *Program) error {
 	if prog == nil {
 		return ErrNil
@@ -102,15 +101,9 @@ func Verify(prog *Program) error {
 	if err := newChecker(prog, 0, top).run(); err != nil {
 		return err
 	}
+	seen := make(map[any]bool)
 	for j, c := range prog.Constants {
-		fn, ok := c.(*types.Function)
-		if !ok {
-			if nested(c) {
-				return fmt.Errorf("%w: constant %d", ErrNestedFunction, j)
-			}
-			continue
-		}
-		if err := newChecker(prog, j+1, fn).run(); err != nil {
+		if err := verifyConstant(prog, j+1, c, seen); err != nil {
 			return err
 		}
 	}
@@ -123,6 +116,26 @@ func (e *VerifyError) Error() string {
 
 func (e *VerifyError) Unwrap() error {
 	return e.Err
+}
+
+// verifyConstant checks the functions reachable from v, each reported at slot.
+func verifyConstant(prog *Program, slot int, v types.Value, seen map[any]bool) error {
+	if id, ok := types.Identity(v); ok {
+		if seen[id] {
+			return nil
+		}
+		seen[id] = true
+	}
+	if fn, ok := v.(*types.Function); ok {
+		return newChecker(prog, slot, fn).run()
+	}
+	elems, _ := children(v)
+	for _, elem := range elems {
+		if err := verifyConstant(prog, slot, elem, seen); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func newChecker(prog *Program, slot int, fn *types.Function) *checker {
@@ -711,25 +724,4 @@ func unify(a, b types.Kind) types.Kind {
 		return a
 	}
 	return anyKind
-}
-
-// nested reports whether v is a literal holding a function at any depth.
-func nested(v types.Value) bool {
-	var elems []types.Value
-	switch v := v.(type) {
-	case *types.Function:
-		return true
-	case *types.ArrayLiteral:
-		elems = v.Elems
-	case *types.MapLiteral:
-		elems = append(append(elems, v.Keys...), v.Values...)
-	case *types.StructLiteral:
-		elems = v.Fields
-	}
-	for _, elem := range elems {
-		if nested(elem) {
-			return true
-		}
-	}
-	return false
 }

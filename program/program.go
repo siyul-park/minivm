@@ -71,11 +71,15 @@ func New(instrs []instr.Instruction, options ...func(*Program)) *Program {
 	return p
 }
 
-// Clone returns a snapshot that shares no mutable bytecode with p: Code, Locals,
-// Globals, Constants, Types, and Handlers get fresh slices, and every
-// *types.Function constant is replaced by a copy owning its Code, Locals,
-// Captures, and Handlers. Type objects, including each function's signature,
-// stay shared and must not be mutated. A nil receiver returns nil.
+// Clone returns a snapshot that shares no mutable state with p: Code, Locals,
+// Globals, Constants, Types, and Handlers get fresh slices, and the constant
+// graph is copied. Every *types.Function, including one nested in an array,
+// map, or struct literal, is replaced by a copy owning its Code, Locals,
+// Captures, and Handlers; literals are rebuilt around copied children and other
+// mutable constants are cloned (types.Clone). An object reachable from several
+// positions is copied once, so the snapshot shares it as p does. Type objects,
+// including each function's signature, stay shared and must not be mutated. A
+// nil receiver returns nil.
 func (p *Program) Clone() *Program {
 	if p == nil {
 		return nil
@@ -88,16 +92,9 @@ func (p *Program) Clone() *Program {
 		Types:     slices.Clone(p.Types),
 		Handlers:  slices.Clone(p.Handlers),
 	}
+	copies := make(map[any]types.Value)
 	for i, v := range c.Constants {
-		if fn, ok := v.(*types.Function); ok {
-			c.Constants[i] = &types.Function{
-				Typ:      fn.Typ,
-				Locals:   slices.Clone(fn.Locals),
-				Captures: slices.Clone(fn.Captures),
-				Code:     slices.Clone(fn.Code),
-				Handlers: slices.Clone(fn.Handlers),
-			}
-		}
+		c.Constants[i] = cloneConstant(v, copies)
 	}
 	return c
 }
@@ -151,4 +148,56 @@ func writeEntry(sb *strings.Builder, index int, s string) {
 		line, tail, _ = strings.Cut(tail, "\n")
 		sb.WriteString(fmt.Sprintf("\t%s\n", line))
 	}
+}
+
+func cloneConstant(v types.Value, copies map[any]types.Value) types.Value {
+	id, aliased := types.Identity(v)
+	if aliased {
+		if c, ok := copies[id]; ok {
+			return c
+		}
+	}
+	var c types.Value
+	if elems, rebuild := children(v); rebuild != nil {
+		// The rebuilt literal is recorded before its children are cloned, so a
+		// literal that contains itself clones into one that contains itself.
+		cloned := make([]types.Value, len(elems))
+		c = rebuild(cloned)
+		if aliased {
+			copies[id] = c
+		}
+		for i, elem := range elems {
+			cloned[i] = cloneConstant(elem, copies)
+		}
+	} else if fn, ok := v.(*types.Function); ok {
+		c = fn.Clone()
+	} else {
+		c = types.Clone(v)
+	}
+	if aliased {
+		copies[id] = c
+	}
+	return c
+}
+
+// children returns the constants held by an array, map, or struct literal
+// and a function rebuilding the literal around replacements for them. Both are
+// nil for any other value. A map literal's children are its keys followed by its values.
+func children(v types.Value) ([]types.Value, func([]types.Value) types.Value) {
+	switch v := v.(type) {
+	case *types.ArrayLiteral:
+		return v.Elems, func(elems []types.Value) types.Value {
+			return &types.ArrayLiteral{Typ: v.Typ, Elems: elems}
+		}
+	case *types.MapLiteral:
+		return slices.Concat(v.Keys, v.Values), func(elems []types.Value) types.Value {
+			n := len(v.Keys)
+			return &types.MapLiteral{Typ: v.Typ, Keys: elems[:n:n], Values: elems[n:]}
+		}
+	case *types.StructLiteral:
+		return v.Fields, func(elems []types.Value) types.Value {
+			return &types.StructLiteral{Typ: v.Typ, Fields: elems}
+		}
+	}
+	return nil, nil
 }
