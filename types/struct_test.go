@@ -172,6 +172,19 @@ func TestStruct_Refs(t *testing.T) {
 	})
 }
 
+func TestStruct_Clone(t *testing.T) {
+	typ := types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeAny()))
+	src := types.NewStruct(typ, types.BoxI32(1), types.BoxRef(2))
+	c := src.Clone()
+
+	require.Same(t, typ, c.Typ)
+	require.Equal(t, src.Field(0), c.Field(0))
+	require.Equal(t, src.Field(1), c.Field(1))
+
+	c.SetField(0, types.BoxI32(9))
+	require.Equal(t, types.BoxI32(1), src.Field(0))
+}
+
 func TestStruct_String(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		s := types.NewStruct(types.NewStructType())

@@ -1136,7 +1136,7 @@ func (i *Interpreter) load(constants []types.Value) {
 				})
 			}
 		default:
-			boxed = i.box(clone(value))
+			boxed = i.box(types.Clone(value))
 		}
 		if keyed {
 			copies[key] = boxed
@@ -1688,57 +1688,6 @@ func (i *Interpreter) box(val types.Value) types.Boxed {
 
 // clone returns val, copying a mutable constant so that the interpreter, not
 // the program, owns the object it mutates. Immutable values are returned as is.
-func clone(val types.Value) types.Value {
-	switch v := val.(type) {
-	case *types.Array:
-		return types.NewArray(v.Typ, slices.Clone(v.Elems)...)
-	case *types.Struct:
-		s := types.NewStruct(v.Typ)
-		copy(s.Data, v.Data)
-		return s
-	case *types.Map:
-		m := types.NewMapWithCapacity(v.Typ, v.Len())
-		m.Zero = v.Zero
-		v.Range(func(key types.MapKey, entry types.MapEntry) { m.Set(key, entry) })
-		return m
-	case types.TypedArray[bool]:
-		return slices.Clone(v)
-	case types.TypedArray[int8]:
-		return slices.Clone(v)
-	case types.TypedArray[int32]:
-		return slices.Clone(v)
-	case types.TypedArray[int64]:
-		return slices.Clone(v)
-	case types.TypedArray[float32]:
-		return slices.Clone(v)
-	case types.TypedArray[float64]:
-		return slices.Clone(v)
-	case *types.TypedMap[bool]:
-		return cloneMap(v)
-	case *types.TypedMap[int8]:
-		return cloneMap(v)
-	case *types.TypedMap[int32]:
-		return cloneMap(v)
-	case *types.TypedMap[int64]:
-		return cloneMap(v)
-	case *types.TypedMap[float32]:
-		return cloneMap(v)
-	case *types.TypedMap[float64]:
-		return cloneMap(v)
-	case *types.TypedMap[string]:
-		return cloneMap(v)
-	default:
-		return val
-	}
-}
-
-func cloneMap[K comparable](m *types.TypedMap[K]) *types.TypedMap[K] {
-	c := types.NewTypedMap[K](m.Typ, m.Len())
-	c.Zero = m.Zero
-	m.Range(func(key K, value types.Boxed) { c.Set(key, value) })
-	return c
-}
-
 func (i *Interpreter) boxI64(val int64) types.Boxed {
 	if types.IsBoxable(val) {
 		return types.BoxI64(val)

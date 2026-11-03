@@ -28,6 +28,38 @@ func TestIsNull(t *testing.T) {
 	}
 }
 
+func TestClone(t *testing.T) {
+	t.Run("immutable", func(t *testing.T) {
+		for _, v := range []types.Value{types.I32(1), types.String("a")} {
+			require.Equal(t, v, types.Clone(v))
+		}
+	})
+
+	t.Run("mutable", func(t *testing.T) {
+		mapTyp := types.NewMapType(types.TypeI32(), types.TypeAny())
+		values := []types.Value{
+			types.NewArray(types.NewArrayType(types.TypeAny()), types.BoxRef(1)),
+			types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32())), types.BoxI32(1)),
+			types.NewMap(mapTyp),
+			types.NewTypedMap[int32](mapTyp, 0),
+			types.TypedArray[int32]{1},
+			types.TypedArray[float64]{1},
+		}
+		for _, v := range values {
+			c := types.Clone(v)
+			require.IsType(t, v, c)
+			require.Equal(t, v.String(), c.String())
+		}
+	})
+
+	t.Run("independent", func(t *testing.T) {
+		src := types.TypedArray[int8]{1, 2}
+		c := types.Clone(src).(types.TypedArray[int8])
+		c[0] = 9
+		require.Equal(t, int8(1), src[0])
+	})
+}
+
 func TestKinds(t *testing.T) {
 	require.Nil(t, types.Kinds(nil))
 	require.Equal(t, []types.Kind{types.KindI32, types.KindRef, types.KindF64}, types.Kinds([]types.Type{types.TypeI32(), types.TypeAny(), types.TypeF64()}))
