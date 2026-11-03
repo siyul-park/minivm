@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -117,6 +118,11 @@ func (a TypedArray[T]) Type() Type {
 	}
 }
 
+// Clone returns a copy of a with its own backing storage.
+func (a TypedArray[T]) Clone() TypedArray[T] {
+	return slices.Clone(a)
+}
+
 func (a TypedArray[T]) String() string {
 	return formatSlice(a.Type(), len(a), func(i int) string { return formatElem(a[i]) })
 }
@@ -136,6 +142,12 @@ func (a *Array) Refs(dst []Ref) []Ref {
 		}
 	}
 	return dst
+}
+
+// Clone returns a copy of a with its own element slice. The elements are boxed
+// words, so the references they hold are shared, not copied.
+func (a *Array) Clone() *Array {
+	return &Array{Typ: a.Typ, Elems: slices.Clone(a.Elems)}
 }
 
 func (a *Array) String() string {
@@ -206,4 +218,12 @@ func formatSlice(typ Type, n int, elem func(int) string) string {
 	}
 	sb.WriteByte('}')
 	return sb.String()
+}
+
+func (a TypedArray[T]) cloneValue() Value {
+	return a.Clone()
+}
+
+func (a *Array) cloneValue() Value {
+	return a.Clone()
 }

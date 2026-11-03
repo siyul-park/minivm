@@ -6624,14 +6624,18 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.NoError(t, vm.Run(context.Background()))
-		got, err := vm.Pop()
-		require.NoError(t, err)
-		vm.Flush()
-
-		require.Equal(t, want, got)
-		compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
-		require.Greater(t, compiles, float64(0))
+		// Compiles finish asynchronously and count when a later entry drains
+		// them, so rerun until one has.
+		poll(t, func() bool {
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			vm.Reset()
+			vm.Flush()
+			compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+			return compiles > 0
+		})
 	})
 
 	t.Run("restores promoted locals when a callee deopts under a loop", func(t *testing.T) {
@@ -6643,16 +6647,19 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.NoError(t, vm.Run(context.Background()))
-		got, err := vm.Pop()
-		require.NoError(t, err)
-		vm.Flush()
-
-		require.Equal(t, want, got)
-		compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
-		require.Greater(t, compiles, float64(0))
-		deopts, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
-		require.Greater(t, deopts, float64(0))
+		// Compiles finish asynchronously, so rerun until optimized code has
+		// both counted and bridged.
+		poll(t, func() bool {
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			vm.Reset()
+			vm.Flush()
+			compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+			bridges, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+			return compiles > 0 && bridges > 0
+		})
 	})
 
 	t.Run("tiers up a callee reached only from native code", func(t *testing.T) {
@@ -6664,15 +6671,18 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.New(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.NoError(t, vm.Run(context.Background()))
-		got, err := vm.Pop()
-		require.NoError(t, err)
-		vm.Flush()
-
-		require.Equal(t, want, got)
-
-		compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
-		require.GreaterOrEqual(t, compiles, float64(2))
+		// Compiles finish asynchronously and count when a later entry drains
+		// them, so rerun until both the caller and the callee have.
+		poll(t, func() bool {
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			vm.Reset()
+			vm.Flush()
+			compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+			return compiles >= 2
+		})
 	})
 
 	t.Run("tiers up a native-only callee across short Runs", func(t *testing.T) {
@@ -7912,6 +7922,111 @@ func TestInterpreter_Run(t *testing.T) {
 		got, err := vm.PopBoxed()
 		require.NoError(t, err)
 		require.Equal(t, types.BoxI32(3), got)
+	})
+
+	t.Run("runs a map constant with a repeated key and equal values", func(t *testing.T) {
+		b := program.NewBuilder()
+		b.ConstGet(&types.MapLiteral{
+			Typ:    types.NewMapType(types.TypeI32(), types.TypeString()),
+			Keys:   []types.Value{types.I32(1), types.I32(1)},
+			Values: []types.Value{types.String("same"), types.String("same")},
+		}).Emit(instr.I32_CONST, 1).Emit(instr.MAP_GET)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+
+		vm := interp.New(prog, interp.WithThreshold(-1))
+		defer vm.Close()
+		for range 2 {
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.String("same"), got)
+			vm.Reset()
+		}
+	})
+
+	t.Run("calls a function nested in an array constant", func(t *testing.T) {
+		fnType := &types.FunctionType{Returns: []types.Type{types.TypeI32()}}
+		fn := types.NewFunctionBuilder(fnType).
+			Emit(instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).
+			MustBuild()
+
+		b := program.NewBuilder()
+		b.ConstGet(&types.ArrayLiteral{
+			Typ:   types.NewArrayType(fnType),
+			Elems: []types.Value{fn},
+		}).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.CALL)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+
+		vm := interp.New(prog, interp.WithThreshold(-1))
+		defer vm.Close()
+		for range 2 {
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(7), got)
+			vm.Reset()
+		}
+	})
+
+	t.Run("shares one mutable constant between its positions", func(t *testing.T) {
+		typ := types.NewArrayType(types.TypeI32())
+		shared := types.NewArray(typ, types.BoxI32(1))
+		typed := types.TypedArray[int32]{1}
+
+		tests := []struct {
+			name      string
+			constants []types.Value
+			write     []instr.Instruction
+			read      []instr.Instruction
+		}{
+			{
+				name:      "two constants",
+				constants: []types.Value{shared, shared},
+				write:     []instr.Instruction{instr.New(instr.CONST_GET, 0)},
+				read:      []instr.Instruction{instr.New(instr.CONST_GET, 1)},
+			},
+			{
+				name: "nested twice",
+				constants: []types.Value{&types.ArrayLiteral{
+					Typ:   types.NewArrayType(typ),
+					Elems: []types.Value{shared, shared},
+				}},
+				write: []instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET)},
+				read:  []instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET)},
+			},
+			{
+				name:      "typed array",
+				constants: []types.Value{typed, typed},
+				write:     []instr.Instruction{instr.New(instr.CONST_GET, 0)},
+				read:      []instr.Instruction{instr.New(instr.CONST_GET, 1)},
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				code := slices.Concat(tt.write,
+					[]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 9), instr.New(instr.ARRAY_SET)},
+					tt.read,
+					[]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.ARRAY_GET)})
+				prog := program.New(code, program.WithConstants(tt.constants...))
+				require.NoError(t, program.Verify(prog))
+
+				vm := interp.New(prog, interp.WithThreshold(-1))
+				defer vm.Close()
+				for range 2 {
+					require.NoError(t, vm.Run(context.Background()))
+					got, err := vm.PopBoxed()
+					require.NoError(t, err)
+					require.Equal(t, types.BoxI32(9), got)
+					vm.Reset()
+				}
+				require.Equal(t, types.BoxI32(1), shared.Elems[0])
+				require.Equal(t, int32(1), typed[0])
+			})
+		}
 	})
 
 	t.Run("covers every runtime opcode", func(t *testing.T) {
@@ -9976,6 +10091,55 @@ func TestInterpreter_Reset(t *testing.T) {
 		reused, err := i.Alloc(types.String("temporary"))
 		require.NoError(t, err)
 		require.Equal(t, addr, reused)
+	})
+
+	t.Run("restores mutable constants to their initial contents", func(t *testing.T) {
+		prog := refArrayProgram(t, 1)
+		i := interp.New(prog, interp.WithThreshold(-1))
+		defer i.Close()
+
+		constant, err := i.Const(3)
+		require.NoError(t, err)
+		array := func() *types.Array {
+			value, err := i.Load(constant.Ref())
+			require.NoError(t, err)
+			return value.(*types.Array)
+		}
+
+		require.NoError(t, i.Run(context.Background()))
+		first, _, err := popString(i)
+		require.NoError(t, err)
+		require.NotEqual(t, types.BoxedNull, array().Elems[0])
+
+		i.Reset()
+		after, err := i.Const(3)
+		require.NoError(t, err)
+		require.Equal(t, constant, after)
+		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, array().Elems)
+
+		require.NoError(t, i.Run(context.Background()))
+		second, _, err := popString(i)
+		require.NoError(t, err)
+		require.Equal(t, first, second)
+	})
+
+	t.Run("gives each interpreter its own mutable constants", func(t *testing.T) {
+		prog := refArrayProgram(t, 1)
+		original := prog.Constants[3].(*types.Array)
+		a := interp.New(prog, interp.WithThreshold(-1))
+		defer a.Close()
+		b := interp.New(prog, interp.WithThreshold(-1))
+		defer b.Close()
+
+		require.NoError(t, a.Run(context.Background()))
+
+		constant, err := b.Const(3)
+		require.NoError(t, err)
+		value, err := b.Load(constant.Ref())
+		require.NoError(t, err)
+		require.NotSame(t, original, value)
+		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, value.(*types.Array).Elems)
+		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, original.Elems)
 	})
 
 	t.Run("finalizes and clears dynamic values", func(t *testing.T) {
