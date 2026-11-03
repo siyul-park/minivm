@@ -164,6 +164,16 @@ func TestProgram_Clone(t *testing.T) {
 		require.Equal(t, int32(7), elems[2].(types.TypedArray[int32])[0])
 		require.Equal(t, int32(1), typed[0])
 	})
+
+	t.Run("keeps a cycle", func(t *testing.T) {
+		lit := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeAny())}
+		lit.Elems = []types.Value{lit}
+		clone := program.New(nil, program.WithConstants(lit)).Clone()
+
+		got := clone.Constants[0].(*types.ArrayLiteral)
+		require.NotSame(t, lit, got)
+		require.Same(t, got, got.Elems[0])
+	})
 }
 
 func TestProgram_String(t *testing.T) {

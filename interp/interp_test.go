@@ -7839,6 +7839,18 @@ func TestNew(t *testing.T) {
 		require.Equal(t, types.I32(5), v)
 	})
 
+	t.Run("loads a cyclic constant literal", func(t *testing.T) {
+		// Loading shares one copy per object, so a literal holding itself keeps the cycle.
+		lit := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeAny())}
+		lit.Elems = []types.Value{lit}
+		i := interp.MustNew(program.New(nil, program.WithConstants(lit)))
+		defer i.Close()
+
+		c, err := i.Const(0)
+		require.NoError(t, err)
+		require.NotNil(t, c)
+	})
+
 	t.Run("interns duplicate string constants", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_EQ),

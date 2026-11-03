@@ -159,11 +159,16 @@ func cloneConstant(v types.Value, copies map[any]types.Value) types.Value {
 	}
 	var c types.Value
 	if elems, rebuild := children(v); rebuild != nil {
+		// The rebuilt literal is recorded before its children are cloned, so a
+		// literal that contains itself clones into one that contains itself.
 		cloned := make([]types.Value, len(elems))
+		c = rebuild(cloned)
+		if aliased {
+			copies[id] = c
+		}
 		for i, elem := range elems {
 			cloned[i] = cloneConstant(elem, copies)
 		}
-		c = rebuild(cloned)
 	} else if fn, ok := v.(*types.Function); ok {
 		c = fn.Clone()
 	} else {

@@ -21,7 +21,7 @@ Static validation of untrusted bytecode.
 | Independence | Verification `MUST NOT` depend on interpretation, `analysis`, or `pass`. |
 | Structure | Boundaries, widths, targets, handler ranges, and termination `MUST` be valid. |
 | Stack | Height and statically known kinds `MUST` be tracked conservatively. |
-| Dynamic effects | Resolve only from known operands/metadata; otherwise reject rather than guess. |
+| Dynamic effects | Arity `MUST` resolve only from known operands/metadata and `MUST NOT` be guessed; an op whose count is a runtime value `MUST` end stack tracking on its path, leaving the rest to its runtime guard. |
 | Runtime-dependent cases | Definite static mismatches `MUST` be rejected; remaining checks belong to runtime guards. |
 
 ## Checks

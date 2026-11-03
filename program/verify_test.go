@@ -345,6 +345,15 @@ func TestVerify(t *testing.T) {
 		},
 	}
 
+	cyclic := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeAny())}
+	cyclic.Elems = []types.Value{cyclic}
+	tests = append(tests, struct {
+		name     string
+		prog     *program.Program
+		wantErr  error
+		wantSlot int
+	}{name: "cyclic constant literal", prog: program.New(nil, program.WithConstants(cyclic))})
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := program.Verify(tt.prog)
