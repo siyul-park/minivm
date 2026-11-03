@@ -288,7 +288,71 @@ func TestVerify(t *testing.T) {
 			}, program.WithHandlers(instr.Handler{Start: 0, End: 99, Catch: 5})),
 			wantErr: program.ErrHandlerRange,
 		},
+		{
+			// array.new pops a runtime count of elements: dataflow ends on its path.
+			name: "valid/array.new with several elements before a merge",
+			prog: assemble(func(b *program.Builder) {
+				els, end := b.Label(), b.Label()
+				typ := uint64(b.Type(types.TypeI32Array()))
+				b.Emit(instr.I32_CONST, 0).BrIf(els)
+				b.Emit(instr.I32_CONST, 10).Emit(instr.I32_CONST, 20).Emit(instr.I32_CONST, 30)
+				b.Emit(instr.I32_CONST, 3).Emit(instr.ARRAY_NEW, typ)
+				b.Br(end)
+				b.Bind(els).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, typ)
+				b.Bind(end).Emit(instr.DROP)
+			}),
+		},
+		{
+			name: "valid/function nested in a literal",
+			prog: program.New([]instr.Instruction{instr.MustNew(instr.NOP)}, program.WithConstants(
+				&types.ArrayLiteral{Typ: types.NewArrayType(types.TypeAny()), Elems: []types.Value{
+					types.NewFunction(nil, nil, []instr.Instruction{instr.MustNew(instr.RETURN)}),
+				}},
+			)),
+		},
+		{
+			name: "constants/invalid function nested in an array literal",
+			prog: program.New([]instr.Instruction{instr.MustNew(instr.NOP)}, program.WithConstants(
+				types.I32(1),
+				&types.ArrayLiteral{Typ: types.NewArrayType(types.TypeAny()), Elems: []types.Value{
+					types.NewFunction(nil, nil, []instr.Instruction{instr.MustNew(instr.DROP), instr.MustNew(instr.RETURN)}),
+				}},
+			)),
+			wantErr:  program.ErrStackUnderflow,
+			wantSlot: 2,
+		},
+		{
+			name: "constants/invalid function nested in a map and struct literal",
+			prog: program.New([]instr.Instruction{instr.MustNew(instr.NOP)}, program.WithConstants(
+				&types.MapLiteral{
+					Typ:  types.NewMapType(types.TypeI32(), types.TypeAny()),
+					Keys: []types.Value{types.I32(1)},
+					Values: []types.Value{&types.StructLiteral{
+						Typ: types.NewStructType(types.NewStructField(types.TypeAny())),
+						Fields: []types.Value{
+							types.NewFunction(nil, nil, []instr.Instruction{instr.MustNew(instr.DROP), instr.MustNew(instr.RETURN)}),
+						},
+					}},
+				},
+			)),
+			wantErr:  program.ErrStackUnderflow,
+			wantSlot: 1,
+		},
+		{
+			name:    "nil program",
+			prog:    nil,
+			wantErr: program.ErrNil,
+		},
 	}
+
+	cyclic := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeAny())}
+	cyclic.Elems = []types.Value{cyclic}
+	tests = append(tests, struct {
+		name     string
+		prog     *program.Program
+		wantErr  error
+		wantSlot int
+	}{name: "cyclic constant literal", prog: program.New(nil, program.WithConstants(cyclic))})
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -34,7 +34,7 @@ func TestNewHostFunction(t *testing.T) {
 
 func TestHostStruct_Field(t *testing.T) {
 	t.Run("reads through to the Go value", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := &hostCounter{Count: 7}
@@ -56,7 +56,7 @@ func TestHostStruct_Field(t *testing.T) {
 	})
 
 	t.Run("reading an index outside the layout faults", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
@@ -73,7 +73,7 @@ func TestHostStruct_Field(t *testing.T) {
 
 func TestHostStruct_SetField(t *testing.T) {
 	t.Run("writes through to the Go value", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := &hostCounter{}
@@ -91,7 +91,7 @@ func TestHostStruct_SetField(t *testing.T) {
 	})
 
 	t.Run("writing an index outside the layout faults", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
@@ -103,7 +103,7 @@ func TestHostStruct_SetField(t *testing.T) {
 }
 
 func TestHostArray_Len(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	r := interp.NewRegistry()
 	defer i.Close()
 	src := []int32{1, 2}
@@ -120,7 +120,7 @@ func TestHostArray_Len(t *testing.T) {
 
 func TestHostArray_Delete(t *testing.T) {
 	t.Run("removes the element and shortens the Go slice", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := []int32{1, 2, 3}
@@ -135,7 +135,7 @@ func TestHostArray_Delete(t *testing.T) {
 	})
 
 	t.Run("an index outside the length faults", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := []int32{1}
@@ -148,7 +148,7 @@ func TestHostArray_Delete(t *testing.T) {
 	})
 
 	t.Run("a Go array cannot shrink", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := [1]int32{1}
@@ -163,7 +163,7 @@ func TestHostArray_Delete(t *testing.T) {
 
 func TestHostArray_Element(t *testing.T) {
 	t.Run("reads through to the Go value", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := []int32{7}
@@ -183,7 +183,7 @@ func TestHostArray_Element(t *testing.T) {
 	})
 
 	t.Run("reading an index outside the length faults", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
@@ -200,7 +200,7 @@ func TestHostArray_Element(t *testing.T) {
 
 func TestHostArray_SetElement(t *testing.T) {
 	t.Run("writes through to the Go value", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := []int32{0}
@@ -213,7 +213,7 @@ func TestHostArray_SetElement(t *testing.T) {
 	})
 
 	t.Run("writing an index outside the length faults", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
@@ -226,7 +226,7 @@ func TestHostArray_SetElement(t *testing.T) {
 
 func TestHostArray_Fill(t *testing.T) {
 	t.Run("writes every slot of the range", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := []int32{0, 0, 0}
@@ -239,7 +239,7 @@ func TestHostArray_Fill(t *testing.T) {
 	})
 
 	t.Run("a range outside the length faults", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
@@ -252,7 +252,7 @@ func TestHostArray_Fill(t *testing.T) {
 
 func TestHostArray_Append(t *testing.T) {
 	t.Run("growth reaches the Go slice", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := []int32{1}
@@ -267,7 +267,7 @@ func TestHostArray_Append(t *testing.T) {
 	})
 
 	t.Run("a Go array cannot grow", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := [1]int32{1}
@@ -281,7 +281,7 @@ func TestHostArray_Append(t *testing.T) {
 }
 
 func TestHostArray_Array(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	r := interp.NewRegistry()
 	defer i.Close()
 	src := []int32{1, 2}
@@ -299,7 +299,7 @@ func TestHostArray_Array(t *testing.T) {
 }
 
 func TestHostMap_Len(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	r := interp.NewRegistry()
 	defer i.Close()
 	src := map[int32]int32{1: 7}
@@ -315,7 +315,7 @@ func TestHostMap_Len(t *testing.T) {
 
 func TestHostMap_Get(t *testing.T) {
 	t.Run("reads through to the Go value", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := map[int32]int32{1: 7}
@@ -337,7 +337,7 @@ func TestHostMap_Get(t *testing.T) {
 	})
 
 	t.Run("a missing key reads as the element zero", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
@@ -351,7 +351,7 @@ func TestHostMap_Get(t *testing.T) {
 	})
 
 	t.Run("a dynamic key finds what the Go side stored", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 
@@ -369,7 +369,7 @@ func TestHostMap_Get(t *testing.T) {
 
 func TestHostMap_Set(t *testing.T) {
 	t.Run("writes through to the Go value", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := map[int32]int32{}
@@ -382,7 +382,7 @@ func TestHostMap_Set(t *testing.T) {
 	})
 
 	t.Run("a dynamic key is stored where a lookup finds it", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		src := map[any]int32{}
@@ -400,7 +400,7 @@ func TestHostMap_Set(t *testing.T) {
 	})
 
 	t.Run("a nil Go map has nowhere to write", func(t *testing.T) {
-		i := interp.New(program.New(nil))
+		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
 		defer i.Close()
 		var src map[int32]int32
@@ -414,7 +414,7 @@ func TestHostMap_Set(t *testing.T) {
 }
 
 func TestHostMap_Delete(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	r := interp.NewRegistry()
 	defer i.Close()
 	src := map[int32]int32{1: 7}
@@ -427,7 +427,7 @@ func TestHostMap_Delete(t *testing.T) {
 }
 
 func TestHostMap_Clear(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	r := interp.NewRegistry()
 	defer i.Close()
 	src := map[int32]int32{1: 7, 2: 8}
@@ -440,7 +440,7 @@ func TestHostMap_Clear(t *testing.T) {
 }
 
 func TestHostMap_Map(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	r := interp.NewRegistry()
 	defer i.Close()
 	src := map[int32]int32{1: 7}
@@ -475,7 +475,7 @@ func TestHostFunction_String(t *testing.T) {
 }
 
 func TestHostStruct_Kind(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	r := interp.NewRegistry()
 	defer i.Close()
 
@@ -485,7 +485,7 @@ func TestHostStruct_Kind(t *testing.T) {
 }
 
 func TestHostStruct_Type(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	r := interp.NewRegistry()
 	defer i.Close()
 
@@ -502,7 +502,7 @@ func TestHostStruct_Type(t *testing.T) {
 }
 
 func TestHostStruct_String(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	r := interp.NewRegistry()
 	defer i.Close()
 
@@ -512,7 +512,7 @@ func TestHostStruct_String(t *testing.T) {
 }
 
 func TestHostArray_Kind(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	r := interp.NewRegistry()
 	defer i.Close()
 
@@ -522,7 +522,7 @@ func TestHostArray_Kind(t *testing.T) {
 }
 
 func TestHostArray_Type(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	r := interp.NewRegistry()
 	defer i.Close()
 
@@ -532,7 +532,7 @@ func TestHostArray_Type(t *testing.T) {
 }
 
 func TestHostArray_String(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	r := interp.NewRegistry()
 	defer i.Close()
 
@@ -542,7 +542,7 @@ func TestHostArray_String(t *testing.T) {
 }
 
 func TestHostMap_Kind(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	r := interp.NewRegistry()
 	defer i.Close()
 
@@ -552,7 +552,7 @@ func TestHostMap_Kind(t *testing.T) {
 }
 
 func TestHostMap_Type(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	r := interp.NewRegistry()
 	defer i.Close()
 
@@ -562,7 +562,7 @@ func TestHostMap_Type(t *testing.T) {
 }
 
 func TestHostMap_String(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	r := interp.NewRegistry()
 	defer i.Close()
 

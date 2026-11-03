@@ -11,7 +11,8 @@ import (
 
 // VerifyError reports the first violation found in a program, located by
 // function slot (0 = top-level code, j+1 = constant j, matching the
-// interpreter's compiled code layout) and instruction byte offset.
+// interpreter's compiled code layout) and instruction byte offset. A function
+// nested in a literal constant j reports slot j+1.
 type VerifyError struct {
 	Slot   int
 	IP     int
@@ -84,21 +85,25 @@ var (
 	ErrHandlerRange = errors.New("invalid exception handler range")
 	// ErrHandlerTarget reports an exception handler whose catch target or depth is invalid.
 	ErrHandlerTarget = errors.New("invalid exception handler target")
+	// ErrNil reports a nil program.
+	ErrNil = errors.New("nil program")
 )
 
 // Verify checks every function slot of prog and returns the first violation as
-// a *VerifyError, or nil when the program is well-formed.
+// a *VerifyError, or nil when the program is well-formed. Every function
+// reachable from a constant is checked, including one nested in an array, map,
+// or struct literal. A nil prog returns ErrNil.
 func Verify(prog *Program) error {
+	if prog == nil {
+		return ErrNil
+	}
 	top := &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
 	if err := newChecker(prog, 0, top).run(); err != nil {
 		return err
 	}
+	seen := make(map[any]bool)
 	for j, c := range prog.Constants {
-		fn, ok := c.(*types.Function)
-		if !ok {
-			continue
-		}
-		if err := newChecker(prog, j+1, fn).run(); err != nil {
+		if err := verifyConstant(prog, j+1, c, seen); err != nil {
 			return err
 		}
 	}
@@ -111,6 +116,26 @@ func (e *VerifyError) Error() string {
 
 func (e *VerifyError) Unwrap() error {
 	return e.Err
+}
+
+// verifyConstant checks the functions reachable from v, each reported at slot.
+func verifyConstant(prog *Program, slot int, v types.Value, seen map[any]bool) error {
+	if id, ok := types.Identity(v); ok {
+		if seen[id] {
+			return nil
+		}
+		seen[id] = true
+	}
+	if fn, ok := v.(*types.Function); ok {
+		return newChecker(prog, slot, fn).run()
+	}
+	elems, _ := children(v)
+	for _, elem := range elems {
+		if err := verifyConstant(prog, slot, elem, seen); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func newChecker(prog *Program, slot int, fn *types.Function) *checker {
@@ -526,7 +551,7 @@ func (c *checker) step(st *stack, inst instr.Instruction, op instr.Opcode, ip in
 		st.drop(len(t.Fields))
 		st.push(slot{kind: types.KindRef, typ: t})
 		return false, nil
-	case instr.MAP_NEW, instr.CLOSURE_NEW:
+	case instr.ARRAY_NEW, instr.MAP_NEW, instr.CLOSURE_NEW:
 		return true, nil
 	}
 

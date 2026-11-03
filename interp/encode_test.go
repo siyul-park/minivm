@@ -14,7 +14,7 @@ import (
 type encodeCelsius int32
 
 func TestMarshalerFunc_Marshal(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	defer i.Close()
 	n := int32(7)
 
@@ -29,7 +29,7 @@ func TestMarshalerFunc_Marshal(t *testing.T) {
 }
 
 func TestEncoder_Interp(t *testing.T) {
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	defer i.Close()
 
 	var got *interp.Interpreter
@@ -49,7 +49,7 @@ func TestEncoder_Encode(t *testing.T) {
 	// The injected encoder resolves dependencies through the registry that
 	// started the conversion, so a registration on the dependency applies to
 	// the delegating marshaler too.
-	i := interp.New(program.New(nil))
+	i := interp.MustNew(program.New(nil))
 	defer i.Close()
 
 	r := interp.NewRegistry(

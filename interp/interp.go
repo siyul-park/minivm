@@ -134,13 +134,6 @@ type option struct {
 	threshold int
 }
 
-// sliceIdentity names a slice-backed value by its type and backing array.
-type sliceIdentity struct {
-	typ reflect.Type
-	ptr unsafe.Pointer
-	len int
-}
-
 // park is the ip a frame waits at while the JIT wakes: past any code.
 const park = math.MaxInt
 
@@ -152,6 +145,16 @@ const (
 )
 
 const heapRunway = 64
+
+// MustNew is New for known-good programs, such as tests and fixtures. It
+// panics if prog is rejected.
+func MustNew(prog *program.Program, opts ...Option) *Interpreter {
+	i, err := New(prog, opts...)
+	if err != nil {
+		panic(err)
+	}
+	return i
+}
 
 // WithHook installs an execution hook.
 func WithHook(fn func(*Interpreter) error) Option {
@@ -213,106 +216,18 @@ func WithThreshold(n int) Option {
 	return func(o *option) { o.threshold = n }
 }
 
-// New builds an interpreter for prog. It trusts prog to be well-formed; run
-// program.Verify(prog) beforehand to reject malformed or untrusted bytecode.
-func New(prog *program.Program, opts ...Option) *Interpreter {
-	opt := option{
-		frame: 128,
-		stack: 1024,
-		heap:  128,
-		tick:  128,
+// New builds an interpreter for prog. It verifies and runs a snapshot of prog
+// (program.Program.Clone), so mutating prog afterward, including the bytecode of
+// its function constants, does not change execution. A malformed program
+// returns the *program.VerifyError and a nil prog returns
+// program.ErrNil. The snapshot shares type objects with prog, such as
+// Types and function signatures; they must not be mutated.
+func New(prog *program.Program, opts ...Option) (*Interpreter, error) {
+	snap, err := snapshot(prog)
+	if err != nil {
+		return nil, err
 	}
-	for _, o := range opts {
-		o(&opt)
-	}
-
-	// Raise each capacity below its minimum to that minimum.
-	opt.frame = max(opt.frame, 1)
-	opt.stack = max(opt.stack, 1)
-	opt.heap = max(opt.heap, 0)
-	opt.tick = max(opt.tick, 1)
-
-	activeCodec := opt.codec
-	if activeCodec == nil {
-		activeCodec = NewRegistry()
-	}
-	samples := prof.NewCollector()
-
-	var fuel int64 = -1
-	if opt.fuel > 0 {
-		ticks := (opt.fuel-1)/uint64(opt.tick) + 1
-		fuel = int64(min(ticks, 1<<63-1))
-	}
-
-	i := &Interpreter{
-		hook:        opt.hook,
-		codec:       activeCodec,
-		profiler:    opt.profiler,
-		samples:     samples,
-		types:       prog.Types,
-		source:      prog.Constants,
-		globals:     make([]types.Boxed, len(prog.Globals)),
-		globalTypes: prog.Globals,
-		instrs:      make([][]byte, len(prog.Constants)+1),
-		code:        make([][]func(*Interpreter), len(prog.Constants)+1),
-		zeros:       make([][]types.Boxed, len(prog.Constants)+1),
-		coros:       make([]bool, len(prog.Constants)+1),
-		handlers:    make([][]instr.Handler, len(prog.Constants)+1),
-		dynamic:     map[int]bool{},
-		frames:      make([]frame, opt.frame),
-		stack:       make([]types.Boxed, opt.stack),
-		heap:        make([]types.Value, 0, opt.heap),
-		owners:      make(map[types.Value]int),
-		free:        make([]int, 0, opt.heap),
-		rc:          make([]int, 0, opt.heap),
-		tick:        opt.tick,
-		fuel:        fuel,
-		gas:         fuel,
-		limit:       opt.maxHeap,
-	}
-	i.load(prog.Constants)
-	i.target = max(cap(i.heap), i.base+heapRunway)
-	if i.limit > 0 {
-		i.target = max(min(i.target, i.limit), i.base)
-	}
-
-	i.module = &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
-	i.instrs[0] = prog.Code
-	i.zeros[0] = types.Zeros(prog.Locals)
-	i.handlers[0] = prog.Handlers
-	i.coros[0] = i.yields(prog.Code)
-
-	i.seed()
-
-	i.code[0] = i.compile(i.module, i.tick == 1)
-
-	// Functions nested in array, map, or struct constants live in the constant
-	// region too, so the region is scanned rather than the top-level list.
-	for addr := 1; addr < i.base; addr++ {
-		if fn, ok := i.heap[addr].(*types.Function); ok {
-			i.bind(addr, fn, false)
-		}
-	}
-
-	i.frames[0].code = i.code[0]
-	i.frames[0].bp = i.sp
-	if locals := len(i.zeros[0]); locals > 0 {
-		copy(i.stack[i.sp:i.sp+locals], i.zeros[0])
-		i.sp += locals
-	}
-	i.fp = 1
-	i.fr = &i.frames[0]
-	i.retain(0)
-
-	i.threshold = -1
-	if jitEnabled(opt) {
-		i.threshold = opt.threshold
-		if opt.threshold == 0 {
-			i.heat = dormancy
-		}
-	}
-
-	return i
+	return build(snap, opts...), nil
 }
 
 // Run executes the program until it returns or exits.
@@ -751,6 +666,118 @@ func (i *Interpreter) Close() error {
 	return i.native.close()
 }
 
+// build constructs an interpreter that owns prog, which the caller has
+// verified and no one else mutates.
+func build(prog *program.Program, opts ...Option) *Interpreter {
+	opt := option{
+		frame: 128,
+		stack: 1024,
+		heap:  128,
+		tick:  128,
+	}
+	for _, o := range opts {
+		o(&opt)
+	}
+
+	// Raise each capacity below its minimum to that minimum.
+	opt.frame = max(opt.frame, 1)
+	opt.stack = max(opt.stack, 1)
+	opt.heap = max(opt.heap, 0)
+	opt.tick = max(opt.tick, 1)
+
+	activeCodec := opt.codec
+	if activeCodec == nil {
+		activeCodec = NewRegistry()
+	}
+	samples := prof.NewCollector()
+
+	var fuel int64 = -1
+	if opt.fuel > 0 {
+		ticks := (opt.fuel-1)/uint64(opt.tick) + 1
+		fuel = int64(min(ticks, 1<<63-1))
+	}
+
+	i := &Interpreter{
+		hook:        opt.hook,
+		codec:       activeCodec,
+		profiler:    opt.profiler,
+		samples:     samples,
+		types:       prog.Types,
+		source:      prog.Constants,
+		globals:     make([]types.Boxed, len(prog.Globals)),
+		globalTypes: prog.Globals,
+		instrs:      make([][]byte, len(prog.Constants)+1),
+		code:        make([][]func(*Interpreter), len(prog.Constants)+1),
+		zeros:       make([][]types.Boxed, len(prog.Constants)+1),
+		coros:       make([]bool, len(prog.Constants)+1),
+		handlers:    make([][]instr.Handler, len(prog.Constants)+1),
+		dynamic:     map[int]bool{},
+		frames:      make([]frame, opt.frame),
+		stack:       make([]types.Boxed, opt.stack),
+		heap:        make([]types.Value, 0, opt.heap),
+		owners:      make(map[types.Value]int),
+		free:        make([]int, 0, opt.heap),
+		rc:          make([]int, 0, opt.heap),
+		tick:        opt.tick,
+		fuel:        fuel,
+		gas:         fuel,
+		limit:       opt.maxHeap,
+	}
+	i.load(prog.Constants)
+	i.target = max(cap(i.heap), i.base+heapRunway)
+	if i.limit > 0 {
+		i.target = max(min(i.target, i.limit), i.base)
+	}
+
+	i.module = &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
+	i.instrs[0] = prog.Code
+	i.zeros[0] = types.Zeros(prog.Locals)
+	i.handlers[0] = prog.Handlers
+	i.coros[0] = i.yields(prog.Code)
+
+	i.seed()
+
+	i.code[0] = i.compile(i.module, i.tick == 1)
+
+	// Functions nested in array, map, or struct constants live in the constant
+	// region too, so the region is scanned rather than the top-level list.
+	for addr := 1; addr < i.base; addr++ {
+		if fn, ok := i.heap[addr].(*types.Function); ok {
+			i.bind(addr, fn, false)
+		}
+	}
+
+	i.frames[0].code = i.code[0]
+	i.frames[0].bp = i.sp
+	if locals := len(i.zeros[0]); locals > 0 {
+		copy(i.stack[i.sp:i.sp+locals], i.zeros[0])
+		i.sp += locals
+	}
+	i.fp = 1
+	i.fr = &i.frames[0]
+	i.retain(0)
+
+	i.threshold = -1
+	if jitEnabled(opt) {
+		i.threshold = opt.threshold
+		if opt.threshold == 0 {
+			i.heat = dormancy
+		}
+	}
+
+	return i
+}
+
+// snapshot returns a verified copy of prog, the only program New and NewPool
+// execute.
+func snapshot(prog *program.Program) (*program.Program, error) {
+	snap := prog.Clone()
+	if err := program.Verify(snap); err != nil {
+		return nil, err
+	}
+	return snap, nil
+}
+
 func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []types.Boxed) (returns []types.Boxed, err error) {
 	if i.ctx != nil || i.fp != 1 {
 		return nil, ErrInterpreterBusy
@@ -1083,7 +1110,7 @@ func (i *Interpreter) load(constants []types.Value) {
 	for head := 0; head < len(queue); head++ {
 		value := queue[head]
 		slot := slots[head]
-		key, keyed := identity(value)
+		key, keyed := types.Identity(value)
 		if keyed {
 			if shared, ok := copies[key]; ok {
 				slot(shared)
@@ -2048,19 +2075,6 @@ func (i *Interpreter) wake() {
 // aliasable reports whether val is a pointer, the only shape two slots can
 // share. A pointer is stored directly in the interface word and is comparable,
 // so the interface itself keys the index.
-// identity returns what makes two constants the same object: the pointer for a
-// pointer value, the backing array for a non-empty slice.
-func identity(val types.Value) (any, bool) {
-	if aliasable(val) {
-		return val, true
-	}
-	v := reflect.ValueOf(val)
-	if v.Kind() == reflect.Slice && v.Len() > 0 {
-		return sliceIdentity{typ: v.Type(), ptr: v.UnsafePointer(), len: v.Len()}, true
-	}
-	return nil, false
-}
-
 func aliasable(val types.Value) bool {
 	typ := reflect.TypeOf(val)
 	return typ != nil && typ.Kind() == reflect.Pointer

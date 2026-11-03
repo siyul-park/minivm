@@ -52,7 +52,7 @@ Behavior `MUST` follow dominant ownership, not import convenience; an owner `MUS
 ## Execution
 
 ```text
-program → Verify → optimize? → interp → threaded ⇄ native
+program → optimize? → interp.New (Verify of a Clone) → threaded ⇄ native
 ```
 
 Threaded execution is the semantic baseline. On ARM64 the JIT, on by default (`WithThreshold`), may compile hot functions; native execution returns to threaded execution at unsupported or non-native boundaries.

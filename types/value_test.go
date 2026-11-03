@@ -60,6 +60,36 @@ func TestClone(t *testing.T) {
 	})
 }
 
+func TestIdentity(t *testing.T) {
+	arr := types.NewArray(types.NewArrayType(types.TypeI32()))
+	typed := types.TypedArray[int32]{1, 2}
+
+	t.Run("pointer", func(t *testing.T) {
+		a, ok := types.Identity(arr)
+		require.True(t, ok)
+		b, _ := types.Identity(arr)
+		require.True(t, a == b)
+		c, _ := types.Identity(types.NewArray(types.NewArrayType(types.TypeI32())))
+		require.False(t, a == c)
+	})
+
+	t.Run("slice backing array", func(t *testing.T) {
+		a, ok := types.Identity(typed)
+		require.True(t, ok)
+		b, _ := types.Identity(typed[:2])
+		require.True(t, a == b)
+		c, _ := types.Identity(types.TypedArray[int32]{1, 2})
+		require.False(t, a == c)
+	})
+
+	t.Run("not aliasable", func(t *testing.T) {
+		for _, v := range []types.Value{types.I32(1), types.String("a"), types.TypedArray[int32]{}} {
+			_, ok := types.Identity(v)
+			require.False(t, ok)
+		}
+	})
+}
+
 func TestKinds(t *testing.T) {
 	require.Nil(t, types.Kinds(nil))
 	require.Equal(t, []types.Kind{types.KindI32, types.KindRef, types.KindF64}, types.Kinds([]types.Type{types.TypeI32(), types.TypeAny(), types.TypeF64()}))

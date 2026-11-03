@@ -32,7 +32,7 @@ prog := program.New([]instr.Instruction{
     instr.MustNew(instr.I32_MUL),
 })
 
-vm := interp.New(prog)
+vm := interp.MustNew(prog)
 defer vm.Close()
 
 if err := vm.Run(context.Background()); err != nil {
@@ -110,7 +110,7 @@ prog, err := optimize.New(optimize.O2).Optimize(prog)
 ### 실행 제어
 
 ```go
-vm := interp.New(prog,
+vm := interp.MustNew(prog,
     interp.WithStack(4096),
     interp.WithHeap(512),
     interp.WithFrame(256),

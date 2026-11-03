@@ -723,7 +723,7 @@ func generatedProgram(t *testing.T, random *rand.Rand) *program.Program {
 func executionResult(t *testing.T, input *program.Program) ([]types.Value, string) {
 	t.Helper()
 
-	vm := interp.New(input)
+	vm := interp.MustNew(input)
 	defer vm.Close()
 
 	message := ""

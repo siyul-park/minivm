@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/siyul-park/minivm/instr"
@@ -180,6 +181,18 @@ func (f *Function) Declared() []Type {
 	out = append(out, f.Typ.Params...)
 	out = append(out, f.Locals...)
 	return out
+}
+
+// Clone returns a copy of f owning its Locals, Captures, Code, and Handlers.
+// The signature is shared.
+func (f *Function) Clone() *Function {
+	return &Function{
+		Typ:      f.Typ,
+		Locals:   slices.Clone(f.Locals),
+		Captures: slices.Clone(f.Captures),
+		Code:     slices.Clone(f.Code),
+		Handlers: slices.Clone(f.Handlers),
+	}
 }
 
 func (f *Function) Kind() Kind {

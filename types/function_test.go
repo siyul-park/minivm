@@ -179,6 +179,30 @@ func TestFunction_Declared(t *testing.T) {
 	}
 }
 
+func TestFunction_Clone(t *testing.T) {
+	typ := &types.FunctionType{Returns: []types.Type{types.TypeI32()}}
+	fn := &types.Function{
+		Typ:      typ,
+		Locals:   []types.Type{types.TypeI32()},
+		Captures: []types.Type{types.TypeI64()},
+		Code:     instr.Marshal([]instr.Instruction{instr.MustNew(instr.NOP)}),
+		Handlers: []instr.Handler{{Start: 0, End: 1, Catch: 2}},
+	}
+	c := fn.Clone()
+	require.NotSame(t, fn, c)
+	require.Same(t, typ, c.Typ)
+	require.Equal(t, fn, c)
+
+	c.Code[0] = byte(instr.DROP)
+	c.Locals[0] = types.TypeI64()
+	c.Captures[0] = types.TypeI32()
+	c.Handlers[0].Catch = 9
+	require.Equal(t, byte(instr.NOP), fn.Code[0])
+	require.Equal(t, types.TypeI32(), fn.Locals[0])
+	require.Equal(t, types.TypeI64(), fn.Captures[0])
+	require.Equal(t, 2, fn.Handlers[0].Catch)
+}
+
 func TestFunction_Kind(t *testing.T) {
 	fn := types.NewFunction(nil, nil, nil)
 	require.Equal(t, types.KindRef, fn.Kind())

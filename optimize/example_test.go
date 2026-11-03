@@ -19,7 +19,7 @@ func ExampleNew() {
 	if err != nil {
 		panic(err)
 	}
-	vm := interp.New(optimized)
+	vm := interp.MustNew(optimized)
 	defer vm.Close()
 
 	if err := vm.Run(context.Background()); err != nil {

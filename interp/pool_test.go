@@ -19,7 +19,8 @@ import (
 
 func TestNewPool(t *testing.T) {
 	t.Run("normalizes non-positive size", func(t *testing.T) {
-		p := interp.NewPool(program.New([]instr.Instruction{instr.MustNew(instr.NOP)}), 0)
+		p, err := interp.NewPool(program.New([]instr.Instruction{instr.MustNew(instr.NOP)}), 0)
+		require.NoError(t, err)
 		defer p.Close()
 		first, err := p.Get(context.Background())
 		require.NoError(t, err)
@@ -30,12 +31,47 @@ func TestNewPool(t *testing.T) {
 		require.ErrorIs(t, err, context.Canceled)
 		p.Put(first)
 	})
+
+	t.Run("rejects a malformed program", func(t *testing.T) {
+		p, err := interp.NewPool(program.New([]instr.Instruction{instr.MustNew(instr.I32_ADD)}), 1)
+		require.Nil(t, p)
+		var ve *program.VerifyError
+		require.ErrorAs(t, err, &ve)
+	})
+
+	t.Run("rejects a nil program", func(t *testing.T) {
+		p, err := interp.NewPool(nil, 1)
+		require.Nil(t, p)
+		require.ErrorIs(t, err, program.ErrNil)
+	})
+
+	t.Run("ignores later mutation of the program", func(t *testing.T) {
+		fn := &types.Function{
+			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32()}},
+			Code: instr.Marshal([]instr.Instruction{instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)}),
+		}
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(fn))
+		p, err := interp.NewPool(prog, 2)
+		require.NoError(t, err)
+		defer p.Close()
+		clear(prog.Code)
+		clear(fn.Code)
+
+		i, err := p.Get(context.Background())
+		require.NoError(t, err)
+		defer p.Put(i)
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(7), v)
+	})
 }
 
 func TestPool_Get(t *testing.T) {
 	t.Run("reuses an idle interpreter", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})
-		p := interp.NewPool(prog, 1)
+		p, err := interp.NewPool(prog, 1)
+		require.NoError(t, err)
 		defer p.Close()
 
 		i1, err := p.Get(context.Background())
@@ -49,7 +85,8 @@ func TestPool_Get(t *testing.T) {
 
 	t.Run("returns context error while waiting", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})
-		p := interp.NewPool(prog, 1)
+		p, err := interp.NewPool(prog, 1)
+		require.NoError(t, err)
 		defer p.Close()
 
 		i, err := p.Get(context.Background())
@@ -72,10 +109,11 @@ func TestPool_Get(t *testing.T) {
 
 	t.Run("returns ErrPoolClosed once closed", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})
-		p := interp.NewPool(prog, 1)
+		p, err := interp.NewPool(prog, 1)
+		require.NoError(t, err)
 		require.NoError(t, p.Close())
 
-		_, err := p.Get(context.Background())
+		_, err = p.Get(context.Background())
 		require.ErrorIs(t, err, interp.ErrPoolClosed)
 	})
 
@@ -83,7 +121,8 @@ func TestPool_Get(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		prog := fibFlatCallsProgram(t, 1000)
 		profiler := prof.New()
-		p := interp.NewPool(prog, 2, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		p, err := interp.NewPool(prog, 2, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		require.NoError(t, err)
 		defer p.Close()
 
 		first, err := p.Get(context.Background())
@@ -128,7 +167,8 @@ func TestPool_Get(t *testing.T) {
 		}
 
 		profiler := prof.New()
-		p := interp.NewPool(prog, 2, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		p, err := interp.NewPool(prog, 2, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		require.NoError(t, err)
 		defer p.Close()
 
 		// a always calls inc and b always dec, through one dynamic CALL site.
@@ -189,7 +229,8 @@ func TestPool_Get(t *testing.T) {
 			wantDec += i - 1
 		}
 
-		p := interp.NewPool(prog, 2, interp.WithThreshold(1))
+		p, err := interp.NewPool(prog, 2, interp.WithThreshold(1))
+		require.NoError(t, err)
 		defer p.Close()
 
 		// a always calls inc and b always dec, through one dynamic CALL site:
@@ -244,7 +285,8 @@ func TestPool_Get(t *testing.T) {
 		prog := program.New(code, program.WithConstants(sumFunction(t)))
 
 		profiler := prof.New()
-		p := interp.NewPool(prog, 2, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		p, err := interp.NewPool(prog, 2, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		require.NoError(t, err)
 		defer p.Close()
 		compiles := func(tier string) float64 {
 			v, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: tier}, prof.Label{Key: "outcome", Value: "ok"})
@@ -299,7 +341,8 @@ func TestPool_Get(t *testing.T) {
 
 		const threshold = 8
 		profiler := prof.New()
-		p := interp.NewPool(prog, 2, interp.WithThreshold(threshold), interp.WithProfiler(profiler))
+		p, err := interp.NewPool(prog, 2, interp.WithThreshold(threshold), interp.WithProfiler(profiler))
+		require.NoError(t, err)
 		defer p.Close()
 
 		a, err := p.Get(context.Background())
@@ -352,7 +395,8 @@ func TestPool_Get(t *testing.T) {
 func TestPool_Put(t *testing.T) {
 	t.Run("returns interpreter to idle after resetting state", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)})
-		p := interp.NewPool(prog, 1)
+		p, err := interp.NewPool(prog, 1)
+		require.NoError(t, err)
 		defer p.Close()
 
 		i, err := p.Get(context.Background())
@@ -369,7 +413,8 @@ func TestPool_Put(t *testing.T) {
 	})
 
 	t.Run("nil is a no-op", func(t *testing.T) {
-		p := interp.NewPool(program.New([]instr.Instruction{instr.MustNew(instr.NOP)}), 1)
+		p, err := interp.NewPool(program.New([]instr.Instruction{instr.MustNew(instr.NOP)}), 1)
+		require.NoError(t, err)
 		defer p.Close()
 		p.Put(nil)
 	})
@@ -378,7 +423,8 @@ func TestPool_Put(t *testing.T) {
 func TestPool_Close(t *testing.T) {
 	t.Run("releases idle interpreters and is idempotent", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})
-		p := interp.NewPool(prog, 1)
+		p, err := interp.NewPool(prog, 1)
+		require.NoError(t, err)
 
 		i, err := p.Get(context.Background())
 		require.NoError(t, err)
@@ -389,7 +435,8 @@ func TestPool_Close(t *testing.T) {
 	})
 
 	t.Run("closes an outstanding interpreter when returned", func(t *testing.T) {
-		p := interp.NewPool(program.New(nil), 1)
+		p, err := interp.NewPool(program.New(nil), 1)
+		require.NoError(t, err)
 		vm, err := p.Get(context.Background())
 		require.NoError(t, err)
 		resource := &trackedValue{}
@@ -406,7 +453,8 @@ func TestPool_Close(t *testing.T) {
 
 func BenchmarkPool_Get(b *testing.B) {
 	b.Run("Uncontended", func(b *testing.B) {
-		pool := interp.NewPool(program.New(nil), 1)
+		pool, err := interp.NewPool(program.New(nil), 1)
+		require.NoError(b, err)
 		defer pool.Close()
 		vm, err := pool.Get(context.Background())
 		require.NoError(b, err)
@@ -427,14 +475,14 @@ func BenchmarkPool_Get(b *testing.B) {
 
 	b.Run("Miss", func(b *testing.B) {
 		var vm *interp.Interpreter
-		var err error
 		var elapsed time.Duration
 		var bytes, allocs uint64
 		var sampled bool
 		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
-			pool := interp.NewPool(program.New(nil), 1)
+			pool, err := interp.NewPool(program.New(nil), 1)
+			require.NoError(b, err)
 			var before runtime.MemStats
 			if !sampled {
 				runtime.ReadMemStats(&before)
@@ -459,7 +507,8 @@ func BenchmarkPool_Get(b *testing.B) {
 	})
 
 	b.Run("ParallelRoundTrip", func(b *testing.B) {
-		pool := interp.NewPool(program.New(nil), runtime.GOMAXPROCS(0))
+		pool, err := interp.NewPool(program.New(nil), runtime.GOMAXPROCS(0))
+		require.NoError(b, err)
 		defer pool.Close()
 		var failed atomic.Bool
 		b.ReportAllocs()
@@ -479,7 +528,8 @@ func BenchmarkPool_Get(b *testing.B) {
 
 func BenchmarkPool_Put(b *testing.B) {
 	b.Run("Uncontended", func(b *testing.B) {
-		pool := interp.NewPool(program.New(nil), 1)
+		pool, err := interp.NewPool(program.New(nil), 1)
+		require.NoError(b, err)
 		defer pool.Close()
 		vm, err := pool.Get(context.Background())
 		require.NoError(b, err)

@@ -60,7 +60,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 			instr.MustNew(instr.I32_CONST, 5),
 			instr.MustNew(instr.RETURN)})), instr.Format(optimized.Constants[0].(*types.Function).Code))
 
-		vm := interp.New(optimized)
+		vm := interp.MustNew(optimized)
 		defer vm.Close()
 		require.NoError(t, vm.Run(context.Background()))
 		value, err := vm.Pop()
@@ -123,7 +123,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(got))
 
-		vm := interp.New(got)
+		vm := interp.MustNew(got)
 		defer vm.Close()
 		require.NoError(t, vm.Run(context.Background()))
 	})
@@ -158,13 +158,13 @@ func TestOptimizer_Optimize(t *testing.T) {
 		require.Len(t, fn.Locals, 1)
 		require.Contains(t, instr.Format(fn.Code), "local.tee")
 
-		beforeVM := interp.New(before)
+		beforeVM := interp.MustNew(before)
 		defer beforeVM.Close()
 		require.NoError(t, beforeVM.Run(context.Background()))
 		beforeValue, err := beforeVM.Pop()
 		require.NoError(t, err)
 
-		optimizedVM := interp.New(optimized)
+		optimizedVM := interp.MustNew(optimized)
 		defer optimizedVM.Close()
 		require.NoError(t, optimizedVM.Run(context.Background()))
 		optimizedValue, err := optimizedVM.Pop()
@@ -208,13 +208,13 @@ func TestOptimizer_Optimize(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(optimized))
 
-		beforeVM := interp.New(before)
+		beforeVM := interp.MustNew(before)
 		defer beforeVM.Close()
 		require.NoError(t, beforeVM.Run(context.Background()))
 		beforeValue, err := beforeVM.Pop()
 		require.NoError(t, err)
 
-		optimizedVM := interp.New(optimized)
+		optimizedVM := interp.MustNew(optimized)
 		defer optimizedVM.Close()
 		require.NoError(t, optimizedVM.Run(context.Background()))
 		optimizedValue, err := optimizedVM.Pop()
@@ -258,13 +258,13 @@ func TestOptimizer_Optimize(t *testing.T) {
 		require.Empty(t, fn.Locals)
 		require.Equal(t, 1, strings.Count(instr.Format(fn.Code), "i32.add"))
 
-		beforeVM := interp.New(before)
+		beforeVM := interp.MustNew(before)
 		defer beforeVM.Close()
 		require.NoError(t, beforeVM.Run(context.Background()))
 		beforeValue, err := beforeVM.Pop()
 		require.NoError(t, err)
 
-		optimizedVM := interp.New(optimized)
+		optimizedVM := interp.MustNew(optimized)
 		defer optimizedVM.Close()
 		require.NoError(t, optimizedVM.Run(context.Background()))
 		optimizedValue, err := optimizedVM.Pop()
@@ -315,13 +315,13 @@ func TestOptimizer_Optimize(t *testing.T) {
 		fn := optimized.Constants[0].(*types.Function)
 		require.Len(t, fn.Handlers, 1)
 
-		beforeVM := interp.New(before)
+		beforeVM := interp.MustNew(before)
 		defer beforeVM.Close()
 		require.NoError(t, beforeVM.Run(context.Background()))
 		beforeValue, err := beforeVM.Pop()
 		require.NoError(t, err)
 
-		optimizedVM := interp.New(optimized)
+		optimizedVM := interp.MustNew(optimized)
 		defer optimizedVM.Close()
 		require.NoError(t, optimizedVM.Run(context.Background()))
 		optimizedValue, err := optimizedVM.Pop()
@@ -339,8 +339,9 @@ func TestOptimizer_Optimize(t *testing.T) {
 			instr.MustNew(instr.I32_ADD)})},
 		{"conditional branch", program.New([]instr.Instruction{
 			instr.MustNew(instr.I32_CONST, 1),
-			instr.MustNew(instr.BR_IF, 5),
+			instr.MustNew(instr.BR_IF, 6),
 			instr.MustNew(instr.I32_CONST, 0),
+			instr.MustNew(instr.DROP),
 			instr.MustNew(instr.I32_CONST, 7)})},
 		{"array access", program.New([]instr.Instruction{
 			instr.MustNew(instr.CONST_GET, 0),
@@ -349,7 +350,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 	}
 	for _, tc := range progs {
 		t.Run(tc.name, func(t *testing.T) {
-			original := interp.New(tc.prog)
+			original := interp.MustNew(tc.prog)
 			defer original.Close()
 			require.NoError(t, original.Run(context.Background()))
 			var want []types.Value
@@ -361,7 +362,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 
 			optimized, err := optimize.New(optimize.O3).Optimize(tc.prog)
 			require.NoError(t, err)
-			got := interp.New(optimized)
+			got := interp.MustNew(optimized)
 			defer got.Close()
 			require.NoError(t, got.Run(context.Background()))
 			var values []types.Value
@@ -432,7 +433,7 @@ func FuzzOptimizerParity(f *testing.F) {
 		require.NoError(t, program.Verify(prog))
 
 		run := func(prog *program.Program) types.Value {
-			vm := interp.New(prog, interp.WithTick(1))
+			vm := interp.MustNew(prog, interp.WithTick(1))
 			defer vm.Close()
 			require.NoError(t, vm.Run(context.Background()))
 			value, err := vm.Pop()
