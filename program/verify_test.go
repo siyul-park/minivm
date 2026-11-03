@@ -303,13 +303,40 @@ func TestVerify(t *testing.T) {
 			}),
 		},
 		{
-			name: "constants/function nested in a literal",
+			name: "valid/function nested in a literal",
 			prog: program.New([]instr.Instruction{instr.MustNew(instr.NOP)}, program.WithConstants(
 				&types.ArrayLiteral{Typ: types.NewArrayType(types.TypeAny()), Elems: []types.Value{
 					types.NewFunction(nil, nil, []instr.Instruction{instr.MustNew(instr.RETURN)}),
 				}},
 			)),
-			wantErr: program.ErrNestedFunction,
+		},
+		{
+			name: "constants/invalid function nested in an array literal",
+			prog: program.New([]instr.Instruction{instr.MustNew(instr.NOP)}, program.WithConstants(
+				types.I32(1),
+				&types.ArrayLiteral{Typ: types.NewArrayType(types.TypeAny()), Elems: []types.Value{
+					types.NewFunction(nil, nil, []instr.Instruction{instr.MustNew(instr.DROP), instr.MustNew(instr.RETURN)}),
+				}},
+			)),
+			wantErr:  program.ErrStackUnderflow,
+			wantSlot: 2,
+		},
+		{
+			name: "constants/invalid function nested in a map and struct literal",
+			prog: program.New([]instr.Instruction{instr.MustNew(instr.NOP)}, program.WithConstants(
+				&types.MapLiteral{
+					Typ:  types.NewMapType(types.TypeI32(), types.TypeAny()),
+					Keys: []types.Value{types.I32(1)},
+					Values: []types.Value{&types.StructLiteral{
+						Typ: types.NewStructType(types.NewStructField(types.TypeAny())),
+						Fields: []types.Value{
+							types.NewFunction(nil, nil, []instr.Instruction{instr.MustNew(instr.DROP), instr.MustNew(instr.RETURN)}),
+						},
+					}},
+				},
+			)),
+			wantErr:  program.ErrStackUnderflow,
+			wantSlot: 1,
 		},
 		{
 			name:    "nil program",

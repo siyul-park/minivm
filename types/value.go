@@ -1,6 +1,11 @@
 package types
 
-import "github.com/siyul-park/minivm/instr"
+import (
+	"reflect"
+	"unsafe"
+
+	"github.com/siyul-park/minivm/instr"
+)
 
 // Value is a runtime value with its kind and type.
 type Value interface {
@@ -39,6 +44,13 @@ type Iterator interface {
 // package) and aliased here so instruction metadata and the value model share
 // one type; its methods (String, IsNumeric, Size) live on instr.Kind.
 type Kind = instr.Kind
+
+// sliceIdentity names a slice-backed value by its type and backing array.
+type sliceIdentity struct {
+	typ reflect.Type
+	ptr unsafe.Pointer
+	len int
+}
 
 // cloner is implemented by the mutable value types, each returning a shallow
 // copy of itself.
@@ -82,6 +94,22 @@ func Clone(v Value) Value {
 		return c.cloneValue()
 	}
 	return v
+}
+
+// Identity returns what makes two values the same object: the pointer for a
+// pointer value, the backing array for a non-empty slice. Values with equal
+// identities share their mutable state. ok is false for any other value.
+func Identity(v Value) (id any, ok bool) {
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Pointer:
+		return v, true
+	case reflect.Slice:
+		if rv.Len() > 0 {
+			return sliceIdentity{typ: rv.Type(), ptr: rv.UnsafePointer(), len: rv.Len()}, true
+		}
+	}
+	return nil, false
 }
 
 // Kinds projects each Type in ts to its Kind. Returns nil for an empty

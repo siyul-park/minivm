@@ -8000,6 +8000,46 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 	})
 
+	t.Run("ignores mutation of the input after New", func(t *testing.T) {
+		fnType := &types.FunctionType{Returns: []types.Type{types.TypeI32()}}
+		nested := types.NewFunctionBuilder(fnType).
+			Append(instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)).
+			MustBuild()
+		raw := types.NewArray(types.NewArrayType(types.TypeI32()), types.BoxI32(1))
+		lit := &types.ArrayLiteral{Typ: types.NewArrayType(fnType), Elems: []types.Value{nested}}
+
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.CALL),
+			instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
+			instr.MustNew(instr.I32_ADD),
+		}, program.WithConstants(lit, types.Value(raw)))
+		vm := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer vm.Close()
+
+		nested.Code[1] = byte(instr.NOP)
+		raw.Elems[0] = types.BoxI32(100)
+		lit.Elems[0] = types.I32(0)
+
+		for range 2 {
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(8), got)
+			vm.Reset()
+		}
+	})
+
+	t.Run("rejects an invalid function nested in a constant", func(t *testing.T) {
+		bad := types.NewFunction(nil, nil, []instr.Instruction{instr.MustNew(instr.DROP), instr.MustNew(instr.RETURN)})
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)}, program.WithConstants(
+			&types.ArrayLiteral{Typ: types.NewArrayType(types.TypeAny()), Elems: []types.Value{bad}}))
+
+		_, err := interp.New(prog)
+		var ve *program.VerifyError
+		require.ErrorAs(t, err, &ve)
+		require.Equal(t, 1, ve.Slot)
+	})
+
 	t.Run("shares one mutable constant between its positions", func(t *testing.T) {
 		typ := types.NewArrayType(types.TypeI32())
 		shared := types.NewArray(typ, types.BoxI32(1))
