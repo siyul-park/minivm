@@ -1,8 +1,11 @@
 package interp_test
 
 import (
+	"context"
+	"errors"
 	"testing"
 
+	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -29,6 +32,38 @@ func TestNewHostFunction(t *testing.T) {
 		got, err := fn.Fn(nil, []types.Boxed{types.BoxI32(4)})
 		require.NoError(t, err)
 		require.Equal(t, []types.Boxed{types.BoxI32(8)}, got)
+	})
+
+	t.Run("an error is caught by a guest try region or wrapped by Run", func(t *testing.T) {
+		errHost := errors.New("host failure")
+		fn := interp.NewHostFunction(&types.FunctionType{Returns: []types.Type{types.TypeI32()}},
+			func(*interp.Interpreter, []types.Boxed) ([]types.Boxed, error) { return nil, errHost })
+
+		b := instr.NewBuilder()
+		start, end, catch, done := b.Label(), b.Label(), b.Label(), b.Label()
+		b.Bind(start).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		b.Bind(end).Br(done)
+		b.Bind(catch).Emit(instr.ERROR_CODE)
+		b.Bind(done)
+		b.Try(start, end, catch, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		caught, err := interp.New(program.New(code, program.WithConstants(fn), program.WithHandlers(b.Handlers()...)))
+		require.NoError(t, err)
+		defer caught.Close()
+		require.NoError(t, caught.Run(context.Background()))
+		code32, err := caught.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(interp.TrapCodeHostError), code32)
+
+		uncaught, err := interp.New(program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+			program.WithConstants(fn)))
+		require.NoError(t, err)
+		defer uncaught.Close()
+		err = uncaught.Run(context.Background())
+		var runtimeErr *interp.RuntimeError
+		require.ErrorAs(t, err, &runtimeErr)
+		require.ErrorIs(t, err, errHost)
 	})
 }
 

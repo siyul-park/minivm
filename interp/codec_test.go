@@ -2,6 +2,7 @@ package interp_test
 
 import (
 	"context"
+	"errors"
 	"math"
 	"reflect"
 	"sync"
@@ -60,6 +61,8 @@ type codecCounted struct{ Count int32 }
 type codecFirst struct{ Shared codecShared }
 
 type codecSecond struct{ Shared codecShared }
+
+var errCodecPanic = errors.New("codec panic")
 
 func TestWithMarshaler(t *testing.T) {
 	millis := interp.WithMarshaler(
@@ -195,6 +198,61 @@ func TestRegistry_Marshal(t *testing.T) {
 			require.Equal(t, tt.want, value, tt.name)
 			require.NoError(t, i.Close())
 		}
+	})
+
+	t.Run("a panicking marshaler returns an error", func(t *testing.T) {
+		i := interp.MustNew(program.New(nil))
+		defer i.Close()
+		r := interp.NewRegistry(interp.WithMarshaler(
+			reflect.TypeFor[codecMillis](), types.TypeI64(),
+			interp.MarshalerFunc(func(*interp.Encoder, unsafe.Pointer) (types.Value, error) {
+				panic(errCodecPanic)
+			})))
+
+		_, err := r.Marshal(i, codecMillis(1))
+		require.ErrorIs(t, err, errCodecPanic)
+	})
+
+	t.Run("fields transfer to the caller with the value", func(t *testing.T) {
+		live := func(i *interp.Interpreter) (refs, counts int) {
+			for addr := 1; addr < i.HeapLen(); addr++ {
+				if n, err := i.RefCount(addr); err == nil && n > 0 {
+					refs++
+					counts += n
+				}
+			}
+			return refs, counts
+		}
+		i := interp.MustNew(program.New(nil))
+		defer i.Close()
+		r := interp.NewRegistry()
+		baseRefs, baseCounts := live(i)
+
+		value, err := r.Marshal(i, codecStrings{A: "a", B: "b", C: "c"})
+		require.NoError(t, err)
+		refs, counts := live(i)
+		require.Greater(t, refs, baseRefs, "the value already owns the refs of its fields")
+		require.Equal(t, refs-baseRefs, counts-baseCounts)
+
+		owned := refs
+		require.NoError(t, i.Push(value))
+		require.NoError(t, i.Run(context.Background()))
+		refs, counts = live(i)
+		require.Equal(t, owned+1, refs, "the pushed struct adds one ref and keeps its fields")
+		_, err = i.Pop()
+		require.NoError(t, err)
+		refs, counts = live(i)
+		require.Equal(t, baseRefs, refs, "popping it frees every ref")
+		require.Equal(t, baseCounts, counts)
+
+		value, err = r.Marshal(i, codecStrings{A: "a", B: "b", C: "c"})
+		require.NoError(t, err)
+		addr, err := i.Alloc(value)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(addr))
+		refs, counts = live(i)
+		require.Equal(t, baseRefs, refs, "Alloc then Release drops an unused value")
+		require.Equal(t, baseCounts, counts)
 	})
 
 	t.Run("function receives active context", func(t *testing.T) {
@@ -761,6 +819,19 @@ func TestRegistry_Unmarshal(t *testing.T) {
 			require.Equal(t, tt.want, reflect.ValueOf(tt.dst).Elem().Interface(), tt.name)
 			require.NoError(t, i.Close())
 		}
+	})
+
+	t.Run("a panicking unmarshaler returns an error", func(t *testing.T) {
+		i := interp.MustNew(program.New(nil))
+		defer i.Close()
+		r := interp.NewRegistry(interp.WithUnmarshaler(
+			reflect.TypeFor[codecMillis](),
+			interp.UnmarshalerFunc(func(*interp.Decoder, types.Value, unsafe.Pointer) error {
+				panic(errCodecPanic)
+			})))
+
+		var dst codecMillis
+		require.ErrorIs(t, r.Unmarshal(i, types.I64(1), &dst), errCodecPanic)
 	})
 
 	t.Run("a boxed ref decodes as the value it names", func(t *testing.T) {
