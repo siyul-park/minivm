@@ -181,6 +181,14 @@ func (s *Struct) Refs(dst []Ref) []Ref {
 	return dst
 }
 
+// Clone returns a copy of s with its own field storage. The fields are boxed
+// words, so the references they hold are shared, not copied.
+func (s *Struct) Clone() *Struct {
+	c := NewStruct(s.Typ)
+	copy(c.Data, s.Data)
+	return c
+}
+
 func (s *Struct) String() string {
 	return formatSlice(s.Typ, len(s.Typ.Fields), func(i int) string {
 		return s.field(i, s.Typ.Fields[i]).String()
@@ -265,4 +273,8 @@ func (t *StructType) String() string {
 
 func (s *Struct) field(i int, f StructField) Boxed {
 	return BoxWord(f.Kind, s.Data[i])
+}
+
+func (s *Struct) cloneValue() Value {
+	return s.Clone()
 }
