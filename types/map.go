@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"reflect"
 	"sort"
@@ -377,6 +378,15 @@ func (m *TypedMap[K]) Refs(dst []Ref) []Ref {
 	return dst
 }
 
+// Clone returns a copy of m with its own entries and the same Typ and Zero. The
+// values are boxed words, so the references they hold are shared, not copied.
+func (m *TypedMap[K]) Clone() *TypedMap[K] {
+	c := NewTypedMap[K](m.Typ, len(m.entries))
+	c.Zero = m.Zero
+	maps.Copy(c.entries, m.entries)
+	return c
+}
+
 // String returns the textual representation.
 func (m *TypedMap[K]) String() string {
 	parts := make([]string, 0, m.Len())
@@ -412,6 +422,16 @@ func (m *Map) Refs(dst []Ref) []Ref {
 		}
 	}
 	return dst
+}
+
+// Clone returns a copy of m with its own entries and the same Typ and Zero. The
+// keys and values are boxed words, so the references they hold are shared, not
+// copied.
+func (m *Map) Clone() *Map {
+	c := NewMapWithCapacity(m.Typ, len(m.entries))
+	c.Zero = m.Zero
+	maps.Copy(c.entries, m.entries)
+	return c
 }
 
 // String returns the textual representation.
@@ -539,4 +559,12 @@ func formatKey(k any) string {
 func formatMap(typ Type, parts []string) string {
 	sort.Strings(parts)
 	return fmt.Sprintf("%s{%s}", typ, strings.Join(parts, ", "))
+}
+
+func (m *TypedMap[K]) cloneValue() Value {
+	return m.Clone()
+}
+
+func (m *Map) cloneValue() Value {
+	return m.Clone()
 }

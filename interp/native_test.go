@@ -5,7 +5,6 @@ import (
 	"errors"
 	"math"
 	"reflect"
-	"runtime"
 	"testing"
 	"time"
 
@@ -796,13 +795,6 @@ func fib(t *testing.T, n int) *program.Program {
 	code, err := b.Assemble()
 	require.NoError(t, err)
 	return program.New(code, program.WithLocals(types.TypeI32()), program.WithConstants(fib))
-}
-
-// native skips a case that runs native code off arm64.
-func native(t *testing.T) {
-	if runtime.GOARCH != "arm64" {
-		t.Skip("native execution needs arm64")
-	}
 }
 
 // poll runs cond on the calling goroutine until it holds, so nothing cond

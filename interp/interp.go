@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"reflect"
+	"slices"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
@@ -58,6 +59,7 @@ type Interpreter struct {
 	fr      *frame
 	stack   []types.Boxed
 	heap    []types.Value
+	source  []types.Value
 	base    int
 	target  int
 	owners  map[types.Value]int
@@ -132,6 +134,13 @@ type option struct {
 	threshold int
 }
 
+// sliceIdentity names a slice-backed value by its type and backing array.
+type sliceIdentity struct {
+	typ reflect.Type
+	ptr unsafe.Pointer
+	len int
+}
+
 // park is the ip a frame waits at while the JIT wakes: past any code.
 const park = math.MaxInt
 
@@ -198,8 +207,8 @@ func WithFuel(val uint64) Option {
 // the JIT starts once the program has done enough work to repay a compile and
 // adapts its thresholds from runtime metrics. n > 0 compiles a
 // *types.Function after n calls and a loop after n back edges. n < 0 disables
-// the JIT. The JIT also requires runtime.GOARCH == "arm64" and a WithTick
-// above 1.
+// the JIT. The JIT also requires a JIT backend for runtime.GOARCH (arm64 today) and a
+// WithTick above 1.
 func WithThreshold(n int) Option {
 	return func(o *option) { o.threshold = n }
 }
@@ -241,7 +250,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		profiler:    opt.profiler,
 		samples:     samples,
 		types:       prog.Types,
-		constants:   make([]types.Boxed, len(prog.Constants)),
+		source:      prog.Constants,
 		globals:     make([]types.Boxed, len(prog.Globals)),
 		globalTypes: prog.Globals,
 		instrs:      make([][]byte, len(prog.Constants)+1),
@@ -261,82 +270,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		gas:         fuel,
 		limit:       opt.maxHeap,
 	}
-	i.alloc(types.Null)
-
-	// Constants load into the heap through a queue, so nested values are
-	// allocated before the slot that holds them is filled.
-	queue := append([]types.Value(nil), prog.Constants...)
-	slots := make([]func(types.Boxed), len(queue))
-	for index := range queue {
-		slots[index] = func(value types.Boxed) {
-			i.constants[index] = value
-		}
-	}
-
-	dedup := make(map[string]types.Ref)
-	for head := 0; head < len(queue); head++ {
-		value := queue[head]
-		slot := slots[head]
-		var boxed types.Boxed
-		switch value := value.(type) {
-		case types.String:
-			ref, seen := dedup[string(value)]
-			if !seen {
-				ref = types.Ref(i.alloc(value))
-				dedup[string(value)] = ref
-			}
-			boxed = types.BoxRef(int(ref))
-		case *types.ArrayLiteral:
-			array := types.NewArray(value.Typ, make([]types.Boxed, len(value.Elems))...)
-			boxed = types.BoxRef(i.alloc(array))
-			for index, elem := range value.Elems {
-				queue = append(queue, elem)
-				slots = append(slots, func(value types.Boxed) {
-					array.Elems[index] = value
-				})
-			}
-		case *types.MapLiteral:
-			m := types.NewMap(value.Typ)
-			boxed = types.BoxRef(i.alloc(m))
-			for index, key := range value.Keys {
-				var mapKey types.MapKey
-				var storedKey types.Boxed
-				queue = append(queue, key)
-				slots = append(slots, func(value types.Boxed) {
-					mapKey, storedKey = i.mapKey(value)
-				})
-				queue = append(queue, value.Values[index])
-				slots = append(slots, func(value types.Boxed) {
-					old, replaced := m.Set(mapKey, types.MapEntry{Key: storedKey, Value: value})
-					if replaced {
-						i.releaseBox(old.Key)
-						i.releaseBox(old.Value)
-					}
-				})
-			}
-		case *types.StructLiteral:
-			structure := types.NewStruct(value.Typ)
-			boxed = types.BoxRef(i.alloc(structure))
-			for index, elem := range value.Fields {
-				queue = append(queue, elem)
-				slots = append(slots, func(value types.Boxed) {
-					structure.SetField(index, value)
-				})
-			}
-		default:
-			boxed = i.box(value)
-		}
-		slot(boxed)
-		if fn, ok := value.(*types.Function); ok {
-			addr := boxed.Ref()
-			i.instrs[addr] = fn.Code
-			i.handlers[addr] = fn.Handlers
-			i.coros[addr] = i.yields(fn.Code)
-		}
-	}
-
-	i.base = len(i.heap)
-	i.recount()
+	i.load(prog.Constants)
 	i.target = max(cap(i.heap), i.base+heapRunway)
 	if i.limit > 0 {
 		i.target = max(min(i.target, i.limit), i.base)
@@ -352,9 +286,11 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 
 	i.code[0] = i.compile(i.module, i.tick == 1)
 
-	for j, v := range prog.Constants {
-		if fn, ok := v.(*types.Function); ok {
-			i.bind(i.constants[j].Ref(), fn, false)
+	// Functions nested in array, map, or struct constants live in the constant
+	// region too, so the region is scanned rather than the top-level list.
+	for addr := 1; addr < i.base; addr++ {
+		if fn, ok := i.heap[addr].(*types.Function); ok {
+			i.bind(addr, fn, false)
 		}
 	}
 
@@ -771,15 +707,18 @@ func (i *Interpreter) Reset() {
 
 	i.gas = i.fuel
 
-	heap := i.heap[:cap(i.heap)]
-	clear(heap[i.base:])
-	i.heap = heap[:i.base]
-	rc := i.rc[:cap(i.rc)]
-	clear(rc[i.base:])
-	i.rc = rc[:i.base]
-	i.recount()
+	// Constants reload from the program into the same addresses, so no
+	// mutable constant keeps a ref into the freed dynamic region.
+	clear(i.heap[:cap(i.heap)])
+	i.heap = i.heap[:0]
+	clear(i.rc[:cap(i.rc)])
+	i.rc = i.rc[:0]
 	i.free = i.free[:0]
 	i.tail = nil
+	target := i.target
+	i.target = 0
+	i.load(i.source)
+	i.target = target
 
 	i.seed()
 	i.pace()
@@ -1113,6 +1052,120 @@ func (i *Interpreter) decoder(r *Registry) *Decoder {
 	d := &i.dec
 	*d = Decoder{interp: i, registry: r}
 	return d
+}
+
+// load fills an empty heap with the null slot and the constants, then takes
+// the constant region as the baseline. Mutable constants are copied so the
+// interpreter owns every object it mutates.
+func (i *Interpreter) load(constants []types.Value) {
+	i.alloc(types.Null)
+
+	// Constants load into the heap through a queue, so nested values are
+	// allocated before the slot that holds them is filled.
+	queue := append([]types.Value(nil), constants...)
+	// A background compile reads the previous slice, so reloading builds a new one.
+	i.constants = make([]types.Boxed, len(constants))
+	slots := make([]func(types.Boxed), len(queue))
+	for index := range queue {
+		slots[index] = func(value types.Boxed) {
+			i.constants[index] = value
+		}
+	}
+
+	// A map literal can repeat a key. The entry it replaces is reconciled once
+	// the counts are established, because a deduplicated string may be shared
+	// with the entry that replaced it.
+	var replaced []types.Boxed
+	dedup := make(map[string]types.Ref)
+	// An object reachable from several positions is copied once, so every
+	// position shares the interpreter-owned copy as the program shared the source.
+	copies := make(map[any]types.Boxed)
+	for head := 0; head < len(queue); head++ {
+		value := queue[head]
+		slot := slots[head]
+		key, keyed := identity(value)
+		if keyed {
+			if shared, ok := copies[key]; ok {
+				slot(shared)
+				continue
+			}
+		}
+		var boxed types.Boxed
+		switch value := value.(type) {
+		case types.String:
+			ref, seen := dedup[string(value)]
+			if !seen {
+				ref = types.Ref(i.alloc(value))
+				dedup[string(value)] = ref
+			}
+			boxed = types.BoxRef(int(ref))
+		case *types.ArrayLiteral:
+			array := types.NewArray(value.Typ, make([]types.Boxed, len(value.Elems))...)
+			boxed = types.BoxRef(i.alloc(array))
+			for index, elem := range value.Elems {
+				queue = append(queue, elem)
+				slots = append(slots, func(value types.Boxed) {
+					array.Elems[index] = value
+				})
+			}
+		case *types.MapLiteral:
+			m := types.NewMap(value.Typ)
+			boxed = types.BoxRef(i.alloc(m))
+			for index, key := range value.Keys {
+				var mapKey types.MapKey
+				var storedKey types.Boxed
+				queue = append(queue, key)
+				slots = append(slots, func(value types.Boxed) {
+					mapKey, storedKey = i.mapKey(value)
+				})
+				queue = append(queue, value.Values[index])
+				slots = append(slots, func(value types.Boxed) {
+					old, ok := m.Set(mapKey, types.MapEntry{Key: storedKey, Value: value})
+					if ok {
+						replaced = append(replaced, old.Key, old.Value)
+					}
+				})
+			}
+		case *types.StructLiteral:
+			structure := types.NewStruct(value.Typ)
+			boxed = types.BoxRef(i.alloc(structure))
+			for index, elem := range value.Fields {
+				queue = append(queue, elem)
+				slots = append(slots, func(value types.Boxed) {
+					structure.SetField(index, value)
+				})
+			}
+		default:
+			boxed = i.box(types.Clone(value))
+		}
+		if keyed {
+			copies[key] = boxed
+		}
+		slot(boxed)
+		if fn, ok := value.(*types.Function); ok {
+			addr := boxed.Ref()
+			i.fit(addr + 1)
+			i.instrs[addr] = fn.Code
+			i.handlers[addr] = fn.Handlers
+			i.coros[addr] = i.yields(fn.Code)
+		}
+	}
+
+	i.base = len(i.heap)
+	i.recount()
+	// Holding each replaced ref across its release frees only what the map no
+	// longer reaches.
+	for _, old := range replaced {
+		i.retainBox(old)
+		i.releaseBox(old)
+	}
+}
+
+// fit grows the per-function tables to n entries, keeping what they hold.
+func (i *Interpreter) fit(n int) {
+	i.instrs = slices.Grow(i.instrs, max(n-len(i.instrs), 0))[:max(n, len(i.instrs))]
+	i.handlers = slices.Grow(i.handlers, max(n-len(i.handlers), 0))[:max(n, len(i.handlers))]
+	i.coros = slices.Grow(i.coros, max(n-len(i.coros), 0))[:max(n, len(i.coros))]
 }
 
 // recount rebuilds baseline counts from constant roots and heap edges after
@@ -1633,6 +1686,8 @@ func (i *Interpreter) box(val types.Value) types.Boxed {
 	}
 }
 
+// clone returns val, copying a mutable constant so that the interpreter, not
+// the program, owns the object it mutates. Immutable values are returned as is.
 func (i *Interpreter) boxI64(val int64) types.Boxed {
 	if types.IsBoxable(val) {
 		return types.BoxI64(val)
@@ -1993,6 +2048,19 @@ func (i *Interpreter) wake() {
 // aliasable reports whether val is a pointer, the only shape two slots can
 // share. A pointer is stored directly in the interface word and is comparable,
 // so the interface itself keys the index.
+// identity returns what makes two constants the same object: the pointer for a
+// pointer value, the backing array for a non-empty slice.
+func identity(val types.Value) (any, bool) {
+	if aliasable(val) {
+		return val, true
+	}
+	v := reflect.ValueOf(val)
+	if v.Kind() == reflect.Slice && v.Len() > 0 {
+		return sliceIdentity{typ: v.Type(), ptr: v.UnsafePointer(), len: v.Len()}, true
+	}
+	return nil, false
+}
+
 func aliasable(val types.Value) bool {
 	typ := reflect.TypeOf(val)
 	return typ != nil && typ.Kind() == reflect.Pointer
