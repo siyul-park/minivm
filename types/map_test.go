@@ -385,6 +385,38 @@ func TestTypedMap_Refs(t *testing.T) {
 	})
 }
 
+func TestTypedMap_Clone(t *testing.T) {
+	t.Run("int32", func(t *testing.T) {
+		typ := types.NewMapType(types.TypeI32(), types.TypeAny())
+		src := types.NewTypedMap[int32](typ, 2)
+		src.Zero = types.BoxRef(7)
+		src.Set(1, types.BoxRef(1))
+		c := src.Clone()
+
+		require.Same(t, typ, c.Typ)
+		require.Equal(t, src.Zero, c.Zero)
+		v, ok := c.Get(1)
+		require.True(t, ok)
+		require.Equal(t, types.BoxRef(1), v)
+
+		c.Set(1, types.BoxRef(9))
+		c.Set(2, types.BoxRef(2))
+		v, _ = src.Get(1)
+		require.Equal(t, types.BoxRef(1), v)
+		require.Equal(t, 1, src.Len())
+	})
+
+	t.Run("string", func(t *testing.T) {
+		typ := types.NewMapType(types.TypeString(), types.TypeAny())
+		src := types.NewTypedMap[string](typ, 2)
+		src.Set("a", types.BoxRef(1))
+		c := src.Clone()
+		c.Delete("a")
+		_, ok := src.Get("a")
+		require.True(t, ok)
+	})
+}
+
 func TestTypedMap_String(t *testing.T) {
 	t.Run("i32", func(t *testing.T) {
 		m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32(), types.TypeI32()), 0)
@@ -456,6 +488,26 @@ func TestMap_Refs(t *testing.T) {
 		})
 		require.Equal(t, []types.Ref{9, 2}, m.Refs([]types.Ref{9}))
 	})
+}
+
+func TestMap_Clone(t *testing.T) {
+	typ := types.NewMapType(types.TypeAny(), types.TypeAny())
+	src := types.NewMap(typ)
+	src.Zero = types.BoxRef(7)
+	key := types.MapKey{Bits: 1}
+	src.Set(key, types.MapEntry{Key: types.BoxRef(1), Value: types.BoxRef(2)})
+	c := src.Clone()
+
+	require.Same(t, typ, c.Typ)
+	require.Equal(t, src.Zero, c.Zero)
+	e, ok := c.Get(key)
+	require.True(t, ok)
+	require.Equal(t, types.BoxRef(2), e.Value)
+
+	c.Set(key, types.MapEntry{Key: types.BoxRef(1), Value: types.BoxRef(9)})
+	c.Delete(types.MapKey{Bits: 5})
+	e, _ = src.Get(key)
+	require.Equal(t, types.BoxRef(2), e.Value)
 }
 
 func TestMap_String(t *testing.T) {
