@@ -15,7 +15,7 @@ import (
 	"github.com/siyul-park/minivm/internal/jit/compile"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/internal/testenv"
-	"github.com/siyul-park/minivm/transform"
+	"github.com/siyul-park/minivm/internal/transform"
 	"github.com/siyul-park/minivm/types"
 )
 

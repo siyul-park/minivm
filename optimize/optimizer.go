@@ -4,9 +4,9 @@ package optimize
 import (
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/internal/ssa"
+	"github.com/siyul-park/minivm/internal/transform"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
-	"github.com/siyul-park/minivm/transform"
 )
 
 // Optimizer runs the selected optimization level.

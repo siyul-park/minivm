@@ -25,7 +25,7 @@ New compiler or target terms `MUST` be introduced by the owning package or topic
 | `instr` | opcode/ISA |
 | `internal/ssa` | IR/dataflow |
 | `internal/asm` | machine encoding/executable memory |
-| `transform` | bytecode/SSA translation and rewrite |
+| `internal/transform` | bytecode/SSA translation and rewrite |
 | `interp` | runtime execution |
 | `prof` | execution sampling |
 

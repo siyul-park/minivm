@@ -7,11 +7,11 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
+	"github.com/siyul-park/minivm/internal/transform"
 	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/optimize"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
-	"github.com/siyul-park/minivm/transform"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
