@@ -52,7 +52,7 @@ if err != nil {
 fmt.Println(result) // 42
 ```
 
-minivm keeps the execution model explicit: bytecode in, verified and bounded runtime, typed value out. Runnable versions of every example here are in [`interp/example_test.go`](interp/example_test.go).
+minivm keeps the execution model explicit: bytecode in, verified runtime, typed value out. Fuel and heap are unlimited by default; set `interp.WithFuel` and `interp.WithHeapLimit` (plus a cancellable context) for untrusted bytecode. Runnable versions of every example here are in [`interp/example_test.go`](interp/example_test.go).
 
 ## Why minivm
 
@@ -113,7 +113,11 @@ if err := vm.SetGlobal(0, types.BoxRef(addr)); err != nil { // the global takes 
 if err := vm.Run(context.Background()); err != nil {
     log.Fatal(err)
 }
-result, err := vm.Pop() // 5
+result, err := vm.Pop()
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println(result) // 5
 ```
 
 For hot calls, `interp.NewHostFunction` takes and returns `[]types.Boxed` directly, with no reflection.
@@ -123,11 +127,18 @@ For hot calls, `interp.NewHostFunction` takes and returns `[]types.Boxed` direct
 `Unmarshal` turns a VM function into a typed Go func:
 
 ```go
+ctx := context.Background()
+
+// addr holds a VM function; see ExampleRegistry_Unmarshal in interp/example_test.go for the full setup.
 var inc func(context.Context, int64) (int64, error)
-if err := vm.Unmarshal(types.BoxRef(addr), &inc); err != nil { // addr holds a VM function
+if err := vm.Unmarshal(types.BoxRef(addr), &inc); err != nil {
     log.Fatal(err)
 }
-n, err := inc(ctx, 41) // 42
+n, err := inc(ctx, 41)
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println(n) // 42
 ```
 
 Declare a trailing `error` on the func type: without one, a failed call panics. Calling it while `vm.Run` is active returns `interp.ErrInterpreterBusy`.
@@ -142,7 +153,7 @@ Threaded execution is the semantic baseline. ARM64 native execution is on by def
 
 ### Verify untrusted bytecode
 
-`interp.New` and `interp.NewPool` verify a snapshot of the program and run only that snapshot, so later changes to `prog` cannot bypass verification. To check bytecode without building an interpreter:
+`interp.New` and `interp.NewPool` verify a snapshot of the program and run only that snapshot, so later changes to `prog` cannot bypass verification. The snapshot covers code and constants; type objects (for example function signatures) are shared with `prog` and MUST NOT be mutated after construction (see [Verification](docs/verification.md)). To check bytecode without building an interpreter:
 
 ```go
 if err := program.Verify(prog); err != nil {
@@ -161,7 +172,7 @@ if err != nil {
 }
 ```
 
-The bytecode optimizer rewrites a program before it runs. Levels range from constant folding and dead-code elimination to common-subexpression elimination, promotion, and loop-invariant hoisting.
+The bytecode optimizer rewrites a program before it runs. It does not verify and may panic on malformed input, so run `program.Verify` first. Levels range from constant folding and dead-code elimination to common-subexpression elimination, promotion, and loop-invariant hoisting.
 
 ### Control execution
 
@@ -173,6 +184,10 @@ vm, err := interp.New(prog,
     interp.WithFuel(10_000),
     interp.WithTick(128),
 )
+if err != nil {
+    log.Fatal(err)
+}
+defer vm.Close()
 ```
 
 Use hooks for policy checks and `debug.NewDebugger` with `WithHook(dbg.Hook)` and `WithTick(1)` for instruction-accurate breakpoints and stepping ([Debugging](docs/debugging.md)).
@@ -180,7 +195,7 @@ Use hooks for policy checks and `debug.NewDebugger` with `WithHook(dbg.Hook)` an
 ## Architecture
 
 ```text
-Program → optimize? → interp.New (verify) → threaded ⇄ native (ARM64)
+Program → Verify → optimize? → interp.New (verify) → threaded ⇄ native (ARM64)
 ```
 
 The threaded interpreter is the semantic baseline and complete execution engine. On ARM64 the JIT adds native execution for hot functions once a program has run long enough to repay a compile (`WithThreshold`); unsupported paths return to threaded execution.

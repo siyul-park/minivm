@@ -52,7 +52,7 @@ if err != nil {
 fmt.Println(result) // 42
 ```
 
-minivm의 실행 모델은 명확합니다. 바이트코드를 입력하고, 검증되고 제한된 런타임에서 실행한 뒤, 타입이 지정된 값을 꺼냅니다. 여기 나온 모든 예제의 실행 가능한 버전은 [`interp/example_test.go`](interp/example_test.go)에 있습니다.
+minivm의 실행 모델은 명확합니다. 바이트코드를 입력하고, 검증된 런타임에서 실행한 뒤, 타입이 지정된 값을 꺼냅니다. 연료와 힙 한도는 기본적으로 무제한이며 `interp.WithFuel`과 `interp.WithHeapLimit`로 설정합니다. 신뢰할 수 없는 바이트코드에는 이 한도와 취소 가능한 컨텍스트를 함께 지정하세요. 여기 나온 모든 예제의 실행 가능한 버전은 [`interp/example_test.go`](interp/example_test.go)에 있습니다.
 
 ## minivm을 선택하는 이유
 
@@ -113,7 +113,11 @@ if err := vm.SetGlobal(0, types.BoxRef(addr)); err != nil { // the global takes 
 if err := vm.Run(context.Background()); err != nil {
     log.Fatal(err)
 }
-result, err := vm.Pop() // 5
+result, err := vm.Pop()
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println(result) // 5
 ```
 
 성능이 중요한 호출에는 `interp.NewHostFunction`이 리플렉션 없이 `[]types.Boxed`를 직접 받고 반환합니다.
@@ -123,11 +127,18 @@ result, err := vm.Pop() // 5
 `Unmarshal`은 VM 함수를 타입이 지정된 Go 함수로 바꿉니다.
 
 ```go
+ctx := context.Background()
+
+// addr holds a VM function; see ExampleRegistry_Unmarshal in interp/example_test.go for the full setup.
 var inc func(context.Context, int64) (int64, error)
-if err := vm.Unmarshal(types.BoxRef(addr), &inc); err != nil { // addr holds a VM function
+if err := vm.Unmarshal(types.BoxRef(addr), &inc); err != nil {
     log.Fatal(err)
 }
-n, err := inc(ctx, 41) // 42
+n, err := inc(ctx, 41)
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println(n) // 42
 ```
 
 함수 타입에는 마지막 `error` 결과를 선언하세요. 없으면 호출 실패 시 panic이 발생합니다. `vm.Run` 실행 중에 호출하면 `interp.ErrInterpreterBusy`를 반환합니다.
@@ -142,7 +153,7 @@ n, err := inc(ctx, 41) // 42
 
 ### 신뢰할 수 없는 바이트코드 검증
 
-`interp.New`와 `interp.NewPool`은 프로그램의 스냅샷을 검증하고 그 스냅샷만 실행하므로, 이후 `prog`를 바꿔도 검증을 우회할 수 없습니다. 인터프리터를 만들지 않고 바이트코드만 검사하려면:
+`interp.New`와 `interp.NewPool`은 프로그램의 스냅샷을 검증하고 그 스냅샷만 실행하므로, 이후 `prog`를 바꿔도 검증을 우회할 수 없습니다. 스냅샷은 코드와 상수를 포함하며, 타입 객체(예: 함수 시그니처)는 `prog`와 공유되므로 생성 후 절대 변경하면 안 됩니다([검증](docs/verification.md)과 동일). 인터프리터를 만들지 않고 바이트코드만 검사하려면:
 
 ```go
 if err := program.Verify(prog); err != nil {
@@ -161,7 +172,7 @@ if err != nil {
 }
 ```
 
-바이트코드 최적화기는 실행 전에 프로그램을 다시 씁니다. 단계는 상수 폴딩과 데드 코드 제거부터 공통 부분식 제거, 승격, 루프 불변식 이동까지 지원합니다.
+바이트코드 최적화기는 실행 전에 프로그램을 다시 씁니다. 검증하지 않으며 잘못된 입력에서 패닉할 수 있으므로 먼저 `program.Verify`를 거치세요. 단계는 상수 폴딩과 데드 코드 제거부터 공통 부분식 제거, 승격, 루프 불변식 이동까지 지원합니다.
 
 ### 실행 제어
 
@@ -173,6 +184,10 @@ vm, err := interp.New(prog,
     interp.WithFuel(10_000),
     interp.WithTick(128),
 )
+if err != nil {
+    log.Fatal(err)
+}
+defer vm.Close()
 ```
 
 정책 검사는 hook으로 처리합니다. 명령어 단위 중단점과 단계 실행은 `debug.NewDebugger`를 `WithHook(dbg.Hook)`, `WithTick(1)`과 함께 사용합니다([디버깅](docs/debugging.md)).
@@ -180,7 +195,7 @@ vm, err := interp.New(prog,
 ## 아키텍처
 
 ```text
-Program → optimize? → interp.New (verify) → threaded ⇄ native (ARM64)
+Program → Verify → optimize? → interp.New (verify) → threaded ⇄ native (ARM64)
 ```
 
 스레디드 인터프리터가 의미론적 기준이자 전체 실행 엔진입니다. ARM64에서 JIT는 프로그램이 컴파일 비용을 회수할 만큼 실행된 뒤 hot function에 네이티브 실행을 추가하고(`WithThreshold`), 지원하지 않는 경로는 스레디드 실행으로 돌아갑니다.
