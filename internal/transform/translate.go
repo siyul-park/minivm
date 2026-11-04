@@ -12,7 +12,9 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// Module contains facts translation may assume beyond the bytecode.
+// Module contains the program facts translation may assume beyond the
+// bytecode. It is fixed for the program's lifetime: nothing recorded at run
+// time belongs here (see Profile).
 type Module struct {
 	// Constants is the constant pool.
 	Constants []types.Boxed
@@ -22,16 +24,28 @@ type Module struct {
 	Objects Objects
 	// Types is the declared-type table.
 	Types []types.Type
-	// Callees maps a dynamic CALL's offset in the translated function to what
-	// was observed there. A recorded snapshot, never live state; absent for a
-	// site never seen, the zero Callee for a site that saw callees of
-	// differing types.
-	Callees map[int]Callee
-	// Refuted holds the offsets whose guard native code has seen fail. A
-	// recorded snapshot: a container op there translates unguarded, so it
-	// bridges instead of speculating its shape again.
-	Refuted map[int]bool
 }
+
+// Profile is the runtime feedback recorded for one function, keyed by
+// bytecode offsets in that function. A value is never mutated once
+// published: a change publishes a new one with the next Generation.
+type Profile struct {
+	// Callees maps a dynamic CALL's offset to what was observed there;
+	// absent for a site never seen, the zero Callee for a site that saw
+	// callees of differing types.
+	Callees map[int]Callee
+	// Refuted holds the offsets whose guard native code has seen fail: a
+	// container op there translates unguarded, so it bridges instead of
+	// speculating its shape again.
+	Refuted map[int]bool
+	// Generation counts the changes recorded so far; compiled code is stale
+	// once the generation of any function it read moved.
+	Generation uint64
+}
+
+// Profiles resolves a function address to its current Profile. A Profiles
+// is a snapshot taken for one compile.
+type Profiles []*Profile
 
 // Callee is what a dynamic CALL site observed.
 type Callee struct {
@@ -60,46 +74,88 @@ type Object struct {
 	I64 *types.I64
 }
 
+// translation is what one Translate call compiles: a root function and the
+// members a static tail call proves it can share its frame with, their spans
+// in one list, which is how a tail call reaches another member. Its members
+// are fixed before analysis, and it is immutable after.
+type translation struct {
+	module Module
+	acts   members
+	spans  []span
+}
+
+// members are a translation's functions, root first.
+type members []activation
+
+// reach is what analysis learned: the facts live at each span's entry, which
+// spans were reached, the tail call targets it proved, and, per tail span
+// whose call loops, the member span it jumps to.
+type reach struct {
+	states []frame
+	seen   []bool
+	proofs []proof
+	jumps  map[int]int
+}
+
+// proof is a tail call target the walker resolved with its own facts.
+type proof struct {
+	address  int
+	function *types.Function
+}
+
+// memberMax caps a translation's functions, the root included.
+const memberMax = 4
+
 // ErrEntry reports an entry offset that does not start a basic block.
 var ErrEntry = errors.New("entry starts no block")
 
-// Translate converts one bytecode function from entry to SSA.
+// Translate converts one bytecode function from entry to SSA, together with
+// every function a static tail call from it proves can share its frame (see
+// newTranslation), and returns the addresses of those functions, root
+// first: the code depends on each one's profile.
 // It returns ErrEntry for a non-block entry and nil when translation is unsupported.
-func Translate(module Module, address int, function *types.Function, entry int) (*ssa.Function, error) {
+func Translate(module Module, profiles Profiles, address int, function *types.Function, entry int) (*ssa.Function, []int, error) {
 	if function == nil || len(function.Code) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	blocks, err := analysis.Blocks(function)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	spans, at := split(function.Code, blocks)
 	root, ok := at[entry]
 	if !ok {
-		return nil, fmt.Errorf("%w: entry %d starts no block", ErrEntry, entry)
+		return nil, nil, fmt.Errorf("%w: entry %d starts no block", ErrEntry, entry)
 	}
 	if spans[0].start != 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
-	act := activation{function: function, address: address, slots: function.Declared()}
-	states, seen, ok := module.analyze(act, spans, 0, frame{closures: make([]int, len(act.slots))})
+	t, ok := newTranslation(module, activation{function: function, address: address, slots: function.Declared(), profile: profiles.Of(address)}, spans, profiles)
 	if !ok {
-		return nil, nil
+		return nil, nil, nil
+	}
+	reached, ok := t.analyze(0, frame{closures: make([]int, len(t.acts[0].slots))})
+	if !ok {
+		return nil, nil, nil
 	}
 	if root != 0 {
-		if !seen[root] {
-			return nil, nil
+		if !reached.seen[root] {
+			return nil, nil, nil
 		}
-		states, seen, ok = module.analyze(act, spans, root, states[root].owning())
+		reached, ok = t.analyze(root, reached.states[root].owning())
 		if !ok {
-			return nil, nil
+			return nil, nil, nil
 		}
 	}
-	built := module.build(act, spans, states, seen, root)
+	built := t.build(reached, root)
 	if built != nil && len(built.Pred(0)) > 0 {
 		built = rotate(built)
 	}
-	return built, nil
+	addresses := make([]int, len(t.acts))
+	for i, act := range t.acts {
+		addresses[i] = act.address
+	}
+	return built, addresses, nil
 }
 
 // Borrows reports, per parameter, whether function borrows it: a reference
@@ -139,6 +195,15 @@ func Adopts(code instr.Opcode, pops, results int) int {
 	}
 }
 
+// Of returns the profile of the function at address: the zero Profile when
+// none was recorded.
+func (p Profiles) Of(address int) Profile {
+	if address < 0 || address >= len(p) || p[address] == nil {
+		return Profile{}
+	}
+	return *p[address]
+}
+
 func (o Objects) function(reference int) *types.Function {
 	return o[reference].Function
 }
@@ -167,105 +232,224 @@ func rotate(f *ssa.Function) *ssa.Function {
 	return r.builder.Build()
 }
 
-// analyze returns the facts live at each span's entry and which spans are
-// reached from root; nothing flows past a span that ends in an exit. A
-// reached span's stack is nil, not just absent, when nothing is live there
-// (e.g. an empty operand stack at a loop header): seen is what tells reached
-// apart from never visited.
-func (m Module) analyze(act activation, spans []span, root int, in frame) ([]frame, []bool, bool) {
-	states := make([]frame, len(spans))
-	seen := make([]bool, len(spans))
-	seen[root] = true
-	states[root] = in
+// newTranslation fixes the translation's members before any joint
+// analysis. It analyzes the root alone, with every tail call to another
+// function an exit, and collects the targets the walker's facts prove;
+// then, breadth first up to memberMax functions, it admits each target that
+// can share the root's frame and translates alone, and collects the targets
+// that member proves in turn. A target proven only by facts that flow across
+// members is missed, which leaves its call an exit. It fails when the root
+// itself does not translate.
+func newTranslation(m Module, root activation, spans []span, profiles Profiles) (*translation, bool) {
+	t := &translation{module: m}
+	t.add(root, spans)
+	reached, ok := t.analyze(0, frame{closures: make([]int, len(root.slots))})
+	if !ok {
+		return nil, false
+	}
+	queue := reached.proofs
+	for q := 0; q < len(queue) && len(t.acts) < memberMax; q++ {
+		target := queue[q]
+		if _, known := t.acts.find(target.address); known || !t.admits(target.function) {
+			continue
+		}
+		blocks, err := analysis.Blocks(target.function)
+		if err != nil {
+			continue
+		}
+		spans, _ := split(target.function.Code, blocks)
+		if spans[0].start != 0 || slices.ContainsFunc(spans, func(s span) bool { return s.suspend }) {
+			continue
+		}
+		act := activation{function: target.function, address: target.address, slots: target.function.Declared(), profile: profiles.Of(target.address)}
+		alone := &translation{module: m}
+		alone.add(act, spans)
+		reached, ok := alone.analyze(0, frame{closures: make([]int, len(act.slots))})
+		if !ok {
+			continue
+		}
+		t.add(act, spans)
+		queue = append(queue, reached.proofs...)
+	}
+	return t, true
+}
+
+// admits reports whether target can share the root's frame: a plain function
+// (no captures, so no upvals, and no handlers) with code, and the root's
+// parameters, slots and results, so every slot-typed fact stays valid across
+// the jump. Coroutine bodies never get here: they hold YIELD or RESUME,
+// which newTranslation checks on the spans.
+func (t *translation) admits(target *types.Function) bool {
+	root := t.acts[0].function
+	return target.Typ != nil && len(target.Code) > 0 && len(target.Captures) == 0 && len(target.Handlers) == 0 &&
+		len(target.Typ.Params) == len(root.Typ.Params) &&
+		slices.EqualFunc(target.Declared(), t.acts[0].slots, types.Type.Equals) &&
+		slices.EqualFunc(target.Typ.Returns, root.Typ.Returns, types.Type.Equals)
+}
+
+// add appends act and its spans as a member.
+func (t *translation) add(act activation, spans []span) {
+	offset := len(t.spans)
+	act.first = offset
+	for _, s := range spans {
+		s.act = len(t.acts)
+		s.flow, s.succs = shifted(s.flow, offset), shifted(s.succs, offset)
+		t.spans = append(t.spans, s)
+	}
+	t.acts = append(t.acts, act)
+}
+
+// analyze returns the facts live at each span's entry, which spans are
+// reached from root, and the tail call targets walkers proved; nothing flows
+// past a span that ends in an exit. A reached span's stack is nil, not just
+// absent, when nothing is live there (e.g. an empty operand stack at a loop
+// header): seen is what tells reached apart from never visited. A tail
+// call's span continues into the first span of the member it loops to,
+// found as it is translated.
+func (t *translation) analyze(root int, in frame) (reach, bool) {
+	r := reach{states: make([]frame, len(t.spans)), seen: make([]bool, len(t.spans)), jumps: map[int]int{}}
+	r.seen[root] = true
+	r.states[root] = in
 	work := []int{root}
 	for len(work) > 0 {
 		id := work[len(work)-1]
 		work = work[:len(work)-1]
-		exit, leaves, ok := m.transfer(act, spans[id], states[id])
+		w, term, ok := t.transfer(t.spans[id], r.states[id])
 		if !ok {
-			return nil, nil, false
+			return reach{}, false
 		}
-		if leaves {
+		if w.proof.function != nil && !slices.Contains(r.proofs, w.proof) {
+			r.proofs = append(r.proofs, w.proof)
+		}
+		if t.spans[id].tail && w.jump >= 0 {
+			r.jumps[id] = w.jump
+		}
+		if term.Op == ssa.OpExit {
 			continue
 		}
-		for _, succ := range spans[id].flow {
-			if !seen[succ] {
-				seen[succ] = true
-				states[succ] = frame{stack: slices.Clone(exit.stack), closures: slices.Clone(exit.closures)}
+		exit := frame{stack: make([]fact, len(w.stack)), closures: w.closures}
+		for i, o := range w.stack {
+			exit.stack[i] = o.fact
+		}
+		for _, succ := range r.flow(t.spans[id], id) {
+			if !r.seen[succ] {
+				r.seen[succ] = true
+				r.states[succ] = frame{stack: slices.Clone(exit.stack), closures: slices.Clone(exit.closures)}
 				work = append(work, succ)
 				continue
 			}
-			changed, ok := states[succ].merge(exit)
+			changed, ok := r.states[succ].merge(exit)
 			if !ok {
-				return nil, nil, false
+				return reach{}, false
 			}
 			if changed {
 				work = append(work, succ)
 			}
 		}
 	}
-	return states, seen, true
+	return r, true
 }
 
-// transfer returns the facts at s's end and whether s leaves native code
-// there, which no span follows.
-func (m Module) transfer(act activation, s span, in frame) (frame, bool, bool) {
+// transfer walks s from in and returns the walker, which holds the facts at
+// s's end, the span a tail call there looped to and the target it proved,
+// and the terminator of s.
+func (t *translation) transfer(s span, in frame) (*walker, ssa.Terminator, bool) {
 	b := ssa.New("")
 	block := b.Block()
-	w, ok := newWalker(m, b, block, act, in)
+	w, ok := newWalker(t, b, block, s, in)
 	if !ok {
-		return frame{}, false, false
+		return nil, ssa.Terminator{}, false
 	}
 	term, ok := w.translate(s)
-	if !ok {
-		return frame{}, false, false
-	}
-	out := make([]fact, len(w.stack))
-	for i, o := range w.stack {
-		out[i] = o.fact
-	}
-	return frame{stack: out, closures: w.closures}, term.Op == ssa.OpExit, true
+	return w, term, ok
 }
 
-// build emits the spans analyze reached, in the order a walk from root over
-// their successors visits them.
-func (m Module) build(act activation, spans []span, states []frame, seen []bool, root int) *ssa.Function {
-	queued := make([]bool, len(spans))
+// build emits the spans r reached, in the order a walk from root over their
+// successors visits them.
+func (t *translation) build(r reach, root int) *ssa.Function {
+	queued := make([]bool, len(t.spans))
 	queued[root] = true
 	order := []int{root}
 	for n := 0; n < len(order); n++ {
-		for _, successor := range spans[order[n]].succs {
-			if seen[successor] && !queued[successor] {
+		for _, successor := range r.succs(t.spans[order[n]], order[n]) {
+			if r.seen[successor] && !queued[successor] {
 				queued[successor] = true
 				order = append(order, successor)
 			}
 		}
 	}
-	ids := make([]int, len(spans))
+	ids := make([]int, len(t.spans))
 	for i := range ids {
 		ids[i] = -1
 	}
-	b := ssa.New(fmt.Sprintf("%d:%d", act.address, spans[root].start))
-	b.Entry(ssa.Frame{Address: act.address, IP: spans[root].start, Returns: act.returns()})
+	act := t.acts[0]
+	b := ssa.New(fmt.Sprintf("%d:%d", act.address, t.spans[root].start))
+	b.Entry(ssa.Frame{Address: act.address, IP: t.spans[root].start, Returns: act.returns()})
 	for _, id := range order {
 		ids[id] = b.Block()
 	}
 
 	for _, id := range order {
-		w, ok := newWalker(m, b, ids[id], act, states[id])
+		w, ok := newWalker(t, b, ids[id], t.spans[id], r.states[id])
 		if !ok {
 			return nil
 		}
-		term, ok := w.translate(spans[id])
+		term, ok := w.translate(t.spans[id])
 		if !ok {
 			return nil
 		}
 		if term.Op != ssa.OpExit {
-			if term.Edges, ok = w.edges(spans[id], states, ids); !ok {
+			if term.Edges, ok = w.edges(r.succs(t.spans[id], id), r.states, ids); !ok {
 				return nil
 			}
 		}
 		b.Term(ids[id], term)
 	}
 	return b.Build()
+}
+
+// flow is the spans facts at s's end flow into: for a tail span, the member
+// span its call jumps to, which only analysis knows.
+func (r reach) flow(s span, id int) []int {
+	if s.tail {
+		return r.jumped(id)
+	}
+	return s.flow
+}
+
+// succs is the spans s continues into, by the same rule as flow.
+func (r reach) succs(s span, id int) []int {
+	if s.tail {
+		return r.jumped(id)
+	}
+	return s.succs
+}
+
+func (r reach) jumped(id int) []int {
+	if j, ok := r.jumps[id]; ok {
+		return []int{j}
+	}
+	return nil
+}
+
+// shifted returns offsets moved by offset, in a new slice.
+func shifted(offsets []int, offset int) []int {
+	if offsets == nil {
+		return nil
+	}
+	out := make([]int, len(offsets))
+	for i, o := range offsets {
+		out[i] = o + offset
+	}
+	return out
+}
+
+// find returns the index of the member at address.
+func (m members) find(address int) (int, bool) {
+	for i, act := range m {
+		if act.address == address {
+			return i, true
+		}
+	}
+	return 0, false
 }

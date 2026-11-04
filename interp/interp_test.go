@@ -3334,6 +3334,111 @@ func TestWithThreshold(t *testing.T) {
 		require.Zero(t, deopts)
 	})
 
+	t.Run("runs mutual tail calls as one native unit", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		const n = 1000
+		for _, tt := range []struct {
+			name    string
+			slow    int
+			dynamic bool
+		}{
+			{"returning normally", -1, false},
+			{"deoptimizing inside the second member", n - 501, false},
+			{"entered through an owned reference", -1, true},
+			{"entered through an owned reference and deoptimizing inside the second member", n - 501, true},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				prog := pingPongProgram(t, n, tt.slow, tt.dynamic)
+				refs := []int{0, 1, 2}
+
+				threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+				wantErr := threaded.Run(context.Background())
+				var want types.Value
+				if tt.slow < 0 {
+					var err error
+					want, err = threaded.Pop()
+					require.NoError(t, err)
+				} else {
+					require.Error(t, wantErr)
+				}
+				counts := make([]int, len(refs))
+				for i, c := range refs {
+					boxed, err := threaded.Const(c)
+					require.NoError(t, err)
+					counts[i], err = threaded.RefCount(boxed.Ref())
+					require.NoError(t, err)
+				}
+				require.NoError(t, threaded.Close())
+
+				profiler := prof.New()
+				vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+				defer vm.Close()
+				run := func() {
+					err := vm.Run(context.Background())
+					if tt.slow < 0 {
+						require.NoError(t, err)
+						result, err := vm.Pop()
+						require.NoError(t, err)
+						require.Equal(t, want, result)
+					} else {
+						require.True(t, errorsEqual(err, wantErr), "%v != %v", err, wantErr)
+					}
+					for i, c := range refs {
+						boxed, err := vm.Const(c)
+						require.NoError(t, err)
+						count, err := vm.RefCount(boxed.Ref())
+						require.NoError(t, err)
+						require.Equal(t, counts[i], count, "constant %d", c)
+					}
+					vm.Reset()
+				}
+				var entries float64
+				poll(t, func() bool {
+					run()
+					vm.Flush()
+					entries = nativeEntries(profiler)
+					compiled, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "ok"})
+					return entries >= 8 && compiled >= 2
+				})
+
+				before := entries
+				deopted, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+				for range 16 {
+					run()
+				}
+				vm.Flush()
+				require.Greater(t, nativeEntries(profiler), before)
+				deopts, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+				if tt.slow < 0 {
+					require.Equal(t, deopted, deopts)
+				} else {
+					require.Greater(t, deopts, deopted)
+				}
+			})
+		}
+	})
+
+	t.Run("recompiles with a guard refuted inside a tail-call member bridged", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		const n = 1000
+		prog := memberGuardProgram(t, n, n-501)
+
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+		require.ErrorIs(t, threaded.Run(context.Background()), interp.ErrTypeMismatch)
+		require.NoError(t, threaded.Close())
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		poll(t, func() bool {
+			require.ErrorIs(t, vm.Run(context.Background()), interp.ErrTypeMismatch)
+			vm.Reset()
+			vm.Flush()
+			bridges, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+			return bridges > 0
+		})
+	})
+
 	t.Run("completes a deep self tail call without growing frames", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		prog := tailRefProgram(t, 1_000_000)

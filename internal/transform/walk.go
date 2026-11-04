@@ -11,6 +11,7 @@ import (
 
 type walker struct {
 	Module
+	members    members
 	builder    *ssa.Builder
 	block      int
 	activation activation
@@ -19,14 +20,18 @@ type walker struct {
 	// there, 0 when unknown (see frame).
 	closures []int
 
+	// jump is the span a tail call looped to, -1 when none did. proof is the
+	// target the last tail call resolved, whether or not it loops.
+	jump   int
+	proof  proof
 	ip     int
 	before []operand
 	state  ssa.Value
 }
 
-// newWalker returns a walker at the start of block, its stack the params of
-// in's facts; it fails when a fact has no SSA representation.
-func newWalker(m Module, b *ssa.Builder, block int, act activation, in frame) (*walker, bool) {
+// newWalker returns a walker at the start of block translating s, its stack
+// the params of in's facts; it fails when a fact has no SSA representation.
+func newWalker(t *translation, b *ssa.Builder, block int, s span, in frame) (*walker, bool) {
 	stack := make([]operand, len(in.stack))
 	for i, e := range in.stack {
 		t, ok := typ(e.kind)
@@ -35,7 +40,7 @@ func newWalker(m Module, b *ssa.Builder, block int, act activation, in frame) (*
 		}
 		stack[i] = operand{value: b.Param(block, t), fact: e}
 	}
-	return &walker{Module: m, builder: b, block: block, activation: act, stack: stack, closures: slices.Clone(in.closures)}, true
+	return &walker{Module: t.module, members: t.acts, builder: b, block: block, activation: t.acts[s.act], stack: stack, closures: slices.Clone(in.closures), jump: -1}, true
 }
 
 func (w *walker) translate(s span) (ssa.Terminator, bool) {
@@ -84,18 +89,18 @@ func (w *walker) translate(s span) (ssa.Terminator, bool) {
 	return w.leave(s.end), true
 }
 
-func (w *walker) edges(s span, states []frame, ids []int) ([]ssa.Edge, bool) {
-	if len(s.succs) == 0 {
+func (w *walker) edges(succs []int, states []frame, ids []int) ([]ssa.Edge, bool) {
+	if len(succs) == 0 {
 		return nil, true
 	}
-	for _, succ := range s.succs {
+	for _, succ := range succs {
 		if len(states[succ].stack) != len(w.stack) {
 			return nil, false
 		}
 	}
 	for i := range w.stack {
 		owned, borrowed := false, false
-		for _, succ := range s.succs {
+		for _, succ := range succs {
 			if states[succ].stack[i].backing == backingStack {
 				owned = true
 			} else {
@@ -109,8 +114,8 @@ func (w *walker) edges(s span, states []frame, ids []int) ([]ssa.Edge, bool) {
 			w.own(i)
 		}
 	}
-	edges := make([]ssa.Edge, len(s.succs))
-	for i, succ := range s.succs {
+	edges := make([]ssa.Edge, len(succs))
+	for i, succ := range succs {
 		edges[i] = ssa.Edge{Block: ids[succ], Args: values(w.stack)}
 	}
 	return edges, true
@@ -278,7 +283,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		var typ *types.FunctionType
 		if target != nil {
 			typ = target.Typ
-		} else if callee := w.Callees[w.ip]; callee.Function == 0 {
+		} else if callee := w.activation.profile.Callees[w.ip]; callee.Function == 0 {
 			typ = callee.Type
 		}
 		if typ == nil {
@@ -403,7 +408,7 @@ func (w *walker) unseen() bool {
 	if len(w.stack) == 0 || w.callee(len(w.stack)-1) != nil {
 		return false
 	}
-	_, seen := w.Callees[w.ip]
+	_, seen := w.activation.profile.Callees[w.ip]
 	return !seen
 }
 
@@ -415,7 +420,7 @@ func (w *walker) unseen() bool {
 // it, so the CALL proceeds exactly as a resolved one; a closure callee keeps
 // its operand, guarded to be a closure over the admitted function.
 func (w *walker) speculate(at int) *types.Function {
-	callee, ok := w.Callees[w.ip]
+	callee, ok := w.activation.profile.Callees[w.ip]
 	if !ok {
 		return nil
 	}
@@ -565,7 +570,7 @@ func (w *walker) call() ([]bool, ssa.Shape) {
 	target := w.callee(top)
 	if target == nil {
 		w.adopt()
-		return nil, ssa.Shape{Type: uintptr(unsafe.Pointer(w.Callees[w.ip].Type))}
+		return nil, ssa.Shape{Type: uintptr(unsafe.Pointer(w.activation.profile.Callees[w.ip].Type))}
 	}
 	var shape ssa.Shape
 	if ref := w.stack[top].closure; ref != 0 {
@@ -610,8 +615,8 @@ func (w *walker) leave(ip int) ssa.Terminator {
 	return ssa.Terminator{Op: ssa.OpReturn, Args: args, State: w.deopt()}
 }
 
-// tail ends a RETURN_CALL: a self tail call loops back to the function's
-// first span, any other leaves native execution.
+// tail ends a RETURN_CALL: a call whose frame a member of the translation can reuse loops to
+// the callee's first span, any other leaves native execution.
 func (w *walker) tail(ip int) (ssa.Terminator, bool) {
 	if len(w.stack) == 0 {
 		return ssa.Terminator{}, false
@@ -620,10 +625,11 @@ func (w *walker) tail(ip int) (ssa.Terminator, bool) {
 	if target == nil || len(w.stack) < 1+len(target.Typ.Params) {
 		return ssa.Terminator{}, false
 	}
-	if !w.reuses(target) {
+	member, ok := w.reuses(target)
+	if !ok {
 		return w.exit(ip), true
 	}
-	return w.loop(ip), true
+	return w.loop(ip, member), true
 }
 
 // callee resolves the function a CALL at operand at calls: a constant
@@ -644,33 +650,36 @@ func (w *walker) callee(at int) *types.Function {
 	return target
 }
 
-// reuses reports whether the RETURN_CALL at the stack's top re-enters this
-// unit's own function with the frame it already has: a plain function, not a
+// reuses returns the member the RETURN_CALL at the stack's top calls
+// with the frame it already has, when there is one: a plain function, not a
 // closure, with every argument on the stack and no slot a store could box
 // wide, since a deopt part-way through the stores could not resume threaded.
-func (w *walker) reuses(target *types.Function) bool {
+func (w *walker) reuses(target *types.Function) (int, bool) {
 	callee := w.stack[len(w.stack)-1]
-	if w.activation.address == 0 || callee.closure != 0 || !callee.referenceKnown || callee.reference != w.activation.address ||
-		target != w.activation.function || len(target.Captures) > 0 || len(w.stack) != 1+len(target.Typ.Params) {
-		return false
+	if w.activation.address == 0 || callee.closure != 0 || !callee.referenceKnown ||
+		len(target.Captures) > 0 || len(w.stack) != 1+len(target.Typ.Params) {
+		return 0, false
 	}
 	for _, slot := range w.activation.slots {
 		if slot.Kind() == types.KindI64 {
-			return false
+			return 0, false
 		}
 		if _, ok := typ(slot.Kind()); !ok {
-			return false
+			return 0, false
 		}
 	}
-	return true
+	w.proof = proof{callee.reference, target}
+	member, ok := w.members.find(callee.reference)
+	return member, ok && w.members[member].function == target
 }
 
-// loop lowers a self tail call as threaded frame reuse does: the arguments
+// loop lowers a tail call as threaded frame reuse does: the arguments
 // replace the parameters, every other local is zeroed, each store releasing
-// the reference it overwrites, and control returns to the function's first
-// span. The stores share the call's resume state, which no store can use.
-func (w *walker) loop(ip int) ssa.Terminator {
+// the reference it overwrites, and control moves to member's first span.
+// The stores share the call's resume state, which no store can use.
+func (w *walker) loop(ip, member int) ssa.Terminator {
 	w.begin(ip)
+	w.jump = w.members[member].first
 	top := len(w.stack) - 1
 	w.release(w.stack[top])
 	w.stack = w.stack[:top]
@@ -805,7 +814,7 @@ func (w *walker) begin(ip int) {
 }
 
 func (w *walker) guard(at int, shape ssa.Shape) {
-	if w.stack[at].kind != types.KindRef || shape.Function == 0 && w.Refuted[w.ip] {
+	if w.stack[at].kind != types.KindRef || shape.Function == 0 && w.activation.profile.Refuted[w.ip] {
 		return
 	}
 	value := w.builder.Value(ssa.TypeRef)

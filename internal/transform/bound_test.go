@@ -98,7 +98,7 @@ func TestBoundPass_Run(t *testing.T) {
 	tests := []struct {
 		name    string
 		loop    boundedLoop
-		refuted map[int]bool
+		refuted transform.Profiles
 		// guards counts the guard.bounds in the preheader, bounds the array
 		// accesses indexed by a bound of the header's induction variable.
 		guards, bounds int
@@ -114,7 +114,8 @@ func TestBoundPass_Run(t *testing.T) {
 		{name: "leaves an index stepping by more than one below the array's length", loop: boundedLoop{step: 2, length: true, test: instr.I32_GE_S}},
 		{name: "leaves an index that is not the induction variable", loop: boundedLoop{step: 1, limit: 256, offset: true, test: instr.I32_GE_S}},
 		{name: "leaves an unsigned compare", loop: boundedLoop{step: 1, limit: 256, test: instr.I32_GE_U}},
-		{name: "leaves a loop whose header entry a guard refuted", loop: counted, refuted: map[int]bool{2: true}},
+		{name: "leaves a loop whose header entry a guard refuted", loop: counted, refuted: transform.Profiles{1: {Refuted: map[int]bool{2: true}}}},
+		{name: "bounds a loop whose header offset only another function refuted", loop: counted, refuted: transform.Profiles{2: {Refuted: map[int]bool{2: true}}}, guards: 1, bounds: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

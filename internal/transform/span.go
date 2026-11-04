@@ -6,10 +6,15 @@ import (
 )
 
 type span struct {
-	start   int
-	end     int
-	flow    []int
-	succs   []int
+	// act indexes the translation member whose code the span covers.
+	act   int
+	start int
+	end   int
+	flow  []int
+	succs []int
+	// tail marks a span that ends in RETURN_CALL: it continues into the
+	// first span of the member it loops to, which only translation knows.
+	tail    bool
 	suspend bool
 }
 
@@ -54,9 +59,9 @@ func split(code []byte, blocks []*analysis.BasicBlock) ([]span, map[int]int) {
 		}
 		spans[last[i]].succs = successors(code, block, at)
 		inst, ip := final(code, block)
-		tail := ip >= 0 && inst.Opcode() == instr.RETURN_CALL
+		spans[last[i]].tail = ip >= 0 && inst.Opcode() == instr.RETURN_CALL
 		for _, succ := range spans[last[i]].succs {
-			if succ == exit || tail {
+			if succ == exit {
 				spans[last[i]].flow = append(spans[last[i]].flow, succ)
 			}
 		}
@@ -77,15 +82,13 @@ func past(code []byte) bool {
 }
 
 // successors lists the spans block's last instruction can continue into. A
-// RETURN_CALL continues into the function's first span: the self tail call
-// the walker lowers as a loop re-enters it.
+// RETURN_CALL has none here: the tail call the walker lowers as a loop
+// continues into the first span of the function it names.
 func successors(code []byte, block *analysis.BasicBlock, at map[int]int) []int {
 	if inst, last := final(code, block); last >= 0 {
 		switch inst.Opcode() {
-		case instr.RETURN:
+		case instr.RETURN, instr.RETURN_CALL:
 			return nil
-		case instr.RETURN_CALL:
-			return targets([]int{0}, at)
 		case instr.BR, instr.BR_TABLE:
 			return targets(instr.Targets(code, last), at)
 		case instr.BR_IF:

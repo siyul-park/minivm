@@ -2,6 +2,7 @@ package transform_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -39,7 +40,7 @@ func TestTranslate(t *testing.T) {
 				b.Bind(done).Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
 			})}
 
-		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 		require.Equal(t, `func 1:0
@@ -79,7 +80,7 @@ blk3: () <-- (blk1)
 				b.Bind(join).Emit(instr.RETURN)
 			})}
 
-		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 		require.Contains(t, ssa.Format(out), "return")
@@ -93,7 +94,7 @@ blk3: () <-- (blk1)
 			Constants: []types.Boxed{types.BoxRef(2)},
 			Objects:   transform.Objects{2: {Function: callee}}}
 
-		out, err := transform.Translate(m, 0, fn, 0)
+		out, _, err := transform.Translate(m, nil, 0, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 		require.Equal(t, `func 0:0
@@ -113,7 +114,7 @@ blk0: ()
 				b.Emit(instr.I32_CONST, 1).Emit(instr.I32_CONST, 2).Emit(instr.I32_ADD).Emit(instr.RETURN)
 			})}
 
-		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 		require.Equal(t, `func 1:0
@@ -130,7 +131,7 @@ blk0: ()
 	t.Run("translates from a loop header", func(t *testing.T) {
 		fn, header := loopFunction(t)
 
-		root, err := transform.Translate(transform.Module{}, 1, fn, header)
+		root, _, err := transform.Translate(transform.Module{}, nil, 1, fn, header)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(root))
 		require.Equal(t, `func 1:2
@@ -156,7 +157,7 @@ blk3: (v4:ref) <-- (blk1)
 		// (blk3): every later pass and Lower assume block 0 has none.
 		require.Empty(t, root.Pred(0))
 
-		entry, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		entry, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(entry))
 		require.Equal(t, `func 1:0
@@ -204,7 +205,7 @@ blk3: (v6:ref) <-- (blk1)
 			})}
 		header := instr.MustNew(instr.LOCAL_GET, 0).Width() + instr.MustNew(instr.BR_IF, 0).Width()
 
-		out, err := transform.Translate(transform.Module{}, 1, fn, header)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, header)
 		require.NoError(t, err)
 		require.NotNil(t, out)
 		require.NoError(t, ssa.Verify(out))
@@ -214,7 +215,7 @@ blk3: (v6:ref) <-- (blk1)
 
 	t.Run("rejects an entry that starts no block", func(t *testing.T) {
 		fn, _ := loopFunction(t)
-		_, err := transform.Translate(transform.Module{}, 1, fn, 1)
+		_, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 1)
 		require.ErrorIs(t, err, transform.ErrEntry)
 		require.EqualError(t, err, "entry starts no block: entry 1 starts no block")
 	})
@@ -229,14 +230,14 @@ blk3: (v6:ref) <-- (blk1)
 		require.NoError(t, err)
 
 		fn := &types.Function{Code: instr.Marshal(code)}
-		out, err := transform.Translate(transform.Module{}, 1, fn, headerOffset)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, headerOffset)
 		require.NoError(t, err)
 		require.Nil(t, out)
 	})
 
 	t.Run("declines what bytecode alone cannot resolve/no code", func(t *testing.T) {
 		fn := &types.Function{Typ: &types.FunctionType{}}
-		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.Nil(t, out)
 	})
@@ -244,7 +245,7 @@ blk3: (v6:ref) <-- (blk1)
 	t.Run("translates a protected region without its catch block", func(t *testing.T) {
 		fn, _ := protectedFunction(t)
 
-		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 		require.Equal(t, `func 1:0
@@ -263,7 +264,7 @@ blk1: (v5:i32) <-- (blk0)
 	t.Run("declines an entry inside a catch block", func(t *testing.T) {
 		fn, catch := protectedFunction(t)
 
-		out, err := transform.Translate(transform.Module{}, 1, fn, catch)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, catch)
 		require.NoError(t, err)
 		require.Nil(t, out)
 	})
@@ -275,7 +276,7 @@ blk1: (v5:i32) <-- (blk0)
 				b.Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
 			})}
 		m := transform.Module{Constants: []types.Boxed{types.BoxRef(2)}, Objects: transform.Objects{}}
-		out, err := transform.Translate(m, 1, fn, 0)
+		out, _, err := transform.Translate(m, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.Nil(t, out)
 	})
@@ -284,7 +285,7 @@ blk1: (v5:i32) <-- (blk0)
 		fn := &types.Function{
 			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32()}},
 			Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.YIELD).Emit(instr.RETURN) })}
-		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.Nil(t, out)
 	})
@@ -297,7 +298,7 @@ blk1: (v5:i32) <-- (blk0)
 				b.Emit(instr.REF_NULL).Emit(instr.LOCAL_TEE, 0).Emit(instr.RETURN)
 			})}
 
-		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NotNil(t, out)
 		require.NoError(t, ssa.Verify(out))
@@ -315,7 +316,7 @@ blk1: (v5:i32) <-- (blk0)
 			Constants: []types.Boxed{types.BoxRef(2)},
 			Objects:   transform.Objects{2: {Function: callee}}}
 
-		out, err := transform.Translate(m, 1, fn, 0)
+		out, _, err := transform.Translate(m, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NotNil(t, out)
 		require.NoError(t, ssa.Verify(out))
@@ -330,9 +331,9 @@ blk1: (v5:i32) <-- (blk0)
 			Code: assemble(t, func(b *instr.Builder) {
 				b.Append(load, index).Emit(instr.ARRAY_GET).Emit(instr.RETURN)
 			})}
-		m := transform.Module{Refuted: map[int]bool{load.Width() + index.Width(): true}}
+		profiles := transform.Profiles{1: {Refuted: map[int]bool{load.Width() + index.Width(): true}}}
 
-		out, err := transform.Translate(m, 1, fn, 0)
+		out, _, err := transform.Translate(transform.Module{}, profiles, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 		require.NotContains(t, ssa.Format(out), "guard.shape")
@@ -354,7 +355,7 @@ blk1: (v5:i32) <-- (blk0)
 				b.Bind(done).Emit(instr.LOCAL_GET, 1).Emit(instr.RETURN)
 			})}
 
-		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 
@@ -399,7 +400,7 @@ blk3: () <-- (blk1)
 				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 5).Emit(instr.ARRAY_SET).Emit(instr.RETURN)
 			})}
 
-		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 
@@ -423,7 +424,7 @@ blk0: ()
 				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SET).Emit(instr.RETURN)
 			})}
 
-		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 
@@ -450,7 +451,7 @@ blk0: ()
 			Constants: []types.Boxed{types.BoxRef(2)},
 			Objects:   transform.Objects{2: {Array: types.NewArrayType(types.TypeI32())}}}
 
-		out, err := transform.Translate(m, 1, fn, 0)
+		out, _, err := transform.Translate(m, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NotNil(t, out)
 		require.NoError(t, ssa.Verify(out))
@@ -466,7 +467,7 @@ blk0: ()
 			})}
 		m := transform.Module{Types: []types.Type{types.NewArrayType(types.TypeI32())}}
 
-		out, err := transform.Translate(m, 1, fn, 0)
+		out, _, err := transform.Translate(m, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NotNil(t, out)
 		require.NoError(t, ssa.Verify(out))
@@ -482,7 +483,7 @@ blk0: ()
 			})}
 		m := transform.Module{Types: []types.Type{types.NewArrayType(types.TypeAny())}}
 
-		out, err := transform.Translate(m, 1, fn, 0)
+		out, _, err := transform.Translate(m, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NotNil(t, out)
 		require.NoError(t, ssa.Verify(out))
@@ -498,7 +499,7 @@ blk0: ()
 					Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 5).Emit(instr.STRUCT_SET).Emit(instr.RETURN)
 			})}
 
-		out, err := transform.Translate(transform.Module{Types: []types.Type{record}}, 1, fn, 0)
+		out, _, err := transform.Translate(transform.Module{Types: []types.Type{record}}, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 
@@ -529,7 +530,7 @@ blk0: ()
 			Constants: []types.Boxed{types.BoxRef(2)},
 			Objects:   transform.Objects{2: {Struct: record}}}
 
-		out, err := transform.Translate(m, 1, fn, 0)
+		out, _, err := transform.Translate(m, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 		require.Contains(t, ssa.Format(out), "v3:ref = guard.shape v1 struct type ")
@@ -547,7 +548,7 @@ blk0: ()
 			Constants: []types.Boxed{types.BoxRef(2)},
 			Objects:   transform.Objects{2: {Function: callee}}}
 
-		out, err := transform.Translate(m, 1, fn, 0)
+		out, _, err := transform.Translate(m, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 		require.Equal(t, `func 1:0
@@ -576,7 +577,7 @@ blk0: ()
 			Constants: []types.Boxed{types.BoxRef(1)},
 			Objects:   transform.Objects{1: {Function: fn}}}
 
-		out, err := transform.Translate(m, 1, fn, 0)
+		out, _, err := transform.Translate(m, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 		require.Equal(t, `func 1:0
@@ -611,6 +612,232 @@ blk3: () <-- (blk1)
 `, ssa.Format(out))
 	})
 
+	t.Run("translates static tail calls between functions as one unit", func(t *testing.T) {
+		ping, pong := pingPong(t)
+		m := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(1), types.BoxRef(2)},
+			Objects:   transform.Objects{1: {Function: ping}, 2: {Function: pong}}}
+
+		out, members, err := transform.Translate(m, nil, 1, ping, 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, []int{1, 2}, members)
+		require.Equal(t, `func 1:0
+blk0: ()
+	jump blk1()
+blk1: () <-- (blk0, blk6)
+	v1:i32 = load local[0]
+	v2:i32 = const 0
+	v3:state = state {addr=1 base=0 ip=7 returns=1 stack=[v1, v2]}
+	v4:i1 = i32.eq v1, v2 state v3
+	br v4, blk2(), blk3()
+blk2: () <-- (blk1)
+	v33:i32 = load local[1]
+	v34:state = state {addr=1 base=0 ip=30 returns=1 stack=[v33]}
+	return v33 state v34
+blk3: () <-- (blk1)
+	v5:i32 = load local[0]
+	v6:i32 = const 1
+	v7:state = state {addr=1 base=0 ip=18 returns=1 stack=[v5, v6]}
+	v8:i32 = i32.sub v5, v6 state v7
+	v9:i32 = load local[1]
+	v10:i32 = load local[0]
+	v11:state = state {addr=1 base=0 ip=23 returns=1 stack=[v8, v9, v10]}
+	v12:i32 = i32.add v9, v10 state v11
+	v13:ref = const 2
+	v14:state = state {addr=1 base=0 ip=27 returns=1 stack=[v8, v12, v13]}
+	store local[1], v12 state v14
+	store local[0], v8 state v14
+	v15:ref = const 0
+	store local[2], v15 state v14
+	jump blk4()
+blk4: () <-- (blk3)
+	v16:i32 = load local[0]
+	v17:i32 = const 0
+	v18:state = state {addr=2 base=0 ip=7 returns=1 stack=[v16, v17]}
+	v19:i1 = i32.eq v16, v17 state v18
+	br v19, blk5(), blk6()
+blk5: () <-- (blk4)
+	v31:i32 = load local[1]
+	v32:state = state {addr=2 base=0 ip=30 returns=1 stack=[v31]}
+	return v31 state v32
+blk6: () <-- (blk4)
+	v20:i32 = load local[0]
+	v21:i32 = const 1
+	v22:state = state {addr=2 base=0 ip=18 returns=1 stack=[v20, v21]}
+	v23:i32 = i32.sub v20, v21 state v22
+	v24:i32 = load local[1]
+	v25:i32 = load local[0]
+	v26:state = state {addr=2 base=0 ip=23 returns=1 stack=[v23, v24, v25]}
+	v27:i32 = i32.add v24, v25 state v26
+	v28:ref = const 1
+	v29:state = state {addr=2 base=0 ip=27 returns=1 stack=[v23, v27, v28]}
+	store local[1], v27 state v29
+	store local[0], v23 state v29
+	v30:ref = const 0
+	store local[2], v30 state v29
+	jump blk1()
+`, ssa.Format(out))
+	})
+
+	t.Run("exits a tail call whose target cannot be a member", func(t *testing.T) {
+		for _, tt := range []struct {
+			name   string
+			mutate func(target *types.Function)
+		}{
+			{"another local", func(target *types.Function) { target.Locals = []types.Type{types.TypeI32()} }},
+			{"another return", func(target *types.Function) { target.Typ.Returns = []types.Type{types.TypeI64()} }},
+			{"captures", func(target *types.Function) { target.Captures = []types.Type{types.TypeI32()} }},
+			{"handlers", func(target *types.Function) { target.Handlers = []instr.Handler{{Start: 0, End: 1, Catch: 1}} }},
+			{"no code", func(target *types.Function) { target.Code = nil }},
+			{"another parameter count", func(target *types.Function) {
+				target.Typ.Params, target.Locals = target.Typ.Params[:1], []types.Type{types.TypeI32(), types.TypeAny()}
+			}},
+			{"a coroutine body", func(target *types.Function) {
+				target.Code = assemble(t, func(b *instr.Builder) { b.Emit(instr.YIELD).Emit(instr.LOCAL_GET, 1).Emit(instr.RETURN) })
+			}},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				ping, pong := pingPong(t)
+				tt.mutate(pong)
+				m := transform.Module{
+					Constants: []types.Boxed{types.BoxRef(1), types.BoxRef(2)},
+					Objects:   transform.Objects{1: {Function: ping}, 2: {Function: pong}}}
+
+				out, members, err := transform.Translate(m, nil, 1, ping, 0)
+				require.NoError(t, err)
+				require.NoError(t, ssa.Verify(out))
+				require.Equal(t, []int{1}, members)
+				require.Contains(t, ssa.Format(out), "exit state")
+				require.NotContains(t, ssa.Format(out), "addr=2 ")
+			})
+		}
+	})
+
+	t.Run("admits a tail target its own facts prove, however the constant reached the stack", func(t *testing.T) {
+		ping, pong := pingPong(t)
+		ping.Code = assemble(t, func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.CONST_GET, 1).Emit(instr.DUP).Emit(instr.DROP).Emit(instr.RETURN_CALL)
+		})
+		m := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(1), types.BoxRef(2)},
+			Objects:   transform.Objects{1: {Function: ping}, 2: {Function: pong}}}
+
+		out, members, err := transform.Translate(m, nil, 1, ping, 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, []int{1, 2}, members)
+		require.Contains(t, ssa.Format(out), "addr=2 ")
+	})
+
+	t.Run("exits a tail call to a target whose own tail call names its callee through a slot", func(t *testing.T) {
+		ping, pong := pingPong(t)
+		pong.Code = assemble(t, func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.RETURN_CALL)
+		})
+		m := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(1), types.BoxRef(2)},
+			Objects:   transform.Objects{1: {Function: ping}, 2: {Function: pong}}}
+
+		out, members, err := transform.Translate(m, nil, 1, ping, 0)
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, []int{1}, members)
+		require.Contains(t, ssa.Format(out), "exit state")
+	})
+
+	t.Run("keeps a root that compiles when a tail target translates only as an exit", func(t *testing.T) {
+		ping, pong := pingPong(t)
+		pong.Code = assemble(t, func(b *instr.Builder) {
+			b.Emit(instr.REF_NULL).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.DROP)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.RETURN)
+		})
+		m := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(1), types.BoxRef(2)},
+			Objects:   transform.Objects{1: {Function: ping}, 2: {Function: pong}}}
+
+		out, members, err := transform.Translate(m, nil, 1, ping, 0)
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, []int{1}, members)
+		require.Contains(t, ssa.Format(out), "exit state")
+	})
+
+	t.Run("exits every tail call when a slot is i64", func(t *testing.T) {
+		ping, pong := pingPong(t)
+		for _, fn := range []*types.Function{ping, pong} {
+			fn.Locals = append(fn.Locals, types.TypeI64())
+		}
+		m := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(1), types.BoxRef(2)},
+			Objects:   transform.Objects{1: {Function: ping}, 2: {Function: pong}}}
+
+		out, members, err := transform.Translate(m, nil, 1, ping, 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, []int{1}, members)
+		require.Contains(t, ssa.Format(out), "exit state")
+	})
+
+	t.Run("reads each member's own feedback at its own offsets", func(t *testing.T) {
+		build := func(other uint64) *types.Function {
+			return &types.Function{
+				Typ: &types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeAny()}, Returns: []types.Type{types.TypeI32()}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.CALL).Emit(instr.DROP)
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.CONST_GET, other).Emit(instr.RETURN_CALL)
+				})}
+		}
+		ping, pong := build(1), build(0)
+		callee := func() *types.Function {
+			return &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}}
+		}
+		m := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(1), types.BoxRef(2)},
+			Objects:   transform.Objects{1: {Function: ping}, 2: {Function: pong}, 3: {Function: callee()}, 4: {Function: callee()}}}
+		at := calls(ping.Code)[0]
+		profiles := transform.Profiles{
+			1: {Callees: map[int]transform.Callee{at: {Function: 3}}},
+			2: {Callees: map[int]transform.Callee{at: {Function: 4}}},
+		}
+
+		out, members, err := transform.Translate(m, profiles, 1, ping, 0)
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, []int{1, 2}, members)
+		text := ssa.Format(out)
+		require.Contains(t, text, "ref = const 3\n")
+		require.Contains(t, text, "ref = const 4\n")
+		require.Equal(t, 2, strings.Count(text, "guard.value"))
+	})
+
+	t.Run("exits a tail call that would grow the members past four functions", func(t *testing.T) {
+		fns := make([]*types.Function, 5)
+		objects := transform.Objects{}
+		var constants []types.Boxed
+		for i := range fns {
+			next := (i + 1) % len(fns)
+			fns[i] = &types.Function{
+				Typ: &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, uint64(next)).Emit(instr.RETURN_CALL)
+				})}
+			objects[i+1] = transform.Object{Function: fns[i]}
+			constants = append(constants, types.BoxRef(i+1))
+		}
+
+		out, _, err := transform.Translate(transform.Module{Constants: constants, Objects: objects}, nil, 1, fns[0], 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		text := ssa.Format(out)
+		require.Equal(t, 1, strings.Count(text, "exit state"))
+		require.Contains(t, text, "addr=4 ")
+		require.NotContains(t, text, "addr=5 ")
+	})
+
 	t.Run("exits a tail call whose frame it cannot reuse", func(t *testing.T) {
 		wide := &types.Function{
 			Typ: &types.FunctionType{Params: []types.Type{types.TypeI64()}, Returns: []types.Type{types.TypeI64()}}}
@@ -621,7 +848,7 @@ blk3: () <-- (blk1)
 			Constants: []types.Boxed{types.BoxRef(1)},
 			Objects:   transform.Objects{1: {Function: wide}}}
 
-		out, err := transform.Translate(m, 1, wide, 0)
+		out, _, err := transform.Translate(m, nil, 1, wide, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 		require.Contains(t, ssa.Format(out), "exit state")
@@ -632,10 +859,10 @@ blk3: () <-- (blk1)
 		m := transform.Module{
 			Constants: []types.Boxed{types.BoxRef(1)},
 			Objects:   transform.Objects{1: {Function: fn}},
-			Callees:   map[int]transform.Callee{ips[0]: {Function: 1}, ips[1]: {Function: 1}},
 		}
+		profiles := transform.Profiles{1: {Callees: map[int]transform.Callee{ips[0]: {Function: 1}, ips[1]: {Function: 1}}}}
 
-		out, err := transform.Translate(m, 1, fn, 0)
+		out, _, err := transform.Translate(m, profiles, 1, fn, 0)
 		require.NoError(t, err)
 		require.NotNil(t, out)
 		require.NoError(t, ssa.Verify(out))
@@ -689,7 +916,7 @@ blk2: () <-- (blk0)
 		}
 		m := transform.Module{Constants: []types.Boxed{types.BoxRef(2)}, Objects: transform.Objects{2: {Function: target}}}
 
-		out, err := transform.Translate(m, 0, fn, 0)
+		out, _, err := transform.Translate(m, nil, 0, fn, 0)
 		require.NoError(t, err)
 		require.NotNil(t, out)
 		require.NoError(t, ssa.Verify(out))
@@ -724,7 +951,7 @@ blk0: ()
 		}
 		m := transform.Module{Constants: []types.Boxed{types.BoxRef(2)}, Objects: transform.Objects{2: {Function: target}}}
 
-		out, err := transform.Translate(m, 1, fn, 0)
+		out, _, err := transform.Translate(m, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NotNil(t, out)
 		require.NotContains(t, ssa.Format(out), "call")
@@ -741,10 +968,10 @@ blk0: ()
 		m := transform.Module{
 			Constants: []types.Boxed{types.BoxRef(2)},
 			Objects:   transform.Objects{2: {Function: target}},
-			Callees:   map[int]transform.Callee{2: {Function: 2, Closure: true}},
 		}
+		profiles := transform.Profiles{1: {Callees: map[int]transform.Callee{2: {Function: 2, Closure: true}}}}
 
-		out, err := transform.Translate(m, 1, fn, 0)
+		out, _, err := transform.Translate(m, profiles, 1, fn, 0)
 		require.NoError(t, err)
 		require.NotNil(t, out)
 		require.NoError(t, ssa.Verify(out))
@@ -773,7 +1000,7 @@ blk0: ()
 			Globals:   []types.Kind{types.KindRef},
 		}
 
-		out, err := transform.Translate(m, 0, fn, 0)
+		out, _, err := transform.Translate(m, nil, 0, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 		require.Equal(t, `func 0:0
@@ -798,7 +1025,7 @@ blk0: ()
 		}
 		m := transform.Module{Constants: []types.Boxed{types.BoxRef(2)}}
 
-		out, err := transform.Translate(m, 1, fn, 0)
+		out, _, err := transform.Translate(m, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 		require.Equal(t, `func 1:0
@@ -814,7 +1041,7 @@ blk0: ()
 
 	t.Run("ends a never-executed dynamic call's block in an exit and leaves out what only follows it", func(t *testing.T) {
 		fn, ip := coldCallFunction(t)
-		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NotNil(t, out)
 		require.NoError(t, ssa.Verify(out))
@@ -837,8 +1064,8 @@ blk2: () <-- (blk0)
 	t.Run("calls a dynamic callee of one shared signature through an owned, signature-carrying call", func(t *testing.T) {
 		fn, ip := coldCallFunction(t)
 		sig := fn.Typ.Params[1].(*types.FunctionType)
-		m := transform.Module{Callees: map[int]transform.Callee{ip: {Type: sig}}}
-		out, err := transform.Translate(m, 1, fn, 0)
+		profiles := transform.Profiles{1: {Callees: map[int]transform.Callee{ip: {Type: sig}}}}
+		out, _, err := transform.Translate(transform.Module{}, profiles, 1, fn, 0)
 		require.NoError(t, err)
 		require.NotNil(t, out)
 		require.NoError(t, ssa.Verify(out))
@@ -869,8 +1096,8 @@ blk4: () <-- (blk1)
 
 	t.Run("declines a dynamic callee whose feedback shares no signature", func(t *testing.T) {
 		fn, ip := coldCallFunction(t)
-		m := transform.Module{Callees: map[int]transform.Callee{ip: {}}}
-		out, err := transform.Translate(m, 1, fn, 0)
+		profiles := transform.Profiles{1: {Callees: map[int]transform.Callee{ip: {}}}}
+		out, _, err := transform.Translate(transform.Module{}, profiles, 1, fn, 0)
 		require.NoError(t, err)
 		require.Nil(t, out)
 	})
@@ -880,10 +1107,10 @@ blk4: () <-- (blk1)
 		m := transform.Module{
 			Constants: []types.Boxed{types.BoxRef(1)},
 			Objects:   transform.Objects{1: {Function: fn}, 7: {Struct: &types.StructType{}}},
-			Callees:   map[int]transform.Callee{ips[0]: {Function: 7}, ips[1]: {Function: 7}},
 		}
+		profiles := transform.Profiles{1: {Callees: map[int]transform.Callee{ips[0]: {Function: 7}, ips[1]: {Function: 7}}}}
 
-		out, err := transform.Translate(m, 1, fn, 0)
+		out, _, err := transform.Translate(m, profiles, 1, fn, 0)
 		require.NoError(t, err)
 		require.Nil(t, out)
 	})
@@ -902,10 +1129,10 @@ blk4: () <-- (blk1)
 		m := transform.Module{
 			Constants: []types.Boxed{types.BoxRef(1)},
 			Objects:   transform.Objects{1: {Function: target}},
-			Callees:   map[int]transform.Callee{ip: {Function: 1}},
 		}
+		profiles := transform.Profiles{0: {Callees: map[int]transform.Callee{ip: {Function: 1}}}}
 
-		out, err := transform.Translate(m, 0, fn, 0)
+		out, _, err := transform.Translate(m, profiles, 0, fn, 0)
 		require.NoError(t, err)
 		require.Nil(t, out)
 	})
@@ -917,7 +1144,7 @@ blk4: () <-- (blk1)
 				b.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
 			})}
 
-		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 		require.Equal(t, `func 1:0
@@ -939,7 +1166,7 @@ blk0: ()
 				b.Emit(instr.I32_ADD).Emit(instr.RETURN)
 			})}
 
-		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 		require.Equal(t, `func 1:0
@@ -966,7 +1193,7 @@ blk0: ()
 				b.Emit(instr.REF_NULL).Emit(instr.REF_NULL).Emit(instr.I32_CONST, 1).Emit(instr.SELECT).Emit(instr.RETURN)
 			})}
 
-		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 		require.Equal(t, `func 1:0
@@ -1075,6 +1302,21 @@ func TestAdopts(t *testing.T) {
 	}
 }
 
+func TestProfiles_Of(t *testing.T) {
+	profiles := transform.Profiles{1: {Refuted: map[int]bool{4: true}, Generation: 2}, 2: nil}
+
+	t.Run("returns the profile recorded at an address", func(t *testing.T) {
+		require.Equal(t, uint64(2), profiles.Of(1).Generation)
+		require.True(t, profiles.Of(1).Refuted[4])
+	})
+
+	t.Run("returns the zero profile for an address with none", func(t *testing.T) {
+		for _, address := range []int{-1, 0, 2, 3} {
+			require.Equal(t, transform.Profile{}, profiles.Of(address))
+		}
+	})
+}
+
 func loopFunction(t *testing.T) (*types.Function, int) {
 	t.Helper()
 	b := instr.NewBuilder()
@@ -1138,6 +1380,26 @@ func coldCallFunction(t *testing.T) (*types.Function, int) {
 		Code: instr.Marshal(code),
 	}
 	return fn, calls(fn.Code)[0]
+}
+
+// pingPong is two functions of one signature that tail call each other,
+// stored at addresses 1 and 2.
+func pingPong(t *testing.T) (*types.Function, *types.Function) {
+	t.Helper()
+	build := func(other int) *types.Function {
+		return &types.Function{
+			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
+			Locals: []types.Type{types.TypeAny()},
+			Code: assemble(t, func(b *instr.Builder) {
+				base := b.Label()
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_EQ).BrIf(base)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB)
+				b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_ADD)
+				b.Emit(instr.CONST_GET, uint64(other)).Emit(instr.RETURN_CALL)
+				b.Bind(base).Emit(instr.LOCAL_GET, 1).Emit(instr.RETURN)
+			})}
+	}
+	return build(1), build(0)
 }
 
 func assemble(t *testing.T, emit func(b *instr.Builder)) []byte {

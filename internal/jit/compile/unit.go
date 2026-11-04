@@ -10,12 +10,15 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// Unit is what one compile reads: program data and module facts only, never
-// the live heap (L11).
+// Unit is what one compile reads: program data, module facts and a snapshot
+// of function profiles only, never the live heap (L11).
 type Unit struct {
 	Address  int
 	Function *types.Function
 	Module   transform.Module
+	// Profiles is the feedback snapshot the compile reads, for the root and
+	// every function it joins.
+	Profiles transform.Profiles
 	Tier     jit.Tier
 	// IP is the bytecode offset translation and lowering root at.
 	IP int
@@ -28,7 +31,7 @@ type Unit struct {
 // Compile translates u at its IP, optimizes it for its tier, and lowers
 // it with m.
 func Compile(u Unit, m Machine) (*jit.Code, error) {
-	f, err := transform.Translate(u.Module, u.Address, u.Function, u.IP)
+	f, members, err := transform.Translate(u.Module, u.Profiles, u.Address, u.Function, u.IP)
 	if err != nil {
 		return nil, fmt.Errorf("compile: translate: %w", err)
 	}
@@ -39,7 +42,7 @@ func Compile(u Unit, m Machine) (*jit.Code, error) {
 		return nil, fmt.Errorf("compile: verify: %w", err)
 	}
 
-	stages := passes(u.Tier, u.Module.Refuted)
+	stages := passes(u.Tier, u.Profiles)
 	if stages == nil {
 		return nil, fmt.Errorf("%w: tier %d", ErrUnsupported, u.Tier)
 	}
@@ -69,6 +72,9 @@ func Compile(u Unit, m Machine) (*jit.Code, error) {
 	if err != nil {
 		return nil, fmt.Errorf("compile: code: %w", err)
 	}
+	for _, address := range members {
+		c.Deps = append(c.Deps, jit.Dep{Address: address, Generation: u.Profiles.Of(address).Generation})
+	}
 	return c, nil
 }
 
@@ -85,9 +91,9 @@ func completion(f *ssa.Function) int {
 }
 
 // passes is the tier's pipeline: Baseline folds and eliminates dead code;
-// Optimized drops the bounds checks no refuted guard keeps (refuted is
-// Module.Refuted).
-func passes(tier jit.Tier, refuted map[int]bool) []pass.Pass[*ssa.Function] {
+// Optimized drops the bounds checks no refuted guard keeps (profiles
+// Profile.Refuted).
+func passes(tier jit.Tier, profiles transform.Profiles) []pass.Pass[*ssa.Function] {
 	switch tier {
 	case jit.Baseline:
 		return []pass.Pass[*ssa.Function]{transform.NewFoldPass(), transform.NewDCEPass()}
@@ -95,7 +101,7 @@ func passes(tier jit.Tier, refuted map[int]bool) []pass.Pass[*ssa.Function] {
 		return []pass.Pass[*ssa.Function]{
 			transform.NewFoldPass(), transform.NewForwardPass(), transform.NewCSEPass(),
 			transform.NewGuardPass(), transform.NewDCEPass(), transform.NewPromotePass(),
-			transform.NewHoistPass(), transform.NewBoundPass(refuted), transform.NewDCEPass(),
+			transform.NewHoistPass(), transform.NewBoundPass(profiles), transform.NewDCEPass(),
 		}
 	default:
 		return nil
