@@ -252,16 +252,7 @@ func hoistable(operation ssa.Operation) bool {
 	case ssa.OpConst:
 		return true
 	case ssa.OpExec:
-		if !operation.Code.IsPure() || ssa.OverflowsI64(operation.Code) {
-			return false
-		}
-		switch operation.Code {
-		case instr.I32_DIV_S, instr.I32_DIV_U, instr.I32_REM_S, instr.I32_REM_U,
-			instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U:
-			return false
-		default:
-			return true
-		}
+		return operation.Code.IsPure() && !operation.Code.Traps() && !ssa.OverflowsI64(operation.Code)
 	default:
 		return false
 	}

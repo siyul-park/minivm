@@ -56,6 +56,23 @@ func TestDCEPass_Run(t *testing.T) {
 		require.Contains(t, ssa.Format(fn), "array.len")
 	})
 
+	t.Run("keeps a division whose quotient is unused, since it may trap", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		x, y := b.Param(entry, ssa.TypeI32), b.Param(entry, ssa.TypeI32)
+		quotient := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_DIV_S, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{quotient}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.True(t, preserved)
+		require.Contains(t, ssa.Format(fn), "i32.div_s")
+	})
+
 	t.Run("removes a block unreachable from the entry", func(t *testing.T) {
 		b := ssa.New("f")
 		entry, live := b.Block(), b.Block()
