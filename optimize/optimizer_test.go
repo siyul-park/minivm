@@ -29,6 +29,23 @@ func TestNew(t *testing.T) {
 }
 
 func TestOptimizer_Optimize(t *testing.T) {
+	t.Run("keeps a division whose quotient is dropped, since it may trap", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.I32_CONST, 7),
+			instr.MustNew(instr.LOCAL_GET, 0),
+			instr.MustNew(instr.I32_DIV_S),
+			instr.MustNew(instr.DROP),
+			instr.MustNew(instr.I32_CONST, 5),
+			instr.MustNew(instr.RETURN)).MustBuild()
+		prog := program.New(
+			[]instr.Instruction{instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+			program.WithConstants(fn))
+
+		optimized, err := optimize.New(optimize.O3).Optimize(prog)
+		require.NoError(t, err)
+		require.Contains(t, instr.Format(optimized.Constants[0].(*types.Function).Code), "i32.div_s")
+	})
+
 	t.Run("O0 passthrough", func(t *testing.T) {
 		o := optimize.New(optimize.O0)
 		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})

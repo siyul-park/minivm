@@ -93,7 +93,7 @@ func liveness(function *ssa.Function, blocks []int) map[site]bool {
 				ssa.OpRetain, ssa.OpRelease:
 				effectful = true
 			case ssa.OpExec:
-				effectful = !operation.Code.IsPure()
+				effectful = !operation.Code.IsPure() || operation.Code.Traps()
 			}
 			if effectful {
 				mark(site{b, i}, operation)

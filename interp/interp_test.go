@@ -2782,6 +2782,40 @@ func TestWithFuel(t *testing.T) {
 }
 
 func TestWithThreshold(t *testing.T) {
+	t.Run("raises a divide by zero whose quotient native code drops", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		typ := &types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}
+		b := types.NewFunctionBuilder(typ)
+		loop, done := b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_EQ).BrIf(done)
+		b.Emit(instr.I32_CONST, 7).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_DIV_S).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB).Emit(instr.LOCAL_SET, 0).Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
+		prog := program.NewBuilder().
+			Globals(types.TypeI32()).
+			Emit(instr.I32_CONST, 64).Emit(instr.GLOBAL_GET, 0).ConstGet(b.MustBuild()).Emit(instr.CALL).
+			MustBuild()
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		run := func(divisor int32) error {
+			vm.Reset()
+			require.NoError(t, vm.SetGlobal(0, types.BoxI32(divisor)))
+			return vm.Run(context.Background())
+		}
+		poll(t, func() bool {
+			require.NoError(t, run(1))
+			vm.Flush()
+			return nativeEntries(profiler) > 0
+		})
+
+		require.ErrorIs(t, run(0), interp.ErrDivideByZero)
+	})
+
 	t.Run("reports threaded's heap exhaustion from a callout with threaded's counts", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 

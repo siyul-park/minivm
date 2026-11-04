@@ -10,6 +10,8 @@ type Type struct {
 	Push     []Kind
 	Reads    Effect
 	Writes   Effect
+	// Traps marks an opcode that raises a trap for some operand values.
+	Traps bool
 }
 
 // Effect names one part of the machine an opcode touches beyond the operand
@@ -98,10 +100,10 @@ var types = map[Opcode]Type{
 	I32_ADD:   {Mnemonic: "i32.add", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
 	I32_SUB:   {Mnemonic: "i32.sub", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
 	I32_MUL:   {Mnemonic: "i32.mul", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
-	I32_DIV_S: {Mnemonic: "i32.div_s", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
-	I32_DIV_U: {Mnemonic: "i32.div_u", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
-	I32_REM_S: {Mnemonic: "i32.rem_s", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
-	I32_REM_U: {Mnemonic: "i32.rem_u", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
+	I32_DIV_S: {Mnemonic: "i32.div_s", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}, Traps: true},
+	I32_DIV_U: {Mnemonic: "i32.div_u", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}, Traps: true},
+	I32_REM_S: {Mnemonic: "i32.rem_s", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}, Traps: true},
+	I32_REM_U: {Mnemonic: "i32.rem_u", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}, Traps: true},
 	I32_SHL:   {Mnemonic: "i32.shl", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
 	I32_SHR_S: {Mnemonic: "i32.shr_s", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
 	I32_SHR_U: {Mnemonic: "i32.shr_u", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
@@ -132,10 +134,10 @@ var types = map[Opcode]Type{
 	I64_ADD:   {Mnemonic: "i64.add", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}},
 	I64_SUB:   {Mnemonic: "i64.sub", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}},
 	I64_MUL:   {Mnemonic: "i64.mul", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}},
-	I64_DIV_S: {Mnemonic: "i64.div_s", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}},
-	I64_DIV_U: {Mnemonic: "i64.div_u", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}},
-	I64_REM_S: {Mnemonic: "i64.rem_s", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}},
-	I64_REM_U: {Mnemonic: "i64.rem_u", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}},
+	I64_DIV_S: {Mnemonic: "i64.div_s", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}, Traps: true},
+	I64_DIV_U: {Mnemonic: "i64.div_u", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}, Traps: true},
+	I64_REM_S: {Mnemonic: "i64.rem_s", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}, Traps: true},
+	I64_REM_U: {Mnemonic: "i64.rem_u", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}, Traps: true},
 	I64_SHL:   {Mnemonic: "i64.shl", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}},
 	I64_SHR_S: {Mnemonic: "i64.shr_s", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}},
 	I64_SHR_U: {Mnemonic: "i64.shr_u", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}},
@@ -333,4 +335,12 @@ func (op Opcode) Writes(effect Effect) bool {
 func (op Opcode) IsPure() bool {
 	t := TypeOf(op)
 	return t.Reads == 0 && t.Writes == 0 && len(t.Push) > 0
+}
+
+// Traps reports whether op raises a trap for some operand values, as integer
+// division does on a zero divisor. A consumer may still number equal
+// occurrences, but must neither remove one whose result is unused nor run one
+// that the program might not.
+func (op Opcode) Traps() bool {
+	return TypeOf(op).Traps
 }
