@@ -922,14 +922,6 @@ func encodeCompareImm(op uint32, inst asm.Instruction) ([]byte, error) {
 	return enc(base | (uint32(imm)&0xFFF)<<10 | reg(n)<<5), nil
 }
 
-func (o *operands) imm(op asm.Operand, missing error) int64 {
-	i, ok := op.(asm.ImmOperand)
-	if !ok {
-		o.fail(missing)
-	}
-	return i.Value
-}
-
 // encodeLoad emits an unsigned-offset load, picking the 32- or 64-bit form
 // by the destination's declared width and scaling the byte offset by that
 // form's own access size.
@@ -969,15 +961,6 @@ func encodeStore(op uint32, scale int64, inst asm.Instruction) ([]byte, error) {
 	}
 	pimm := uint32(offset/scale) & 0xFFF
 	return enc(op | pimm<<10 | reg(base)<<5 | reg(src)), nil
-}
-
-func (o *operands) mem(op asm.Operand) (base asm.PReg, offset int64) {
-	m, ok := op.(asm.MemOperand)
-	if !ok {
-		o.fail(ErrMissingMemoryOperand)
-		return 0, 0
-	}
-	return o.reg(m.Base, ErrMissingMemoryOperand), m.Offset
 }
 
 // indexedLoad is the register-offset load word op names for dst, its index
@@ -1057,6 +1040,23 @@ func encodeFloatTernary(op32, op64 uint32, inst asm.Instruction) ([]byte, error)
 		base = op32
 	}
 	return enc(base | reg(m)<<16 | reg(a)<<10 | reg(n)<<5 | reg(d)), nil
+}
+
+func (o *operands) imm(op asm.Operand, missing error) int64 {
+	i, ok := op.(asm.ImmOperand)
+	if !ok {
+		o.fail(missing)
+	}
+	return i.Value
+}
+
+func (o *operands) mem(op asm.Operand) (base asm.PReg, offset int64) {
+	m, ok := op.(asm.MemOperand)
+	if !ok {
+		o.fail(ErrMissingMemoryOperand)
+		return 0, 0
+	}
+	return o.reg(m.Base, ErrMissingMemoryOperand), m.Offset
 }
 
 func (o *operands) reg(op asm.Operand, missing error) asm.PReg {

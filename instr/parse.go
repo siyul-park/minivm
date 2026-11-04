@@ -211,45 +211,6 @@ func Parse(line string) (Instruction, error) {
 	return New(op, operands...)
 }
 
-// define binds name to the next instruction Builder emits, failing if an
-// earlier line already defined it.
-func (lt *labelTable) define(name string, line int) error {
-	if def, ok := lt.defLine[name]; ok {
-		return fmt.Errorf("line %d: %w: %q (first defined at line %d)", line, ErrDuplicateLabel, name, def)
-	}
-	lt.b.Bind(lt.get(name))
-	lt.defLine[name] = line
-	return nil
-}
-
-func (lt *labelTable) describe(lines []int, err error) error {
-	b := lt.b
-	switch {
-	case errors.Is(err, ErrUnboundLabel):
-		for _, name := range lt.names {
-			if b.labels[lt.byName[name].n] < 0 {
-				return fmt.Errorf("line %d: %w: %q", lt.refLine[name], ErrUnboundLabel, name)
-			}
-		}
-	case errors.Is(err, ErrOffsetRange):
-		pos := make([]int, len(b.instrs)+1)
-		for i, inst := range b.instrs {
-			pos[i+1] = pos[i] + inst.Width()
-		}
-		for i, fx := range b.fixups {
-			target := b.labels[fx.label.n]
-			if target < 0 {
-				continue
-			}
-			offset := pos[target] - pos[fx.branch+1]
-			if offset < math.MinInt16 || offset > math.MaxInt16 {
-				return fmt.Errorf("line %d: %w: %q", lines[i], ErrOffsetRange, lt.names[fx.label.n])
-			}
-		}
-	}
-	return err
-}
-
 // stripOffsetPrefix removes a leading "NNNN:" or "NNNN:\t" byte-offset
 // prefix of the kind Format emits ahead of each instruction, if present.
 func stripOffsetPrefix(line string) string {
@@ -367,6 +328,45 @@ func parseBranchOperand(tok string, lt *labelTable, line int) (uint64, *Label, e
 	}
 	l := lt.reference(tok, line)
 	return 0, &l, nil
+}
+
+// define binds name to the next instruction Builder emits, failing if an
+// earlier line already defined it.
+func (lt *labelTable) define(name string, line int) error {
+	if def, ok := lt.defLine[name]; ok {
+		return fmt.Errorf("line %d: %w: %q (first defined at line %d)", line, ErrDuplicateLabel, name, def)
+	}
+	lt.b.Bind(lt.get(name))
+	lt.defLine[name] = line
+	return nil
+}
+
+func (lt *labelTable) describe(lines []int, err error) error {
+	b := lt.b
+	switch {
+	case errors.Is(err, ErrUnboundLabel):
+		for _, name := range lt.names {
+			if b.labels[lt.byName[name].n] < 0 {
+				return fmt.Errorf("line %d: %w: %q", lt.refLine[name], ErrUnboundLabel, name)
+			}
+		}
+	case errors.Is(err, ErrOffsetRange):
+		pos := make([]int, len(b.instrs)+1)
+		for i, inst := range b.instrs {
+			pos[i+1] = pos[i] + inst.Width()
+		}
+		for i, fx := range b.fixups {
+			target := b.labels[fx.label.n]
+			if target < 0 {
+				continue
+			}
+			offset := pos[target] - pos[fx.branch+1]
+			if offset < math.MinInt16 || offset > math.MaxInt16 {
+				return fmt.Errorf("line %d: %w: %q", lines[i], ErrOffsetRange, lt.names[fx.label.n])
+			}
+		}
+	}
+	return err
 }
 
 // reference records line as a use site of name, the first if there are

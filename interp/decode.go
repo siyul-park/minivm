@@ -165,44 +165,6 @@ func unmarshalArray(t reflect.Type, elem *conversion) UnmarshalerFunc {
 	}
 }
 
-// elements reports the length of a VM array and a reader for its elements. The
-// source representation is resolved once per array rather than per element.
-func (d *Decoder) elements(val types.Value) (int, func(int) (types.Value, error), error) {
-	switch v := val.(type) {
-	case types.TypedArray[bool]:
-		return len(v), func(i int) (types.Value, error) { return types.I1(v[i]), nil }, nil
-	case types.TypedArray[int8]:
-		return len(v), func(i int) (types.Value, error) { return types.I32(v[i]), nil }, nil
-	case types.TypedArray[int32]:
-		return len(v), func(i int) (types.Value, error) { return types.I32(v[i]), nil }, nil
-	case types.TypedArray[int64]:
-		return len(v), func(i int) (types.Value, error) { return types.I64(v[i]), nil }, nil
-	case types.TypedArray[float32]:
-		return len(v), func(i int) (types.Value, error) { return types.F32(v[i]), nil }, nil
-	case types.TypedArray[float64]:
-		return len(v), func(i int) (types.Value, error) { return types.F64(v[i]), nil }, nil
-	case *types.Array:
-		return len(v.Elems), func(i int) (types.Value, error) {
-			return d.interp.deref(v.Elems[i])
-		}, nil
-	default:
-		return 0, nil, fmt.Errorf("%w: source=%T", ErrTypeMismatch, val)
-	}
-}
-
-func fill(d *Decoder, elem *conversion, base unsafe.Pointer, stride uintptr, n int, read func(int) (types.Value, error)) error {
-	for idx := range n {
-		value, err := read(idx)
-		if err != nil {
-			return fmt.Errorf("array element %d: %w", idx, err)
-		}
-		if err := elem.set(d, value, unsafe.Add(base, uintptr(idx)*stride)); err != nil {
-			return fmt.Errorf("array element %d: %w", idx, err)
-		}
-	}
-	return nil
-}
-
 // unmarshalKey reverses Interpreter.mapKey for dynamic host maps: numeric kinds
 // use their normalized Go type, strings use content, and other refs use identity.
 func unmarshalKey(d *Decoder, val types.Value, p unsafe.Pointer) error {
@@ -258,6 +220,31 @@ func unmarshalMap(t reflect.Type, index UnmarshalerFunc, elem *conversion) Unmar
 	}
 }
 
+// elements reports the length of a VM array and a reader for its elements. The
+// source representation is resolved once per array rather than per element.
+func (d *Decoder) elements(val types.Value) (int, func(int) (types.Value, error), error) {
+	switch v := val.(type) {
+	case types.TypedArray[bool]:
+		return len(v), func(i int) (types.Value, error) { return types.I1(v[i]), nil }, nil
+	case types.TypedArray[int8]:
+		return len(v), func(i int) (types.Value, error) { return types.I32(v[i]), nil }, nil
+	case types.TypedArray[int32]:
+		return len(v), func(i int) (types.Value, error) { return types.I32(v[i]), nil }, nil
+	case types.TypedArray[int64]:
+		return len(v), func(i int) (types.Value, error) { return types.I64(v[i]), nil }, nil
+	case types.TypedArray[float32]:
+		return len(v), func(i int) (types.Value, error) { return types.F32(v[i]), nil }, nil
+	case types.TypedArray[float64]:
+		return len(v), func(i int) (types.Value, error) { return types.F64(v[i]), nil }, nil
+	case *types.Array:
+		return len(v.Elems), func(i int) (types.Value, error) {
+			return d.interp.deref(v.Elems[i])
+		}, nil
+	default:
+		return 0, nil, fmt.Errorf("%w: source=%T", ErrTypeMismatch, val)
+	}
+}
+
 // entries walks a VM map, resolving one representation switch per map and
 // reporting the entry count first so the destination is sized once.
 func (d *Decoder) entries(val types.Value, reserve func(int), set func(key, value types.Value) error) error {
@@ -304,6 +291,19 @@ func (d *Decoder) entries(val types.Value, reserve func(int), set func(key, valu
 		return fmt.Errorf("%w: source=%T", ErrTypeMismatch, val)
 	}
 	return err
+}
+
+func fill(d *Decoder, elem *conversion, base unsafe.Pointer, stride uintptr, n int, read func(int) (types.Value, error)) error {
+	for idx := range n {
+		value, err := read(idx)
+		if err != nil {
+			return fmt.Errorf("array element %d: %w", idx, err)
+		}
+		if err := elem.set(d, value, unsafe.Add(base, uintptr(idx)*stride)); err != nil {
+			return fmt.Errorf("array element %d: %w", idx, err)
+		}
+	}
+	return nil
 }
 
 // rangeKeys reserves m's size, then visits each entry under its boxed key.

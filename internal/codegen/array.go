@@ -500,11 +500,6 @@ func arraySwitch(subject jen.Code, body func(typedElem) []jen.Code, rest ...jen.
 	return typeSwitch(subject, typedElems, typedElem.instance, body, rest...)
 }
 
-// instance is the type-switch case of a typed array of e.
-func (e typedElem) instance() jen.Code {
-	return e.array()
-}
-
 // hostArrayCase is the type-switch case of a host array view.
 func hostArrayCase(body ...jen.Code) jen.Code {
 	return jen.Case(jen.Op("*").Id("HostArray")).Block(body...)
@@ -529,6 +524,11 @@ func copyCases() []jen.Code {
 		))
 	}
 	return cases
+}
+
+// instance is the type-switch case of a typed array of e.
+func (e typedElem) instance() jen.Code {
+	return e.array()
 }
 
 // array is the type of a typed array of e.

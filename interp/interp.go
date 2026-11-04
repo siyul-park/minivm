@@ -157,16 +157,6 @@ const (
 
 const heapRunway = 64
 
-// MustNew is New for known-good programs, such as tests and fixtures. It
-// panics if prog is rejected.
-func MustNew(prog *program.Program, opts ...Option) *Interpreter {
-	i, err := New(prog, opts...)
-	if err != nil {
-		panic(err)
-	}
-	return i
-}
-
 // WithHook installs an execution hook.
 func WithHook(fn func(*Interpreter) error) Option {
 	return func(o *option) { o.hook = fn }
@@ -225,6 +215,16 @@ func WithFuel(val uint64) Option {
 // WithTick above 1.
 func WithThreshold(n int) Option {
 	return func(o *option) { o.threshold = n }
+}
+
+// MustNew is New for known-good programs, such as tests and fixtures. It
+// panics if prog is rejected.
+func MustNew(prog *program.Program, opts ...Option) *Interpreter {
+	i, err := New(prog, opts...)
+	if err != nil {
+		panic(err)
+	}
+	return i
 }
 
 // New builds an interpreter for prog. It verifies and runs a snapshot of prog
@@ -2094,14 +2094,6 @@ func (i *Interpreter) wake() {
 	}
 }
 
-// aliasable reports whether val is a pointer, the only shape two slots can
-// share. A pointer is stored directly in the interface word and is comparable,
-// so the interface itself keys the index.
-func aliasable(val types.Value) bool {
-	typ := reflect.TypeOf(val)
-	return typ != nil && typ.Kind() == reflect.Pointer
-}
-
 func unboxRef[T types.Value](i *Interpreter, val types.Boxed) T {
 	v := deref[T](i, val)
 	i.release(val.Ref())
@@ -2180,6 +2172,14 @@ func (i *Interpreter) refs(v types.Value) []types.Ref {
 	}
 	i.refbuf = t.Refs(i.refbuf[:0])
 	return i.refbuf
+}
+
+// aliasable reports whether val is a pointer, the only shape two slots can
+// share. A pointer is stored directly in the interface word and is comparable,
+// so the interface itself keys the index.
+func aliasable(val types.Value) bool {
+	typ := reflect.TypeOf(val)
+	return typ != nil && typ.Kind() == reflect.Pointer
 }
 
 // deref is the T val references, keeping val's reference.
