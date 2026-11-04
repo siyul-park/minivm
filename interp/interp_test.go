@@ -2299,20 +2299,6 @@ func structGetHostLoop(repeats int32) *program.Program {
 	return prog
 }
 
-func TestMustNew(t *testing.T) {
-	t.Run("builds a verified program", func(t *testing.T) {
-		i := interp.MustNew(program.New([]instr.Instruction{instr.MustNew(instr.NOP)}))
-		defer i.Close()
-		require.NotNil(t, i)
-	})
-
-	t.Run("panics on a malformed program", func(t *testing.T) {
-		require.Panics(t, func() {
-			interp.MustNew(program.New([]instr.Instruction{instr.MustNew(instr.I32_ADD)}))
-		})
-	})
-}
-
 func TestWithHook(t *testing.T) {
 	tests := []struct {
 		name string
@@ -7825,6 +7811,20 @@ func TestWithThreshold(t *testing.T) {
 				require.Zero(t, deopts, "%s %x", c.code, args)
 			}
 		}
+	})
+}
+
+func TestMustNew(t *testing.T) {
+	t.Run("builds a verified program", func(t *testing.T) {
+		i := interp.MustNew(program.New([]instr.Instruction{instr.MustNew(instr.NOP)}))
+		defer i.Close()
+		require.NotNil(t, i)
+	})
+
+	t.Run("panics on a malformed program", func(t *testing.T) {
+		require.Panics(t, func() {
+			interp.MustNew(program.New([]instr.Instruction{instr.MustNew(instr.I32_ADD)}))
+		})
 	})
 }
 
