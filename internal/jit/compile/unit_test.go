@@ -158,11 +158,31 @@ func TestCompile(t *testing.T) {
 	})
 
 	t.Run("keeps the bounds checks of a loop whose header entry a guard refuted", func(t *testing.T) {
-		u := compile.Unit{Address: 1, Function: total(t), Tier: jit.Optimized, Module: transform.Module{Refuted: map[int]bool{totalTest: true}}}
+		u := compile.Unit{Address: 1, Function: total(t), Tier: jit.Optimized, Profiles: transform.Profiles{1: {Refuted: map[int]bool{totalTest: true}}}}
 		code, err := compile.Compile(u, arm64.New())
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, code.Free()) })
 		require.True(t, slices.ContainsFunc(code.Exits, func(e jit.Exit) bool { return e.Trap }))
+	})
+
+	t.Run("records the profile generation of the root and every member it compiled from", func(t *testing.T) {
+		build := func(other uint64) *types.Function {
+			return &types.Function{
+				Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
+				Code: instr.Marshal([]instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CONST_GET, other), instr.MustNew(instr.RETURN_CALL)}),
+			}
+		}
+		ping, pong := build(1), build(0)
+		module := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(1), types.BoxRef(2)},
+			Objects:   transform.Objects{1: {Function: ping}, 2: {Function: pong}},
+		}
+		profiles := transform.Profiles{1: {Generation: 3}, 2: {Generation: 5}, 3: {Generation: 9}}
+
+		code, err := compile.Compile(compile.Unit{Address: 1, Function: ping, Module: module, Profiles: profiles, Tier: jit.Baseline}, arm64.New())
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, code.Free()) })
+		require.Equal(t, []jit.Dep{{Address: 1, Generation: 3}, {Address: 2, Generation: 5}}, code.Deps)
 	})
 
 	t.Run("compiles and runs an OSR unit at every tier", func(t *testing.T) {
@@ -277,10 +297,10 @@ func TestCompile(t *testing.T) {
 		module := transform.Module{
 			Constants: []types.Boxed{types.BoxRef(1)},
 			Objects:   transform.Objects{1: {Function: fib}},
-			Callees:   map[int]transform.Callee{ips[0]: {Function: 1}, ips[1]: {Function: 1}},
 		}
+		profiles := transform.Profiles{1: {Callees: map[int]transform.Callee{ips[0]: {Function: 1}, ips[1]: {Function: 1}}}}
 		for _, tier := range []jit.Tier{jit.Baseline, jit.Optimized} {
-			c, err := compile.Compile(compile.Unit{Address: 1, Function: fib, Module: module, Tier: tier}, arm64.New())
+			c, err := compile.Compile(compile.Unit{Address: 1, Function: fib, Module: module, Profiles: profiles, Tier: tier}, arm64.New())
 			require.NoError(t, err)
 			require.NoError(t, c.Free())
 		}

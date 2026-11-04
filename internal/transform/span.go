@@ -6,7 +6,7 @@ import (
 )
 
 type span struct {
-	// act indexes the group member whose code the span covers.
+	// act indexes the translation member whose code the span covers.
 	act   int
 	start int
 	end   int

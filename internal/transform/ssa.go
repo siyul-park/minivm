@@ -83,7 +83,7 @@ func (p *SSAPass) roundtrip(manager *pass.Manager, constants *pool, address int,
 	if !expressible(function) {
 		return false, nil
 	}
-	f, err := Translate(constants.module(), address, function, 0)
+	f, _, err := Translate(constants.module(), nil, address, function, 0)
 	if err != nil || f == nil {
 		return false, err
 	}

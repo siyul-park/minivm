@@ -723,6 +723,38 @@ func pingPongProgram(t *testing.T, n, slow int, dynamic bool) *program.Program {
 	return program.New(entry, program.WithConstants(member(1, -1), member(0, slow), types.String("held"), wrapper))
 }
 
+// memberGuardProgram calls ping(n, 0, null) and leaves the result. ping and
+// pong (constants 0 and 1) sum n down to 0 by tail calling each other with an
+// array parameter; at n == slow pong reads an element of it, a container
+// guard native code compiles in pong alone and that the null array refutes.
+func memberGuardProgram(t *testing.T, n, slow int) *program.Program {
+	t.Helper()
+	array := types.NewArrayType(types.TypeI32())
+	member := func(other uint64, slow int) *types.Function {
+		b := instr.NewBuilder()
+		base, rare, next := b.Label(), b.Label(), b.Label()
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_EQ).BrIf(base)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(slow))).Emit(instr.I32_EQ).BrIf(rare)
+		b.Bind(next)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_ADD)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.CONST_GET, other).Emit(instr.RETURN_CALL)
+		b.Bind(base).Emit(instr.LOCAL_GET, 1).Emit(instr.RETURN)
+		b.Bind(rare).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.LOCAL_SET, 1).Br(next)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		return &types.Function{
+			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeI32(), array}, Returns: []types.Type{types.TypeI32()}},
+			Code: instr.Marshal(code),
+		}
+	}
+	b := instr.NewBuilder()
+	b.Emit(instr.I32_CONST, uint64(uint32(n))).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(instr.Unmarshal(instr.Marshal(code)), program.WithLocals(array), program.WithConstants(member(1, -1), member(0, slow)))
+}
+
 // iterativeFibProgram computes the nth Fibonacci number in a module-level
 // loop, carrying every value in locals so the loop header's own operand
 // stack is empty: a module-code OSR site, address 0 included.

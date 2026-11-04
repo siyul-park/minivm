@@ -13,6 +13,8 @@ type activation struct {
 	slots    []types.Type
 	// first is the index of the function's first span.
 	first int
+	// profile is the feedback recorded for the function.
+	profile Profile
 }
 
 // frame is the facts live at a span's entry: its operand stack, and, per

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Runs the repository gate before every commit. Install with `make init` or
+# `make install-hooks`; bypass once with `git commit --no-verify`.
+set -e
+git diff --cached --check
+make check

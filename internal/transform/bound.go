@@ -18,7 +18,7 @@ import (
 // shrinking op between the two would leave n above it. A loop whose header
 // entry offset is refuted keeps its checks.
 type BoundPass struct {
-	refuted map[int]bool
+	profiles Profiles
 }
 
 // induction is a loop the pass bounds: its preheader, induction variable,
@@ -35,22 +35,22 @@ type induction struct {
 type loops struct {
 	function  *ssa.Function
 	dominance *graph.Dominance
-	refuted   map[int]bool
+	profiles  Profiles
 	sites     map[ssa.Value]site
 	params    map[ssa.Value]int
 }
 
 var _ pass.Pass[*ssa.Function] = (*BoundPass)(nil)
 
-// NewBoundPass returns the pass; refuted holds the offsets whose guard native
-// code has seen fail (Module.Refuted).
-func NewBoundPass(refuted map[int]bool) *BoundPass {
-	return &BoundPass{refuted: refuted}
+// NewBoundPass returns the pass; profiles holds, per function, the offsets
+// whose guard native code has seen fail (Profile.Refuted).
+func NewBoundPass(profiles Profiles) *BoundPass {
+	return &BoundPass{profiles: profiles}
 }
 
 // Run applies the pass to one SSA function.
 func (p *BoundPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
-	bounded, guards := newLoops(function, p.refuted).bounds()
+	bounded, guards := newLoops(function, p.profiles).bounds()
 	if len(bounded) == 0 {
 		return true, nil
 	}
@@ -58,8 +58,8 @@ func (p *BoundPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	return false, nil
 }
 
-func newLoops(function *ssa.Function, refuted map[int]bool) *loops {
-	l := &loops{function: function, dominance: graph.NewDominance(function), refuted: refuted, sites: map[ssa.Value]site{}, params: map[ssa.Value]int{}}
+func newLoops(function *ssa.Function, profiles Profiles) *loops {
+	l := &loops{function: function, dominance: graph.NewDominance(function), profiles: profiles, sites: map[ssa.Value]site{}, params: map[ssa.Value]int{}}
 	for b := 0; b < function.Len(); b++ {
 		for _, v := range function.Block(b).Params {
 			l.params[v] = b
@@ -208,8 +208,10 @@ func (l *loops) induction(body map[int]bool, h int) (induction, bool) {
 		return induction{}, false
 	}
 
-	if frames, ok := inlet(l.function, l.sites, h, preheader, invariant); ok && !l.refuted[frames[len(frames)-1].IP] {
-		loop.frames = frames
+	if frames, ok := inlet(l.function, l.sites, h, preheader, invariant); ok {
+		if at := frames[len(frames)-1]; !l.profiles.Of(at.Address).Refuted[at.IP] {
+			loop.frames = frames
+		}
 	}
 	return loop, true
 }

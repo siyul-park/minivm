@@ -73,6 +73,7 @@ Query them with `op.Reads(effect)` and `op.Writes(effect)`. Rules:
 - allocating a container writes `Heap`; overwriting the contents of one both reads and writes it, which is where a replaced reference is released;
 - only `call` and `return_call` write `Frame`; resuming a coroutine pushes no frame;
 - `op.IsPure()` is derived, not declared: an opcode that reads nothing, writes nothing, and pushes at least one value computes from its operands alone, so a consumer `MAY` number, fold, or reorder it.
+- `op.Traps()` is declared: integer `div` and `rem` trap on a zero divisor. A trapping opcode can still be pure, so a consumer `MAY` number equal occurrences, but it `MUST NOT` remove one whose result is unused or hoist one the program might not run.
 
 New opcodes `MUST` declare effects beside stack effects in `instr/type.go`; consumers `MUST` query `instr` rather than re-derive effects.
 

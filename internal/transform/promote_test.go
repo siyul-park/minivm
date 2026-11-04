@@ -136,7 +136,7 @@ func TestNewPromotePass(t *testing.T) {
 func TestPromotePass_Run(t *testing.T) {
 	t.Run("keeps an unpromoted ref local beside a promoted i32 local", func(t *testing.T) {
 		fn, _ := loopFunction(t)
-		out, err := transform.Translate(transform.Module{}, 1, fn, 0)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
 

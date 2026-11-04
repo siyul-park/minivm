@@ -155,3 +155,21 @@ func TestOpcode_IsPure(t *testing.T) {
 		require.False(t, instr.DROP.IsPure())
 	})
 }
+
+func TestOpcode_Traps(t *testing.T) {
+	t.Run("marks integer division, which traps on a zero divisor", func(t *testing.T) {
+		for _, op := range []instr.Opcode{
+			instr.I32_DIV_S, instr.I32_DIV_U, instr.I32_REM_S, instr.I32_REM_U,
+			instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U,
+		} {
+			require.True(t, op.Traps(), instr.TypeOf(op).Mnemonic)
+			require.True(t, op.IsPure(), instr.TypeOf(op).Mnemonic)
+		}
+	})
+
+	t.Run("leaves an operation total over its operands unmarked", func(t *testing.T) {
+		require.False(t, instr.I32_ADD.Traps())
+		require.False(t, instr.F64_DIV.Traps())
+		require.False(t, instr.NOP.Traps())
+	})
+}

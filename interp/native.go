@@ -57,23 +57,20 @@ type native struct {
 	ledgers []jit.Ledger
 	// failed records permanent compile failure per address and tier.
 	failed [][2]bool
-	// built is the feedback each address's published code was compiled from,
-	// per tier: a retire blocks a recompile only when feedback has not moved
-	// since.
-	built [][2]transform.Module
+	// built is the profiles each address's published code was compiled from,
+	// per tier: a retire blocks a recompile only when none has moved since.
+	built [][2][]jit.Dep
 	// sites indexes every observed OSR site by (address, ip): drain looks a
 	// failed OSR unit's site up here to restore its threaded handler.
 	sites map[key]*site
-	// callees records each dynamic CALL's observed callees, by caller
-	// address then ip: the zero Callee means unseen, a mixed Function more
-	// than one seen (Type their shared signature, nil when they differ), any
-	// other the one callee seen there so far. A caller's own ip slice is
-	// allocated lazily, sized to its own code. feedback reads this to
-	// snapshot a unit's own sites at submit time.
-	callees [][]transform.Callee
-	// refuted records, by address then ip, each guard native code has seen
-	// fail; allocated lazily like callees. feedback snapshots it.
-	refuted [][]bool
+	// profiles is each address's current feedback: its dynamic CALL sites'
+	// observed callees (see) and its refuted guard sites (record). An entry
+	// is never mutated once installed; a change replaces it with the next
+	// generation, so a snapshot of the table is a consistent view.
+	profiles []*transform.Profile
+	// view is the snapshot of profiles a Submit hands out, rebuilt after a
+	// change.
+	view transform.Profiles
 
 	// exact caches unfused threaded code for materialized frames, by address.
 	exact [][]func(*Interpreter)
@@ -176,8 +173,8 @@ type site struct {
 	// code is the published code once a store lookup has found it; nil
 	// until then, and again once the site fails.
 	code *jit.Code
-	// built is the feedback s's published code was compiled from.
-	built transform.Module
+	// built is the profiles s's published code was compiled from.
+	built []jit.Dep
 	// refutes counts s's refuted speculations and re-arms: never reset, so
 	// they bound s's recompiles.
 	refutes int
@@ -224,10 +221,6 @@ const (
 	// per threaded instruction.
 	short = 32
 )
-
-// mixed marks a dynamic CALL site (native.callees) that has seen more than
-// one callee: it never speculates.
-const mixed = -1
 
 const (
 	metricCompiles = "vm_jit_compiles_total"
@@ -330,12 +323,11 @@ func (n *native) wake(i *Interpreter) bool {
 	n.refutes = make([]int, len(i.code))
 	n.ledgers = make([]jit.Ledger, len(i.code))
 	n.failed = make([][2]bool, len(i.code))
-	n.built = make([][2]transform.Module, len(i.code))
+	n.built = make([][2][]jit.Dep, len(i.code))
 	n.exact = make([][]func(*Interpreter), len(i.code))
 	n.borrows = make([][]bool, len(i.code))
 	n.sites = map[key]*site{}
-	n.callees = make([][]transform.Callee, len(i.code))
-	n.refuted = make([][]bool, len(i.code))
+	n.profiles = make([]*transform.Profile, len(i.code))
 	n.briefs = briefs
 	n.gates = slices.Clone(briefs)
 
@@ -588,7 +580,7 @@ func (n *native) observer(s *site, code []func(*Interpreter), inner func(*Interp
 			if total >= s.threshold && (total-s.threshold)%s.cadence == 0 && n.resolved(s.address, s.headers) {
 
 				n.drain(i)
-				u := compile.Unit{Address: s.address, Function: s.fn, Module: n.feedback(s.address), Tier: jit.Optimized, IP: s.ip, OSR: true}
+				u := compile.Unit{Address: s.address, Function: s.fn, Module: n.module, Profiles: n.snapshot(), Tier: jit.Optimized, IP: s.ip, OSR: true}
 				s.submitted = n.queue.Submit(u)
 			}
 		case due:
@@ -657,7 +649,7 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 		ok, retire, fault = n.settle(i, c, trap, &s.ledger, mark, start,
 			func(exit jit.Exit) { n.rebuild(i, exit, start, f.ref, f.release) },
 			func() bool {
-				if !same(s.built, n.feedback(s.address)) {
+				if n.stale(s.built) {
 					return true
 				}
 				s.refutes++
@@ -673,7 +665,7 @@ func (n *native) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	if retire {
 		n.store.RetireAt(s.address, s.ip)
 		s.code = nil
-		if s.refutes < tolerance && !same(s.built, n.feedback(s.address)) {
+		if s.refutes < tolerance && n.stale(s.built) {
 
 			s.refutes++
 			s.submitted = false
@@ -738,7 +730,7 @@ func (n *native) frame(i *Interpreter, at, k int, m jit.Frame, ref int, release 
 	ctx := n.ctx
 	if m.Address != entered(i, ref) {
 		// A tail call inside native code moved to another function of its
-		// group: threaded released ref there and the frame runs addr through
+		// translation: threaded released ref there and the frame runs addr through
 		// no reference of its own.
 		if release {
 			i.release(ref)
@@ -922,7 +914,7 @@ func (n *native) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 			if exit.Trap {
 				return false, false, nil
 			}
-			n.record(i, exit)
+			n.record(exit)
 			return false, n.judge(entered, code, refute), nil
 		}
 	}
@@ -955,16 +947,16 @@ func (n *native) judge(entered, code *jit.Code, refute func() bool) bool {
 }
 
 // refute counts one refuted speculation against addr's code at tier and
-// reports whether it retires: at once when feedback moved since the code was
-// built, which a recompile can use, else at the tolerance count.
+// reports whether it retires: at once when a profile it was built from moved,
+// which a recompile can use, else at the tolerance count.
 func (n *native) refute(addr int, tier jit.Tier) bool {
 	n.refutes[addr]++
 	return n.moved(addr, tier) || n.refutes[addr] >= tolerance
 }
 
 // retire unpublishes addr's code at tier and restarts its counters. The tier
-// fails only when feedback has not moved since the code was built: a
-// recompile would get no new input.
+// fails only when no profile it was built from moved: a recompile would get
+// no new input.
 func (n *native) retire(addr int, tier jit.Tier) {
 	n.store.Retire(addr)
 	if !n.moved(addr, tier) {
@@ -977,10 +969,17 @@ func (n *native) retire(addr int, tier jit.Tier) {
 	n.entries[addr], n.refutes[addr], n.ledgers[addr] = 0, 0, jit.Ledger{}
 }
 
-// moved reports whether addr's feedback changed since its code at tier was
-// built: a recompile at that tier has new input.
+// moved reports whether a profile addr's code at tier was built from changed
+// since: a recompile at that tier has new input.
 func (n *native) moved(addr int, tier jit.Tier) bool {
-	return !same(n.built[addr][tier-1], n.feedback(addr))
+	return n.stale(n.built[addr][tier-1])
+}
+
+// stale reports whether the generation of any profile in deps moved.
+func (n *native) stale(deps []jit.Dep) bool {
+	return slices.ContainsFunc(deps, func(d jit.Dep) bool {
+		return d.Address < len(n.profiles) && n.profiles[d.Address] != nil && n.profiles[d.Address].Generation != d.Generation
+	})
 }
 
 // pending reports whether addr has no code yet but may still compile: a
@@ -1283,47 +1282,65 @@ func (n *native) count(i *Interpreter, addr int, fn *types.Function) {
 	if total < int64(n.threshold)<<n.raise(addr) || n.hasFailed(addr, jit.Baseline) {
 		return
 	}
-	n.queue.Submit(compile.Unit{Address: addr, Function: fn, Module: n.feedback(addr), Tier: jit.Baseline})
+	n.queue.Submit(compile.Unit{Address: addr, Function: fn, Module: n.module, Profiles: n.snapshot(), Tier: jit.Baseline})
 }
 
 // see records the callee seen at the current dynamic CALL: i.fr's own
 // address and ip (the CALL's own, per call's doc). A caller past construction
-// (bound dynamically) is skipped; its own ip slice is allocated lazily, sized
-// to its own code, on first use. The transition is unset -> callee -> mixed
-// once a second, different callee is seen; it never moves back, and a mixed
-// site keeps its signature until a callee of another one is seen.
+// (bound dynamically) is skipped. The transition is unset -> callee -> mixed
+// (the zero Function) once a second, different callee is seen; it never
+// moves back, and a mixed site keeps its signature until a callee of another
+// one is seen. Only a transition revises the profile.
 func (n *native) see(i *Interpreter, callee transform.Callee) {
 	addr, ip := i.fr.addr, i.fr.ip
-	if addr >= len(n.callees) {
+	if addr >= len(n.profiles) {
 		return
 	}
-	if n.callees[addr] == nil {
-		n.callees[addr] = make([]transform.Callee, len(i.code[addr]))
-	}
 	callee.Type = i.function(callee.Function).Typ
-	sites := n.callees[addr]
-	switch site := sites[ip]; {
-	case site == transform.Callee{}:
-		sites[ip] = callee
+	site, seen := n.current(addr).Callees[ip]
+	next := callee
+	switch {
+	case !seen:
 	case site == callee:
+		return
 	case site.Type != nil && !site.Type.Equals(callee.Type):
-		sites[ip] = transform.Callee{Function: mixed}
+		next = transform.Callee{}
 	default:
-		sites[ip] = transform.Callee{Function: mixed, Type: site.Type}
+		next = transform.Callee{Type: site.Type}
 	}
+	if seen && next == site {
+		return
+	}
+	p := n.revise(addr)
+	p.Callees[ip] = next
 }
 
 // record notes exit's site, a guard that failed, so the next compile of its
-// function translates the site generic (transform.Module.Refuted).
-func (n *native) record(i *Interpreter, exit jit.Exit) {
+// function translates the site generic (transform.Profile.Refuted). The
+// site belongs to the function of the exit's frame, which is a member of the
+// code that took the exit when it is not the code's root.
+func (n *native) record(exit jit.Exit) {
 	addr, ip := exit.Frame.Address, exit.Frame.IP
-	if addr >= len(n.refuted) {
+	if addr >= len(n.profiles) || n.current(addr).Refuted[ip] {
 		return
 	}
-	if n.refuted[addr] == nil {
-		n.refuted[addr] = make([]bool, len(i.code[addr]))
+	n.revise(addr).Refuted[ip] = true
+}
+
+// revise installs a copy of addr's profile at the next generation and
+// returns it for the caller to change before anything reads it.
+func (n *native) revise(addr int) *transform.Profile {
+	old := n.current(addr)
+	p := &transform.Profile{Callees: maps.Clone(old.Callees), Refuted: maps.Clone(old.Refuted), Generation: old.Generation + 1}
+	if p.Callees == nil {
+		p.Callees = map[int]transform.Callee{}
 	}
-	n.refuted[addr][ip] = true
+	if p.Refuted == nil {
+		p.Refuted = map[int]bool{}
+	}
+	n.profiles[addr] = p
+	n.view = nil
+	return p
 }
 
 // drain publishes completed jobs, records permanent compile failures, and
@@ -1339,7 +1356,7 @@ func (n *native) drain(i *Interpreter) {
 					i.code[s.address][s.ip] = s.inner
 					delete(n.sites, k)
 				}
-			} else if same(job.Unit.Module, n.feedback(job.Unit.Address)) {
+			} else if n.generation(job.Unit.Address) == job.Unit.Profiles.Of(job.Unit.Address).Generation {
 
 				n.markFailed(job.Unit.Address, job.Unit.Tier)
 			}
@@ -1352,9 +1369,9 @@ func (n *native) drain(i *Interpreter) {
 		}
 		n.store.Publish(job.Code)
 		if !job.Unit.OSR {
-			n.built[job.Unit.Address][job.Code.Tier-1] = job.Unit.Module
+			n.built[job.Unit.Address][job.Code.Tier-1] = job.Code.Deps
 		} else if s, ok := n.sites[key{job.Unit.Address, job.Unit.IP}]; ok {
-			s.built = job.Unit.Module
+			s.built = job.Code.Deps
 		}
 		if job.Code.Tier == jit.Baseline {
 			n.nominate(job.Unit.Address)
@@ -1368,10 +1385,34 @@ func (n *native) drain(i *Interpreter) {
 			return false
 		}
 		if n.entries[addr] >= graduate<<n.raise(addr) {
-			n.queue.Submit(compile.Unit{Address: addr, Function: i.function(addr), Module: n.feedback(addr), Tier: jit.Optimized})
+			n.queue.Submit(compile.Unit{Address: addr, Function: i.function(addr), Module: n.module, Profiles: n.snapshot(), Tier: jit.Optimized})
 		}
 		return true
 	})
+}
+
+// generation is addr's current profile generation.
+func (n *native) generation(addr int) uint64 {
+	return n.current(addr).Generation
+}
+
+// current is addr's current profile, the zero one when none was
+// recorded.
+func (n *native) current(addr int) transform.Profile {
+	if n.profiles[addr] == nil {
+		return transform.Profile{}
+	}
+	return *n.profiles[addr]
+}
+
+// snapshot is the profile table a compile reads. It is never mutated after
+// it is handed out: a revision replaces the entry it came from, not the
+// snapshot.
+func (n *native) snapshot() transform.Profiles {
+	if n.view == nil {
+		n.view = slices.Clone(n.profiles)
+	}
+	return n.view
 }
 
 // raise is the shift addr's retires apply to its call and promotion
@@ -1383,39 +1424,6 @@ func (n *native) raise(addr int) uint {
 // hasFailed reports whether addr's compile at tier permanently failed.
 func (n *native) hasFailed(addr int, tier jit.Tier) bool {
 	return n.failed[addr][tier-1]
-}
-
-// feedback is addr's compile-time snapshot of n.module: its own dynamic CALL
-// sites (see), an unseen one absent, a mixed one without its function, and
-// its refuted guard sites (record). The snapshot is never mutated after
-// Submit: fresh maps every call.
-func (n *native) feedback(addr int) transform.Module {
-	m := n.module
-	if addr >= len(n.callees) {
-		return m
-	}
-	for ip, callee := range n.callees[addr] {
-		switch {
-		case callee == transform.Callee{}:
-			continue
-		case callee.Function == mixed:
-			callee = transform.Callee{Type: callee.Type}
-		}
-		if m.Callees == nil {
-			m.Callees = map[int]transform.Callee{}
-		}
-		m.Callees[ip] = callee
-	}
-	for ip, ok := range n.refuted[addr] {
-		if !ok {
-			continue
-		}
-		if m.Refuted == nil {
-			m.Refuted = map[int]bool{}
-		}
-		m.Refuted[ip] = true
-	}
-	return m
 }
 
 // markFailed permanently marks addr's compile at tier as failed.
@@ -1648,12 +1656,6 @@ func target(i *Interpreter, exit jit.Exit, ref int) (addr int, ok bool) {
 		}
 	}
 	return addr, true
-}
-
-// same reports whether feedback snapshots a and b hold the same callees and
-// refuted sites.
-func same(a, b transform.Module) bool {
-	return maps.Equal(a.Callees, b.Callees) && maps.Equal(a.Refuted, b.Refuted)
 }
 
 // jitEnabled reports whether opt selects the JIT: WithThreshold(n) with n >=

@@ -384,7 +384,7 @@ func TestNew(t *testing.T) {
 
 	t.Run("calls its own entry directly, bypassing the natives table", func(t *testing.T) {
 		fib, module := fibonacci(t)
-		f, err := transform.Translate(module, 2, fib, 0)
+		f, _, err := transform.Translate(module, nil, 2, fib, 0)
 		require.NoError(t, err)
 		code, _ := lower(t, arm64.New(), f, fib, module.Objects, 2, false)
 
@@ -405,7 +405,7 @@ func TestNew(t *testing.T) {
 
 	t.Run("records a nested native call's return address in its own code", func(t *testing.T) {
 		fib, module := fibonacci(t)
-		f, err := transform.Translate(module, 2, fib, 0)
+		f, _, err := transform.Translate(module, nil, 2, fib, 0)
 		require.NoError(t, err)
 		assembly, err := compile.Lower(f, arm64.New(), fib, module.Objects, 0, false, true)
 		require.NoError(t, err)
@@ -433,7 +433,7 @@ func TestNew(t *testing.T) {
 
 	t.Run("resumes a call to a function without native code with the result the interpreter places", func(t *testing.T) {
 		fib, module := fibonacci(t)
-		f, err := transform.Translate(module, 2, fib, 0)
+		f, _, err := transform.Translate(module, nil, 2, fib, 0)
 		require.NoError(t, err)
 		code, exits := lower(t, arm64.New(), f, fib, module.Objects, 0, false)
 
@@ -470,7 +470,7 @@ func TestNew(t *testing.T) {
 
 	t.Run("bridges a call past the depth limit or the stack top", func(t *testing.T) {
 		fib, module := fibonacci(t)
-		f, err := transform.Translate(module, 2, fib, 0)
+		f, _, err := transform.Translate(module, nil, 2, fib, 0)
 		require.NoError(t, err)
 		code, exits := lower(t, arm64.New(), f, fib, module.Objects, 0, false)
 		natives := []uintptr{0, 0, code}
@@ -809,7 +809,7 @@ func TestNew(t *testing.T) {
 			Constants: []types.Boxed{types.BoxRef(2)},
 			Objects:   transform.Objects{2: {Struct: record}},
 		}
-		f, err := transform.Translate(m, 1, fn, 0)
+		f, _, err := transform.Translate(m, nil, 1, fn, 0)
 		require.NoError(t, err)
 
 		s := types.NewStruct(record, types.BoxI32(5))
@@ -1029,7 +1029,7 @@ func TestNew(t *testing.T) {
 			b.Bind(done).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.RETURN)
 		})
 		entry := instr.MustNew(instr.I32_CONST, 0).Width()*2 + instr.MustNew(instr.LOCAL_SET, 1).Width()
-		f, err := transform.Translate(transform.Module{}, 1, fn, entry)
+		f, _, err := transform.Translate(transform.Module{}, nil, 1, fn, entry)
 		require.NoError(t, err)
 		require.Len(t, f.Block(0).Params, 1)
 
@@ -1053,7 +1053,7 @@ func TestNew(t *testing.T) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_DIV_S).Emit(instr.RETURN)
 		})
 		entry := instr.MustNew(instr.LOCAL_GET, 0).Width() + instr.MustNew(instr.BR_IF, 0).Width()
-		f, err := transform.Translate(transform.Module{}, 1, fn, entry)
+		f, _, err := transform.Translate(transform.Module{}, nil, 1, fn, entry)
 		require.NoError(t, err)
 		require.Empty(t, f.Block(0).Params)
 
@@ -1082,7 +1082,7 @@ func TestNew(t *testing.T) {
 		fn := &types.Function{Code: instr.Marshal(code)}
 
 		entry := instr.MustNew(instr.I32_CONST, 0).Width() + instr.MustNew(instr.BR_IF, 0).Width()
-		f, err := transform.Translate(transform.Module{}, 0, fn, entry)
+		f, _, err := transform.Translate(transform.Module{}, nil, 0, fn, entry)
 		require.NoError(t, err)
 		require.Empty(t, f.Block(0).Params)
 
@@ -3377,7 +3377,7 @@ func function(t *testing.T, params, locals []types.Type, emit func(*instr.Builde
 
 func translate(t *testing.T, fn *types.Function) *ssa.Function {
 	t.Helper()
-	f, err := transform.Translate(transform.Module{}, 1, fn, 0)
+	f, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
 	require.NoError(t, err)
 	return f
 }

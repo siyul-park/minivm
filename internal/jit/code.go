@@ -34,6 +34,9 @@ type Code struct {
 	// i64 parameter inline (SBFX), never through the heap.
 	Arguments []types.Kind
 	Exits     []Exit
+	// Deps are the profiles c was compiled from: its root's and each
+	// member's. c is stale once any of them moved.
+	Deps []Dep
 
 	// native is the body's own address: offset 0, what natives[Address]
 	// holds for a native-to-native call. entry is the Go entry stub's
@@ -54,6 +57,12 @@ type Assembly struct {
 	Bytes []byte
 	Exits []Exit
 	Entry int
+}
+
+// Dep names the generation of one function's profile compiled code read.
+type Dep struct {
+	Address    int
+	Generation uint64
 }
 
 // Tier is how far a function's native code is optimized; the zero Tier is none.
