@@ -88,11 +88,13 @@ type translation struct {
 type members []activation
 
 // reach is what analysis learned: the facts live at each span's entry, which
-// spans were reached, and the tail call targets it proved.
+// spans were reached, the tail call targets it proved, and, per tail span
+// whose call loops, the member span it jumps to.
 type reach struct {
 	states []frame
 	seen   []bool
 	proofs []proof
+	jumps  map[int]int
 }
 
 // proof is a tail call target the walker resolved with its own facts.
@@ -305,7 +307,7 @@ func (t *translation) add(act activation, spans []span) {
 // call's span continues into the first span of the member it loops to,
 // found as it is translated.
 func (t *translation) analyze(root int, in frame) (reach, bool) {
-	r := reach{states: make([]frame, len(t.spans)), seen: make([]bool, len(t.spans))}
+	r := reach{states: make([]frame, len(t.spans)), seen: make([]bool, len(t.spans)), jumps: map[int]int{}}
 	r.seen[root] = true
 	r.states[root] = in
 	work := []int{root}
@@ -319,11 +321,8 @@ func (t *translation) analyze(root int, in frame) (reach, bool) {
 		if w.proof.function != nil && !slices.Contains(r.proofs, w.proof) {
 			r.proofs = append(r.proofs, w.proof)
 		}
-		if t.spans[id].tail {
-			t.spans[id].flow, t.spans[id].succs = nil, nil
-			if w.jump >= 0 {
-				t.spans[id].flow, t.spans[id].succs = []int{w.jump}, []int{w.jump}
-			}
+		if t.spans[id].tail && w.jump >= 0 {
+			r.jumps[id] = w.jump
 		}
 		if term.Op == ssa.OpExit {
 			continue
@@ -332,7 +331,7 @@ func (t *translation) analyze(root int, in frame) (reach, bool) {
 		for i, o := range w.stack {
 			exit.stack[i] = o.fact
 		}
-		for _, succ := range t.spans[id].flow {
+		for _, succ := range r.flow(t.spans[id], id) {
 			if !r.seen[succ] {
 				r.seen[succ] = true
 				r.states[succ] = frame{stack: slices.Clone(exit.stack), closures: slices.Clone(exit.closures)}
@@ -372,7 +371,7 @@ func (t *translation) build(r reach, root int) *ssa.Function {
 	queued[root] = true
 	order := []int{root}
 	for n := 0; n < len(order); n++ {
-		for _, successor := range t.spans[order[n]].succs {
+		for _, successor := range r.succs(t.spans[order[n]], order[n]) {
 			if r.seen[successor] && !queued[successor] {
 				queued[successor] = true
 				order = append(order, successor)
@@ -400,13 +399,37 @@ func (t *translation) build(r reach, root int) *ssa.Function {
 			return nil
 		}
 		if term.Op != ssa.OpExit {
-			if term.Edges, ok = w.edges(t.spans[id], r.states, ids); !ok {
+			if term.Edges, ok = w.edges(r.succs(t.spans[id], id), r.states, ids); !ok {
 				return nil
 			}
 		}
 		b.Term(ids[id], term)
 	}
 	return b.Build()
+}
+
+// flow is the spans facts at s's end flow into: for a tail span, the member
+// span its call jumps to, which only analysis knows.
+func (r reach) flow(s span, id int) []int {
+	if s.tail {
+		return r.jumped(id)
+	}
+	return s.flow
+}
+
+// succs is the spans s continues into, by the same rule as flow.
+func (r reach) succs(s span, id int) []int {
+	if s.tail {
+		return r.jumped(id)
+	}
+	return s.succs
+}
+
+func (r reach) jumped(id int) []int {
+	if j, ok := r.jumps[id]; ok {
+		return []int{j}
+	}
+	return nil
 }
 
 // shifted returns offsets moved by offset, in a new slice.

@@ -89,18 +89,18 @@ func (w *walker) translate(s span) (ssa.Terminator, bool) {
 	return w.leave(s.end), true
 }
 
-func (w *walker) edges(s span, states []frame, ids []int) ([]ssa.Edge, bool) {
-	if len(s.succs) == 0 {
+func (w *walker) edges(succs []int, states []frame, ids []int) ([]ssa.Edge, bool) {
+	if len(succs) == 0 {
 		return nil, true
 	}
-	for _, succ := range s.succs {
+	for _, succ := range succs {
 		if len(states[succ].stack) != len(w.stack) {
 			return nil, false
 		}
 	}
 	for i := range w.stack {
 		owned, borrowed := false, false
-		for _, succ := range s.succs {
+		for _, succ := range succs {
 			if states[succ].stack[i].backing == backingStack {
 				owned = true
 			} else {
@@ -114,8 +114,8 @@ func (w *walker) edges(s span, states []frame, ids []int) ([]ssa.Edge, bool) {
 			w.own(i)
 		}
 	}
-	edges := make([]ssa.Edge, len(s.succs))
-	for i, succ := range s.succs {
+	edges := make([]ssa.Edge, len(succs))
+	for i, succ := range succs {
 		edges[i] = ssa.Edge{Block: ids[succ], Args: values(w.stack)}
 	}
 	return edges, true
