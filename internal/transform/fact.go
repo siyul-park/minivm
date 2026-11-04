@@ -11,6 +11,8 @@ type activation struct {
 	function *types.Function
 	address  int
 	slots    []types.Type
+	// first is the index of the function's first span.
+	first int
 }
 
 // frame is the facts live at a span's entry: its operand stack, and, per

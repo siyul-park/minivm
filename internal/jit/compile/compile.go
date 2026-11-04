@@ -792,7 +792,11 @@ func (l *lowering) exit(k jit.Kind) int {
 	stack := frame.Stack
 	if k == jit.ExitCall {
 		stack = stack[:len(stack)-len(l.op.Args)]
-		f.IP += instr.Instruction(l.fn.Code[f.IP:]).Width()
+		code := l.fn.Code
+		if member := l.objects[f.Address].Function; f.Address != l.address && member != nil {
+			code = member.Code
+		}
+		f.IP += instr.Instruction(code[f.IP:]).Width()
 	}
 	if len(stack) > 0 {
 		f.Stack = make([]jit.Operand, len(stack))

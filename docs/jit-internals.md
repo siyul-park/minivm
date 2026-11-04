@@ -111,6 +111,14 @@ A function with captures runs natively only through its closure:
 | OSR | declines unless the frame holds its captures |
 | Native call | lowering rejects a direct call of it |
 
+A static `RETURN_CALL` loops, as threaded frame reuse does, when its callee can share the frame; the unit then translates the callee's spans with the root's, and the loop jumps to the callee's first span. A callee joins the unit's tail-call group (at most 4 functions, the root included) when it is a constant plain function with code, no captures or handlers, no `YIELD`/`RESUME`, the root's `Declared()` slots and `Returns`, and a call that has every argument on the stack and no `i64` slot. A self tail call is the one-function group. Any other `RETURN_CALL` ends in `OpExit`.
+
+| Group rule | Contract |
+|---|---|
+| Exit states | Each carries its own member's `Address` and `ip`; `Lower` resumes an `ExitCall` after the instruction of the function that state names. Slot kinds, layout, and result convention are the root's, which identical `Declared()` and `Returns` make valid for every member. |
+| Feedback | `Module.Callees` and `Module.Refuted` are offsets in the root: member spans translate with neither, so a member's dynamic `CALL` that is not statically resolved ends in `OpExit`, and a member's container op stays guarded. A guard failing in a member records against the member's `Address` (`native.record`), which the root's code does not read: that code retires on `tolerance` refutations, not on feedback movement. |
+| Ownership | Threaded `RETURN_CALL` releases the entering reference at the jump (when the entering call owned it) and runs the callee through a reference of its own. Native code releases it when its call returns, as for any call. `native.frame` makes a materialized frame match threaded: a frame whose function is not the one its entering reference names takes that function as `ref`, `release` false, and releases the entering reference there if the call owned it, exactly once. |
+
 A reference parameter its function never writes (`transform.Borrows`) is borrowed: a native caller lends a local- or constant-backed argument without a retain, and releases an owned one after the call.
 
 ## ARM64 activation
@@ -170,7 +178,7 @@ A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every ad
 | release | release | `jit.Ledger` price |
 | served `ExitCall` | call | `jit.Ledger` price; nothing while the callee has no code but may still compile (`pending`) |
 | `ExitDeopt` with `Exit.Trap`; a bridge or box whose handler panicked; a denied control-transfer bridge (`THROW`, `UNREACHABLE`); a cancelled safepoint; a safepoint whose tick runs threaded; an `ExitCall` under a hook; a trap, throw, or cancellation in a served call's callee | trap | none |
-| `ExitDeopt` without `Exit.Trap` (guards, `OpExit` at a cold dynamic `CALL` or a `RETURN_CALL` that is not a self tail call); any other declined bridge; an `ExitCall` not served | guard | refutation |
+| `ExitDeopt` without `Exit.Trap` (guards, `OpExit` at a cold dynamic `CALL` or a `RETURN_CALL` outside the unit's tail-call group); any other declined bridge; an `ExitCall` not served | guard | refutation |
 
 | Rule | Contract |
 |---|---|
@@ -239,7 +247,7 @@ Entry reuses the current frame (`FB = bp`, `Depth = 0`); exits rewrite it in pla
 - i64 results use X0/X1 only for one or two results; wider result sets stay boxed.
 - A wide (>49-bit) i64 takes `ExitBox` at the sites listed in Exits above.
 - Container lowering requires `guard.shape`; null or mismatched representation deopts.
-- Bridges resume except the denied ops in Exits (above); a non-self `RETURN_CALL`'s `ExitDeopt` does not, nor an `ExitCall` to a coroutine function. `YIELD` and `RESUME` never reach an exit at all: they make the translator decline the whole unit at compile time.
+- Bridges resume except the denied ops in Exits (above); a `RETURN_CALL` outside the tail-call group's `ExitDeopt` does not, nor an `ExitCall` to a coroutine function. `YIELD` and `RESUME` never reach an exit at all: they make the translator decline the whole unit at compile time.
 - A catch block never runs natively: the interpreter runs it after the deopt.
 - Host functions are not speculated at dynamic CALL sites; owned callees are not candidates.
 - A hoisted `guard.shape` deopts at its loop header's state, an offset no op guards: its refutation falls back to the `tolerance` count instead of a generic site.

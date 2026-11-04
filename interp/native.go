@@ -736,6 +736,15 @@ func (n *native) rebuild(i *Interpreter, exit jit.Exit, start, ref int, release 
 // decision in the caller's compiled code.
 func (n *native) frame(i *Interpreter, at, k int, m jit.Frame, ref int, release bool) {
 	ctx := n.ctx
+	if m.Address != entered(i, ref) {
+		// A tail call inside native code moved to another function of its
+		// group: threaded released ref there and the frame runs addr through
+		// no reference of its own.
+		if release {
+			i.release(ref)
+		}
+		ref, release = m.Address, false
+	}
 	f := &i.frames[at]
 	f.addr = m.Address
 	f.code = n.exactCode(i, m.Address)
@@ -771,6 +780,17 @@ func (n *native) frame(i *Interpreter, at, k int, m jit.Frame, ref int, release 
 		}
 		i.sp = sp
 	}
+}
+
+// entered is the function a call through ref runs: ref itself, or the
+// function of the closure it names.
+func entered(i *Interpreter, ref int) int {
+	if ref > 0 && ref < len(i.heap) {
+		if cl, ok := i.heap[ref].(*types.Closure); ok {
+			return int(cl.Fn)
+		}
+	}
+	return ref
 }
 
 // quiesce marks a quiescent point, where n runs no native activation and

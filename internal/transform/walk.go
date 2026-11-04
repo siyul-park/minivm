@@ -11,6 +11,7 @@ import (
 
 type walker struct {
 	Module
+	group      *group
 	builder    *ssa.Builder
 	block      int
 	activation activation
@@ -19,14 +20,22 @@ type walker struct {
 	// there, 0 when unknown (see frame).
 	closures []int
 
+	// jump is the span a tail call looped to, -1 when none did.
+	jump   int
 	ip     int
 	before []operand
 	state  ssa.Value
 }
 
-// newWalker returns a walker at the start of block, its stack the params of
-// in's facts; it fails when a fact has no SSA representation.
-func newWalker(m Module, b *ssa.Builder, block int, act activation, in frame) (*walker, bool) {
+// newWalker returns a walker at the start of block translating s, its stack
+// the params of in's facts; it fails when a fact has no SSA representation.
+// Only the root's spans see the module's feedback, which is keyed by offsets
+// in the root.
+func newWalker(g *group, b *ssa.Builder, block int, s span, in frame) (*walker, bool) {
+	m := g.Module
+	if s.act != 0 {
+		m.Callees, m.Refuted = nil, nil
+	}
 	stack := make([]operand, len(in.stack))
 	for i, e := range in.stack {
 		t, ok := typ(e.kind)
@@ -35,7 +44,7 @@ func newWalker(m Module, b *ssa.Builder, block int, act activation, in frame) (*
 		}
 		stack[i] = operand{value: b.Param(block, t), fact: e}
 	}
-	return &walker{Module: m, builder: b, block: block, activation: act, stack: stack, closures: slices.Clone(in.closures)}, true
+	return &walker{Module: m, group: g, builder: b, block: block, activation: g.acts[s.act], stack: stack, closures: slices.Clone(in.closures), jump: -1}, true
 }
 
 func (w *walker) translate(s span) (ssa.Terminator, bool) {
@@ -610,8 +619,8 @@ func (w *walker) leave(ip int) ssa.Terminator {
 	return ssa.Terminator{Op: ssa.OpReturn, Args: args, State: w.deopt()}
 }
 
-// tail ends a RETURN_CALL: a self tail call loops back to the function's
-// first span, any other leaves native execution.
+// tail ends a RETURN_CALL: a call whose frame the group can reuse loops to
+// the callee's first span, any other leaves native execution.
 func (w *walker) tail(ip int) (ssa.Terminator, bool) {
 	if len(w.stack) == 0 {
 		return ssa.Terminator{}, false
@@ -620,10 +629,11 @@ func (w *walker) tail(ip int) (ssa.Terminator, bool) {
 	if target == nil || len(w.stack) < 1+len(target.Typ.Params) {
 		return ssa.Terminator{}, false
 	}
-	if !w.reuses(target) {
+	member, ok := w.reuses(target)
+	if !ok {
 		return w.exit(ip), true
 	}
-	return w.loop(ip), true
+	return w.loop(ip, member), true
 }
 
 // callee resolves the function a CALL at operand at calls: a constant
@@ -644,33 +654,34 @@ func (w *walker) callee(at int) *types.Function {
 	return target
 }
 
-// reuses reports whether the RETURN_CALL at the stack's top re-enters this
-// unit's own function with the frame it already has: a plain function, not a
+// reuses returns the group member the RETURN_CALL at the stack's top calls
+// with the frame it already has, when there is one: a plain function, not a
 // closure, with every argument on the stack and no slot a store could box
 // wide, since a deopt part-way through the stores could not resume threaded.
-func (w *walker) reuses(target *types.Function) bool {
+func (w *walker) reuses(target *types.Function) (int, bool) {
 	callee := w.stack[len(w.stack)-1]
-	if w.activation.address == 0 || callee.closure != 0 || !callee.referenceKnown || callee.reference != w.activation.address ||
-		target != w.activation.function || len(target.Captures) > 0 || len(w.stack) != 1+len(target.Typ.Params) {
-		return false
+	if w.activation.address == 0 || callee.closure != 0 || !callee.referenceKnown ||
+		len(target.Captures) > 0 || len(w.stack) != 1+len(target.Typ.Params) {
+		return 0, false
 	}
 	for _, slot := range w.activation.slots {
 		if slot.Kind() == types.KindI64 {
-			return false
+			return 0, false
 		}
 		if _, ok := typ(slot.Kind()); !ok {
-			return false
+			return 0, false
 		}
 	}
-	return true
+	return w.group.join(callee.reference, target)
 }
 
-// loop lowers a self tail call as threaded frame reuse does: the arguments
+// loop lowers a tail call as threaded frame reuse does: the arguments
 // replace the parameters, every other local is zeroed, each store releasing
-// the reference it overwrites, and control returns to the function's first
-// span. The stores share the call's resume state, which no store can use.
-func (w *walker) loop(ip int) ssa.Terminator {
+// the reference it overwrites, and control moves to member's first span.
+// The stores share the call's resume state, which no store can use.
+func (w *walker) loop(ip, member int) ssa.Terminator {
 	w.begin(ip)
+	w.jump = w.group.acts[member].first
 	top := len(w.stack) - 1
 	w.release(w.stack[top])
 	w.stack = w.stack[:top]

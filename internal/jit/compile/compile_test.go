@@ -551,6 +551,27 @@ func TestLower(t *testing.T) {
 		}, exits)
 	})
 
+	t.Run("resumes a call exit after the instruction of the function its state names", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		arg := constant(b, entry, types.BoxI32(7))
+		callee := constant(b, entry, types.BoxRef(2))
+		at := b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 3, IP: 0, Returns: 1, Stack: []ssa.Operand{{Value: arg}, {Value: callee}}}}, Results: []ssa.Value{at}})
+		got := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+
+		root := function(1, 0, instr.MustNew(instr.I32_CONST, 0))
+		member := function(1, 0, instr.MustNew(instr.CALL))
+		objects := transform.Objects{1: {Function: root}, 2: {Function: function(1, 0)}, 3: {Function: member}}
+		assembly, err := compile.Lower(b.Build(), new(machine), root, objects, 1, false, true)
+		require.NoError(t, err)
+		require.Equal(t, jit.ExitCall, assembly.Exits[0].Kind)
+		require.Equal(t, 3, assembly.Exits[0].Frame.Address)
+		require.Equal(t, instr.MustNew(instr.CALL).Width(), assembly.Exits[0].Frame.IP)
+	})
+
 	t.Run("calls the closure its call names, passing its upvals and mapping it on the call exit", func(t *testing.T) {
 		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32()}}, Captures: []types.Type{types.TypeI32()}}
 		b := ssa.New("f")

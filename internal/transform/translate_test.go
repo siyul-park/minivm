@@ -2,6 +2,7 @@ package transform_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -611,6 +612,124 @@ blk3: () <-- (blk1)
 `, ssa.Format(out))
 	})
 
+	t.Run("groups static tail calls between functions into one unit", func(t *testing.T) {
+		ping, pong := pingPong(t)
+		m := transform.Module{
+			Constants: []types.Boxed{types.BoxRef(1), types.BoxRef(2)},
+			Objects:   transform.Objects{1: {Function: ping}, 2: {Function: pong}}}
+
+		out, err := transform.Translate(m, 1, ping, 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, `func 1:0
+blk0: ()
+	jump blk1()
+blk1: () <-- (blk0, blk6)
+	v1:i32 = load local[0]
+	v2:i32 = const 0
+	v3:state = state {addr=1 base=0 ip=7 returns=1 stack=[v1, v2]}
+	v4:i1 = i32.eq v1, v2 state v3
+	br v4, blk2(), blk3()
+blk2: () <-- (blk1)
+	v33:i32 = load local[1]
+	v34:state = state {addr=1 base=0 ip=30 returns=1 stack=[v33]}
+	return v33 state v34
+blk3: () <-- (blk1)
+	v5:i32 = load local[0]
+	v6:i32 = const 1
+	v7:state = state {addr=1 base=0 ip=18 returns=1 stack=[v5, v6]}
+	v8:i32 = i32.sub v5, v6 state v7
+	v9:i32 = load local[1]
+	v10:i32 = load local[0]
+	v11:state = state {addr=1 base=0 ip=23 returns=1 stack=[v8, v9, v10]}
+	v12:i32 = i32.add v9, v10 state v11
+	v13:ref = const 2
+	v14:state = state {addr=1 base=0 ip=27 returns=1 stack=[v8, v12, v13]}
+	store local[1], v12 state v14
+	store local[0], v8 state v14
+	v15:ref = const 0
+	store local[2], v15 state v14
+	jump blk4()
+blk4: () <-- (blk3)
+	v16:i32 = load local[0]
+	v17:i32 = const 0
+	v18:state = state {addr=2 base=0 ip=7 returns=1 stack=[v16, v17]}
+	v19:i1 = i32.eq v16, v17 state v18
+	br v19, blk5(), blk6()
+blk5: () <-- (blk4)
+	v31:i32 = load local[1]
+	v32:state = state {addr=2 base=0 ip=30 returns=1 stack=[v31]}
+	return v31 state v32
+blk6: () <-- (blk4)
+	v20:i32 = load local[0]
+	v21:i32 = const 1
+	v22:state = state {addr=2 base=0 ip=18 returns=1 stack=[v20, v21]}
+	v23:i32 = i32.sub v20, v21 state v22
+	v24:i32 = load local[1]
+	v25:i32 = load local[0]
+	v26:state = state {addr=2 base=0 ip=23 returns=1 stack=[v23, v24, v25]}
+	v27:i32 = i32.add v24, v25 state v26
+	v28:ref = const 1
+	v29:state = state {addr=2 base=0 ip=27 returns=1 stack=[v23, v27, v28]}
+	store local[1], v27 state v29
+	store local[0], v23 state v29
+	v30:ref = const 0
+	store local[2], v30 state v29
+	jump blk1()
+`, ssa.Format(out))
+	})
+
+	t.Run("exits a tail call whose target cannot join the group", func(t *testing.T) {
+		for _, tt := range []struct {
+			name   string
+			mutate func(target *types.Function)
+		}{
+			{"another local", func(target *types.Function) { target.Locals = []types.Type{types.TypeI32()} }},
+			{"another return", func(target *types.Function) { target.Typ.Returns = []types.Type{types.TypeI64()} }},
+			{"captures", func(target *types.Function) { target.Captures = []types.Type{types.TypeI32()} }},
+			{"handlers", func(target *types.Function) { target.Handlers = []instr.Handler{{Start: 0, End: 1, Catch: 1}} }},
+			{"no code", func(target *types.Function) { target.Code = nil }},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				ping, pong := pingPong(t)
+				tt.mutate(pong)
+				m := transform.Module{
+					Constants: []types.Boxed{types.BoxRef(1), types.BoxRef(2)},
+					Objects:   transform.Objects{1: {Function: ping}, 2: {Function: pong}}}
+
+				out, err := transform.Translate(m, 1, ping, 0)
+				require.NoError(t, err)
+				require.NoError(t, ssa.Verify(out))
+				require.Contains(t, ssa.Format(out), "exit state")
+				require.NotContains(t, ssa.Format(out), "addr=2 ")
+			})
+		}
+	})
+
+	t.Run("exits a tail call that would grow the group past four functions", func(t *testing.T) {
+		fns := make([]*types.Function, 5)
+		objects := transform.Objects{}
+		var constants []types.Boxed
+		for i := range fns {
+			next := (i + 1) % len(fns)
+			fns[i] = &types.Function{
+				Typ: &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, uint64(next)).Emit(instr.RETURN_CALL)
+				})}
+			objects[i+1] = transform.Object{Function: fns[i]}
+			constants = append(constants, types.BoxRef(i+1))
+		}
+
+		out, err := transform.Translate(transform.Module{Constants: constants, Objects: objects}, 1, fns[0], 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		text := ssa.Format(out)
+		require.Equal(t, 1, strings.Count(text, "exit state"))
+		require.Contains(t, text, "addr=4 ")
+		require.NotContains(t, text, "addr=5 ")
+	})
+
 	t.Run("exits a tail call whose frame it cannot reuse", func(t *testing.T) {
 		wide := &types.Function{
 			Typ: &types.FunctionType{Params: []types.Type{types.TypeI64()}, Returns: []types.Type{types.TypeI64()}}}
@@ -1138,6 +1257,26 @@ func coldCallFunction(t *testing.T) (*types.Function, int) {
 		Code: instr.Marshal(code),
 	}
 	return fn, calls(fn.Code)[0]
+}
+
+// pingPong is two functions of one signature that tail call each other,
+// stored at addresses 1 and 2.
+func pingPong(t *testing.T) (*types.Function, *types.Function) {
+	t.Helper()
+	build := func(other int) *types.Function {
+		return &types.Function{
+			Typ:    &types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
+			Locals: []types.Type{types.TypeAny()},
+			Code: assemble(t, func(b *instr.Builder) {
+				base := b.Label()
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_EQ).BrIf(base)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB)
+				b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_ADD)
+				b.Emit(instr.CONST_GET, uint64(other)).Emit(instr.RETURN_CALL)
+				b.Bind(base).Emit(instr.LOCAL_GET, 1).Emit(instr.RETURN)
+			})}
+	}
+	return build(1), build(0)
 }
 
 func assemble(t *testing.T, emit func(b *instr.Builder)) []byte {
