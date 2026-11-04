@@ -63,14 +63,18 @@ endif
 
 PROJECT = $(shell basename -s .git $(shell git config --get remote.origin.url))
 
-.PHONY: init install-tools install-lighthouse install-lint-tools install-modules generate build clean tidy update clean-sum clean-cache sync check check-generated check-tidy check-fmt check-arm64 check-inline test coverage coverage-check benchmark lighthouse lint fmt vet doc fuzz
+.PHONY: init install-hooks install-tools install-lighthouse install-lint-tools install-modules generate build clean tidy update clean-sum clean-cache sync check check-generated check-tidy check-fmt check-arm64 check-inline test coverage coverage-check benchmark lighthouse lint fmt vet doc fuzz
 all: lint test build
 
 init:
+	@$(MAKE) install-hooks
 	@$(MAKE) install-tools
 	@$(MAKE) install-modules
 	@$(MAKE) install-lighthouse
 	@$(MAKE) install-lint-tools
+
+install-hooks:
+	@git config core.hooksPath .githooks
 
 install-tools:
 	@go install golang.org/x/tools/cmd/godoc@latest
