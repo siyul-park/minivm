@@ -41,7 +41,7 @@ func containerGet(state *state, current step) (value, error) {
 		index := state.stack[1]
 		compile := append([]jen.Code(nil), container.compile...)
 		compile = append(compile, index.compile...)
-		body := []jen.Code{overflow()}
+		body := []jen.Code{overflowAt(0)}
 		body = append(body, index.check...)
 		body = append(body, index.body...)
 		body = append(body,
@@ -66,7 +66,7 @@ func containerGet(state *state, current step) (value, error) {
 		index := state.stack[1]
 		compile := append([]jen.Code(nil), container.compile...)
 		compile = append(compile, index.compile...)
-		body := []jen.Code{overflow()}
+		body := []jen.Code{overflowAt(0)}
 		body = append(body, container.check...)
 		body = append(body, container.body...)
 		body = append(body, index.check...)
@@ -161,7 +161,7 @@ func arrayStore(state *state, current step) (value, error) {
 	}
 
 	compile := append(append(append([]jen.Code(nil), container.compile...), index.compile...), val.compile...)
-	body := []jen.Code{overflow()}
+	body := []jen.Code{overflowAt(0)}
 
 	tail := func(array jen.Code) []jen.Code {
 		return []jen.Code{

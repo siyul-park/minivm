@@ -50,7 +50,7 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 
 	delta := len(inputs) - arity + 1
 	if !conditional && local == nil && delta > 0 {
-		body = append(body, overflow())
+		body = append(body, overflowAt(0))
 	}
 	for _, source := range inputs {
 		compile = append(compile, source.compile...)

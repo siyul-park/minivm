@@ -1,7 +1,6 @@
 package codegen
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/dave/jennifer/jen"
@@ -23,6 +22,7 @@ func threaderType(file *jen.File) {
 		jen.Id("code").Index().Byte(),
 		jen.Id("ip").Int(),
 		jen.Id("exact").Bool(),
+		jen.Id("traps").Index().Uint8(),
 	)
 }
 
@@ -38,10 +38,9 @@ func fusionTable(patterns []pattern) (jen.Code, error) {
 			continue
 		}
 		body := []jen.Code{jen.Id("start").Op(":=").Id("c").Dot("ip")}
-		for index, pattern := range patterns {
-			label := fmt.Sprintf("l%d", index)
+		for _, pattern := range patterns {
 			size := pattern.width()
-			statements, err := compose(pattern, size, label)
+			statements, trap, err := compose(pattern, size, "")
 			if err != nil {
 				return nil, err
 			}
@@ -49,15 +48,20 @@ func fusionTable(patterns []pattern) (jen.Code, error) {
 				offset := size - width(instr.BR_IF) + 1
 				statements = append([]jen.Code{jen.Id("offset").Op(":=").Qual(instrPkg, "ParseI16").Call(jen.Id("c").Dot("code"), jen.Id("start").Op("+").Lit(offset))}, statements...)
 			}
-			body = append(body, jen.If(jen.Op("!").Parens(matchGuard(pattern))).Block(jen.Goto().Id(label)))
-			body = append(body, jen.Block(statements...))
-			body = append(body, jen.Id(label).Op(":"))
+			statements = append([]jen.Code{jen.If(jen.Op("!").Parens(matchGuard(pattern))).Block(jen.Return(jen.Nil()))}, statements...)
+			attempt := jen.Func().Params().Func().Params(jen.Op("*").Id("Interpreter")).Block(
+				jen.For(jen.Range().Lit(1)).Block(statements...),
+				jen.Return(jen.Nil()),
+			).Call()
+			body = append(body, jen.If(jen.Id("fn").Op(":=").Add(attempt), jen.Id("fn").Op("!=").Nil()).Block(
+				jen.Return(jen.Id("fn"), jen.Lit(trap)),
+			))
 		}
-		body = append(body, jen.Return(jen.Nil()))
-		entries = append(entries, jen.Qual(instrPkg, symbol(instr.Opcode(opcode))).Op(":").Func().Params(jen.Id("c").Op("*").Id("threader")).Func().Params(jen.Op("*").Id("Interpreter")).Block(body...))
+		body = append(body, jen.Return(jen.Nil(), jen.Lit(0)))
+		entries = append(entries, jen.Qual(instrPkg, symbol(instr.Opcode(opcode))).Op(":").Func().Params(jen.Id("c").Op("*").Id("threader")).Params(jen.Func().Params(jen.Op("*").Id("Interpreter")), jen.Uint8()).Block(body...))
 	}
 
-	table := jen.Index(jen.Lit(256)).Func().Params(jen.Id("c").Op("*").Id("threader")).Func().Params(jen.Op("*").Id("Interpreter"))
+	table := jen.Index(jen.Lit(256)).Func().Params(jen.Id("c").Op("*").Id("threader")).Params(jen.Func().Params(jen.Op("*").Id("Interpreter")), jen.Uint8())
 	return table.ValuesFunc(func(group *jen.Group) {
 		for _, entry := range entries {
 			group.Line().Add(entry)
@@ -118,13 +122,20 @@ func compileMethod(file *jen.File) {
 		jen.Id("c").Dot("captures").Op("=").Id("captures"),
 		jen.Id("c").Dot("captureTypes").Op("=").Id("captureTypes"),
 		jen.Id("c").Dot("ip").Op("=").Lit(0),
+		jen.Id("c").Dot("traps").Op("=").Nil(),
 		jen.Id("compiled").Op(":=").Make(jen.Index().Func().Params(jen.Op("*").Id("Interpreter")), jen.Len(jen.Id("code"))),
 		jen.For(jen.Id("c").Dot("ip").Op("<").Len(jen.Id("code"))).Block(
 			jen.Id("ip").Op(":=").Id("c").Dot("ip"),
 			jen.If(jen.Op("!").Id("c").Dot("exact")).Block(
 				jen.If(jen.Id("compile").Op(":=").Id("fusions").Index(jen.Id("code").Index(jen.Id("ip"))), jen.Id("compile").Op("!=").Nil()).Block(
-					jen.If(jen.Id("fn").Op(":=").Id("compile").Call(jen.Id("c")), jen.Id("fn").Op("!=").Nil()).Block(
+					jen.If(jen.List(jen.Id("fn"), jen.Id("trap")).Op(":=").Id("compile").Call(jen.Id("c")), jen.Id("fn").Op("!=").Nil()).Block(
 						jen.Id("compiled").Index(jen.Id("ip")).Op("=").Id("fn"),
+						jen.If(jen.Id("trap").Op(">").Lit(0)).Block(
+							jen.If(jen.Id("c").Dot("traps").Op("==").Nil()).Block(
+								jen.Id("c").Dot("traps").Op("=").Make(jen.Index().Uint8(), jen.Len(jen.Id("code"))),
+							),
+							jen.Id("c").Dot("traps").Index(jen.Id("ip")).Op("=").Id("trap"),
+						),
 						jen.Continue(),
 					),
 				),

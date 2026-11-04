@@ -19,6 +19,7 @@ type loader struct {
 	pos        jen.Code
 	label      string
 	standalone bool
+	at         int
 }
 
 // slot is where a slot-writing opcode keeps its slot: the threader field with
@@ -92,7 +93,10 @@ func slotRead(state *state, current step) (value, error) {
 
 func load(current step, slot, offset int, label string, standalone bool) (value, error) {
 	l := newLoader(current.op, slot, offset, label, standalone)
-	result := value{op: current.op, head: current.op, boxed: jen.Id(l.boxed)}
+	if standalone || current.commit {
+		l.at = -1
+	}
+	result := value{at: l.at, op: current.op, head: current.op, boxed: jen.Id(l.boxed)}
 
 	result.room = true
 
@@ -136,6 +140,7 @@ func newLoader(op instr.Opcode, slot, offset int, label string, standalone bool)
 		pos:        at,
 		label:      label,
 		standalone: standalone,
+		at:         offset,
 	}
 }
 
@@ -178,23 +183,23 @@ func (l loader) read(result *value, current step) error {
 		if l.standalone {
 			result.check = append(result.check,
 				jen.Id(l.addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(l.index),
-				jen.If(jen.Id(l.addr).Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+				jen.If(jen.Id(l.addr).Op(">=").Id("i").Dot("sp")).Block(fail("ErrSegmentationFault", l.at)),
 			)
 		} else {
 			result.check = append(result.check,
-				jen.If(jen.Id("i").Dot("fr").Dot("bp").Op("+").Id(l.index).Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+				jen.If(jen.Id("i").Dot("fr").Dot("bp").Op("+").Id(l.index).Op(">=").Id("i").Dot("sp")).Block(fail("ErrSegmentationFault", l.at)),
 			)
 			result.body = append(result.body, jen.Id(l.addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(l.index))
 		}
 		result.body = append(result.body, jen.Id(l.boxed).Op(":=").Id("i").Dot("stack").Index(jen.Id(l.addr)))
 	case instr.GLOBAL_GET:
 		result.check = append(result.check,
-			jen.If(jen.Id(l.index).Op(">=").Len(jen.Id("i").Dot("globals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+			jen.If(jen.Id(l.index).Op(">=").Len(jen.Id("i").Dot("globals"))).Block(fail("ErrSegmentationFault", l.at)),
 		)
 		result.body = append(result.body, jen.Id(l.boxed).Op(":=").Id("i").Dot("globals").Index(jen.Id(l.index)))
 	case instr.UPVAL_GET:
 		result.check = append(result.check,
-			jen.If(jen.Id(l.index).Op(">=").Len(jen.Id("i").Dot("fr").Dot("upvals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+			jen.If(jen.Id(l.index).Op(">=").Len(jen.Id("i").Dot("fr").Dot("upvals"))).Block(fail("ErrSegmentationFault", l.at)),
 		)
 		result.body = append(result.body, jen.Id(l.boxed).Op(":=").Id("i").Dot("fr").Dot("upvals").Index(jen.Id(l.index)))
 	}
@@ -362,7 +367,7 @@ func (l loader) finish(result value, current step, ok bool) (value, error) {
 		return result, nil
 	}
 	if result.room {
-		result.push = append(result.push, overflow())
+		result.push = append(result.push, overflowAt(l.at))
 	}
 	result.push = append(result.push, result.check...)
 	result.push = append(result.push, result.body...)
@@ -479,7 +484,7 @@ func constStandalone(current step, input value) jen.Code {
 func materialize(input value, retain bool, advance int) []jen.Code {
 	var body []jen.Code
 	if input.room {
-		body = append(body, overflow())
+		body = append(body, overflowAt(input.at))
 	}
 	body = append(body, input.check...)
 	body = append(body, input.body...)

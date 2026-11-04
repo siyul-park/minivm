@@ -26,6 +26,15 @@ Standalone execution `MUST` materialize the same values that fusion passes direc
 
 The absorbed head advances threaded compilation by its width. Runtime results, stack/frame state, IPs, traps, control flow, and ownership therefore match unfused execution. NOP run compaction is separate dispatch compaction.
 
+## Trap offsets
+
+A fused handler keeps the frame IP at its first instruction until it ends, so a trap is located after the fact and the non-faulting path writes nothing extra. A trace names the instruction that faulted, as unfused execution and the JIT do.
+
+- Each `fusions` entry returns the offset of the pattern's trapping consumer with its handler; `Compile` keeps the nonzero offsets in `threader.traps`, indexed by IP, and `Interpreter.compile` hands them to `Interpreter.traps`. A pattern whose trapping sources `commit` already advances the IP per source, so it records zero.
+- A panic that reaches `dispatch` takes that offset when the frame still runs the fused code. This covers the consumer's own checks and every helper it calls (`arrayGet`, `arraySet`, `structGet`, `alloc`, host functions).
+- A fused producer that traps ahead of its consumer (stack overflow, slot bounds) panics `trapped` with its own offset instead; `lower.go` `fail` and `overflowAt` emit it. Standalone handlers panic plain.
+- `dispatch` applies the offset once. A rethrow across an outer floor carries a zero offset.
+
 ## Supported Patterns
 
 Current patterns include:
