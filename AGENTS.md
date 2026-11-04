@@ -99,10 +99,8 @@ The agent `MUST` satisfy all of the following before reporting completion; any i
 Repository baseline:
 
 ```bash
-make check-generated check-tidy check-fmt vet
-go test ./...
-go test -race ./...
-GOOS=linux GOARCH=arm64 go build ./...
-GOOS=linux GOARCH=arm64 go test -exec=true ./...
+make check
 git diff --check
 ```
+
+`make init` installs a pre-commit hook (`.githooks/pre-commit`) that runs the same baseline on every commit.
