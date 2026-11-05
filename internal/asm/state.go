@@ -13,12 +13,10 @@ type State struct {
 	stub  uintptr
 	stack []uint64
 
-	sp, fp, lr uintptr
-	pc         uintptr
-	nsp, top   unsafe.Pointer
-	exited     uint64
-	regs       [32]uint64
-	fregs      [32]uint64
+	pc       uintptr
+	nsp, top unsafe.Pointer
+	exited   uint64
+	saved    registers
 }
 
 // OffsetStub is where native code finds the exit stub off the state
@@ -61,13 +59,13 @@ func (s *State) Abandon() {
 
 // Reg reports the saved value of r. r must be saved by the exit protocol.
 func (s *State) Reg(r PReg) uint64 {
-	return *s.cell(r)
+	return *s.saved.cell(r)
 }
 
 // SetReg stores v in the saved register file for r. r must be saved by the
 // exit protocol.
 func (s *State) SetReg(r PReg, v uint64) {
-	*s.cell(r) = v
+	*s.saved.cell(r) = v
 }
 
 // Slot reads spill slot n of the suspended native activation.
@@ -86,18 +84,4 @@ func (s *State) Word(addr uintptr) uint64 {
 		panic("asm: address outside the native stack")
 	}
 	return s.stack[offset/8]
-}
-
-func (s *State) cell(r PReg) *uint64 {
-	if r.ID() >= uint8(len(s.regs)) {
-		panic("asm: invalid register")
-	}
-	switch r.Type() {
-	case RegTypeInt:
-		return &s.regs[r.ID()]
-	case RegTypeFloat:
-		return &s.fregs[r.ID()]
-	default:
-		panic("asm: invalid register type")
-	}
 }

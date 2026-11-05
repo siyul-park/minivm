@@ -17,6 +17,7 @@ func TestNewState(t *testing.T) {
 	})
 
 	t.Run("starts with an empty register file", func(t *testing.T) {
+		testenv.MustHaveArch(t, "arm64")
 		s, err := asm.NewState(4096)
 		require.NoError(t, err)
 		require.Zero(t, s.Reg(asm.NewPReg(0, asm.RegTypeInt, asm.Width64)))
