@@ -2,11 +2,9 @@
 
 package asm
 
-import "runtime"
-
-// registers is empty: no exit protocol runs on this architecture.
-type registers struct{}
-
-func (*registers) cell(PReg) *uint64 {
-	panic("asm: native execution is unsupported on " + runtime.GOARCH)
+// registers is a plain register file: no trampoline fills it here, but code
+// that reads or writes saved registers still runs.
+type registers struct {
+	regs  [32]uint64
+	fregs [32]uint64
 }
