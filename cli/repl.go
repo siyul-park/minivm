@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -355,13 +354,13 @@ func (r *REPL) profile(ctx context.Context) error {
 		return err
 	}
 
-	r.showProfile(p.Metrics())
+	r.showProfile(p.Snapshot())
 	return nil
 }
 
-// showProfile renders normalized, ranked profiler metrics.
-func (r *REPL) showProfile(metrics []prof.Metric) {
-	p := collect(metrics).report()
+// showProfile renders the ranked samples of c.
+func (r *REPL) showProfile(c *prof.Collector) {
+	p := rank(c)
 	out := r.out
 	fmt.Fprintf(out, "profile samples: %d\n", p.total)
 	if len(p.functions) > 0 {
@@ -604,11 +603,7 @@ func (r *REPL) commit(inst instr.Instruction) {
 }
 
 func (r *REPL) parse(line string) (instr.Instruction, error) {
-	normalized, err := normalize(line, r.codeLen)
-	if err != nil {
-		return nil, err
-	}
-	return instr.Parse(normalized)
+	return instr.ParseAt(line, r.codeLen)
 }
 
 func (r *REPL) printErr(err error) {
@@ -657,54 +652,6 @@ func printFrames(out io.Writer, vm *interp.Interpreter) {
 	}
 }
 
-// normalize converts "@N" absolute byte targets in branch instructions to relative
-// offsets from ip, and strips any "NNNN:\t" offset prefix. Returns the line unchanged
-// if no "@" tokens are present.
-func normalize(line string, ip int) (string, error) {
-	if _, after, ok := strings.Cut(line, ":\t"); ok {
-		line = after
-	}
-	fields := strings.Fields(line)
-	if len(fields) < 2 {
-		return line, nil
-	}
-	switch strings.ToLower(fields[0]) {
-	case "br", "br_if":
-		if !strings.HasPrefix(fields[1], "@") {
-			return line, nil
-		}
-		const width = 3
-		rel, err := relative(fields[1], ip, width)
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("%s %d", fields[0], rel), nil
-	case "br_table":
-		count, err := parseInt(fields[1])
-		if err != nil {
-			return "", fmt.Errorf("invalid br_table count %s: %w", fields[1], err)
-		}
-		width := 4 + count*2
-		tokens := slices.Clone(fields)
-		changed := false
-		for i, f := range fields[2:] {
-			if !strings.HasPrefix(f, "@") {
-				continue
-			}
-			rel, err := relative(f, ip, width)
-			if err != nil {
-				return "", err
-			}
-			tokens[2+i] = strconv.Itoa(rel)
-			changed = true
-		}
-		if changed {
-			return strings.Join(tokens, " "), nil
-		}
-	}
-	return line, nil
-}
-
 func parseBreakSpec(spec string) (fn, ip int, err error) {
 	if idx := strings.Index(spec, ":"); idx >= 0 {
 		fn, err = parseInt(spec[:idx])
@@ -722,20 +669,6 @@ func parseBreakSpec(spec string) (fn, ip int, err error) {
 		}
 	}
 	return fn, ip, nil
-}
-
-// relative converts the "@N" absolute target token of the instruction at ip
-// into an offset from the end of that width-byte instruction.
-func relative(token string, ip, width int) (int, error) {
-	abs, err := parseInt(token[1:])
-	if err != nil {
-		return 0, fmt.Errorf("invalid absolute branch target %s: %w", token, err)
-	}
-	rel := abs - (ip + width)
-	if rel < 0 || rel > 0xFFFF {
-		return 0, fmt.Errorf("branch target %s out of range from offset %d", token, ip)
-	}
-	return rel, nil
 }
 
 func parseInt(s string) (int, error) {

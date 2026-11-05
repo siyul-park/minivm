@@ -393,6 +393,43 @@ func TestParse(t *testing.T) {
 	}
 }
 
+func TestParseAt(t *testing.T) {
+	tests := []struct {
+		line    string
+		ip      int
+		want    instr.Instruction
+		targets []int
+		wantErr bool
+	}{
+		{line: "br @8", ip: 5, want: instr.MustNew(instr.BR, 0), targets: []int{8}},
+		{line: "br_if @0x0010", ip: 5, want: instr.MustNew(instr.BR_IF, 8), targets: []int{16}},
+		{line: "0005:\tbr_if @8", ip: 5, want: instr.MustNew(instr.BR_IF, 0), targets: []int{8}},
+		{line: "br @0", ip: 5, want: instr.MustNew(instr.BR, 0xFFF8), targets: []int{0}},
+		{line: "br_table 1 @20 @10", ip: 2, want: instr.MustNew(instr.BR_TABLE, 1, 12, 2), targets: []int{20, 10}},
+		{line: "br 3", ip: 5, want: instr.MustNew(instr.BR, 3), targets: []int{11}},
+		{line: "br @0x10000", ip: 0, wantErr: true},
+		{line: "br @8", ip: -1, wantErr: true},
+		{line: "br_table @1 @2 @3", ip: 0, wantErr: true},
+		{line: "local.get @1", ip: 0, wantErr: true},
+		{line: "br @x", ip: 0, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(strconv.Quote(tt.line), func(t *testing.T) {
+			got, err := instr.ParseAt(tt.line, tt.ip)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+
+			code := append(make([]byte, tt.ip), got...)
+			require.Equal(t, tt.targets, instr.Targets(code, tt.ip))
+		})
+	}
+}
+
 func FuzzParse(f *testing.F) {
 	f.Add("i32.const 42")
 	f.Add("br_table 0x02 0x0000 0x0001 0x0000")

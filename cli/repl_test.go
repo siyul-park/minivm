@@ -229,8 +229,8 @@ func TestREPL_Run(t *testing.T) {
 			excludes: []string{"error:"}},
 		{
 			name: "out-of-range absolute branch target errors",
-			// out-of-range absolute target reports error
-			input:    "br @0x0000\n.quit\n",
+			// a target beyond the signed 16-bit branch range reports an error
+			input:    "br @0x10000\n.quit\n",
 			contains: []string{"error:"}},
 
 		{
