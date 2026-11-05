@@ -23,9 +23,10 @@ if err != nil { return err }
 if err := vm.Run(ctx); err != nil { return err }
 if err := vm.Close(); err != nil { return err }
 metrics := p.Metrics()
+samples := p.Snapshot()
 ```
 
-`WithProfiler` attaches a profiler to an interpreter or pool. `Flush` publishes samples without closing; pool members flush on return/close.
+`WithProfiler` attaches a profiler to an interpreter or pool. `Metrics` flattens the aggregate into named metrics for export. `Snapshot` copies it as a `Collector`, whose `Total`, `Functions`, `IPs`, `IP` and `Opcode` read the samples directly; REPL `.profile` ranks from those. `Flush` publishes samples without closing; pool members flush on return/close.
 
 ## Metrics
 

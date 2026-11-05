@@ -136,3 +136,20 @@ func TestProfiler_Metrics(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, float64(2), value)
 }
+
+func TestProfiler_Snapshot(t *testing.T) {
+	local := prof.NewCollector()
+	local.Add(2, 4, byte(instr.NOP))
+	local.AddMetric("custom", 3)
+	profiler := prof.New()
+	profiler.Flush(local)
+
+	snap := profiler.Snapshot()
+	require.Equal(t, uint64(1), snap.Total())
+	require.Equal(t, uint64(1), snap.IP(2, 4))
+	require.Equal(t, float64(3), snap.Value("custom"))
+
+	snap.Add(2, 4, byte(instr.NOP))
+	value, _ := profiler.Metric("vm_samples_total")
+	require.Equal(t, float64(1), value)
+}

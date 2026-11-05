@@ -37,7 +37,7 @@ var ErrPoolClosed = errors.New("pool closed")
 // the same errors; Interpreters share that snapshot. size <= 0 is normalized to
 // 1. Interpreters are created lazily on Get.
 func NewPool(prog *program.Program, size int, opts ...Option) (*Pool, error) {
-	snap, err := snapshot(prog)
+	snap, err := program.Snapshot(prog)
 	if err != nil {
 		return nil, err
 	}

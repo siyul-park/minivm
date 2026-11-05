@@ -126,6 +126,14 @@ func TestCollector_Samples(t *testing.T) {
 	require.Zero(t, collector.Samples(4))
 }
 
+func TestCollector_Functions(t *testing.T) {
+	collector := prof.NewCollector()
+	require.Nil(t, collector.Functions())
+	collector.Add(3, 0, byte(instr.NOP))
+	collector.Add(1, 0, byte(instr.NOP))
+	require.Equal(t, []int{1, 3}, collector.Functions())
+}
+
 func TestCollector_IPs(t *testing.T) {
 	collector := prof.NewCollector()
 	collector.Add(3, 10, byte(instr.NOP))
