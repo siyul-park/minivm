@@ -24,7 +24,7 @@ Fusion state records stack checks, evaluation, ownership, materialization, and t
 
 Standalone execution `MUST` materialize the same values that fusion passes directly. Resident stack refs are consumed; local/global/upvalue/constant refs are borrowed until materialization.
 
-The absorbed head advances threaded compilation by its width. Runtime results, stack/frame state, IPs, traps, control flow, and ownership therefore match unfused execution. NOP run compaction is separate dispatch compaction.
+The absorbed head advances threaded compilation by its width. Runtime results, stack/frame state, IPs, traps (except resource limits; see Trap offsets), control flow, and ownership therefore match unfused execution. NOP run compaction is separate dispatch compaction.
 
 ## Trap offsets
 
@@ -34,7 +34,7 @@ A fused handler keeps the frame IP at its first instruction until it ends, so a 
 - A panic that reaches `dispatch` takes that offset when the frame still runs the fused code. This covers the consumer's own checks and every helper it calls (`arrayGet`, `arraySet`, `structGet`, `alloc`, host functions).
 - A fused producer that traps ahead of its consumer (stack overflow, slot bounds) panics `trapped` with its own offset instead; `lower.go` `fail` and `overflowAt` emit it. Standalone handlers panic plain.
 - `dispatch` applies the offset once. A rethrow across an outer floor carries a zero offset.
-- A fused numeric operation reads a wide `i64.const` raw, without the temporary box unfused execution allocates. Against `WithHeapLimit`, it can therefore exhaust the heap later than unfused execution or not at all. Every other trap matches.
+- Fusion skips temporaries: a fused handler pushes no transient operands and reads a wide `i64.const` raw, without its box. Against `WithStack` and `WithHeapLimit`, it can therefore trap later than unfused execution, or not at all. Such a resource limit is the one exception to trap parity.
 
 ## Supported Patterns
 
