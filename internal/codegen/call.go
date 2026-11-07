@@ -198,7 +198,7 @@ func pushFrame(callee target, targetSlots int, releaseTarget, native bool, advan
 	}
 	if native {
 		body = append(body, jen.If(
-			jen.Id("i").Dot("native").Op("!=").Nil().Op("&&").Id("i").Dot("native").Dot("call").Call(
+			jen.Id("i").Dot("jit").Op("!=").Nil().Op("&&").Id("i").Dot("jit").Dot("call").Call(
 				jen.Id("i"), jen.Add(callee.addr), jen.Id("fn"), jen.Lit(releaseTarget), jen.Lit(advance),
 			),
 		).Block(jen.Return()))

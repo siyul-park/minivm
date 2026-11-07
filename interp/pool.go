@@ -172,21 +172,21 @@ func (p *Pool) share(i *Interpreter) {
 	if i.attach() != nil {
 		i.spend(dormancy)
 	}
-	if i.native == nil {
+	if i.jit == nil {
 		return
 	}
 	p.sharedMu.Lock()
 	defer p.sharedMu.Unlock()
 
 	if p.shared == nil {
-		p.shared = i.native.shared.retain()
+		p.shared = i.jit.shared.retain()
 		return
 	}
-	if !reflect.DeepEqual(i.native.shared.module, p.shared.module) {
+	if !reflect.DeepEqual(i.jit.shared.module, p.shared.module) {
 		return
 	}
 
-	if err := i.native.join(p.shared.retain()); err != nil && p.closeErr == nil {
+	if err := i.jit.join(p.shared.retain()); err != nil && p.closeErr == nil {
 		p.closeErr = err
 	}
 }
