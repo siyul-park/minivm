@@ -97,7 +97,7 @@ func passes(tier jit.Tier, profiles transform.Profiles) []pass.Pass[*ssa.Functio
 	case jit.Baseline:
 		return transform.O1()
 	case jit.Optimized:
-		return transform.O3(transform.NewBoundPass(profiles))
+		return transform.O3(transform.NewBCEPass(profiles))
 	default:
 		return nil
 	}

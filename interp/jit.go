@@ -25,15 +25,15 @@ type engine struct {
 	// ctx is built by the first entry: its native stack is the largest
 	// allocation a JIT makes, and most programs never enter native code.
 	ctx *jit.Context
-	// reader is the engine's registration with its shared store.
+	// reader is the engine's registration with its shared cache.
 	reader *jit.Reader
 	// quota is the work units a safepoint adds to Context.Budget: the tick
 	// of an interpreter with fuel or a hook, else budget.
 	quota int64
-	// exact caches unfused threaded code for materialized frames, by address.
-	exact [][]func(*Interpreter)
+	// unfused caches threaded code for materialized frames, by address.
+	unfused [][]func(*Interpreter)
 	// depth is how many native activations are suspended under a call the
-	// interpreter runs for them (nest): the next entry starts its records
+	// interpreter runs for them (reenter): the next entry starts its records
 	// above them.
 	depth uint64
 	// borrows caches transform.Borrows by address for entries above depth
@@ -59,10 +59,10 @@ type hold struct {
 // count of an operand (native code owns and releases each).
 type callout func(i *Interpreter, code []byte, args [2]types.Boxed) types.Value
 
-// shared contains the pool-shareable native runtime: Store, Queue, and Module.
+// shared contains the pool-shareable native runtime: Cache, Queue, and Module.
 // refs closes it after the last interpreter releases it.
 type shared struct {
-	store  *jit.Store
+	cache  *jit.Cache
 	queue  *compile.Queue
 	module transform.Module
 
@@ -126,7 +126,7 @@ type site struct {
 	// native's shared runtime.
 	total     *atomic.Int64
 	submitted bool
-	// code is the published code once a store lookup has found it; nil
+	// code is the published code once a cache lookup has found it; nil
 	// until then, and again once the site fails.
 	code *jit.Code
 	// built is the profiles s's published code was compiled from.
@@ -140,7 +140,7 @@ type site struct {
 }
 
 // interval is how many back edges pass — once a header site has crossed
-// the submit threshold — between its store lookups (and, while unsubmitted,
+// the submit threshold — between its cache lookups (and, while unsubmitted,
 // its Queue.Submit retries): rare enough that the lock CodeAt and Submit
 // take never runs on the per-iteration path. An entry site observes Runs
 // and uses 1.
@@ -221,24 +221,24 @@ func newEngine(i *Interpreter, threshold int) *engine {
 }
 
 // wake builds the engine's live state, once, and reports whether it is live. Under the
-// automatic policy a program whose code is all brief has nothing a Go entry
+// automatic policy a program whose code is all trivial has nothing a Go entry
 // could repay: it stays without a JIT.
 func (e *engine) wake(i *Interpreter) bool {
 	if e.shared != nil {
 		return true
 	}
-	briefs := make([]bool, len(i.code))
+	trivial := make([]bool, len(i.code))
 	if e.auto {
 		lengths := map[int]int{}
-		briefs[0] = e.length(i, 0, lengths) < short
-		all := briefs[0]
+		trivial[0] = e.length(i, 0, lengths) < short
+		all := trivial[0]
 		for _, c := range i.constants {
 			if c.Kind() != types.KindRef {
 				continue
 			}
 			if _, ok := i.heap[c.Ref()].(*types.Function); ok {
-				briefs[c.Ref()] = e.length(i, c.Ref(), lengths) < short
-				all = all && briefs[c.Ref()]
+				trivial[c.Ref()] = e.length(i, c.Ref(), lengths) < short
+				all = all && trivial[c.Ref()]
 			}
 		}
 		if all {
@@ -247,19 +247,19 @@ func (e *engine) wake(i *Interpreter) bool {
 	}
 	r := newShared(i)
 	e.shared = r
-	e.reader = r.store.Attach()
+	e.reader = r.cache.Attach()
 	e.backoffs = make([]uint8, len(i.code))
 	e.entries = make([]int64, len(i.code))
 	e.refutes = make([]int, len(i.code))
 	e.ledgers = make([]jit.Ledger, len(i.code))
 	e.failed = make([][2]bool, len(i.code))
 	e.built = make([][2][]jit.Dep, len(i.code))
-	e.exact = make([][]func(*Interpreter), len(i.code))
+	e.unfused = make([][]func(*Interpreter), len(i.code))
 	e.borrows = make([][]bool, len(i.code))
 	e.sites = map[key]*site{}
 	e.profiles = make([]*transform.Profile, len(i.code))
-	e.briefs = briefs
-	e.gates = slices.Clone(briefs)
+	e.trivial = trivial
+	e.gates = slices.Clone(trivial)
 
 	e.observe(i, 0, i.module)
 	for addr, obj := range e.module.Objects {
@@ -270,11 +270,11 @@ func (e *engine) wake(i *Interpreter) bool {
 	return true
 }
 
-// newShared builds a fresh, unshared JIT runtime for i's program: a Store
+// newShared builds a fresh, unshared JIT runtime for i's program: a Cache
 // sized to i's code, a single-worker compile Queue, and i's constant module.
 func newShared(i *Interpreter) *shared {
 	r := &shared{
-		store:  jit.NewStore(len(i.code)),
+		cache:  jit.NewCache(len(i.code)),
 		queue:  compile.NewQueue(func() compile.Machine { m, _ := host.New(); return m }, 1),
 		module: newModule(i),
 		calls:  make([]atomic.Int64, len(i.code)),
@@ -297,7 +297,7 @@ func (e *engine) close() error {
 func (e *engine) join(r *shared) error {
 	e.reader.Detach()
 	own := e.shared
-	e.shared, e.reader = r, r.store.Attach()
+	e.shared, e.reader = r, r.cache.Attach()
 	return own.release()
 }
 
@@ -326,7 +326,7 @@ func (e *engine) attempt(i *Interpreter, addr int, fn *types.Function, release b
 		return false
 	}
 	e.drain(i)
-	code := e.store.Code(addr)
+	code := e.cache.Code(addr)
 	if code == nil {
 		e.count(i, addr, fn)
 		return false
@@ -341,18 +341,18 @@ func (e *engine) attempt(i *Interpreter, addr int, fn *types.Function, release b
 			return false
 		}
 	}
-	retire, fault := e.run(i, addr, fn, code, bp, release, advance)
+	invalidate, fault := e.run(i, addr, fn, code, bp, release, advance)
 	if fault != nil {
 		panic(fault)
 	}
-	if retire {
-		e.retire(addr, code.Tier)
+	if invalidate {
+		e.invalidate(addr, code.Tier)
 	}
 	return true
 }
 
 // run executes one native call whose frame starts at bp and reports whether
-// it should retire and the fault settle reports.
+// it should invalidate and the fault settle reports.
 func (e *engine) run(i *Interpreter, addr int, fn *types.Function, code *jit.Code, bp int, release bool, advance int) (bool, any) {
 	returns := len(fn.Typ.Returns)
 
@@ -379,13 +379,13 @@ func (e *engine) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 
 	if trap := jit.Enter(code.Entry(), ctx); trap != jit.TrapReturn {
 		start := i.fp
-		ok, retire, fault := e.settle(i, code, trap, &e.ledgers[addr], mark, start,
+		ok, invalidate, fault := e.settle(i, code, trap, &e.ledgers[addr], mark, start,
 
-			func(exit jit.Exit) { i.fr.ip += advance; e.rebuild(i, exit, start, addr, release) },
+			func(exit jit.Exit) { i.fr.ip += advance; e.materialize(i, exit, start, addr, release) },
 			func() bool { return e.refute(addr, code.Tier) },
 		)
 		if !ok {
-			return retire, fault
+			return invalidate, fault
 		}
 	} else {
 		e.ledgers[addr].Spend(mark - ctx.Budget)
@@ -440,7 +440,7 @@ func (e *engine) observe(i *Interpreter, addr int, fn *types.Function) {
 		install(ip, false)
 	}
 
-	if addr == 0 && !slices.Contains(headers, 0) && !e.briefs[0] {
+	if addr == 0 && !slices.Contains(headers, 0) && !e.trivial[0] {
 		install(0, true)
 	}
 }
@@ -471,7 +471,7 @@ func (e *engine) observer(s *site, code []func(*Interpreter), inner func(*Interp
 			}
 		case due:
 			e.drain(i)
-			s.code = e.store.CodeAt(s.address, s.ip)
+			s.code = e.cache.CodeAt(s.address, s.ip)
 		}
 		inner(i)
 	}
@@ -481,11 +481,11 @@ func (e *engine) observer(s *site, code []func(*Interpreter), inner func(*Interp
 // published, permanently failed, or disabled: an entry site's submit waits
 // for this instead of competing with them for addr's one queue slot. A
 // header absent from sites has already failed or disabled (drain and enter
-// delete it on either); one still present is resolved once the store holds
+// delete it on either); one still present is resolved once the cache holds
 // its published code.
 func (e *engine) resolved(addr int, ips []int) bool {
 	for _, ip := range ips {
-		if _, ok := e.sites[key{addr, ip}]; ok && e.store.CodeAt(addr, ip) == nil {
+		if _, ok := e.sites[key{addr, ip}]; ok && e.cache.CodeAt(addr, ip) == nil {
 			return false
 		}
 	}
@@ -511,8 +511,8 @@ func (e *engine) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 		}
 	}
 	c := s.code
-	if c.Retired() {
-		if c = e.store.CodeAt(s.address, s.ip); c == nil {
+	if c.Invalidated() {
+		if c = e.cache.CodeAt(s.address, s.ip); c == nil {
 			s.code = nil
 			return false
 		}
@@ -526,14 +526,14 @@ func (e *engine) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 
 	e.metricEntry(i, c)
 
-	ok, retire := true, false
+	ok, invalidate := true, false
 	var fault any
 	if trap := jit.Enter(c.Entry(), ctx); trap != jit.TrapReturn {
 
 		start := i.fp - 1
 		f := i.fr
-		ok, retire, fault = e.settle(i, c, trap, &s.ledger, mark, start,
-			func(exit jit.Exit) { e.rebuild(i, exit, start, f.ref, f.release) },
+		ok, invalidate, fault = e.settle(i, c, trap, &s.ledger, mark, start,
+			func(exit jit.Exit) { e.materialize(i, exit, start, f.ref, f.release) },
 			func() bool {
 				if e.stale(s.built) {
 					return true
@@ -548,8 +548,8 @@ func (e *engine) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	if ok {
 		e.finish(i, s, c)
 	}
-	if retire {
-		e.store.RetireAt(s.address, s.ip)
+	if invalidate {
+		e.cache.InvalidateAt(s.address, s.ip)
 		s.code = nil
 		if s.refutes < tolerance && e.stale(s.built) {
 
@@ -570,11 +570,11 @@ func (e *engine) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	return true
 }
 
-// rebuild materializes every native activation of the current run, from
+// materialize materializes every native activation of the current run, from
 // depth upward, as frames from start and positions the interpreter at the
 // innermost one. The run's first activation was entered through ref, and
 // release reports whether it owns that reference.
-func (e *engine) rebuild(i *Interpreter, exit jit.Exit, start, ref int, release bool) {
+func (e *engine) materialize(i *Interpreter, exit jit.Exit, start, ref int, release bool) {
 	ctx := e.ctx
 	floor, depth := int(e.depth), int(ctx.Depth)
 
@@ -586,7 +586,7 @@ func (e *engine) rebuild(i *Interpreter, exit jit.Exit, start, ref int, release 
 	maps[depth-floor-1] = exit.Frame
 	refs[0], owns[0] = ref, release
 	for k := depth - 2; k >= floor; k-- {
-		code := e.store.Find(ctx.Records[k+1].PC)
+		code := e.cache.Find(ctx.Records[k+1].PC)
 		call := code.Exits[ctx.Records[k].Exit]
 		maps[k-floor] = call.Frame
 		refs[k-floor+1] = e.callee(k, call)
@@ -631,7 +631,7 @@ func (e *engine) frame(i *Interpreter, at, k int, m jit.Frame, ref int, release 
 	}
 	f := &i.frames[at]
 	f.addr = m.Address
-	f.code = e.exactCode(i, m.Address)
+	f.code = e.unfusedCode(i, m.Address)
 	f.ref = ref
 	f.release = release
 	f.bp = e.frameBase(i, k)
@@ -684,20 +684,20 @@ func (e *engine) quiesce() {
 		return
 	}
 	e.reader.Quiesce()
-	e.freeErr = errors.Join(e.freeErr, e.store.Reclaim())
+	e.freeErr = errors.Join(e.freeErr, e.cache.Reclaim())
 }
 
 // settle serves exits from trap through safepoints, releases, bridges, and
 // calls; mark is Context.Budget at entry, and the entered activation
 // materializes as frame start. ok reports that the activation reached
-// TrapReturn; retire reports whether the code retires; fault is a panic a
+// TrapReturn; invalidate reports whether the code is invalidated; fault is a panic a
 // call raised past its native caller, which the caller re-raises once native
 // code has returned.
 //
 // Each exit costs the code by its class (jit.Class): a trap nothing; a guard
 // its refutation (judge); a bridge or call its price, charged to ledger before it is
-// served, which retires the code once its work no longer pays.
-func (e *engine) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *jit.Ledger, mark int64, start int, deopt func(jit.Exit), refute func() bool) (ok, retire bool, fault any) {
+// served, which invalidates the code once its work no longer pays.
+func (e *engine) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *jit.Ledger, mark int64, start int, deopt func(jit.Exit), refute func() bool) (ok, invalidate bool, fault any) {
 	ctx := e.ctx
 	for {
 		ledger.Spend(mark - ctx.Budget)
@@ -708,7 +708,7 @@ func (e *engine) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 
 		entered := code
 		if ctx.Depth != e.depth+1 {
-			entered = e.store.Find(ctx.PC())
+			entered = e.cache.Find(ctx.PC())
 		}
 		exit := entered.Exits[ctx.Exit()]
 		metric(i, metricExits, 1, prof.Label{Key: "kind", Value: exit.Kind.String()})
@@ -761,7 +761,7 @@ func (e *engine) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 				}
 			case exit.Kind == jit.ExitBridge:
 				class = e.bridge(i, exit)
-			case !e.widen(i, exit):
+			case !e.box(i, exit):
 				class = jit.ClassTrap
 			}
 			switch class {
@@ -795,7 +795,7 @@ func (e *engine) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 				e.replay(i, exit, ref)
 				return false, true, nil
 			}
-			if fault, ok := e.nest(i, exit, ref, start, deopt); !ok {
+			if fault, ok := e.reenter(i, exit, ref, start, deopt); !ok {
 				return false, false, fault
 			}
 			e.sync(i)
@@ -839,7 +839,7 @@ func (e *engine) load(i *Interpreter, bp, spare int) {
 	ctx := e.ctx
 	e.sync(i)
 	ctx.Globals = base(i.globals)
-	ctx.Natives = e.store.Natives()
+	ctx.Natives = e.cache.Natives()
 	ctx.Entries = base(e.entries)
 	ctx.Top = end(i.stack)
 	ctx.FB = base(i.stack[bp:])
@@ -854,9 +854,9 @@ func (e *engine) sync(i *Interpreter) {
 	e.ctx.RC = base(i.rc)
 }
 
-// widen heap-boxes exit.Word, a wide i64, into Context.Results[0] as
+// box heap-boxes exit.Word, a wide i64, into Context.Results[0] as
 // threaded boxI64 does; a panic (heap exhaustion) declines.
-func (e *engine) widen(i *Interpreter, exit jit.Exit) (ok bool) {
+func (e *engine) box(i *Interpreter, exit jit.Exit) (ok bool) {
 	defer func() {
 		if recover() != nil {
 			ok = false
@@ -930,7 +930,7 @@ func (e *engine) bridge(i *Interpreter, exit jit.Exit) jit.Class {
 
 	savedFr, savedSP := i.fr, i.sp
 	f := &i.frames[i.fp]
-	*f = frame{addr: m.Address, code: e.exactCode(i, m.Address), bp: bp, ip: m.IP}
+	*f = frame{addr: m.Address, code: e.unfusedCode(i, m.Address), bp: bp, ip: m.IP}
 	i.fr = f
 	i.sp = sp + len(tail)
 
@@ -991,7 +991,7 @@ func (e *engine) nests(i *Interpreter, exit jit.Exit, addr int) bool {
 	return bp+slots(i.function(exit.Frame.Address))+len(exit.Frame.Stack)+exit.Args < len(i.stack)
 }
 
-// nest runs exit's call in the interpreter while its native caller stays
+// reenter runs exit's call in the interpreter while its native caller stays
 // suspended, and reports whether native code resumes. A frame standing in
 // for the caller runs only its CALL; the native activations below it keep
 // their frame slots from start, which no handler search or unwinding crosses
@@ -1001,7 +1001,7 @@ func (e *engine) nests(i *Interpreter, exit jit.Exit, addr int) bool {
 // callee materializes the caller under the callee's live frames: a
 // cancellation continues threaded, a THROW whose search the floor stopped
 // runs again over the materialized frames, and any other panic is fault.
-func (e *engine) nest(i *Interpreter, exit jit.Exit, ref, start int, deopt func(jit.Exit)) (fault any, ok bool) {
+func (e *engine) reenter(i *Interpreter, exit jit.Exit, ref, start int, deopt func(jit.Exit)) (fault any, ok bool) {
 	ctx := e.ctx
 	k := int(ctx.Depth) - 1
 	m := exit.Frame
@@ -1011,7 +1011,7 @@ func (e *engine) nest(i *Interpreter, exit jit.Exit, ref, start int, deopt func(
 	state, limit, depth, floor := ctx.State, ctx.Limit, e.depth, i.floor
 	fr, fp, sp, saved := i.fr, i.fp, i.sp, i.frames[at]
 
-	code := e.exactCode(i, m.Address)
+	code := e.unfusedCode(i, m.Address)
 	i.frames[at] = frame{addr: m.Address, code: code[:m.IP], bp: bp, ip: m.IP, returns: m.Returns}
 	i.fr, i.fp = &i.frames[at], at+1
 	args := bp + slots(i.function(m.Address)) + len(m.Stack)
@@ -1052,14 +1052,14 @@ func (e *engine) nest(i *Interpreter, exit jit.Exit, ref, start int, deopt func(
 	return fault, false
 }
 
-// exactCode returns addr's threaded code compiled exact, building and caching
+// unfusedCode returns addr's threaded code compiled unfused, building and caching
 // it the first time a deoptimization at addr needs it.
-func (e *engine) exactCode(i *Interpreter, addr int) []func(*Interpreter) {
-	if code := e.exact[addr]; code != nil {
+func (e *engine) unfusedCode(i *Interpreter, addr int) []func(*Interpreter) {
+	if code := e.unfused[addr]; code != nil {
 		return code
 	}
 	code, _ := e.compile(i.function(addr), true)
-	e.exact[addr] = code
+	e.unfused[addr] = code
 	return code
 }
 
@@ -1071,7 +1071,7 @@ func (e *engine) frameBase(i *Interpreter, k int) int {
 // replay pushes exit's callee over its arguments at i.fr's CALL, which the
 // interpreter then runs: it retains each lent argument and a borrowed ref,
 // since the CALL adopts both. A closure callee is counted and recorded here,
-// since the threaded closure CALL has no native hook; so is brief code, whose
+// since the threaded closure CALL has no native hook; so is trivial code, whose
 // hook is gated.
 func (e *engine) replay(i *Interpreter, exit jit.Exit, ref int) {
 	for _, p := range exit.Lent {
@@ -1091,11 +1091,11 @@ func (e *engine) replay(i *Interpreter, exit jit.Exit, ref int) {
 		case *types.Closure:
 			addr := int(callee.Fn)
 			e.see(i, transform.Callee{Function: addr, Closure: true})
-			if e.store.Code(addr) == nil {
+			if e.cache.Code(addr) == nil {
 				e.count(i, addr, i.function(addr))
 			}
 		case *types.Function:
-			if ref < len(e.briefs) && e.briefs[ref] && e.store.Code(ref) == nil {
+			if ref < len(e.trivial) && e.trivial[ref] && e.cache.Code(ref) == nil {
 				e.count(i, ref, callee)
 			}
 		}
@@ -1153,7 +1153,7 @@ func (r *shared) retain() *shared {
 }
 
 // release drops one reference to r, closing its queue — freeing every code
-// it finished but no native ever drained — and its store once none remain.
+// it finished but no native ever drained — and its cache once none remain.
 // A native's calls into its shared runtime are synchronous, so no native
 // code is ever suspended when the last reference releases.
 func (r *shared) release() error {
@@ -1166,7 +1166,7 @@ func (r *shared) release() error {
 			err = errors.Join(err, job.Code.Free())
 		}
 	}
-	return errors.Join(err, r.store.Close())
+	return errors.Join(err, r.cache.Close())
 }
 
 // nominate adds addr to r's candidates, once.
@@ -1252,7 +1252,7 @@ func toWord(i *Interpreter, kind types.Kind, v types.Boxed) uint64 {
 	return v.Word()
 }
 
-// dispatch runs the threaded loop for nest until its stand-in frame's CALL
+// dispatch runs the threaded loop for reenter until its stand-in frame's CALL
 // completes, reporting a cancellation as err and any panic no handler above
 // the floor caught as fault.
 func dispatch(i *Interpreter) (fault any, err error) {

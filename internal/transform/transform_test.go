@@ -105,7 +105,7 @@ func TestPassOrder(t *testing.T) {
 		pipeline.Add(transform.NewFoldPass())
 		pipeline.Add(transform.NewCSEPass())
 		pipeline.Add(transform.NewGuardPass())
-		pipeline.Add(transform.NewHoistPass())
+		pipeline.Add(transform.NewLICMPass())
 		pipeline.Add(transform.NewDCEPass())
 		out, err := pipeline.Run(pass.NewManager(), fn)
 

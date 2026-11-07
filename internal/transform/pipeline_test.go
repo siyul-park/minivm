@@ -31,7 +31,7 @@ func TestO2(t *testing.T) {
 func TestO3(t *testing.T) {
 	base := []pass.Pass[*ssa.Function]{
 		transform.NewFoldPass(), transform.NewForwardPass(), transform.NewCSEPass(), transform.NewGuardPass(),
-		transform.NewDCEPass(), transform.NewPromotePass(), transform.NewHoistPass(),
+		transform.NewDCEPass(), transform.NewPromotePass(), transform.NewLICMPass(),
 	}
 
 	t.Run("ends with dead-code removal", func(t *testing.T) {
@@ -39,7 +39,7 @@ func TestO3(t *testing.T) {
 	})
 
 	t.Run("runs late passes before the last dead-code removal", func(t *testing.T) {
-		late := transform.NewBoundPass(transform.Profiles{})
+		late := transform.NewBCEPass(transform.Profiles{})
 		want := append(base[:len(base):len(base)], late, transform.NewDCEPass())
 		require.Equal(t, names(want), names(transform.O3(late)))
 	})
