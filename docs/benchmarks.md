@@ -40,6 +40,8 @@ Compares deterministic workloads across minivm's threaded interpreter, JIT, Waze
 
 The timed loop excludes fixture loading, compilation, module construction, function lookup, and correctness checks where the runtime permits it. `quick`, `standard`, and `deep` use 100 ms, 300 ms, and 1 s target times; `—` denotes an unavailable or intentionally inapplicable runtime.
 
+CI publishes this table from a shared `ubuntu-24.04-arm` runner: `standard` on each code push to `main`, `deep` weekly. Read it as ratios between runtimes in one run. Differences between two runs include runner noise, and numbers from another machine are not comparable. Use `make benchmark-diff` to judge a change.
+
 ## Ownership
 
 - `benchmarks/registry` owns benchmark metadata and runtime source attachment.

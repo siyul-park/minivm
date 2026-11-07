@@ -88,11 +88,16 @@ jobs:
 
   benchmark:
     needs: check
+    if: github.ref != 'refs/heads/main'
     name: Benchmark Report
-    runs-on: ubuntu-24.04
+    # ARM64, because the JIT runs nowhere else. A slower result never fails the
+    # build: a shared runner is too noisy to gate on.
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -103,5 +108,18 @@ jobs:
             go.sum
             benchmarks/go.sum
 
-      - name: Run Benchmark
-        run: make benchmark benchmark-level=quick
+      - name: Compare with Main
+        run: |
+          base="$(git merge-base origin/main HEAD)"
+          if [ "$base" = "$(git rev-parse HEAD)" ]; then
+            echo "Nothing to compare: HEAD is on main." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          make benchmark-diff base="$base" benchmark-level=quick > report.txt
+          cat report.txt
+          {
+            echo "## Benchmark against \`${base:0:7}\`"
+            echo '```'
+            cat report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

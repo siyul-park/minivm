@@ -11,9 +11,10 @@ import (
 
 type step struct {
 	match
-	kind   instr.Kind
-	boxed  bool
-	commit bool
+	kind     instr.Kind
+	boxed    bool
+	commit   bool
+	consumer bool
 }
 
 type state struct {
@@ -25,6 +26,7 @@ type state struct {
 }
 
 type value struct {
+	at       int // offset of a fused producer a plain trap would misname; negative otherwise
 	op       instr.Opcode
 	head     instr.Opcode
 	compile  []jen.Code
@@ -291,33 +293,43 @@ func emit(code jen.Code) lowerer {
 	}
 }
 
-func compose(pattern pattern, size int, label string) ([]jen.Code, error) {
+func compose(pattern pattern, size int, label string) ([]jen.Code, int, error) {
 	steps, err := resolve(pattern)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	context := state{width: size, label: label}
 	var result value
+	trap, committed := 0, false
 	for _, current := range steps {
 		emit := lowerers[current.op]
 		if emit == nil {
-			return nil, fmt.Errorf("no lowering for %s", instr.TypeOf(current.op).Mnemonic)
+			return nil, 0, fmt.Errorf("no lowering for %s", instr.TypeOf(current.op).Mnemonic)
 		}
 		result, err = emit(&context, current)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
+		}
+		if current.consumer {
+			trap = context.offset
+		}
+		if current.commit {
+			committed = true
 		}
 		context.offset += width(current.op)
 	}
 	if result.handler != nil || len(result.compile) == 0 {
 		consumer := steps[len(steps)-1].op
-		return nil, fmt.Errorf("no fusion lowering for %s", instr.TypeOf(consumer).Mnemonic)
+		return nil, 0, fmt.Errorf("no fusion lowering for %s", instr.TypeOf(consumer).Mnemonic)
 	}
 	if len(context.stack) != 0 {
-		return nil, fmt.Errorf("fusion leaves %d pending values", len(context.stack))
+		return nil, 0, fmt.Errorf("fusion leaves %d pending values", len(context.stack))
 	}
-	return result.compile, nil
+	if committed {
+		trap = 0
+	}
+	return result.compile, trap, nil
 }
 
 func resolve(pattern pattern) ([]step, error) {
@@ -341,6 +353,7 @@ func resolve(pattern pattern) ([]step, error) {
 	if consumerAt < 0 {
 		return nil, fmt.Errorf("fusion pattern has no consumer")
 	}
+	steps[consumerAt].consumer = true
 	consumer := steps[consumerAt].op
 	if consumerAt == 0 {
 		if stored {
@@ -494,7 +507,24 @@ func underflow(n int) jen.Code {
 }
 
 func overflow() jen.Code {
-	return jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow")))
+	return overflowAt(-1)
+}
+
+// overflowAt traps when the stack has no room for a push by the producer at
+// offset at; see fail.
+func overflowAt(at int) jen.Code {
+	return jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(fail("ErrStackOverflow", at))
+}
+
+// fail panics with err. A fused producer that traps ahead of its handler's
+// consumer passes its offset from the handler's first instruction so the trap
+// names it; any other panic stays plain, which a fused handler reports at its
+// consumer. A negative at is plain.
+func fail(err string, at int) jen.Code {
+	if at < 0 {
+		return jen.Panic(jen.Id(err))
+	}
+	return jen.Panic(jen.Id("trapped").Values(jen.Id(err), jen.Lit(at)))
 }
 
 // spend spends one unit of a dormant JIT's heat (Interpreter.heat) when cond

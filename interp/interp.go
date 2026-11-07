@@ -60,6 +60,7 @@ type Interpreter struct {
 	globalTypes []types.Type
 	instrs      [][]byte
 	code        [][]func(*Interpreter)
+	traps       [][]uint8
 	zeros       [][]types.Boxed
 	coros       []bool
 	handlers    [][]instr.Handler
@@ -730,6 +731,7 @@ func build(prog *program.Program, opts ...Option) *Interpreter {
 		globalTypes: prog.Globals,
 		instrs:      make([][]byte, len(prog.Constants)+1),
 		code:        make([][]func(*Interpreter), len(prog.Constants)+1),
+		traps:       make([][]uint8, len(prog.Constants)+1),
 		zeros:       make([][]types.Boxed, len(prog.Constants)+1),
 		coros:       make([]bool, len(prog.Constants)+1),
 		handlers:    make([][]instr.Handler, len(prog.Constants)+1),
@@ -759,7 +761,7 @@ func build(prog *program.Program, opts ...Option) *Interpreter {
 
 	i.seed()
 
-	i.code[0] = i.compile(i.module, i.tick == 1)
+	i.code[0], i.traps[0] = i.compile(i.module, i.tick == 1)
 
 	// Functions nested in array, map, or struct constants live in the constant
 	// region too, so the region is scanned rather than the top-level list.
@@ -879,11 +881,15 @@ func (i *Interpreter) dispatch() (caught bool, err error) {
 				err = ErrYield
 				return
 			}
+			r = i.locate(r)
 			if i.handle(r) {
 				caught = true
 				return
 			}
 			if i.floor > 0 {
+				if e, ok := r.(error); ok {
+					r = trapped{err: e}
+				}
 				panic(r)
 			}
 			err = i.fault(r)
@@ -1250,6 +1256,9 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if addr >= len(i.code) {
 		i.code = append(i.code, make([][]func(*Interpreter), n-len(i.code))...)
 	}
+	if addr >= len(i.traps) {
+		i.traps = append(i.traps, make([][]uint8, n-len(i.traps))...)
+	}
 	if addr >= len(i.zeros) {
 		i.zeros = append(i.zeros, make([][]types.Boxed, n-len(i.zeros))...)
 	}
@@ -1264,7 +1273,7 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	}
 	i.instrs[addr] = fn.Code
 	i.handlers[addr] = fn.Handlers
-	i.code[addr] = i.compile(fn, i.tick == 1)
+	i.code[addr], i.traps[addr] = i.compile(fn, i.tick == 1)
 	i.zeros[addr] = types.Zeros(fn.Locals)
 	if dynamic {
 		i.dynamic[addr] = true
@@ -1287,8 +1296,9 @@ func (i *Interpreter) yields(code []byte) bool {
 
 // compile builds fn's threaded code: fused unless exact, which every
 // materialized native frame needs because a fusion leaves no handler at the
-// IPs it absorbs (interp/native.go's deopt resumes exactly there).
-func (i *Interpreter) compile(fn *types.Function, exact bool) []func(*Interpreter) {
+// IPs it absorbs (interp/native.go's deopt resumes exactly there). The second
+// result is the fused handlers' trap offsets, indexed by ip; see trapped.
+func (i *Interpreter) compile(fn *types.Function, exact bool) ([]func(*Interpreter), []uint8) {
 	c := &threader{
 		types:       i.types,
 		constants:   i.constants,
@@ -1298,7 +1308,8 @@ func (i *Interpreter) compile(fn *types.Function, exact bool) []func(*Interprete
 		globalTypes: i.globalTypes,
 		exact:       exact,
 	}
-	return c.Compile(fn.Code, fn.Slots(), fn.Declared(), types.Kinds(fn.Captures), fn.Captures)
+	code := c.Compile(fn.Code, fn.Slots(), fn.Declared(), types.Kinds(fn.Captures), fn.Captures)
+	return code, c.traps
 }
 
 // globalDecls returns the declared kinds for threaded handler selection.
@@ -1676,6 +1687,27 @@ func (i *Interpreter) discard(f *frame) {
 	f.coro = 0
 }
 
+// locate moves the running frame's ip to the instruction a trap names, which a
+// fused handler leaves at its first instruction, and returns the trap's cause.
+// A trapped panic carries its own offset; any other error takes the offset the
+// frame's fused handler recorded for its trapping consumer, none for a frame
+// running unfused code. The rethrow of an outer floor carries offset zero, so
+// the ip moves once.
+func (i *Interpreter) locate(r any) any {
+	if t, ok := r.(trapped); ok {
+		i.fr.ip += t.at
+		return t.err
+	}
+	if _, ok := r.(error); !ok || i.fr == nil {
+		return r
+	}
+	f := i.fr
+	if f.addr >= 0 && f.addr < len(i.code) && f.ip >= 0 && f.ip < len(i.traps[f.addr]) && len(f.code) > 0 && &f.code[0] == &i.code[f.addr][0] {
+		f.ip += int(i.traps[f.addr][f.ip])
+	}
+	return r
+}
+
 func (i *Interpreter) fault(r any) error {
 	frames := make([]FrameInfo, 0, i.fp)
 	for idx := i.fp - 1; idx >= 0; idx-- {
@@ -1694,6 +1726,8 @@ func (i *Interpreter) guard(err *error) {
 func (i *Interpreter) cause(r any) error {
 	switch e := r.(type) {
 	case escape:
+		return e.err
+	case trapped:
 		return e.err
 	case error:
 		return e
@@ -2141,6 +2175,7 @@ func (i *Interpreter) remove(addr int) {
 	}
 	i.instrs[addr] = nil
 	i.code[addr] = nil
+	i.traps[addr] = nil
 	i.zeros[addr] = nil
 	i.handlers[addr] = nil
 	i.coros[addr] = false

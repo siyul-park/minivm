@@ -2816,6 +2816,161 @@ func TestWithThreshold(t *testing.T) {
 		require.ErrorIs(t, run(0), interp.ErrDivideByZero)
 	})
 
+	t.Run("reports a fused trap at the faulting instruction in every tier", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		tests := []struct {
+			name     string
+			body     func(b *instr.Builder, target int)
+			good     int32
+			bad      int32
+			null     int
+			limit    int
+			threaded bool // native loses frames here until #278
+		}{
+			{
+				name: "array.get on a null container",
+				body: func(b *instr.Builder, _ int) {
+					b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.DROP)
+				},
+				bad:  1,
+				null: 2,
+			},
+			{
+				name: "array.get past the end of a typed array",
+				body: func(b *instr.Builder, _ int) {
+					b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET).Emit(instr.DROP)
+				},
+				bad: 1000,
+			},
+			{
+				name: "array.set past the end of a typed array",
+				body: func(b *instr.Builder, _ int) {
+					b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SET)
+				},
+				bad: 1000,
+			},
+			{
+				name: "struct.get on a null container",
+				body: func(b *instr.Builder, _ int) {
+					b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).Emit(instr.DROP)
+				},
+				bad:  1,
+				null: 4,
+			},
+			{
+				name: "i32.div_s by a zero local after a pending operand",
+				body: func(b *instr.Builder, _ int) {
+					b.Emit(instr.I32_CONST, 7).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_DIV_S).Emit(instr.DROP)
+				},
+				good: 1,
+			},
+			{
+				name: "i32.div_s by zero",
+				body: func(b *instr.Builder, _ int) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_DIV_S).Emit(instr.DROP)
+				},
+				good: 1,
+			},
+			{
+				name: "closure.new on an exhausted heap",
+				body: func(b *instr.Builder, target int) {
+					skip := b.Label()
+					b.Emit(instr.LOCAL_GET, 1).BrIf(skip)
+					b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, uint64(target)).Emit(instr.CLOSURE_NEW).Emit(instr.ARRAY_SET)
+					b.Bind(skip)
+				},
+				good:  1,
+				limit: 40,
+			},
+			{
+				name: "i64.add boxing a wide result into a local on an exhausted heap",
+				body: func(b *instr.Builder, _ int) {
+					skip := b.Label()
+					b.Emit(instr.LOCAL_GET, 1).BrIf(skip)
+					b.Emit(instr.I64_CONST, uint64(1)<<60).Emit(instr.LOCAL_SET, 5)
+					b.Emit(instr.LOCAL_GET, 5).Emit(instr.LOCAL_GET, 5).Emit(instr.I64_ADD).Emit(instr.LOCAL_SET, 6)
+					b.Bind(skip)
+				},
+				good:     1,
+				limit:    7,
+				threaded: true,
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				pb := program.NewBuilder().Globals(types.TypeI32())
+				pb.Type(types.NewArrayType(types.TypeI32()))
+				pb.Type(types.NewArrayType(types.TypeAny()))
+				pb.Type(types.NewStructType(types.NewStructField(types.TypeI32())))
+				target := pb.Const(incFunction())
+
+				b := instr.NewBuilder()
+				loop, done, keep := b.Label(), b.Label(), b.Label()
+				b.Emit(instr.I32_CONST, 128).Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.LOCAL_SET, 2)
+				b.Emit(instr.I32_CONST, 128).Emit(instr.ARRAY_NEW_DEFAULT, 1).Emit(instr.LOCAL_SET, 3)
+				b.Emit(instr.STRUCT_NEW_DEFAULT, 2).Emit(instr.LOCAL_SET, 4)
+				if tt.null != 0 {
+					b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_EQZ).BrIf(keep)
+					b.Emit(instr.REF_NULL).Emit(instr.LOCAL_SET, uint64(tt.null))
+					b.Bind(keep)
+				}
+				b.Bind(loop)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_EQZ).BrIf(done)
+				tt.body(b, target)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB).Emit(instr.LOCAL_SET, 0).Br(loop)
+				b.Bind(done)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
+				code, err := b.Assemble()
+				require.NoError(t, err)
+				fn := &types.Function{
+					Typ: &types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
+					Locals: []types.Type{
+						types.NewArrayType(types.TypeI32()),
+						types.NewArrayType(types.TypeAny()),
+						types.NewStructType(types.NewStructField(types.TypeI32())),
+						types.TypeI64(),
+						types.TypeI64(),
+					},
+					Code: instr.Marshal(code),
+				}
+				prog := pb.Emit(instr.I32_CONST, 64).Emit(instr.GLOBAL_GET, 0).ConstGet(fn).Emit(instr.CALL).MustBuild()
+
+				run := func(vm *interp.Interpreter, arg int32) error {
+					vm.Reset()
+					require.NoError(t, vm.SetGlobal(0, types.BoxI32(arg)))
+					return vm.Run(context.Background())
+				}
+				opts := []interp.Option{}
+				if tt.limit > 0 {
+					opts = append(opts, interp.WithHeapLimit(tt.limit))
+				}
+
+				exact := interp.MustNew(prog, append(opts, interp.WithTick(1))...)
+				defer exact.Close()
+				want := run(exact, tt.bad)
+				require.Error(t, want)
+
+				threaded := interp.MustNew(prog, append(opts, interp.WithThreshold(-1))...)
+				defer threaded.Close()
+				require.EqualError(t, run(threaded, tt.bad), want.Error())
+				if tt.threaded {
+					return
+				}
+
+				profiler := prof.New()
+				native := interp.MustNew(prog, append(opts, interp.WithThreshold(1), interp.WithProfiler(profiler))...)
+				defer native.Close()
+				poll(t, func() bool {
+					require.NoError(t, run(native, tt.good))
+					native.Flush()
+					return nativeEntries(profiler) > 0
+				})
+				require.EqualError(t, run(native, tt.bad), want.Error())
+			})
+		}
+	})
+
 	t.Run("reports threaded's heap exhaustion from a callout with threaded's counts", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 
