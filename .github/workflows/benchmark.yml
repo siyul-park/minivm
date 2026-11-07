@@ -21,7 +21,7 @@ jobs:
   benchmark:
     name: Publish Results
     # ARM64, because the JIT runs nowhere else.
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
