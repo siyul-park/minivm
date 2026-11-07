@@ -517,7 +517,7 @@ func localStore(state *state, current step) (value, error) {
 		),
 		jen.If(jen.Op("!").Id("dstOK")).Block(reject(state.label)),
 	}
-	body, err := numeric(consumer.op, state.stack[:len(state.stack)-1], state.width, state.label, false, jen.Id("dst"))
+	body, err := numeric(consumer.op, state.stack[:len(state.stack)-1], state.width, state.label, false, &sink{slot: jen.Id("dst"), at: state.offset})
 	if err != nil {
 		return value{}, err
 	}

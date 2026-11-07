@@ -40788,7 +40788,7 @@ var (
 						v6 := types.BoxF32(v4 + v5)
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 8})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -40824,7 +40824,7 @@ var (
 						v6 := types.BoxF32(v4 - v5)
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 8})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -40860,7 +40860,7 @@ var (
 						v6 := types.BoxF32(v4 * v5)
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 8})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -40896,7 +40896,7 @@ var (
 						v6 := types.BoxF32(min(v4, v5))
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 8})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -40932,7 +40932,7 @@ var (
 						v6 := types.BoxF32(max(v4, v5))
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 8})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -40968,7 +40968,7 @@ var (
 						v6 := types.BoxF32(float32(math.Copysign(float64(v4), float64(v5))))
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 8})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -41334,7 +41334,7 @@ var (
 						v6 := types.BoxF64(v4 + v5)
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 12})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -41370,7 +41370,7 @@ var (
 						v6 := types.BoxF64(v4 - v5)
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 12})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -41406,7 +41406,7 @@ var (
 						v6 := types.BoxF64(v4 * v5)
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 12})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -41442,7 +41442,7 @@ var (
 						v6 := types.BoxF64(math.Min(v4, v5))
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 12})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -41478,7 +41478,7 @@ var (
 						v6 := types.BoxF64(math.Max(v4, v5))
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 12})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -41514,7 +41514,7 @@ var (
 						v6 := types.BoxF64(math.Copysign(v4, v5))
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 12})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -42309,7 +42309,7 @@ var (
 						v9 := types.BoxF32(v4 + v8)
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -42354,7 +42354,7 @@ var (
 						v9 := types.BoxF32(v4 - v8)
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -42399,7 +42399,7 @@ var (
 						v9 := types.BoxF32(v4 * v8)
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -42444,7 +42444,7 @@ var (
 						v9 := types.BoxF32(min(v4, v8))
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -42489,7 +42489,7 @@ var (
 						v9 := types.BoxF32(max(v4, v8))
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -42534,7 +42534,7 @@ var (
 						v9 := types.BoxF32(float32(math.Copysign(float64(v4), float64(v8))))
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -42999,7 +42999,7 @@ var (
 						v9 := types.BoxF64(v4 + v8)
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -43044,7 +43044,7 @@ var (
 						v9 := types.BoxF64(v4 - v8)
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -43089,7 +43089,7 @@ var (
 						v9 := types.BoxF64(v4 * v8)
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -43134,7 +43134,7 @@ var (
 						v9 := types.BoxF64(math.Min(v4, v8))
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -43179,7 +43179,7 @@ var (
 						v9 := types.BoxF64(math.Max(v4, v8))
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -43224,7 +43224,7 @@ var (
 						v9 := types.BoxF64(math.Copysign(v4, v8))
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -43689,7 +43689,7 @@ var (
 						v9 := types.BoxI32(v4 + v8)
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -43734,7 +43734,7 @@ var (
 						v9 := types.BoxI32(v4 - v8)
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -43779,7 +43779,7 @@ var (
 						v9 := types.BoxI32(v4 * v8)
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -43824,7 +43824,7 @@ var (
 						v9 := types.BoxI32(v4 << (v8 & 31))
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -43869,7 +43869,7 @@ var (
 						v9 := types.BoxI32(v4 >> (v8 & 31))
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -43914,7 +43914,7 @@ var (
 						v9 := types.BoxI32(int32(uint32(v4) >> (v8 & 31)))
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -43957,7 +43957,7 @@ var (
 						v7 := types.Boxed(uint64(v2)&uint64(v6) & ^uint64(types.VMask) | (uint64(v2) ^ uint64(v6)&types.VMask))
 						v8 := i.fr.bp + v1
 						if v8 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v8] = v7
 						i.sp -= 0
@@ -44000,7 +44000,7 @@ var (
 						v7 := types.Boxed(uint64(v2) & uint64(v6))
 						v8 := i.fr.bp + v1
 						if v8 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v8] = v7
 						i.sp -= 0
@@ -44043,7 +44043,7 @@ var (
 						v7 := types.Boxed(uint64(v2) | uint64(v6))
 						v8 := i.fr.bp + v1
 						if v8 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v8] = v7
 						i.sp -= 0
@@ -44088,7 +44088,7 @@ var (
 						v9 := types.BoxI32(int32(bits.RotateLeft32(uint32(v4), int(v8))))
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -44133,7 +44133,7 @@ var (
 						v9 := types.BoxI32(int32(bits.RotateLeft32(uint32(v4), -int(v8))))
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						i.stack[v10] = v9
 						i.sp -= 0
@@ -44878,7 +44878,7 @@ var (
 						v9 := i.boxI64(v4 + v8)
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						v11 := i.stack[v10]
 						if v11 != v9 {
@@ -44927,7 +44927,7 @@ var (
 						v9 := i.boxI64(v4 - v8)
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						v11 := i.stack[v10]
 						if v11 != v9 {
@@ -44976,7 +44976,7 @@ var (
 						v9 := i.boxI64(v4 * v8)
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						v11 := i.stack[v10]
 						if v11 != v9 {
@@ -45025,7 +45025,7 @@ var (
 						v9 := i.boxI64(v4 << (v8 & 63))
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						v11 := i.stack[v10]
 						if v11 != v9 {
@@ -45074,7 +45074,7 @@ var (
 						v9 := i.boxI64(v4 >> (v8 & 63))
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						v11 := i.stack[v10]
 						if v11 != v9 {
@@ -45123,7 +45123,7 @@ var (
 						v9 := i.boxI64(int64(uint64(v4) >> (v8 & 63)))
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						v11 := i.stack[v10]
 						if v11 != v9 {
@@ -45172,7 +45172,7 @@ var (
 						v9 := i.boxI64(v4 ^ v8)
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						v11 := i.stack[v10]
 						if v11 != v9 {
@@ -45221,7 +45221,7 @@ var (
 						v9 := i.boxI64(v4 & v8)
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						v11 := i.stack[v10]
 						if v11 != v9 {
@@ -45270,7 +45270,7 @@ var (
 						v9 := i.boxI64(v4 | v8)
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						v11 := i.stack[v10]
 						if v11 != v9 {
@@ -45319,7 +45319,7 @@ var (
 						v9 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), int(v8))))
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						v11 := i.stack[v10]
 						if v11 != v9 {
@@ -45368,7 +45368,7 @@ var (
 						v9 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), -int(v8))))
 						v10 := i.fr.bp + v1
 						if v10 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 5})
 						}
 						v11 := i.stack[v10]
 						if v11 != v9 {
@@ -45688,7 +45688,7 @@ var (
 						v6 := types.BoxI32(v4 + v5)
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 8})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -45724,7 +45724,7 @@ var (
 						v6 := types.BoxI32(v4 - v5)
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 8})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -45760,7 +45760,7 @@ var (
 						v6 := types.BoxI32(v4 * v5)
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 8})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -45796,7 +45796,7 @@ var (
 						v6 := types.BoxI32(v4 << (v5 & 31))
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 8})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -45832,7 +45832,7 @@ var (
 						v6 := types.BoxI32(v4 >> (v5 & 31))
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 8})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -45868,7 +45868,7 @@ var (
 						v6 := types.BoxI32(int32(uint32(v4) >> (v5 & 31)))
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 8})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -45903,7 +45903,7 @@ var (
 						v4 := types.Boxed(uint64(v2)&uint64(v5) & ^uint64(types.VMask) | (uint64(v2) ^ uint64(v5)&types.VMask))
 						v6 := i.fr.bp + v1
 						if v6 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 8})
 						}
 						i.stack[v6] = v4
 						i.sp -= 0
@@ -45938,7 +45938,7 @@ var (
 						v4 := types.Boxed(uint64(v2) & uint64(v5))
 						v6 := i.fr.bp + v1
 						if v6 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 8})
 						}
 						i.stack[v6] = v4
 						i.sp -= 0
@@ -45973,7 +45973,7 @@ var (
 						v4 := types.Boxed(uint64(v2) | uint64(v5))
 						v6 := i.fr.bp + v1
 						if v6 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 8})
 						}
 						i.stack[v6] = v4
 						i.sp -= 0
@@ -46009,7 +46009,7 @@ var (
 						v6 := types.BoxI32(int32(bits.RotateLeft32(uint32(v4), int(v5))))
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 8})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -46045,7 +46045,7 @@ var (
 						v6 := types.BoxI32(int32(bits.RotateLeft32(uint32(v4), -int(v5))))
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 8})
 						}
 						i.stack[v7] = v6
 						i.sp -= 0
@@ -46961,7 +46961,7 @@ var (
 						v6 := i.boxI64(v4 + v5)
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 12})
 						}
 						v8 := i.stack[v7]
 						if v8 != v6 {
@@ -47001,7 +47001,7 @@ var (
 						v6 := i.boxI64(v4 - v5)
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 12})
 						}
 						v8 := i.stack[v7]
 						if v8 != v6 {
@@ -47041,7 +47041,7 @@ var (
 						v6 := i.boxI64(v4 * v5)
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 12})
 						}
 						v8 := i.stack[v7]
 						if v8 != v6 {
@@ -47081,7 +47081,7 @@ var (
 						v6 := i.boxI64(v4 << (v5 & 63))
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 12})
 						}
 						v8 := i.stack[v7]
 						if v8 != v6 {
@@ -47121,7 +47121,7 @@ var (
 						v6 := i.boxI64(v4 >> (v5 & 63))
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 12})
 						}
 						v8 := i.stack[v7]
 						if v8 != v6 {
@@ -47161,7 +47161,7 @@ var (
 						v6 := i.boxI64(int64(uint64(v4) >> (v5 & 63)))
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 12})
 						}
 						v8 := i.stack[v7]
 						if v8 != v6 {
@@ -47201,7 +47201,7 @@ var (
 						v6 := i.boxI64(v4 ^ v5)
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 12})
 						}
 						v8 := i.stack[v7]
 						if v8 != v6 {
@@ -47241,7 +47241,7 @@ var (
 						v6 := i.boxI64(v4 & v5)
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 12})
 						}
 						v8 := i.stack[v7]
 						if v8 != v6 {
@@ -47281,7 +47281,7 @@ var (
 						v6 := i.boxI64(v4 | v5)
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 12})
 						}
 						v8 := i.stack[v7]
 						if v8 != v6 {
@@ -47321,7 +47321,7 @@ var (
 						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), int(v5))))
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 12})
 						}
 						v8 := i.stack[v7]
 						if v8 != v6 {
@@ -47361,7 +47361,7 @@ var (
 						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), -int(v5))))
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 12})
 						}
 						v8 := i.stack[v7]
 						if v8 != v6 {
@@ -119924,7 +119924,7 @@ var (
 						v0 := types.BoxI32(i.stack[i.sp-2].I32() + i.stack[i.sp-1].I32())
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -119956,7 +119956,7 @@ var (
 						v0 := types.BoxI32(i.stack[i.sp-2].I32() - i.stack[i.sp-1].I32())
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -119988,7 +119988,7 @@ var (
 						v0 := types.BoxI32(i.stack[i.sp-2].I32() * i.stack[i.sp-1].I32())
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -120020,7 +120020,7 @@ var (
 						v0 := types.BoxI32(i.stack[i.sp-2].I32() << (i.stack[i.sp-1].I32() & 31))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -120052,7 +120052,7 @@ var (
 						v0 := types.BoxI32(i.stack[i.sp-2].I32() >> (i.stack[i.sp-1].I32() & 31))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -120084,7 +120084,7 @@ var (
 						v0 := types.BoxI32(int32(uint32(i.stack[i.sp-2].I32()) >> (i.stack[i.sp-1].I32() & 31)))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -120116,7 +120116,7 @@ var (
 						v0 := types.Boxed(uint64(i.stack[i.sp-2])&uint64(i.stack[i.sp-1]) & ^uint64(types.VMask) | (uint64(i.stack[i.sp-2]) ^ uint64(i.stack[i.sp-1])&types.VMask))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -120148,7 +120148,7 @@ var (
 						v0 := types.Boxed(uint64(i.stack[i.sp-2]) & uint64(i.stack[i.sp-1]))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -120180,7 +120180,7 @@ var (
 						v0 := types.Boxed(uint64(i.stack[i.sp-2]) | uint64(i.stack[i.sp-1]))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -120212,7 +120212,7 @@ var (
 						v0 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-2].I32()), int(i.stack[i.sp-1].I32()))))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -120244,7 +120244,7 @@ var (
 						v0 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-2].I32()), -int(i.stack[i.sp-1].I32()))))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -121848,7 +121848,7 @@ var (
 						v0 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) + i.unboxI64(i.stack[i.sp-1]))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						v3 := i.stack[v2]
 						if v3 != v0 {
@@ -121884,7 +121884,7 @@ var (
 						v0 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) - i.unboxI64(i.stack[i.sp-1]))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						v3 := i.stack[v2]
 						if v3 != v0 {
@@ -121920,7 +121920,7 @@ var (
 						v0 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) * i.unboxI64(i.stack[i.sp-1]))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						v3 := i.stack[v2]
 						if v3 != v0 {
@@ -121956,7 +121956,7 @@ var (
 						v0 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) << (i.unboxI64(i.stack[i.sp-1]) & 63))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						v3 := i.stack[v2]
 						if v3 != v0 {
@@ -121992,7 +121992,7 @@ var (
 						v0 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) >> (i.unboxI64(i.stack[i.sp-1]) & 63))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						v3 := i.stack[v2]
 						if v3 != v0 {
@@ -122028,7 +122028,7 @@ var (
 						v0 := i.boxI64(int64(uint64(i.unboxI64(i.stack[i.sp-2])) >> (i.unboxI64(i.stack[i.sp-1]) & 63)))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						v3 := i.stack[v2]
 						if v3 != v0 {
@@ -122064,7 +122064,7 @@ var (
 						v0 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) ^ i.unboxI64(i.stack[i.sp-1]))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						v3 := i.stack[v2]
 						if v3 != v0 {
@@ -122100,7 +122100,7 @@ var (
 						v0 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) & i.unboxI64(i.stack[i.sp-1]))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						v3 := i.stack[v2]
 						if v3 != v0 {
@@ -122136,7 +122136,7 @@ var (
 						v0 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) | i.unboxI64(i.stack[i.sp-1]))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						v3 := i.stack[v2]
 						if v3 != v0 {
@@ -122172,7 +122172,7 @@ var (
 						v0 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-2])), int(i.unboxI64(i.stack[i.sp-1])))))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						v3 := i.stack[v2]
 						if v3 != v0 {
@@ -122208,7 +122208,7 @@ var (
 						v0 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-2])), -int(i.unboxI64(i.stack[i.sp-1])))))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						v3 := i.stack[v2]
 						if v3 != v0 {
@@ -123422,7 +123422,7 @@ var (
 						v0 := types.BoxF32(i.stack[i.sp-2].F32() + i.stack[i.sp-1].F32())
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -123454,7 +123454,7 @@ var (
 						v0 := types.BoxF32(i.stack[i.sp-2].F32() - i.stack[i.sp-1].F32())
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -123486,7 +123486,7 @@ var (
 						v0 := types.BoxF32(i.stack[i.sp-2].F32() * i.stack[i.sp-1].F32())
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -123518,7 +123518,7 @@ var (
 						v0 := types.BoxF32(min(i.stack[i.sp-2].F32(), i.stack[i.sp-1].F32()))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -123550,7 +123550,7 @@ var (
 						v0 := types.BoxF32(max(i.stack[i.sp-2].F32(), i.stack[i.sp-1].F32()))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -123582,7 +123582,7 @@ var (
 						v0 := types.BoxF32(float32(math.Copysign(float64(i.stack[i.sp-2].F32()), float64(i.stack[i.sp-1].F32()))))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -124542,7 +124542,7 @@ var (
 						v0 := types.BoxF64(i.stack[i.sp-2].F64() + i.stack[i.sp-1].F64())
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -124574,7 +124574,7 @@ var (
 						v0 := types.BoxF64(i.stack[i.sp-2].F64() - i.stack[i.sp-1].F64())
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -124606,7 +124606,7 @@ var (
 						v0 := types.BoxF64(i.stack[i.sp-2].F64() * i.stack[i.sp-1].F64())
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -124638,7 +124638,7 @@ var (
 						v0 := types.BoxF64(math.Min(i.stack[i.sp-2].F64(), i.stack[i.sp-1].F64()))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -124670,7 +124670,7 @@ var (
 						v0 := types.BoxF64(math.Max(i.stack[i.sp-2].F64(), i.stack[i.sp-1].F64()))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2
@@ -124702,7 +124702,7 @@ var (
 						v0 := types.BoxF64(math.Copysign(i.stack[i.sp-2].F64(), i.stack[i.sp-1].F64()))
 						v2 := i.fr.bp + v1
 						if v2 >= i.sp {
-							panic(ErrSegmentationFault)
+							panic(trapped{ErrSegmentationFault, 1})
 						}
 						i.stack[v2] = v0
 						i.sp -= 2

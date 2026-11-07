@@ -102,6 +102,12 @@ func TestGenerate(t *testing.T) {
 		require.True(t, offsets["0"])
 		require.True(t, offsets["7"])
 		require.Positive(t, producers)
+
+		// A fused local.set's destination check names the local.set, not the
+		// numeric consumer the handler reports by default.
+		store := `:= types\.Box\w+\(.*\)\s+v\d+ := i\.fr\.bp \+ v\d+\s+if v\d+ >= i\.sp \{\s+panic\(`
+		require.Regexp(t, store+`trapped\{ErrSegmentationFault, \d+\}\)`, string(files[0].Data))
+		require.NotRegexp(t, store+`ErrSegmentationFault\)`, string(files[0].Data))
 	})
 
 	t.Run("deterministic", func(t *testing.T) {

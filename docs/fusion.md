@@ -34,6 +34,7 @@ A fused handler keeps the frame IP at its first instruction until it ends, so a 
 - A panic that reaches `dispatch` takes that offset when the frame still runs the fused code. This covers the consumer's own checks and every helper it calls (`arrayGet`, `arraySet`, `structGet`, `alloc`, host functions).
 - A fused producer that traps ahead of its consumer (stack overflow, slot bounds) panics `trapped` with its own offset instead; `lower.go` `fail` and `overflowAt` emit it. Standalone handlers panic plain.
 - `dispatch` applies the offset once. A rethrow across an outer floor carries a zero offset.
+- A fused numeric operation reads a wide `i64.const` raw, without the temporary box unfused execution allocates. Against `WithHeapLimit`, it can therefore exhaust the heap later than unfused execution or not at all. Every other trap matches.
 
 ## Supported Patterns
 

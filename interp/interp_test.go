@@ -2820,12 +2820,13 @@ func TestWithThreshold(t *testing.T) {
 		testenv.MustHaveJIT(t)
 
 		tests := []struct {
-			name  string
-			body  func(b *instr.Builder, target int)
-			good  int32
-			bad   int32
-			null  int
-			limit int
+			name     string
+			body     func(b *instr.Builder, target int)
+			good     int32
+			bad      int32
+			null     int
+			limit    int
+			threaded bool // native loses frames here until #278
 		}{
 			{
 				name: "array.get on a null container",
@@ -2882,6 +2883,19 @@ func TestWithThreshold(t *testing.T) {
 				good:  1,
 				limit: 40,
 			},
+			{
+				name: "i64.add boxing a wide result into a local on an exhausted heap",
+				body: func(b *instr.Builder, _ int) {
+					skip := b.Label()
+					b.Emit(instr.LOCAL_GET, 1).BrIf(skip)
+					b.Emit(instr.I64_CONST, uint64(1)<<60).Emit(instr.LOCAL_SET, 5)
+					b.Emit(instr.LOCAL_GET, 5).Emit(instr.LOCAL_GET, 5).Emit(instr.I64_ADD).Emit(instr.LOCAL_SET, 6)
+					b.Bind(skip)
+				},
+				good:     1,
+				limit:    7,
+				threaded: true,
+			},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
@@ -2915,6 +2929,8 @@ func TestWithThreshold(t *testing.T) {
 						types.NewArrayType(types.TypeI32()),
 						types.NewArrayType(types.TypeAny()),
 						types.NewStructType(types.NewStructField(types.TypeI32())),
+						types.TypeI64(),
+						types.TypeI64(),
 					},
 					Code: instr.Marshal(code),
 				}
@@ -2938,6 +2954,9 @@ func TestWithThreshold(t *testing.T) {
 				threaded := interp.MustNew(prog, append(opts, interp.WithThreshold(-1))...)
 				defer threaded.Close()
 				require.EqualError(t, run(threaded, tt.bad), want.Error())
+				if tt.threaded {
+					return
+				}
 
 				profiler := prof.New()
 				native := interp.MustNew(prog, append(opts, interp.WithThreshold(1), interp.WithProfiler(profiler))...)
