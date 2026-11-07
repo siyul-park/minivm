@@ -2,7 +2,6 @@ package types
 
 import (
 	"fmt"
-	"unsafe"
 )
 
 // Error is a guest exception value. It carries a human-readable message, an
@@ -21,13 +20,6 @@ type Error struct {
 type ErrorCode int32
 
 type errorType struct{}
-
-// ErrorValueOffset exposes Error.value's layout to the ARM64 JIT heap-read
-// fast path.
-const ErrorValueOffset = int(unsafe.Offsetof(Error{}.value))
-
-// ErrorCodeOffset exposes Error.code's layout for future native fast paths.
-const ErrorCodeOffset = int(unsafe.Offsetof(Error{}.code))
 
 const (
 	// ErrorCodeNone is the code of an error with no code.

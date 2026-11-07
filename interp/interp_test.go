@@ -8123,6 +8123,14 @@ func TestMustNew(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
+	t.Run("reports constants past the heap limit", func(t *testing.T) {
+		pb := program.NewBuilder()
+		pb.Const(types.String("constant"))
+		i, err := interp.New(pb.MustBuild(), interp.WithHeapLimit(1))
+		require.ErrorIs(t, err, interp.ErrHeapExhausted)
+		require.Nil(t, i)
+	})
+
 	t.Run("runs a program", func(t *testing.T) {
 		i := interp.MustNew(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 5)}))
 		defer i.Close()

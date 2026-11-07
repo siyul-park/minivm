@@ -40,7 +40,7 @@ type HostArray struct {
 	elem     *conversion
 	copy     MarshalerFunc
 	registry *Registry
-	bounds   span
+	bounds   extent
 	stride   uintptr
 	rtyp     reflect.Type
 	ptr      unsafe.Pointer
