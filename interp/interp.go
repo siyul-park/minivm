@@ -1787,11 +1787,19 @@ func (i *Interpreter) unbox(val types.Boxed) types.Value {
 	return v
 }
 
+// unboxI64 does not use unboxRef: its generic assertion costs threaded wide i64
+// kernels 5%.
 func (i *Interpreter) unboxI64(val types.Boxed) int64 {
 	if val.Kind() != types.KindRef {
 		return val.I64()
 	}
-	return int64(unboxRef[types.I64](i, val))
+	addr := val.Ref()
+	v, ok := i.heap[addr].(types.I64)
+	if !ok {
+		panic(ErrTypeMismatch)
+	}
+	i.release(addr)
+	return int64(v)
 }
 
 // borrowI64 reads an I64 without consuming a reference: unlike unboxI64 it
