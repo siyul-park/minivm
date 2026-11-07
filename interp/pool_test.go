@@ -68,6 +68,20 @@ func TestNewPool(t *testing.T) {
 }
 
 func TestPool_Get(t *testing.T) {
+	t.Run("reports constants past the heap limit and keeps its slot", func(t *testing.T) {
+		pb := program.NewBuilder()
+		pb.Const(types.String("constant"))
+		p, err := interp.NewPool(pb.MustBuild(), 1, interp.WithHeapLimit(1))
+		require.NoError(t, err)
+		defer p.Close()
+
+		for range 2 {
+			i, err := p.Get(context.Background())
+			require.ErrorIs(t, err, interp.ErrHeapExhausted)
+			require.Nil(t, i)
+		}
+	})
+
 	t.Run("reuses an idle interpreter", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})
 		p, err := interp.NewPool(prog, 1)
