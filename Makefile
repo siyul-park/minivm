@@ -159,7 +159,7 @@ check-arm64:
 	@(cd benchmarks && GOOS=linux GOARCH=arm64 go test -exec=true ./...)
 
 check-inline:
-	@go build -gcflags=-m ./interp 2>&1 | grep -q 'can inline (\*native).call$$' || 		{ echo "(*native).call no longer inlines"; exit 1; }
+	@go build -gcflags=-m ./interp 2>&1 | grep -q 'can inline (\*engine).call$$' || 		{ echo "(*engine).call no longer inlines"; exit 1; }
 
 test:
 	@go test -race $(test-options) ./...

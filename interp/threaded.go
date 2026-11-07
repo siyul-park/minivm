@@ -215,7 +215,7 @@ var (
 					if v4 > 0 {
 						copy(i.stack[i.sp-1:i.sp+v4-1], i.zeros[v0])
 					}
-					if i.native != nil && i.native.call(i, v0, v1, true, 1) {
+					if i.jit != nil && i.jit.call(i, v0, v1, true, 1) {
 						return
 					}
 					v5 := &i.frames[i.fp]
@@ -80607,7 +80607,7 @@ var (
 							if v4 > 0 {
 								copy(i.stack[i.sp:i.sp+v4], i.zeros[v3])
 							}
-							if i.native != nil && i.native.call(i, v3, v0, false, 4) {
+							if i.jit != nil && i.jit.call(i, v3, v0, false, 4) {
 								return
 							}
 							v5 := &i.frames[i.fp]

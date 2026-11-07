@@ -37,7 +37,7 @@ type Interpreter struct {
 	codec    Codec
 	profiler *prof.Profiler
 	samples  *prof.Collector
-	native   *native
+	jit      *engine
 	// threshold is the JIT's WithThreshold setting, or -1 where the JIT
 	// cannot run; attach builds native from it.
 	threshold int
@@ -100,7 +100,7 @@ type Interpreter struct {
 	fp int
 	sp int
 	// floor is the frame count below which frames stand for native
-	// activations suspended under a call they made (native.nest): no handler
+	// activations suspended under a call they made (engine.nest): no handler
 	// search crosses it, and a panic it does not catch above it unwinds to
 	// their owner.
 	floor int
@@ -260,8 +260,8 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 		}
 		i.ctx = nil
 		i.done = nil
-		if i.native != nil {
-			i.native.quiesce()
+		if i.jit != nil {
+			i.jit.quiesce()
 		}
 		return err
 	}
@@ -683,10 +683,10 @@ func (i *Interpreter) Close() error {
 	i.arrays.clear()
 	i.structs.clear()
 	i.closed = true
-	if i.native == nil {
+	if i.jit == nil {
 		return nil
 	}
-	return i.native.close()
+	return i.jit.close()
 }
 
 // build constructs an interpreter that owns prog, which the caller has
@@ -1306,7 +1306,7 @@ func (i *Interpreter) yields(code []byte) bool {
 
 // compile builds fn's threaded code: fused unless exact, which every
 // materialized native frame needs because a fusion leaves no handler at the
-// IPs it absorbs (interp/native.go's deopt resumes exactly there). The second
+// IPs it absorbs (interp/jit.go's deopt resumes exactly there). The second
 // result is the fused handlers' trap offsets, indexed by ip; see trapped.
 func (i *Interpreter) compile(fn *types.Function, exact bool) ([]func(*Interpreter), []uint8) {
 	c := &threader{
@@ -2090,11 +2090,11 @@ func (i *Interpreter) deref(val types.Value) (types.Value, error) {
 
 // attach returns i's JIT runtime, nil when the JIT is off, building it on
 // first use: an interpreter that never runs pays nothing for it.
-func (i *Interpreter) attach() *native {
-	if i.native == nil && i.threshold >= 0 {
-		i.native = newNative(i, i.threshold)
+func (i *Interpreter) attach() *engine {
+	if i.jit == nil && i.threshold >= 0 {
+		i.jit = newEngine(i, i.threshold)
 	}
-	return i.native
+	return i.jit
 }
 
 // spend charges work against a dormant JIT's heat and wakes it once heat runs
@@ -2121,11 +2121,11 @@ func (i *Interpreter) unpark() bool {
 }
 
 // wake makes the dormant JIT live, or turns it off for a program none of
-// whose code can repay a Go entry (native.wake).
+// whose code can repay a Go entry (engine.wake).
 func (i *Interpreter) wake() {
 	i.heat = 0
-	if !i.native.wake(i) {
-		i.native, i.threshold = nil, -1
+	if !i.jit.wake(i) {
+		i.jit, i.threshold = nil, -1
 	}
 }
 
