@@ -708,6 +708,12 @@ func (n *native) rebuild(i *Interpreter, exit jit.Exit, start, ref int, release 
 		lent[k-floor+1] = e.Lent
 	}
 
+	// Materialization must not fail: threaded code would already have paid for
+	// these values, so their boxes may pass the heap limit. The next allocation
+	// that needs a new entry trips it.
+	limit := i.limit
+	i.limit = 0
+	defer func() { i.limit = limit }()
 	for j := range maps {
 		n.frame(i, start+j, floor+j, maps[j], refs[j], owns[j])
 	}
