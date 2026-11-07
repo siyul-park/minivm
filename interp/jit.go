@@ -53,12 +53,6 @@ type hold struct {
 	ref, count int
 }
 
-// key identifies one OSR site by its loop header's (address, ip): how drain
-// looks a site up to restore it once its unit's compile permanently fails.
-type key struct {
-	address, ip int
-}
-
 // callout computes an allocating operation's new object from its operands,
 // args holding the deepest first, from code, the operation's bytecode. It is
 // the interpreter's own helper for the operation, which writes no reference
@@ -93,6 +87,12 @@ type shared struct {
 	totals map[key]*atomic.Int64
 
 	refs atomic.Int64
+}
+
+// key identifies one OSR site by its loop header's (address, ip): how drain
+// looks a site up to restore it once its unit's compile permanently fails.
+type key struct {
+	address, ip int
 }
 
 // site is one OSR entry's observation state — a loop header, or loop-free
