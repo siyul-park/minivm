@@ -12,6 +12,10 @@ pipeline   ordered transforms + invalidation
 
 `pass.Manager` owns analysis registration/cache; `pass.Pipeline` owns transform order/invalidation. Analyses `MUST NOT` mutate IR. A transform returns `true` only when all cached analyses remain valid; errors `MUST` invalidate them because an in-place transform may have partially mutated IR.
 
+## Standard pipelines
+
+`internal/transform` `O1`, `O2`, and `O3` define the SSA pass order once. `optimize.O1`–`O3` use them directly. The JIT uses `O1` for Baseline and `O3` for Optimized, with its profile-reading `BoundPass` as a late pass.
+
 ## Layers
 
 | Layer | Owns |
