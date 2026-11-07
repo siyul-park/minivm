@@ -38,8 +38,8 @@ type Encoder struct {
 	owned    []int
 }
 
-// span reports the base pointer and length of the Go array or slice at p.
-type span func(unsafe.Pointer) (unsafe.Pointer, int)
+// extent reports the base pointer and length of the Go array or slice at p.
+type extent func(unsafe.Pointer) (unsafe.Pointer, int)
 
 // boxer writes the Go value at p into a VM slot. It has no public counterpart
 // because a registered Marshaler produces a standalone value and the codec
@@ -198,7 +198,7 @@ func marshalHostStruct(t reflect.Type, vm *types.StructType, fields []field) Mar
 }
 
 func marshalHostArray(t reflect.Type, vm *types.ArrayType, elem *conversion, copy MarshalerFunc) MarshalerFunc {
-	bounds, stride := spanOf(t), t.Elem().Size()
+	bounds, stride := extentOf(t), t.Elem().Size()
 	return func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
 		return &HostArray{
 			typ: vm, elem: elem, copy: copy, registry: e.registry,
@@ -218,7 +218,7 @@ func marshalHostMap(t reflect.Type, vm *types.MapType, index UnmarshalerFunc, el
 // generic representation, where an element can reach the container again and
 // the walk has to refuse the cycle.
 func marshalArray(t reflect.Type, at *types.ArrayType, elem *conversion) MarshalerFunc {
-	bounds, stride := spanOf(t), t.Elem().Size()
+	bounds, stride := extentOf(t), t.Elem().Size()
 	switch elem.kind {
 	case reflect.Bool:
 		return typedArray(bounds, stride, func(p unsafe.Pointer) bool { return *(*bool)(p) })
@@ -269,9 +269,9 @@ func marshalArray(t reflect.Type, at *types.ArrayType, elem *conversion) Marshal
 	}
 }
 
-// spanOf compiles the reach of a Go array or slice, whose length a slice
+// extentOf compiles the reach of a Go array or slice, whose length a slice
 // carries in its header and an array fixes in its type.
-func spanOf(t reflect.Type) span {
+func extentOf(t reflect.Type) extent {
 	if t.Kind() == reflect.Array {
 		n := t.Len()
 		return func(p unsafe.Pointer) (unsafe.Pointer, int) { return p, n }
@@ -283,7 +283,7 @@ func spanOf(t reflect.Type) span {
 }
 
 func typedArray[T int8 | int32 | int64 | float32 | float64 | bool](
-	bounds span,
+	bounds extent,
 	stride uintptr,
 	read func(unsafe.Pointer) T,
 ) MarshalerFunc {

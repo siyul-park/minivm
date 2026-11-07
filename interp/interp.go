@@ -1725,8 +1725,7 @@ func (i *Interpreter) box(val types.Value) types.Boxed {
 	}
 }
 
-// clone returns val, copying a mutable constant so that the interpreter, not
-// the program, owns the object it mutates. Immutable values are returned as is.
+// boxI64 boxes val inline when it fits and on the heap when it does not.
 func (i *Interpreter) boxI64(val int64) types.Boxed {
 	if types.IsBoxable(val) {
 		return types.BoxI64(val)

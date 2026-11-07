@@ -97,10 +97,10 @@ func field(a *asm.Assembler, s compile.Site, v ssa.Value) asm.Reg {
 	return target.X16
 }
 
-// width is the element storage width of an array admitting Kind: bool and
+// stride is the element storage width of an array admitting Kind: bool and
 // int8 one byte, int32 and float32 four, int64, float64, and a ref's own
 // Boxed word eight.
-func width(kind types.Kind) int {
+func stride(kind types.Kind) int {
 	switch kind {
 	case types.KindI1, types.KindI8:
 		return 1

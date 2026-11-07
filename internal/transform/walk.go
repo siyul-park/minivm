@@ -17,7 +17,7 @@ type walker struct {
 	activation activation
 	stack      []operand
 	// closures is, per slot, the function of the closure this unit stored
-	// there, 0 when unknown (see frame).
+	// there, 0 when unknown (see facts).
 	closures []int
 
 	// jump is the span a tail call looped to, -1 when none did. proof is the
@@ -31,7 +31,7 @@ type walker struct {
 
 // newWalker returns a walker at the start of block translating s, its stack
 // the params of in's facts; it fails when a fact has no SSA representation.
-func newWalker(t *translation, b *ssa.Builder, block int, s span, in frame) (*walker, bool) {
+func newWalker(t *translation, b *ssa.Builder, block int, s span, in facts) (*walker, bool) {
 	stack := make([]operand, len(in.stack))
 	for i, e := range in.stack {
 		t, ok := typ(e.kind)
@@ -89,7 +89,7 @@ func (w *walker) translate(s span) (ssa.Terminator, bool) {
 	return w.leave(s.end), true
 }
 
-func (w *walker) edges(succs []int, states []frame, ids []int) ([]ssa.Edge, bool) {
+func (w *walker) edges(succs []int, states []facts, ids []int) ([]ssa.Edge, bool) {
 	if len(succs) == 0 {
 		return nil, true
 	}

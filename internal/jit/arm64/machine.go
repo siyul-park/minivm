@@ -1058,7 +1058,7 @@ func (m *Machine) arrayGet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 	}
 	ptr, ln := m.elements(a, s, op.Args[0], shape)
 	dst := s.Reg(op.Results[0])
-	switch width(shape.Kind) {
+	switch stride(shape.Kind) {
 	case 1:
 		at := m.element(a, s, op, ptr, ln, 0)
 		if shape.Kind == types.KindI8 {
@@ -1090,7 +1090,7 @@ func (m *Machine) arraySet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 	}
 	ptr, ln := m.elements(a, s, op.Args[0], shape)
 	val := s.Reg(op.Args[2])
-	switch width(shape.Kind) {
+	switch stride(shape.Kind) {
 	case 1:
 		at := m.element(a, s, op, ptr, ln, 0)
 		if shape.Kind == types.KindI1 && s.Type(op.Args[2]).Kind() != types.KindI1 {
