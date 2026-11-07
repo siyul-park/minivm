@@ -105,7 +105,7 @@ br 10
 br @0x0010
 ```
 
-`.show` prints absolute offsets; the REPL `MUST` normalize `@` targets to relative encoding.
+`.show` prints absolute offsets. `instr.ParseAt` encodes an `@` target relative to the end of the instruction, the inverse of `instr.Targets`, so a target must lie within the signed 16-bit branch range.
 
 Whole-program text (`.load`, `run`, `.code`) accepts labels:
 

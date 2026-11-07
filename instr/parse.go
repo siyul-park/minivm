@@ -187,8 +187,16 @@ func ParseAll(r io.Reader) ([]Instruction, error) {
 // produced by Format ("0000:  i32.const 0x2a"). Returns nil, nil for
 // blank lines. Branch operands must be numeric; symbolic labels are resolved
 // only by ParseAll, which sees the whole program and can back-patch a
-// forward reference.
+// forward reference. An absolute target needs the line's offset; see ParseAt.
 func Parse(line string) (Instruction, error) {
+	return ParseAt(line, -1)
+}
+
+// ParseAt parses line as Parse does, for an instruction placed at byte
+// offset ip. A branch target may also be written "@N", the absolute offset N;
+// it is encoded relative to the end of the instruction, the inverse of
+// Targets. A negative ip rejects "@N".
+func ParseAt(line string, ip int) (Instruction, error) {
 	line = strings.TrimSpace(stripOffsetPrefix(line))
 	if line == "" {
 		return nil, nil
@@ -202,12 +210,42 @@ func Parse(line string) (Instruction, error) {
 		return nil, fmt.Errorf("unknown mnemonic: %q", mnemonic)
 	}
 
-	typ := TypeOf(op)
-	operands, err := parseOperands(fields[1:], typ.Widths)
+	type absolute struct{ operand, target int }
+	args := fields[1:]
+	var targets []absolute
+	for i, f := range args {
+		if !strings.HasPrefix(f, "@") {
+			continue
+		}
+		branch := (op == BR || op == BR_IF) && i == 0 || op == BR_TABLE && i > 0
+		if ip < 0 || !branch {
+			return nil, fmt.Errorf("%s: absolute target %q needs a branch operand at a known offset", mnemonic, f)
+		}
+		target, err := strconv.ParseInt(f[1:], 0, 64)
+		if err != nil {
+			return nil, fmt.Errorf("%s: invalid absolute target %q", mnemonic, f)
+		}
+		targets = append(targets, absolute{operand: i, target: int(target)})
+		args[i] = "0"
+	}
+
+	operands, err := parseOperands(args, TypeOf(op).Widths)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", mnemonic, err)
 	}
+	inst, err := New(op, operands...)
+	if err != nil || len(targets) == 0 {
+		return inst, err
+	}
 
+	next := ip + len(inst)
+	for _, t := range targets {
+		rel := t.target - next
+		if rel < math.MinInt16 || rel > math.MaxInt16 {
+			return nil, fmt.Errorf("%s: target @%d out of range from offset %d", mnemonic, t.target, ip)
+		}
+		operands[t.operand] = uint64(uint16(int16(rel)))
+	}
 	return New(op, operands...)
 }
 

@@ -371,6 +371,31 @@ func TestVerify(t *testing.T) {
 	}
 }
 
+func TestSnapshot(t *testing.T) {
+	t.Run("returns a verified copy", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})
+		snap, err := program.Snapshot(prog)
+		require.NoError(t, err)
+		require.Equal(t, prog.Code, snap.Code)
+
+		prog.Code[0] = byte(instr.UNREACHABLE)
+		require.Equal(t, byte(instr.NOP), snap.Code[0])
+	})
+
+	t.Run("rejects a malformed program", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.DROP)})
+		snap, err := program.Snapshot(prog)
+		var verr *program.VerifyError
+		require.ErrorAs(t, err, &verr)
+		require.Nil(t, snap)
+	})
+
+	t.Run("rejects a nil program", func(t *testing.T) {
+		_, err := program.Snapshot(nil)
+		require.ErrorIs(t, err, program.ErrNil)
+	})
+}
+
 func TestVerifyError_Error(t *testing.T) {
 	err := &program.VerifyError{Slot: 2, IP: 7, Opcode: instr.I32_ADD, Err: program.ErrStackUnderflow}
 	require.Equal(t, "verify: slot 2, ip 7, i32.add: stack underflow", err.Error())

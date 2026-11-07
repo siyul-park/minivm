@@ -34,3 +34,12 @@ func (p *Profiler) Metrics() []Metric {
 	defer p.mu.Unlock()
 	return p.data.Metrics()
 }
+
+// Snapshot returns a copy of the aggregated samples and metrics.
+func (p *Profiler) Snapshot() *Collector {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	c := NewCollector()
+	c.merge(&p.data)
+	return c
+}

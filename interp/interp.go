@@ -228,14 +228,14 @@ func MustNew(prog *program.Program, opts ...Option) *Interpreter {
 	return i
 }
 
-// New builds an interpreter for prog. It verifies and runs a snapshot of prog
-// (program.Program.Clone), so mutating prog afterward, including the bytecode of
+// New builds an interpreter for prog. It runs program.Snapshot(prog), a
+// verified copy, so mutating prog afterward, including the bytecode of
 // its function constants, does not change execution. A malformed program
 // returns the *program.VerifyError and a nil prog returns
 // program.ErrNil. The snapshot shares type objects with prog, such as
 // Types and function signatures; they must not be mutated.
 func New(prog *program.Program, opts ...Option) (*Interpreter, error) {
-	snap, err := snapshot(prog)
+	snap, err := program.Snapshot(prog)
 	if err != nil {
 		return nil, err
 	}
@@ -790,16 +790,6 @@ func build(prog *program.Program, opts ...Option) *Interpreter {
 	}
 
 	return i
-}
-
-// snapshot returns a verified copy of prog, the only program New and NewPool
-// execute.
-func snapshot(prog *program.Program) (*program.Program, error) {
-	snap := prog.Clone()
-	if err := program.Verify(snap); err != nil {
-		return nil, err
-	}
-	return snap, nil
 }
 
 func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []types.Boxed) (returns []types.Boxed, err error) {

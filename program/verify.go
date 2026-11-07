@@ -110,6 +110,17 @@ func Verify(prog *Program) error {
 	return nil
 }
 
+// Snapshot returns a verified copy of prog: Clone, then Verify, so the copy
+// that passed verification is the only one a caller runs. It returns Verify's
+// errors.
+func Snapshot(prog *Program) (*Program, error) {
+	snap := prog.Clone()
+	if err := Verify(snap); err != nil {
+		return nil, err
+	}
+	return snap, nil
+}
+
 func (e *VerifyError) Error() string {
 	return fmt.Sprintf("verify: slot %d, ip %d, %s: %v", e.Slot, e.IP, instr.TypeOf(e.Opcode).Mnemonic, e.Err)
 }

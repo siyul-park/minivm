@@ -123,6 +123,17 @@ func (c *Collector) Samples(fn int) uint64 {
 	return c.funcs[fn].count
 }
 
+// Functions returns the functions that have samples, in index order.
+func (c *Collector) Functions() []int {
+	var fns []int
+	for fn, s := range c.funcs {
+		if s.count > 0 {
+			fns = append(fns, fn)
+		}
+	}
+	return fns
+}
+
 // IPs returns the instruction pointers of fn that have samples.
 func (c *Collector) IPs(fn int) []int {
 	if fn < 0 || fn >= len(c.funcs) {
