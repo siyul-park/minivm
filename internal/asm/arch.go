@@ -4,6 +4,16 @@ package asm
 // architecture.
 type Arch interface {
 	Encoder() Encoder
+	// Enter runs native code at code on s's native stack until that activation
+	// returns or exits, and reports whether it is suspended at an exit. It
+	// runs only where a host JIT backend exists.
+	Enter(code uintptr, s *State) bool
+	// Resume continues s's suspended activation and reports the same as Enter.
+	Resume(s *State) bool
+	// Stub returns the address of the stub native code calls to exit.
+	Stub() uintptr
+	// Flush makes newly written code visible to instruction fetch.
+	Flush(code []byte)
 }
 
 // Encoder turns one architecture-neutral Instruction into its machine

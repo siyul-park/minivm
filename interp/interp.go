@@ -231,15 +231,15 @@ func MustNew(prog *program.Program, opts ...Option) *Interpreter {
 // New builds an interpreter for prog. It runs program.Snapshot(prog), a
 // verified copy, so mutating prog afterward, including the bytecode of
 // its function constants, does not change execution. A malformed program
-// returns the *program.VerifyError and a nil prog returns
-// program.ErrNil. The snapshot shares type objects with prog, such as
+// returns the *program.VerifyError, a nil prog returns program.ErrNil, and
+// constants that do not fit WithHeapLimit return ErrHeapExhausted. The snapshot shares type objects with prog, such as
 // Types and function signatures; they must not be mutated.
 func New(prog *program.Program, opts ...Option) (*Interpreter, error) {
 	snap, err := program.Snapshot(prog)
 	if err != nil {
 		return nil, err
 	}
-	return build(snap, opts...), nil
+	return build(snap, opts...)
 }
 
 // Run executes the program until it returns or exits.
@@ -691,7 +691,7 @@ func (i *Interpreter) Close() error {
 
 // build constructs an interpreter that owns prog, which the caller has
 // verified and no one else mutates.
-func build(prog *program.Program, opts ...Option) *Interpreter {
+func build(prog *program.Program, opts ...Option) (*Interpreter, error) {
 	opt := option{
 		frame: 128,
 		stack: 1024,
@@ -747,7 +747,9 @@ func build(prog *program.Program, opts ...Option) *Interpreter {
 		gas:         fuel,
 		limit:       opt.maxHeap,
 	}
-	i.load(prog.Constants)
+	if err := i.preload(prog.Constants); err != nil {
+		return nil, err
+	}
 	i.target = max(cap(i.heap), i.base+heapRunway)
 	if i.limit > 0 {
 		i.target = max(min(i.target, i.limit), i.base)
@@ -789,7 +791,7 @@ func build(prog *program.Program, opts ...Option) *Interpreter {
 		}
 	}
 
-	return i
+	return i, nil
 }
 
 func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []types.Boxed) (returns []types.Boxed, err error) {
@@ -1097,6 +1099,14 @@ func (i *Interpreter) decoder(r *Registry) *Decoder {
 	d := &i.dec
 	*d = Decoder{interp: i, registry: r}
 	return d
+}
+
+// preload loads constants, reporting a full heap as an error: an embedder sets
+// the limit that a program's constants can exceed.
+func (i *Interpreter) preload(constants []types.Value) (err error) {
+	defer i.guard(&err)
+	i.load(constants)
+	return nil
 }
 
 // load fills an empty heap with the null slot and the constants, then takes
@@ -1759,8 +1769,7 @@ func (i *Interpreter) box(val types.Value) types.Boxed {
 	}
 }
 
-// clone returns val, copying a mutable constant so that the interpreter, not
-// the program, owns the object it mutates. Immutable values are returned as is.
+// boxI64 boxes val inline when it fits and on the heap when it does not.
 func (i *Interpreter) boxI64(val int64) types.Boxed {
 	if types.IsBoxable(val) {
 		return types.BoxI64(val)

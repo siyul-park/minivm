@@ -299,15 +299,15 @@ func (n *native) wake(i *Interpreter) bool {
 	}
 	briefs := make([]bool, len(i.code))
 	if n.auto {
-		spans := map[int]int{}
-		briefs[0] = n.span(i, 0, spans) < short
+		lengths := map[int]int{}
+		briefs[0] = n.length(i, 0, lengths) < short
 		all := briefs[0]
 		for _, c := range i.constants {
 			if c.Kind() != types.KindRef {
 				continue
 			}
 			if _, ok := i.heap[c.Ref()].(*types.Function); ok {
-				briefs[c.Ref()] = n.span(i, c.Ref(), spans) < short
+				briefs[c.Ref()] = n.length(i, c.Ref(), lengths) < short
 				all = all && briefs[c.Ref()]
 			}
 		}
@@ -353,15 +353,15 @@ func newShared(i *Interpreter) *shared {
 	return r
 }
 
-// span returns how many instructions one run of the code at addr executes,
+// length returns how many instructions one run of the code at addr executes,
 // its constant callees' included, or short when it may run more: a loop, a
 // call through anything but a constant function, a tail call, or recursion.
-func (n *native) span(i *Interpreter, addr int, spans map[int]int) int {
-	if count, ok := spans[addr]; ok {
+func (n *native) length(i *Interpreter, addr int, lengths map[int]int) int {
+	if count, ok := lengths[addr]; ok {
 		return count
 	}
 
-	spans[addr] = short
+	lengths[addr] = short
 	code := i.function(addr).Code
 	count, callee := 0, -1
 	for ip := 0; ip < len(code) && count < short; {
@@ -371,7 +371,7 @@ func (n *native) span(i *Interpreter, addr int, spans map[int]int) int {
 			if callee < 0 {
 				return short
 			}
-			count += n.span(i, callee, spans)
+			count += n.length(i, callee, lengths)
 		case instr.RETURN_CALL:
 			return short
 		case instr.BR, instr.BR_IF, instr.BR_TABLE:
@@ -393,7 +393,7 @@ func (n *native) span(i *Interpreter, addr int, spans map[int]int) int {
 		ip += inst.Width()
 	}
 	count = min(count, short)
-	spans[addr] = count
+	lengths[addr] = count
 	return count
 }
 

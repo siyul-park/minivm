@@ -1,4 +1,4 @@
-package asm_test
+package arm64_test
 
 import (
 	"runtime"
@@ -43,47 +43,47 @@ func grow(n int) int {
 	return grow(n-1) + 1
 }
 
-func TestEnter(t *testing.T) {
+func TestArch_Enter(t *testing.T) {
 	testenv.MustHaveArch(t, "arm64")
 
 	t.Run("returns when the code returns", func(t *testing.T) {
-		s, err := asm.NewState(4096)
+		s, err := asm.NewState(arm64.New(), 4096)
 		require.NoError(t, err)
 		code := link(t, arm64.RET())
 
-		require.False(t, asm.Enter(code, &s))
+		require.False(t, arm64.New().Enter(code, &s))
 	})
 
 	t.Run("keeps the native stack pointer aligned", func(t *testing.T) {
-		s, err := asm.NewState(4096)
+		s, err := asm.NewState(arm64.New(), 4096)
 		require.NoError(t, err)
 		code := link(t, frame(slices.Concat([]asm.Instruction{arm64.ADDI(arm64.X0, arm64.SP, 16)}, exit())...)...)
 
-		require.True(t, asm.Enter(code, &s))
-		require.False(t, asm.Resume(&s))
+		require.True(t, arm64.New().Enter(code, &s))
+		require.False(t, arm64.New().Resume(&s))
 		stack := s.Reg(arm64.X0)
 		require.NotZero(t, stack)
 		require.Zero(t, stack%16)
 	})
 
 	t.Run("handles a small stack allocation", func(t *testing.T) {
-		s, err := asm.NewState(8)
+		s, err := asm.NewState(arm64.New(), 8)
 		require.NoError(t, err)
 
-		require.False(t, asm.Enter(link(t, frame()...), &s))
+		require.False(t, arm64.New().Enter(link(t, frame()...), &s))
 	})
 
 	t.Run("suspends at an exit", func(t *testing.T) {
-		s, err := asm.NewState(4096)
+		s, err := asm.NewState(arm64.New(), 4096)
 		require.NoError(t, err)
 		code := link(t, frame(slices.Concat([]asm.Instruction{arm64.MOVI(arm64.X0, 42)}, exit())...)...)
 
-		require.True(t, asm.Enter(code, &s))
+		require.True(t, arm64.New().Enter(code, &s))
 		require.Equal(t, uint64(42), s.Reg(arm64.X0))
 	})
 
 	t.Run("nests below a suspended activation", func(t *testing.T) {
-		s, err := asm.NewState(4096)
+		s, err := asm.NewState(arm64.New(), 4096)
 		require.NoError(t, err)
 		outer := link(t, frame(slices.Concat(
 			[]asm.Instruction{arm64.MOVI(arm64.X0, 1), arm64.STR(arm64.X0, arm64.SP, 0)},
@@ -99,19 +99,19 @@ func TestEnter(t *testing.T) {
 			arm64.RET(),
 		)
 
-		require.True(t, asm.Enter(outer, &s))
-		require.False(t, asm.Enter(inner, &s))
-		require.True(t, asm.Resume(&s))
+		require.True(t, arm64.New().Enter(outer, &s))
+		require.False(t, arm64.New().Enter(inner, &s))
+		require.True(t, arm64.New().Resume(&s))
 		require.Equal(t, uint64(1), s.Reg(arm64.X0))
-		require.False(t, asm.Resume(&s))
+		require.False(t, arm64.New().Resume(&s))
 	})
 }
 
-func TestResume(t *testing.T) {
+func TestArch_Resume(t *testing.T) {
 	testenv.MustHaveArch(t, "arm64")
 
 	t.Run("continues with the registers Go set", func(t *testing.T) {
-		s, err := asm.NewState(4096)
+		s, err := asm.NewState(arm64.New(), 4096)
 		require.NoError(t, err)
 		code := link(t, frame(slices.Concat(
 			[]asm.Instruction{arm64.MOVI(arm64.X0, 42)},
@@ -120,15 +120,15 @@ func TestResume(t *testing.T) {
 			exit(),
 		)...)...)
 
-		require.True(t, asm.Enter(code, &s))
+		require.True(t, arm64.New().Enter(code, &s))
 		s.SetReg(arm64.X0, 100)
-		require.True(t, asm.Resume(&s))
+		require.True(t, arm64.New().Resume(&s))
 		require.Equal(t, uint64(101), s.Reg(arm64.X0))
-		require.False(t, asm.Resume(&s))
+		require.False(t, arm64.New().Resume(&s))
 	})
 
 	t.Run("restores every saved register", func(t *testing.T) {
-		s, err := asm.NewState(4096)
+		s, err := asm.NewState(arm64.New(), 4096)
 		require.NoError(t, err)
 		fregs := arm64.New().Registers(asm.RegTypeFloat)
 		require.Len(t, fregs, 32)
@@ -148,7 +148,7 @@ func TestResume(t *testing.T) {
 		insts = append(insts, exit()...)
 		code := link(t, frame(insts...)...)
 
-		require.True(t, asm.Enter(code, &s))
+		require.True(t, arm64.New().Enter(code, &s))
 		for _, r := range saved {
 			require.Equal(t, uint64(r.ID())+1, s.Reg(r), r.String())
 			s.SetReg(r, uint64(r.ID())+1000)
@@ -157,18 +157,18 @@ func TestResume(t *testing.T) {
 			require.Equal(t, uint64(i)+100, s.Reg(fregs[i]), fregs[i].String())
 			s.SetReg(fregs[i], uint64(i)+2000)
 		}
-		require.True(t, asm.Resume(&s))
+		require.True(t, arm64.New().Resume(&s))
 		for _, r := range saved {
 			require.Equal(t, uint64(r.ID())+1000, s.Reg(r), r.String())
 		}
 		for i := range 32 {
 			require.Equal(t, uint64(i)+2000, s.Reg(fregs[i]), fregs[i].String())
 		}
-		require.False(t, asm.Resume(&s))
+		require.False(t, arm64.New().Resume(&s))
 	})
 
 	t.Run("survives Go stack growth and collection while suspended", func(t *testing.T) {
-		s, err := asm.NewState(4096)
+		s, err := asm.NewState(arm64.New(), 4096)
 		require.NoError(t, err)
 		code := link(t, frame(slices.Concat(
 			[]asm.Instruction{arm64.MOVI(arm64.X0, 3), arm64.STR(arm64.X0, arm64.SP, 0)},
@@ -177,12 +177,12 @@ func TestResume(t *testing.T) {
 			exit(),
 		)...)...)
 
-		require.True(t, asm.Enter(code, &s))
+		require.True(t, arm64.New().Enter(code, &s))
 		require.Equal(t, 1<<16, grow(1<<16))
 		runtime.GC()
-		require.True(t, asm.Resume(&s))
+		require.True(t, arm64.New().Resume(&s))
 		require.Equal(t, uint64(6), s.Reg(arm64.X0))
-		require.False(t, asm.Resume(&s))
+		require.False(t, arm64.New().Resume(&s))
 	})
 }
 
@@ -192,10 +192,15 @@ func link(t *testing.T, insts ...asm.Instruction) uintptr {
 	a.Emit(insts...)
 	code, err := a.Build()
 	require.NoError(t, err)
-	buffer, err := asm.NewBuffer(len(code))
+	buffer, err := asm.NewBuffer(arm64.New(), len(code))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
 	addr, err := buffer.Link(code)
 	require.NoError(t, err)
 	return addr
+}
+
+func TestArch_Stub(t *testing.T) {
+	testenv.MustHaveArch(t, "arm64")
+	require.NotZero(t, arm64.New().Stub())
 }

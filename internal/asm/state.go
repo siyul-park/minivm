@@ -8,25 +8,35 @@ import (
 // State is the native machine state shared with Go. Native code reaches it
 // through the pinned register and exits through OffsetStub. It must lead any
 // embedding runtime context. Its native stack is noscan; native code stores no
-// Go pointers there.
+// Go pointers there. It is the same for every architecture: each one's
+// trampoline keeps what it needs of Go's stack in link and saves its register
+// banks in a prefix of regs and fregs.
 type State struct {
 	stub  uintptr
 	stack []uint64
 
-	sp, fp, lr uintptr
-	pc         uintptr
-	nsp, top   unsafe.Pointer
-	exited     uint64
-	regs       [32]uint64
-	fregs      [32]uint64
+	link     [3]uintptr
+	pc       uintptr
+	nsp, top unsafe.Pointer
+	exited   uint64
+	regs     [32]uint64
+	fregs    [32]uint64
 }
 
-// OffsetStub is where native code finds the exit stub off the state
-// register. The trampoline reads every other field through go_asm.h.
-const OffsetStub = unsafe.Offsetof(State{}.stub)
+// Field offsets for native code and each architecture's trampoline.
+const (
+	OffsetStub   = unsafe.Offsetof(State{}.stub)
+	OffsetLink   = unsafe.Offsetof(State{}.link)
+	OffsetPC     = unsafe.Offsetof(State{}.pc)
+	OffsetNSP    = unsafe.Offsetof(State{}.nsp)
+	OffsetExited = unsafe.Offsetof(State{}.exited)
+	OffsetRegs   = unsafe.Offsetof(State{}.regs)
+	OffsetFRegs  = unsafe.Offsetof(State{}.fregs)
+)
 
-// NewState returns a state with a 16-byte-aligned native stack top.
-func NewState(size int) (State, error) {
+// NewState returns a state exiting through arch's stub, with a 16-byte-aligned
+// native stack top.
+func NewState(arch Arch, size int) (State, error) {
 	if size <= 0 {
 		return State{}, fmt.Errorf("%w: stack size %d", ErrInvalidArgs, size)
 	}
@@ -37,7 +47,7 @@ func NewState(size int) (State, error) {
 		index--
 	}
 	top := unsafe.Add(base, index*8)
-	return State{stub: exitPC(), nsp: top, top: top, stack: stack}, nil
+	return State{stub: arch.Stub(), nsp: top, top: top, stack: stack}, nil
 }
 
 // PC reports where the last exit left: the exit stub's return address, which

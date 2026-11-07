@@ -17,9 +17,9 @@ type activation struct {
 	profile Profile
 }
 
-// frame is the facts live at a span's entry: its operand stack, and, per
+// facts is what a span's entry knows: its operand stack, and, per
 // slot, the function of the closure this unit stored there, 0 when unknown.
-type frame struct {
+type facts struct {
 	stack    []fact
 	closures []int
 }
@@ -65,7 +65,7 @@ func (a activation) returns() int {
 
 // merge joins src into f and reports whether f changed; a stack shape
 // mismatch cannot join.
-func (f *frame) merge(src frame) (bool, bool) {
+func (f *facts) merge(src facts) (bool, bool) {
 	if len(f.stack) != len(src.stack) {
 		return false, false
 	}
@@ -88,7 +88,7 @@ func (f *frame) merge(src frame) (bool, bool) {
 
 // owning is the state an OSR unit enters at a loop header: every reference
 // owned, and no closure it built itself.
-func (f frame) owning() frame {
+func (f facts) owning() facts {
 	out := slices.Clone(f.stack)
 	for i := range out {
 		if out[i].kind == types.KindRef {
@@ -96,7 +96,7 @@ func (f frame) owning() frame {
 		}
 		out[i].closure = 0
 	}
-	return frame{stack: out, closures: make([]int, len(f.closures))}
+	return facts{stack: out, closures: make([]int, len(f.closures))}
 }
 
 func (f *fact) merge(src fact) (bool, bool) {
