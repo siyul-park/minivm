@@ -32,6 +32,8 @@ type machine struct {
 	spills    []int
 	sites     []compile.Call
 	consts    []uint64
+	// operands records every Site.Operand a lowering read.
+	operands []int
 	// falls records, per Branch, whether one of its labels is next.
 	falls []bool
 	// fused records every result Site.Fuse admitted.
@@ -73,6 +75,13 @@ func (m *machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 	switch {
 	case op.Op == ssa.OpExec && op.Code == instr.I32_DIV_S:
 		a.Emit(arm64.CBZLabel(s.Reg(op.Args[1]), s.Trap()))
+	case op.Op == ssa.OpExec && op.Code == instr.STRUCT_NEW_DEFAULT:
+		if operand, ok := s.Operand(); ok {
+			m.operands = append(m.operands, operand)
+		}
+		exit, resume := s.Bridge()
+		a.Emit(arm64.CBZLabel(s.Reg(op.Results[0]), exit))
+		a.Bind(resume)
 	case op.Op == ssa.OpRelease:
 		exit, resume := s.Release(s.Reg(op.Args[0]))
 		a.Emit(arm64.CBZLabel(s.Reg(op.Args[0]), exit))
@@ -382,6 +391,25 @@ func TestLower(t *testing.T) {
 			}},
 			Results: []types.Kind{types.KindRef},
 		}}, exits)
+	})
+
+	t.Run("places a resumable bridge stub and reads the operation's operand off its bytecode", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		at := state(b, entry, 0)
+		got := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_NEW_DEFAULT, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+
+		m := new(machine)
+		assembly, err := compile.Lower(b.Build(), m, function(0, 0, instr.MustNew(instr.STRUCT_NEW_DEFAULT, 7)), nil, 0, false, true)
+		require.NoError(t, err)
+		require.Equal(t, []int{7}, m.operands)
+		require.Equal(t, []string{"prologue", "exec", "return", "exit 0 1", "results", "jump", "epilogue", "enter"}, m.calls)
+		require.Len(t, assembly.Exits, 1)
+		require.Equal(t, jit.ExitBridge, assembly.Exits[0].Kind)
+		require.Equal(t, instr.STRUCT_NEW_DEFAULT, assembly.Exits[0].Code)
+		require.Equal(t, []types.Kind{types.KindRef}, assembly.Exits[0].Results)
 	})
 
 	t.Run("bridges a heap write with the stored value it adopts", func(t *testing.T) {

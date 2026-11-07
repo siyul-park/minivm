@@ -29,6 +29,8 @@ work  []int
 
 Native execution MUST preserve the threaded ownership totals.
 
+While native code runs, the stock (`jit-internals.md`, Reserve) owns refs it built ahead: each is a live slot of count 1 that no program value references. `HeapLen` and `RefCount` can read higher than threaded execution would until the stock is returned. It is returned at every return to the interpreter at native depth 0, so after `Run` the heap holds only what the program owns; a heap limit counts stocked slots, and reaching it returns the stock before it fails.
+
 ## Transfers
 
 | Operation | Result |

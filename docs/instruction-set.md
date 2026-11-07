@@ -274,7 +274,7 @@ One opcode per row, in opcode-value order.
 | Arrays | `ARRAY_DELETE` | `array.delete` | ⬜ | 🔲 | bridges and resumes native code on ARM64; an array of unknown element type makes the translator decline the whole unit |
 | Arrays | `ARRAY_SLICE` | `array.slice` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Structs | `STRUCT_NEW` | `struct.new` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
-| Structs | `STRUCT_NEW_DEFAULT` | `struct.new_default` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Structs | `STRUCT_NEW_DEFAULT` | `struct.new_default` | ⬜ | 🔲 | takes a prebuilt default struct from the type's stock on ARM64, else bridges and resumes native code (`jit-internals.md`, Reserve) |
 | Structs | `STRUCT_GET` | `struct.get` | ✅ | 🔲 | guarded, else bridges and resumes native code |
 | Structs | `STRUCT_SET` | `struct.set` | ✅ | 🔲 | guarded, else bridges and resumes native code |
 | Maps | `MAP_NEW` | `map.new` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |

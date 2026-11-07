@@ -70,6 +70,72 @@ func node() *types.StructType {
 	)
 }
 
+// links builds a chain of n default nodes, each holding the one before and its
+// index, and leaves the last node's stamp on the stack. A nonnegative trap
+// divides by zero in that iteration; spare also keeps one default struct of a
+// second type, whose stock the loop never takes. Every node stays live to the
+// end, so the heap a run leaves is a function of n alone.
+func links(t *testing.T, n, trap int, spare bool) *program.Program {
+	t.Helper()
+	record := node()
+	second := types.NewStructType(types.NewStructField(types.TypeI32()))
+	b := instr.NewBuilder()
+	loop, done, skip := b.Label(), b.Label(), b.Label()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+	if spare {
+		b.Emit(instr.STRUCT_NEW_DEFAULT, 1).Emit(instr.LOCAL_SET, 3)
+	}
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	if trap >= 0 {
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(trap)).Emit(instr.I32_NE).BrIf(skip)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.I32_CONST, 0).Emit(instr.I32_DIV_S).Emit(instr.DROP)
+		b.Bind(skip)
+	}
+	b.Emit(instr.STRUCT_NEW_DEFAULT, 0).Emit(instr.LOCAL_SET, 2)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.STRUCT_SET)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.STRUCT_SET)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32(), record, record, second), program.WithTypes(record, second))
+}
+
+// heapOf is the heap a finished run left: its length and every live count.
+func heapOf(vm *interp.Interpreter) (int, []int) {
+	counts := make([]int, vm.HeapLen()-1)
+	for j := range counts {
+		counts[j], _ = vm.RefCount(j + 1)
+	}
+	return vm.HeapLen(), counts
+}
+
+// liveOf is how many objects a finished run left alive.
+func liveOf(vm *interp.Interpreter) int {
+	_, counts := heapOf(vm)
+	live := 0
+	for _, count := range counts {
+		if count > 0 {
+			live++
+		}
+	}
+	return live
+}
+
+// warm runs prog on vm until native code has run it, then resets vm.
+func warm(t *testing.T, vm *interp.Interpreter, profiler *prof.Profiler) {
+	t.Helper()
+	poll(t, func() bool {
+		_ = vm.Run(context.Background())
+		vm.Reset()
+		vm.Flush()
+		return nativeEntries(profiler) > 0
+	})
+}
+
 // wideArgFunction returns its i64 parameter plus one.
 func wideArgFunction() *types.Function {
 	b := instr.NewBuilder()

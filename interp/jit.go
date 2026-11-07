@@ -41,6 +41,9 @@ type engine struct {
 	// releases them only at depth 1).
 	borrows [][]bool
 	freeErr error
+	// stock is the default structs built ahead for native code; it is built
+	// with ctx, which first reads it.
+	stock stock
 	// compile is captured once so deoptimization does not add a static
 	// dependency from generated threaded handlers back to their compiler.
 	// Calling i.compile here directly creates the threaded/fusions
@@ -357,6 +360,9 @@ func (e *engine) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	returns := len(fn.Typ.Returns)
 
 	e.load(i, bp, 0)
+	if e.depth == 0 {
+		defer e.stock.flush(i)
+	}
 	ctx := e.ctx
 	mark := ctx.Budget
 
@@ -504,12 +510,7 @@ func (e *engine) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	if (s.entry && len(s.headers) == 0 && cancelled(i)) || len(i.fr.upvals) < len(s.fn.Captures) || e.depth >= uint64(len(e.ctx.Records)) {
 		return false
 	}
-	if s.onCadence() {
-		e.drain(i)
-		if e.depth == 0 {
-			e.quiesce()
-		}
-	}
+	e.cadence(i, s)
 	c := s.code
 	if c.Invalidated() {
 		if c = e.cache.CodeAt(s.address, s.ip); c == nil {
@@ -520,6 +521,9 @@ func (e *engine) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	}
 
 	e.load(i, i.fr.bp, 1)
+	if e.depth == 0 {
+		defer e.stock.flush(i)
+	}
 	ctx := e.ctx
 	ctx.Upvals = base(i.fr.upvals)
 	mark := ctx.Budget
@@ -568,6 +572,18 @@ func (e *engine) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 		panic(fault)
 	}
 	return true
+}
+
+// cadence publishes finished compiles at s's cadence, and at depth 0 marks a
+// quiescent point.
+func (e *engine) cadence(i *Interpreter, s *site) {
+	if !s.onCadence() {
+		return
+	}
+	e.drain(i)
+	if e.depth == 0 {
+		e.quiesce()
+	}
 }
 
 // materialize materializes every native activation of the current run, from
@@ -833,7 +849,9 @@ func (e *engine) load(i *Interpreter, bp, spare int) {
 		if err != nil {
 			panic(err)
 		}
+		e.stock = newStock(len(i.types))
 		ctx.Budget = e.quota
+		ctx.Stocks = base(e.stock.table)
 		e.ctx = ctx
 	}
 	ctx := e.ctx
@@ -974,8 +992,12 @@ func (e *engine) callout(i *Interpreter, exit jit.Exit, serve callout) (ok bool)
 	for j, o := range m.Stack[len(m.Stack)-exit.Pops:] {
 		args[j] = fromWord(i, o.Value.Kind, ctx.Read(k, o.Value))
 	}
-	v := serve(i, i.function(m.Address).Code[m.IP:], args)
+	code := i.function(m.Address).Code[m.IP:]
+	v := serve(i, code, args)
 	ctx.Results[0] = toWord(i, exit.Results[0], types.BoxRef(i.alloc(v)))
+	if exit.Code == instr.STRUCT_NEW_DEFAULT {
+		e.stock.refill(i, index(code))
+	}
 	return true
 }
 
