@@ -55,7 +55,9 @@ A runtime cell is `—` only when no meaningful implementation exists or the ben
 
 ## Measurement
 
-`make benchmark` is the only benchmark command. Only measurement time changes by level.
+`make benchmark` measures every runtime and regenerates the result document. Only measurement time changes by level.
+
+`make benchmark-diff base=<ref>` compares the `threaded` and `jit` tiers against `base` in alternating rounds, with `benchstat`. CI runs it on each branch against its merge base with `main`, and writes the table to the job summary. It reports and does not fail.
 
 | Level | Target |
 |---|---:|
@@ -69,11 +71,7 @@ Fixture loading, compilation, module construction, function lookup, and correctn
 
 Use one shared workload stem and one Go registry entry. Add every runtime fixture that can express the same deterministic algorithm and input without changing its computation. Keep expected-result calculation owned by the Go registration.
 
-Regenerate the result document with:
-
-```bash
-make benchmark
-```
+CI regenerates the result document on each code push to `main` and commits it. Do not commit a table measured locally.
 
 ## Ownership
 

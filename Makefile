@@ -47,6 +47,8 @@ endef
 # change this baseline only with measured coverage evidence.
 coverage-min ?= 83.7
 benchmark-level ?= standard
+benchmark-rounds ?= 6
+benchstat ?= golang.org/x/perf/cmd/benchstat@v0.0.0-20261009192801-be2c69fb417e
 fuzz-parallel ?= 4
 GOIMPORTS ?= goimports
 -include .env
@@ -63,7 +65,7 @@ endif
 
 PROJECT = $(shell basename -s .git $(shell git config --get remote.origin.url))
 
-.PHONY: init install-hooks install-tools install-lighthouse install-lint-tools install-modules generate build clean tidy update clean-sum clean-cache sync check check-generated check-tidy check-fmt check-arm64 check-inline test coverage coverage-check benchmark lighthouse lint fmt vet doc fuzz
+.PHONY: init install-hooks install-tools install-lighthouse install-lint-tools install-modules generate build clean tidy update clean-sum clean-cache sync check check-generated check-tidy check-fmt check-arm64 check-inline test coverage coverage-check benchmark benchmark-diff lighthouse lint fmt vet doc fuzz
 all: lint test build
 
 init:
@@ -184,6 +186,21 @@ benchmark:
 	cat "$$tmp"; \
 	test $$status -eq 0; \
 	(cd benchmarks && go run ./cmd/benchreport -input "$$tmp" -output ../docs/benchmarks.md)
+
+# benchmark-diff compares minivm's own tiers against base in alternating rounds,
+# so drift on a shared machine lands on both sides.
+benchmark-diff:
+	@test -n "$(base)" || { echo "usage: make benchmark-diff base=<ref>"; exit 1; }
+	@tmp="$$(mktemp -d)"; \
+	trap 'git worktree remove --force "$$tmp/tree"; rm -rf "$$tmp"' EXIT; \
+	git worktree add -q --detach "$$tmp/tree" "$(base)"; \
+	(cd "$$tmp/tree/benchmarks" && go test -c -o "$$tmp/base.test" .); \
+	(cd benchmarks && go test -c -o "$$tmp/head.test" .); \
+	for round in $$(seq $(benchmark-rounds)); do \
+		(cd "$$tmp/tree/benchmarks" && "$$tmp/base.test" -test.run='^$$' -test.bench='^BenchmarkKernels$$/./^(threaded|jit)$$' -test.benchtime=$(benchmark-time) >> "$$tmp/base.txt"); \
+		(cd benchmarks && "$$tmp/head.test" -test.run='^$$' -test.bench='^BenchmarkKernels$$/./^(threaded|jit)$$' -test.benchtime=$(benchmark-time) >> "$$tmp/head.txt"); \
+	done; \
+	(cd "$$tmp" && go run $(benchstat) base.txt head.txt)
 
 lighthouse:
 	@lighthouse check
