@@ -1748,13 +1748,7 @@ func (i *Interpreter) unboxI64(val types.Boxed) int64 {
 	if val.Kind() != types.KindRef {
 		return val.I64()
 	}
-	addr := val.Ref()
-	v, ok := i.heap[addr].(types.I64)
-	if !ok {
-		panic(ErrTypeMismatch)
-	}
-	i.release(addr)
-	return int64(v)
+	return int64(unboxRef[types.I64](i, val))
 }
 
 // borrowI64 reads an I64 without consuming a reference: unlike unboxI64 it
