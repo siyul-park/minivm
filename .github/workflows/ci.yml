@@ -63,7 +63,7 @@ jobs:
     needs: check
     # Coverage runs on ARM64 so architecture-specific executable-memory and
     # encoder paths are reachable. The native rebuild is tracked separately.
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -92,7 +92,7 @@ jobs:
     name: Benchmark Report
     # ARM64, because the JIT runs nowhere else. A slower result never fails the
     # build: a shared runner is too noisy to gate on.
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
