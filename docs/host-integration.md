@@ -125,7 +125,7 @@ if err := vm.SetGlobal(0, types.BoxRef(addr)); err != nil { return err }
 
 ## Limits
 
-`WithHeap` sets initial capacity. `WithHeapLimit(n)` sets an entry limit; `n <= 0` means unlimited. Deoptimization boxes values native code held unboxed and may pass the limit to do so; the next allocation then fails. `Alloc`, `Push`, and `Marshal` return `ErrHeapExhausted`; guest execution wraps it in `RuntimeError`.
+`WithHeap` sets initial capacity. `WithHeapLimit(n)` sets an entry limit; `n <= 0` means unlimited. Deoptimization boxes values native code held unboxed and may pass the limit to do so; the next allocation that needs a new heap entry then fails. `Alloc`, `Push`, and `Marshal` return `ErrHeapExhausted`; guest execution wraps it in `RuntimeError`.
 
 ## Related
 

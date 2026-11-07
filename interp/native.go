@@ -710,7 +710,7 @@ func (n *native) rebuild(i *Interpreter, exit jit.Exit, start, ref int, release 
 
 	// Materialization must not fail: threaded code would already have paid for
 	// these values, so their boxes may pass the heap limit. The next allocation
-	// that threaded code makes trips it.
+	// that needs a new entry trips it.
 	limit := i.limit
 	i.limit = 0
 	defer func() { i.limit = limit }()
