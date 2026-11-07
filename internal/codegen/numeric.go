@@ -8,6 +8,13 @@ import (
 	"github.com/siyul-park/minivm/instr"
 )
 
+// sink is the local.set a numeric operation stores into: its slot and its
+// offset from the handler's first instruction.
+type sink struct {
+	slot jen.Code
+	at   int
+}
+
 func arithmetic(state *state, current step) (value, error) {
 	head := current.op
 	if len(state.stack) > 0 {
@@ -27,7 +34,7 @@ func arithmetic(state *state, current step) (value, error) {
 }
 
 // numeric emits one numeric operation from virtual and resident operands.
-func numeric(consumer instr.Opcode, inputs []value, advance int, label string, conditional bool, local jen.Code) ([]jen.Code, error) {
+func numeric(consumer instr.Opcode, inputs []value, advance int, label string, conditional bool, local *sink) ([]jen.Code, error) {
 	arity, ok := arity(consumer)
 	if !ok {
 		return nil, fmt.Errorf("unsupported numeric consumer %s", instr.TypeOf(consumer).Mnemonic)
@@ -50,7 +57,7 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 
 	delta := len(inputs) - arity + 1
 	if !conditional && local == nil && delta > 0 {
-		body = append(body, overflow())
+		body = append(body, overflowAt(0))
 	}
 	for _, source := range inputs {
 		compile = append(compile, source.compile...)
@@ -93,8 +100,8 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 	}
 	if local != nil {
 		body = append(body,
-			jen.Id("addr").Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Add(local),
-			jen.If(jen.Id("addr").Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+			jen.Id("addr").Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Add(local.slot),
+			jen.If(jen.Id("addr").Op(">=").Id("i").Dot("sp")).Block(fail("ErrSegmentationFault", local.at)),
 		)
 		if instr.TypeOf(consumer).Push[0].Repr() == instr.KindI64 {
 			body = append(body,

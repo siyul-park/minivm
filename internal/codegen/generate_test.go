@@ -73,6 +73,43 @@ func TestGenerate(t *testing.T) {
 		require.True(t, foundCompile)
 	})
 
+	t.Run("trap offsets", func(t *testing.T) {
+		files, err := codegen.Generate()
+		require.NoError(t, err)
+		file, err := parser.ParseFile(token.NewFileSet(), files[0].Path, files[0].Data, 0)
+		require.NoError(t, err)
+
+		offsets := map[string]bool{}
+		producers := 0
+		ast.Inspect(file, func(node ast.Node) bool {
+			switch node := node.(type) {
+			case *ast.ReturnStmt:
+				if len(node.Results) == 2 {
+					if literal, ok := node.Results[1].(*ast.BasicLit); ok {
+						offsets[literal.Value] = true
+					}
+				}
+			case *ast.CompositeLit:
+				if ident, ok := node.Type.(*ast.Ident); ok && ident.Name == "trapped" {
+					producers++
+				}
+			}
+			return true
+		})
+		// LOCAL_GET (2 bytes), I32_CONST (5), ARRAY_GET traps at the array.get, 7
+		// bytes in; a pattern that traps nowhere ahead of its first instruction
+		// reports offset 0.
+		require.True(t, offsets["0"])
+		require.True(t, offsets["7"])
+		require.Positive(t, producers)
+
+		// A fused local.set's destination check names the local.set, not the
+		// numeric consumer the handler reports by default.
+		store := `:= types\.Box\w+\(.*\)\s+v\d+ := i\.fr\.bp \+ v\d+\s+if v\d+ >= i\.sp \{\s+panic\(`
+		require.Regexp(t, store+`trapped\{ErrSegmentationFault, \d+\}\)`, string(files[0].Data))
+		require.NotRegexp(t, store+`ErrSegmentationFault\)`, string(files[0].Data))
+	})
+
 	t.Run("deterministic", func(t *testing.T) {
 		first, err := codegen.Generate()
 		require.NoError(t, err)

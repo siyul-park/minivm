@@ -89,7 +89,7 @@ type native struct {
 	// dependency from generated threaded handlers back to their compiler.
 	// Calling i.compile here directly creates the threaded/fusions
 	// initialization cycle.
-	compile func(fn *types.Function, exact bool) []func(*Interpreter)
+	compile func(fn *types.Function, exact bool) ([]func(*Interpreter), []uint8)
 }
 
 // hold is one heap operand of a bridge attempt and its count before it.
@@ -1222,7 +1222,7 @@ func (n *native) exactCode(i *Interpreter, addr int) []func(*Interpreter) {
 	if code := n.exact[addr]; code != nil {
 		return code
 	}
-	code := n.compile(i.function(addr), true)
+	code, _ := n.compile(i.function(addr), true)
 	n.exact[addr] = code
 	return code
 }
