@@ -1909,6 +1909,9 @@ func (i *Interpreter) alloc(val types.Value) int {
 		}
 	}
 	if limited {
+		if i.jit != nil && i.jit.stock.flush(i) {
+			return i.alloc(val)
+		}
 		panic(ErrHeapExhausted)
 	}
 
@@ -1930,6 +1933,18 @@ func (i *Interpreter) alloc(val types.Value) int {
 	i.rc = append(i.rc, 1)
 	i.track(val)
 	return len(i.heap) - 1
+}
+
+// shrink drops from the heap the slots free[mark:] hold that end it, which only
+// grew to hold them.
+func (i *Interpreter) shrink(mark int) {
+	tail := i.free[mark:]
+	slices.Sort(tail)
+	for len(tail) > 0 && tail[len(tail)-1] == len(i.heap)-1 {
+		i.heap, i.rc = i.heap[:len(i.heap)-1], i.rc[:len(i.rc)-1]
+		tail = tail[:len(tail)-1]
+	}
+	i.free = i.free[:mark+len(tail)]
 }
 
 func (i *Interpreter) reuse(val types.Value) (int, bool) {

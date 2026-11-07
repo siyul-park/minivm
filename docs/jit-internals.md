@@ -48,7 +48,7 @@ One wake (analysis, the first compiles, their garbage) costs ~0.3–0.6 ms of in
 
 ## Owners
 
-`architecture.md`'s Package Ownership table owns package boundaries. Within `interp/`, native execution and exit handling live in `jit.go` (`engine`), tier decisions in `policy.go` (`policy`), and runtime feedback in `feedback.go` (`feedback`).
+`architecture.md`'s Package Ownership table owns package boundaries. Within `interp/`, native execution and exit handling live in `jit.go` (`engine`), tier decisions in `policy.go` (`policy`), runtime feedback in `feedback.go` (`feedback`), and the default structs built ahead for native code in `stock.go` (`stock`).
 
 ## Runtime contract
 
@@ -58,7 +58,8 @@ One wake (analysis, the first compiles, their garbage) costs ~0.3–0.6 ms of in
 | `asm.State` | Same struct on every architecture. Native stack, saved Go registers, native SP/PC/register file at the last exit. No Go pointer on the native stack but a slice's element pointer (below). |
 | `Arch.Enter` / `Arch.Resume` | Run code on the native stack / continue a suspended activation. Report whether it stopped at an exit. |
 | exit stub | Native code `BLR`s `asm.OffsetStub`; the stub saves registers and returns to Go. `Resume` returns from that call. |
-| `jit.Context` | Built at the interpreter's first native entry. `asm.State` first, then `Trap`, exit id, then `Heap`, `Globals`, `RC`, `Natives`, `Entries`, `Top`, `FB`, `Upvals`, `Depth`, `Limit`, `Budget`, `Results`, `Records`. `Results` stages a bridge or box exit's result words for native code to reload on resume. The interpreter writes every base before `Enter`; only `Heap` and `RC` are rewritten before each `Resume`, since serving an exit can only relocate those two append-grown slices. |
+| `jit.Context` | Built at the interpreter's first native entry. `asm.State` first, then `Trap`, exit id, then `Heap`, `Globals`, `RC`, `Natives`, `Entries`, `Top`, `FB`, `Stocks`, `Upvals`, `Depth`, `Limit`, `Budget`, `Results`, `Records`. `Results` stages a bridge or box exit's result words for native code to reload on resume. The interpreter writes every base before `Enter`; only `Heap` and `RC` are rewritten before each `Resume`, since serving an exit can only relocate those two append-grown slices. |
+| `Context.Stocks` | The base of the `jit.Stock` table, one `{Refs, N}` entry per type index, built with the context and fixed for its life (Reserve). |
 | `Context.Upvals` | The entering activation's upvals base. Written by the interpreter before an OSR `Enter` and by a native closure call before its branch; read once by a prologue into an ordinary register. |
 | `jit.Trap` | `TrapReturn`, `TrapDeopt`, `TrapBridge`. |
 | `jit.Code` | One unit's native code at one tier. `Free` unmaps once. |
@@ -162,13 +163,26 @@ A deopt stub sits out of line after the next terminator that does not fall throu
 
 | Exit | Resume rule |
 |---|---|
-| Callout | A bridge of `STRING_CONCAT`, `STRING_NEW_UTF32`, `STRING_ENCODE_UTF32`, `ARRAY_NEW_DEFAULT`, or `STRUCT_NEW_DEFAULT` is served by `engine.callout`: the op's own `Interpreter` helper (the one its threaded handler calls) computes the object from the operand words, Go allocates it and hands native code its one reference through `Context.Results`; no scratch frame, operand retain, or handler run. The helper writes no operand count, so a panic (heap exhaustion, the op's own fault) deopts as a trap with every count unchanged and threaded code reports it. |
+| Callout | A bridge of `STRING_CONCAT`, `STRING_NEW_UTF32`, `STRING_ENCODE_UTF32`, `ARRAY_NEW_DEFAULT`, or `STRUCT_NEW_DEFAULT` is served by `engine.callout`: the op's own `Interpreter` helper (the one its threaded handler calls) computes the object from the operand words, Go allocates it and hands native code its one reference through `Context.Results`; no scratch frame, operand retain, or handler run. The helper writes no operand count, so a panic (heap exhaustion, the op's own fault) deopts as a trap with every count unchanged and threaded code reports it. A `STRUCT_NEW_DEFAULT` callout also refills the type's stock (Reserve). |
 | Bridge | `engine.bridge` runs the op's threaded handler once in Go, then native resumes, for every op `bridgeable` admits. It denies a control transfer (the op writes `Branch`), `ARRAY_NEW` (its declared two-operand arity does not cover the `1+count` it pops), and `MAP_KEYS` (it allocates every key before the result array); their bridges deopt. An op with a host-view operand deopts before its handler runs: a view runs `Registry` conversions, which are host code. |
 | Release | `Exit.Word` identifies the last ref; interpreter owns reclamation, then native resumes. |
 | Box | `Exit.Word` carries the wide i64; interpreter allocates a boxed value, then native resumes. |
 | Trap | A bridge whose handler panics restores each heap operand to the count it saved before the attempt, then deopts; threaded code runs the op again and reports its trap. The declined attempt leaves only heap and count storage growth, stack slots above the frame, and the scratch frame changed: no admitted handler writes heap contents, allocates, or retains anything but its operands before its last panic point. A box trap deopts the same way. |
 
 A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every admitted op are exactly the operands its handler pops; it uses a scratch stack and leaves native registers untouched. The bridge retains every ref operand for the handler, so none reaches zero during an attempt; a boxed wide i64 is a fresh heap value the handler owns. After a completed handler, the bridge releases its retain of each operand the op adopts (`transform.Adopts`: the stored value of a heap write with no result), since native code handed the op that operand's own reference; native code releases the other operands it owns. Result words are unboxed per kind; a heap-boxed i64 result is consumed into a raw word. The materializer retains borrowed refs.
+
+### Reserve
+
+`STRUCT_NEW_DEFAULT` takes its object from a stock instead of exiting. `interp.stock` holds, per type index, default structs it built ahead (`newStruct` and `alloc`, count 1) as boxed refs in a Go array; its `jit.Stock` entry publishes the array base and the count `N` in `Context.Stocks`.
+
+| Step | Owner | Rule |
+|---|---|---|
+| take | `arm64.Machine` | `N == 0` takes the callout exit; else `N--` and the result is `Refs[N]`. Native code writes no Go pointer and no count: the stock's count becomes the result's. |
+| refill | `engine.callout` | After serving the op, `stock.refill` handles the miss. A type's first miss in an entry only arms it, so a call that allocates once builds nothing ahead. Each later miss builds 16 structs, then twice as many per refill up to 1024, and republishes the entry. A refill that exhausts the heap stops early without failing. |
+| exhaustion | `Interpreter.alloc` | At the heap limit, `stock.flush` returns every stocked ref and the allocation retries once; a second failure raises `ErrHeapExhausted` as in threaded code. |
+| flush | `engine.run`, `engine.enter` | Every return to the interpreter at depth 0, including deopt, throw, cancellation, and panic, runs `stock.flush` once, deferred; with nothing stocked it is one check. It releases every unused ref and disarms every type. |
+
+A batch is stored so native code takes its lowest address first, so a single-type program leaves the heap threaded would. With several types, unused refs can sit below taken ones: their slots return to `free` and `HeapLen` can read higher than threaded code's.
 
 ### Exit policy
 
