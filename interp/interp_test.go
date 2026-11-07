@@ -3362,7 +3362,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Zero(t, nativeEntries(profiler))
 	})
 
-	t.Run("recompiles a retired function only after more calls than its first compile", func(t *testing.T) {
+	t.Run("recompiles a invalidated function only after more calls than its first compile", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 
 		inc := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
@@ -3699,7 +3699,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Zero(t, deopts)
 	})
 
-	t.Run("retires a loop that only bridges and releases", func(t *testing.T) {
+	t.Run("invalidates a loop that only bridges and releases", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		record := node()
 		b := instr.NewBuilder()
@@ -4560,7 +4560,7 @@ func TestWithThreshold(t *testing.T) {
 		defer vm.Close()
 
 		// f(0) runs threaded-entered at most once per Run; enough Runs pass
-		// for its bridges to reach the retirement limit several times over.
+		// for its bridges to reach the invalidation limit several times over.
 		const runs = 16
 		var got types.Value
 		var runErr, popErr error
@@ -4935,7 +4935,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Zero(t, metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "unsupported"}))
 	})
 
-	t.Run("retires a caller whose served calls outweigh its work", func(t *testing.T) {
+	t.Run("invalidates a caller whose served calls outweigh its work", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		const runs = 16
 
@@ -7194,7 +7194,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, float64(1), again)
 	})
 
-	t.Run("retires an OSR site whose loop body always bridges", func(t *testing.T) {
+	t.Run("invalidates an OSR site whose loop body always bridges", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		const n = 600
 		b := instr.NewBuilder()
@@ -7217,7 +7217,7 @@ func TestWithThreshold(t *testing.T) {
 		ctx := context.Background()
 
 		// The header's own back edges cross its cadence within the first
-		// Run and it retires (refute deopts) within a handful of Runs. The
+		// Run and it is invalidated (refute deopts) within a handful of Runs. The
 		// ip-0 site's submit waits for the header to resolve (resolved),
 		// then needs its own cadence (interval) of Runs for a submit
 		// window and again for its first lookup to drain and publish the
@@ -7369,7 +7369,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Zero(t, deopts)
 	})
 
-	t.Run("recompiles a unit retired by a later-recorded site", func(t *testing.T) {
+	t.Run("recompiles a unit invalidated by a later-recorded site", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		prog := indirectFibCallsProgram(t, 20, 50)
 		want := runProgram(t, prog)
@@ -7440,7 +7440,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Zero(t, unsupported)
 	})
 
-	t.Run("retires a speculated callee refuted by a second function", func(t *testing.T) {
+	t.Run("invalidates a speculated callee refuted by a second function", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		prog := applyProgram(t, 3000)
 

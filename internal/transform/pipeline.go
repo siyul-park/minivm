@@ -15,13 +15,13 @@ func O2() []pass.Pass[*ssa.Function] {
 	return []pass.Pass[*ssa.Function]{NewFoldPass(), NewCSEPass(), NewGuardPass(), NewDCEPass()}
 }
 
-// O3 adds slot forwarding, promotion and hoisting to O2. late runs before the
+// O3 adds slot forwarding, promotion and LICM to O2. late runs before the
 // last dead-code removal, for a caller's own passes. It is the JIT's Optimized
 // tier, whose late pass reads profiles.
 func O3(late ...pass.Pass[*ssa.Function]) []pass.Pass[*ssa.Function] {
 	passes := []pass.Pass[*ssa.Function]{
 		NewFoldPass(), NewForwardPass(), NewCSEPass(), NewGuardPass(),
-		NewDCEPass(), NewPromotePass(), NewHoistPass(),
+		NewDCEPass(), NewPromotePass(), NewLICMPass(),
 	}
 	passes = append(passes, late...)
 	return append(passes, NewDCEPass())

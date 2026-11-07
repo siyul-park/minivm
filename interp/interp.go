@@ -100,7 +100,7 @@ type Interpreter struct {
 	fp int
 	sp int
 	// floor is the frame count below which frames stand for native
-	// activations suspended under a call they made (engine.nest): no handler
+	// activations suspended under a call they made (engine.reenter): no handler
 	// search crosses it, and a panic it does not catch above it unwinds to
 	// their owner.
 	floor int

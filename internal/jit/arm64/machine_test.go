@@ -680,7 +680,7 @@ func TestNew(t *testing.T) {
 			b.Bind(done).Emit(instr.LOCAL_GET, 3).Emit(instr.RETURN)
 		})
 		f := translate(t, fn)
-		for _, p := range []pass.Pass[*ssa.Function]{transform.NewPromotePass(), transform.NewHoistPass(), transform.NewDCEPass()} {
+		for _, p := range []pass.Pass[*ssa.Function]{transform.NewPromotePass(), transform.NewLICMPass(), transform.NewDCEPass()} {
 			_, err := p.Run(pass.NewManager(), f)
 			require.NoError(t, err)
 		}

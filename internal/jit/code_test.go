@@ -81,44 +81,44 @@ func TestNewCode(t *testing.T) {
 	})
 }
 
-func TestCode_Retired(t *testing.T) {
+func TestCode_Invalidated(t *testing.T) {
 	t.Run("is false while published", func(t *testing.T) {
-		s := jit.NewStore(1)
+		s := jit.NewCache(1)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 		c := code(t, 0, jit.Baseline)
 		require.True(t, s.Publish(c))
 
-		require.False(t, c.Retired())
+		require.False(t, c.Invalidated())
 	})
 
-	t.Run("is true once Retire clears it", func(t *testing.T) {
-		s := jit.NewStore(1)
+	t.Run("is true once Invalidate clears it", func(t *testing.T) {
+		s := jit.NewCache(1)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 		c := code(t, 0, jit.Baseline)
 		require.True(t, s.Publish(c))
 
-		s.Retire(0)
-		require.True(t, c.Retired())
+		s.Invalidate(0)
+		require.True(t, c.Invalidated())
 	})
 
 	t.Run("is true once a higher tier replaces it", func(t *testing.T) {
-		s := jit.NewStore(1)
+		s := jit.NewCache(1)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 		c := code(t, 0, jit.Baseline)
 		require.True(t, s.Publish(c))
 
 		require.True(t, s.Publish(code(t, 0, jit.Optimized)))
-		require.True(t, c.Retired())
+		require.True(t, c.Invalidated())
 	})
 
-	t.Run("is true once RetireAt clears an OSR code", func(t *testing.T) {
-		s := jit.NewStore(1)
+	t.Run("is true once InvalidateAt clears an OSR code", func(t *testing.T) {
+		s := jit.NewCache(1)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 		c := osrCode(t, 0, 12, jit.Optimized)
 		require.True(t, s.Publish(c))
 
-		s.RetireAt(0, 12)
-		require.True(t, c.Retired())
+		s.InvalidateAt(0, 12)
+		require.True(t, c.Invalidated())
 	})
 }
 

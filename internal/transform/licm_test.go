@@ -63,14 +63,14 @@ func blockChunk(format string, id int) string {
 	return rest
 }
 
-func TestNewHoistPass(t *testing.T) {
+func TestNewLICMPass(t *testing.T) {
 	t.Run("returns a pass over ssa.Function", func(t *testing.T) {
-		var p pass.Pass[*ssa.Function] = transform.NewHoistPass()
+		var p pass.Pass[*ssa.Function] = transform.NewLICMPass()
 		require.NotNil(t, p)
 	})
 }
 
-func TestHoistPass_Run(t *testing.T) {
+func TestLICMPass_Run(t *testing.T) {
 	t.Run("hoists a pure computation over invariant arguments into the loop's preheader", func(t *testing.T) {
 		l := newCountedLoop()
 		x, y := l.b.Value(ssa.TypeI32), l.b.Value(ssa.TypeI32)
@@ -82,7 +82,7 @@ func TestHoistPass_Run(t *testing.T) {
 		require.NoError(t, ssa.Verify(fn))
 		before := ssa.Format(fn)
 
-		preserved, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.False(t, preserved)
@@ -105,7 +105,7 @@ func TestHoistPass_Run(t *testing.T) {
 		fn := l.close()
 		require.NoError(t, ssa.Verify(fn))
 
-		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+		_, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
@@ -120,7 +120,7 @@ func TestHoistPass_Run(t *testing.T) {
 		fn := l.close()
 		require.NoError(t, ssa.Verify(fn))
 
-		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+		_, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
@@ -138,7 +138,7 @@ func TestHoistPass_Run(t *testing.T) {
 		fn := l.close()
 		require.NoError(t, ssa.Verify(fn))
 
-		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+		_, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
@@ -156,7 +156,7 @@ func TestHoistPass_Run(t *testing.T) {
 		fn := l.close()
 		require.NoError(t, ssa.Verify(fn))
 
-		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+		_, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
@@ -202,7 +202,7 @@ func TestHoistPass_Run(t *testing.T) {
 		require.NoError(t, ssa.Verify(fn))
 		before := ssa.Format(fn)
 
-		preserved, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.True(t, preserved)
@@ -229,7 +229,7 @@ func TestHoistPass_Run(t *testing.T) {
 		fn := l.close()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.False(t, preserved)
@@ -274,7 +274,7 @@ func TestHoistPass_Run(t *testing.T) {
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.False(t, preserved)
@@ -338,7 +338,7 @@ blk3: () <-- (blk1)
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+		_, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
@@ -359,7 +359,7 @@ blk3: () <-- (blk1)
 		fn := l.close()
 		require.NoError(t, ssa.Verify(fn))
 
-		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+		_, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
@@ -382,7 +382,7 @@ blk3: () <-- (blk1)
 		fn := l.close()
 		require.NoError(t, ssa.Verify(fn))
 
-		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+		_, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
@@ -404,7 +404,7 @@ blk3: () <-- (blk1)
 		fn := l.close()
 		require.NoError(t, ssa.Verify(fn))
 
-		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+		_, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
@@ -425,7 +425,7 @@ blk3: () <-- (blk1)
 		fn := l.close()
 		require.NoError(t, ssa.Verify(fn))
 
-		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+		_, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
@@ -441,7 +441,7 @@ blk3: () <-- (blk1)
 		fn := l.close()
 		require.NoError(t, ssa.Verify(fn))
 
-		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+		_, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
@@ -479,7 +479,7 @@ blk3: () <-- (blk1)
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		_, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+		_, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
@@ -529,7 +529,7 @@ blk3: () <-- (blk1)
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
-		preserved, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.False(t, preserved)
@@ -550,7 +550,7 @@ blk3: () <-- (blk1)
 		require.NoError(t, ssa.Verify(fn))
 		before := ssa.Format(fn)
 
-		preserved, err := transform.NewHoistPass().Run(pass.NewManager(), fn)
+		preserved, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
 		require.True(t, preserved)
