@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"math"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -2820,13 +2821,15 @@ func TestWithThreshold(t *testing.T) {
 		testenv.MustHaveJIT(t)
 
 		tests := []struct {
-			name     string
-			body     func(b *instr.Builder, target int)
-			good     int32
-			bad      int32
-			null     int
-			limit    int
-			threaded bool // native loses frames here until #278
+			name  string
+			body  func(b *instr.Builder, target int)
+			good  int32
+			bad   int32
+			null  int
+			limit int
+			// boxed defers wide i64 boxes in native code, so a heap limit trips at
+			// another instruction, in the same frames.
+			boxed bool
 		}{
 			{
 				name: "array.get on a null container",
@@ -2892,9 +2895,9 @@ func TestWithThreshold(t *testing.T) {
 					b.Emit(instr.LOCAL_GET, 5).Emit(instr.LOCAL_GET, 5).Emit(instr.I64_ADD).Emit(instr.LOCAL_SET, 6)
 					b.Bind(skip)
 				},
-				good:     1,
-				limit:    7,
-				threaded: true,
+				good:  1,
+				limit: 7,
+				boxed: true,
 			},
 		}
 		for _, tt := range tests {
@@ -2954,10 +2957,6 @@ func TestWithThreshold(t *testing.T) {
 				threaded := interp.MustNew(prog, append(opts, interp.WithThreshold(-1))...)
 				defer threaded.Close()
 				require.EqualError(t, run(threaded, tt.bad), want.Error())
-				if tt.threaded {
-					return
-				}
-
 				profiler := prof.New()
 				native := interp.MustNew(prog, append(opts, interp.WithThreshold(1), interp.WithProfiler(profiler))...)
 				defer native.Close()
@@ -2966,7 +2965,14 @@ func TestWithThreshold(t *testing.T) {
 					native.Flush()
 					return nativeEntries(profiler) > 0
 				})
-				require.EqualError(t, run(native, tt.bad), want.Error())
+				got := run(native, tt.bad)
+				require.Error(t, got)
+				if tt.boxed {
+					ip := regexp.MustCompile(`ip=\d+`)
+					require.Equal(t, ip.ReplaceAllString(want.Error(), "ip"), ip.ReplaceAllString(got.Error(), "ip"))
+					return
+				}
+				require.EqualError(t, got, want.Error())
 			})
 		}
 	})
