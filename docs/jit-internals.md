@@ -54,8 +54,9 @@ One wake (analysis, the first compiles, their garbage) costs ~0.3–0.6 ms of in
 
 | Symbol | Contract |
 |---|---|
-| `asm.State` | Native stack, saved Go registers, native SP/PC/register file at the last exit. No Go pointer on the native stack but a slice's element pointer (below). |
-| `asm.Enter` / `asm.Resume` | Run code on the native stack / continue a suspended activation. Report whether it stopped at an exit. |
+| `asm.Arch` | One architecture's assembler and native runtime: encoder, `Enter`, `Resume`, exit stub, instruction-cache `Flush`. `internal/asm` has no architecture-specific file. `asm/host.Arch` names the running one as a type, so the runtime calls `Enter` and `Resume` without interface dispatch (3% on binary-trees). |
+| `asm.State` | Same struct on every architecture. Native stack, saved Go registers, native SP/PC/register file at the last exit. No Go pointer on the native stack but a slice's element pointer (below). |
+| `Arch.Enter` / `Arch.Resume` | Run code on the native stack / continue a suspended activation. Report whether it stopped at an exit. |
 | exit stub | Native code `BLR`s `asm.OffsetStub`; the stub saves registers and returns to Go. `Resume` returns from that call. |
 | `jit.Context` | Built at the interpreter's first native entry. `asm.State` first, then `Trap`, exit id, then `Heap`, `Globals`, `RC`, `Natives`, `Entries`, `Top`, `FB`, `Upvals`, `Depth`, `Limit`, `Budget`, `Results`, `Records`. `Results` stages a bridge or box exit's result words for native code to reload on resume. The interpreter writes every base before `Enter`; only `Heap` and `RC` are rewritten before each `Resume`, since serving an exit can only relocate those two append-grown slices. |
 | `Context.Upvals` | The entering activation's upvals base. Written by the interpreter before an OSR `Enter` and by a native closure call before its branch; read once by a prologue into an ordinary register. |

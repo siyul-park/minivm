@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	"github.com/siyul-park/minivm/internal/asm"
+	"github.com/siyul-park/minivm/internal/asm/host"
 )
 
 // Context is the runtime state shared by native code and the interpreter.
@@ -66,9 +67,10 @@ const (
 	TrapBridge
 )
 
-// Convention is how many values a function passes or returns in registers
-// (X0, X1 on ARM64); more travel through its VM frame. Context.Results
-// stages that many words.
+// Convention is how many values a native function passes or returns in
+// registers; more travel through its VM frame. It is VM ABI policy shared by
+// every backend: each compile.Machine picks which registers carry them.
+// Context.Results stages that many words.
 const Convention = 2
 
 // Offsets of the Context fields native code writes before an exit.
@@ -103,7 +105,7 @@ var _ [0]struct{} = [unsafe.Offsetof(Context{}.State)]struct{}{}
 // and reports how it left. Anything but TrapReturn leaves it suspended for
 // Resume.
 func Enter(code uintptr, ctx *Context) Trap {
-	if !asm.Enter(code, &ctx.State) {
+	if !(host.Arch{}).Enter(code, &ctx.State) {
 		return TrapReturn
 	}
 	return ctx.Trap()
@@ -111,7 +113,7 @@ func Enter(code uintptr, ctx *Context) Trap {
 
 // Resume continues the suspended activation and reports how it left next.
 func Resume(ctx *Context) Trap {
-	if !asm.Resume(&ctx.State) {
+	if !(host.Arch{}).Resume(&ctx.State) {
 		return TrapReturn
 	}
 	return ctx.Trap()
@@ -119,7 +121,7 @@ func Resume(ctx *Context) Trap {
 
 // NewContext returns a context owning a native stack of size bytes.
 func NewContext(size int) (*Context, error) {
-	s, err := asm.NewState(size)
+	s, err := asm.NewState(host.Arch{}, size)
 	if err != nil {
 		return nil, err
 	}
