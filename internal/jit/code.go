@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/siyul-park/minivm/internal/asm"
+	"github.com/siyul-park/minivm/internal/asm/host"
 	"github.com/siyul-park/minivm/types"
 )
 
@@ -80,7 +81,7 @@ func NewCode(address, ip int, osr bool, tier Tier, results int, registers, argum
 	if a.Entry < 0 || a.Entry > len(a.Bytes) {
 		return nil, fmt.Errorf("%w: entry stub offset %d", asm.ErrInvalidArgs, a.Entry)
 	}
-	buffer, err := asm.NewBuffer(len(a.Bytes))
+	buffer, err := asm.NewBuffer(host.Arch{}, len(a.Bytes))
 	if err != nil {
 		return nil, err
 	}
