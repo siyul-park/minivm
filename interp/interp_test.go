@@ -8504,28 +8504,74 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("reuses the arrays a native entry stocked and did not take", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		prog := chains(t, 2000, 0, 1, 1)
+		run := func(vm *interp.Interpreter) float64 {
+			return testing.AllocsPerRun(20, func() {
+				require.NoError(t, vm.Run(context.Background()))
+				vm.Reset()
+			})
+		}
+
+		// Threaded code reuses every array at Reset; what it still allocates is
+		// the collector's closure and the free list regrowing, and the race
+		// detector adds to both.
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer threaded.Close()
+		run(threaded)
+		want := run(threaded)
 
 		profiler := prof.New()
 		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
 		warm(t, vm, profiler)
-		for range 8 {
+		run(vm)
+
+		vm.Flush()
+		entered := nativeEntries(profiler)
+		got := run(vm)
+		vm.Flush()
+		require.Greater(t, nativeEntries(profiler), entered)
+		// Native code and its profiler allocate about 35 more than threaded code
+		// does; a stocked array rebuilt in Go on every entry adds over 140.
+		require.LessOrEqual(t, got, want+96)
+	})
+
+	t.Run("fills a stock with as many arrays as the last entry used", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		prog := chains(t, 128, 0, 1, 1)
+		limit := fits(t, prog)
+
+		// At the smallest heap threaded code runs prog in, a fill that builds
+		// more than the loop takes reaches the limit and collects once more than
+		// threaded code does; doubling from 16 overshoots, a fill of what the
+		// last entry used does not.
+		threadedProfiler := prof.New()
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1), interp.WithProfiler(threadedProfiler), interp.WithHeapLimit(limit))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		threaded.Flush()
+		want, _ := threadedProfiler.Metric("vm_gc_cycles_total")
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHeapLimit(limit))
+		defer vm.Close()
+		warm(t, vm, profiler)
+		for range 4 {
 			require.NoError(t, vm.Run(context.Background()))
 			vm.Reset()
 		}
 
 		vm.Flush()
 		entered := nativeEntries(profiler)
-		allocs := testing.AllocsPerRun(20, func() {
+		before, _ := profiler.Metric("vm_gc_cycles_total")
+		const runs = 4
+		for range runs {
 			require.NoError(t, vm.Run(context.Background()))
 			vm.Reset()
-		})
+		}
 		vm.Flush()
+		after, _ := profiler.Metric("vm_gc_cycles_total")
 		require.Greater(t, nativeEntries(profiler), entered)
-		// What remains is the collector's closure and the free list regrowing
-		// after Reset; a stocked array rebuilt in Go on every entry costs a
-		// hundred more.
-		require.Less(t, allocs, float64(64))
+		require.Equal(t, runs*want, after-before)
 	})
 
 }

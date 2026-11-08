@@ -22,6 +22,12 @@ type stock struct {
 	// step is how many objects each type's next refill builds; zero until
 	// the type's first miss, which only arms it.
 	step []int
+	// built and left are how many objects each type's fills built in an
+	// entry and how many of them the entry did not take; missed is how many
+	// misses it served. Their sum, built - left + missed, is how many objects
+	// the entry used, and learned is that sum for the last entry that built
+	// any, which sizes the type's next first fill.
+	built, left, missed, learned []int
 	// shifts is how many times each type's stocked length changed in an
 	// entry; a second change stops the type's stocking until flush.
 	shifts []int8
@@ -48,7 +54,7 @@ const (
 
 // newStock returns an empty stock for n types.
 func newStock(n int) stock {
-	s := stock{table: make([]jit.Stock, n), refs: make([][]types.Boxed, n), step: make([]int, n), shifts: make([]int8, n)}
+	s := stock{table: make([]jit.Stock, n), refs: make([][]types.Boxed, n), step: make([]int, n), built: make([]int, n), left: make([]int, n), missed: make([]int, n), learned: make([]int, n), shifts: make([]int8, n)}
 	for t := range s.table {
 		s.table[t].Len = unset
 	}
@@ -57,16 +63,20 @@ func newStock(n int) stock {
 
 // refill serves type t's miss of an object of the given length, which a struct
 // has none of. The first miss of an entry only arms the type, so a call that
-// allocates once builds nothing ahead; each later miss builds the next batch,
-// stopping early, without failing, when the heap is exhausted, after releasing
+// allocates once builds nothing ahead; the next builds what the last entry
+// needed beyond the two misses served so far, at least 16, and each later miss
+// in the entry doubles that, stopping early, without failing, when the heap is exhausted, after releasing
 // a stock of arrays of another length. A type whose length changes a second
 // time in an entry alternates, and builds nothing more until flush, so each of
 // its allocations costs the callout alone. Native code takes the batch's lowest
 // address first, so a batch is stored last first.
 func (s *stock) refill(i *Interpreter, t, length int) {
 	s.dirty = true
+	s.missed[t]++
 	if s.step[t] == 0 {
-		s.step[t] = first
+		// Two misses are served before the first fill, the arming one and
+		// the one that fills.
+		s.step[t] = min(max(s.learned[t]-2, first), last)
 		return
 	}
 	if length > wide || s.shifts[t] > 1 {
@@ -97,6 +107,7 @@ func (s *stock) refill(i *Interpreter, t, length int) {
 			}
 		}
 		slices.Reverse(refs[n:])
+		s.built[t] += len(refs) - n
 		s.refs[t] = refs
 		s.table[t] = jit.Stock{Refs: base(refs), N: int64(len(refs)), Len: int64(length)}
 		s.held = s.held || len(refs) > 0
@@ -126,7 +137,10 @@ func (s *stock) flush(i *Interpreter) bool {
 	mark := len(i.free)
 	for t := range s.table {
 		s.drop(i, t)
-		s.step[t], s.shifts[t], s.table[t].Len = 0, 0, unset
+		if s.built[t] > 0 {
+			s.learned[t] = s.built[t] - s.left[t] + s.missed[t]
+		}
+		s.step[t], s.built[t], s.left[t], s.missed[t], s.shifts[t], s.table[t].Len = 0, 0, 0, 0, 0, unset
 	}
 	i.shrink(mark)
 	return released
@@ -135,6 +149,7 @@ func (s *stock) flush(i *Interpreter) bool {
 // drop releases every ref type t still has stocked, leaving the slots it
 // frees to the caller to shrink.
 func (s *stock) drop(i *Interpreter, t int) {
+	s.left[t] += int(s.table[t].N)
 	for e := &s.table[t]; e.N > 0; {
 		e.N--
 		i.undo(s.refs[t][e.N].Ref())
