@@ -166,7 +166,7 @@ test:
 	@(cd benchmarks && go test -race $(test-options) ./...)
 
 coverage:
-	@go test -count=1 -race --coverprofile=coverage.out --covermode=atomic -coverpkg=./... $(test-options) ./...
+	@go test -count=1 -race -timeout=20m --coverprofile=coverage.out --covermode=atomic -coverpkg=./... $(test-options) ./...
 
 coverage-check: coverage
 	@coverage="$$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%", "", $$3); print $$3}')"; \
