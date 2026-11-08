@@ -1425,7 +1425,7 @@ func TestMachine_Lower(t *testing.T) {
 		target.LDR(target.X17, target.X16, 0),
 	}
 
-	stockIndex, farIndex := 3, 5000
+	binIndex, farIndex := 3, 5000
 	var tests []test
 	for _, c := range []struct {
 		code instr.Opcode
@@ -2353,42 +2353,93 @@ func TestMachine_Lower(t *testing.T) {
 			op:   ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{1, 3}, Results: []ssa.Value{4}},
 		},
 		{
-			name:  "struct.new_default takes the last ref of its type's stock or bridges when it is empty",
+			name:  "struct.new_default takes the last ref of its type's bin or bridges when it is empty",
 			regs:  regs{1: ssa.TypeRef},
-			index: &stockIndex,
+			index: &binIndex,
 			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_NEW_DEFAULT, Results: []ssa.Value{1}},
 			rows: []asm.Instruction{
-				target.LDR(vr(1), target.Ctx, int16(jit.OffsetStocks)),
-				target.LDR(vr(2), vr(1), int16(3*int(jit.SizeofStock)+int(jit.OffsetStockN))),
+				target.LDR(vr(1), target.Ctx, int16(jit.OffsetBins)),
+				target.LDR(vr(2), vr(1), int16(3*int(jit.SizeofBin)+int(jit.OffsetBinN))),
 				target.CBZLabel(vr(2), exit),
 				target.SUBI(vr(2), vr(2), 1),
-				target.STR(vr(2), vr(1), int16(3*int(jit.SizeofStock)+int(jit.OffsetStockN))),
-				target.LDR(vr(3), vr(1), int16(3*int(jit.SizeofStock))),
+				target.STR(vr(2), vr(1), int16(3*int(jit.SizeofBin)+int(jit.OffsetBinN))),
+				target.LDR(vr(3), vr(1), int16(3*int(jit.SizeofBin))),
 				target.LSLI(vr(4), vr(2), 3), target.ADD(vr(4), vr(3), vr(4)),
 				target.LDR(reg(ssa.TypeRef, 1), vr(4), 0),
 			},
 			lower: true,
 		},
 		{
-			name:  "struct.new_default reaches a stock entry past the immediate range through an added offset",
+			name:  "struct.new_default reaches a bin entry past the immediate range through an added offset",
 			regs:  regs{1: ssa.TypeRef},
 			index: &farIndex,
 			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_NEW_DEFAULT, Results: []ssa.Value{1}},
 			rows: func() []asm.Instruction {
-				rows := []asm.Instruction{target.LDR(vr(1), target.Ctx, int16(jit.OffsetStocks))}
-				rows = append(rows, target.LDI(target.X16, uint64(5000*int(jit.SizeofStock)))...)
+				rows := []asm.Instruction{target.LDR(vr(1), target.Ctx, int16(jit.OffsetBins))}
+				rows = append(rows, target.LDI(target.X16, uint64(5000*int(jit.SizeofBin)))...)
 				return append(rows,
 					target.ADD(vr(1), vr(1), target.X16),
-					target.LDR(vr(2), vr(1), int16(jit.OffsetStockN)),
+					target.LDR(vr(2), vr(1), int16(jit.OffsetBinN)),
 					target.CBZLabel(vr(2), exit),
 					target.SUBI(vr(2), vr(2), 1),
-					target.STR(vr(2), vr(1), int16(jit.OffsetStockN)),
+					target.STR(vr(2), vr(1), int16(jit.OffsetBinN)),
 					target.LDR(vr(3), vr(1), 0),
 					target.LSLI(vr(4), vr(2), 3), target.ADD(vr(4), vr(3), vr(4)),
 					target.LDR(reg(ssa.TypeRef, 1), vr(4), 0),
 				)
 			}(),
 			lower: true,
+		},
+		{
+			name:  "array.new_default takes the last ref of its type's bin or bridges on an empty bin or another length",
+			regs:  regs{1: ssa.TypeRef, 2: i32},
+			index: &binIndex,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_NEW_DEFAULT, Args: []ssa.Value{2}, Results: []ssa.Value{1}},
+			rows: []asm.Instruction{
+				target.LDR(vr(1), target.Ctx, int16(jit.OffsetBins)),
+				target.LDR(vr(2), vr(1), int16(3*int(jit.SizeofBin)+int(jit.OffsetBinN))),
+				target.CBZLabel(vr(2), exit),
+				target.SXTW(vr(4), reg(i32, 2)),
+				target.LDR(vr(5), vr(1), int16(3*int(jit.SizeofBin)+int(jit.OffsetBinLen))),
+				target.CMP(vr(4), vr(5)),
+				target.BCondLabel(target.OpBNE, exit),
+				target.SUBI(vr(2), vr(2), 1),
+				target.STR(vr(2), vr(1), int16(3*int(jit.SizeofBin)+int(jit.OffsetBinN))),
+				target.LDR(vr(3), vr(1), int16(3*int(jit.SizeofBin))),
+				target.LSLI(vr(6), vr(2), 3), target.ADD(vr(6), vr(3), vr(6)),
+				target.LDR(reg(ssa.TypeRef, 1), vr(6), 0),
+			},
+			lower: true,
+		},
+		{
+			name:  "array.new_default reaches a bin entry past the immediate range through an added offset",
+			regs:  regs{1: ssa.TypeRef, 2: i32},
+			index: &farIndex,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_NEW_DEFAULT, Args: []ssa.Value{2}, Results: []ssa.Value{1}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{target.LDR(vr(1), target.Ctx, int16(jit.OffsetBins))}
+				rows = append(rows, target.LDI(target.X16, uint64(5000*int(jit.SizeofBin)))...)
+				return append(rows,
+					target.ADD(vr(1), vr(1), target.X16),
+					target.LDR(vr(2), vr(1), int16(jit.OffsetBinN)),
+					target.CBZLabel(vr(2), exit),
+					target.SXTW(vr(4), reg(i32, 2)),
+					target.LDR(vr(5), vr(1), int16(jit.OffsetBinLen)),
+					target.CMP(vr(4), vr(5)),
+					target.BCondLabel(target.OpBNE, exit),
+					target.SUBI(vr(2), vr(2), 1),
+					target.STR(vr(2), vr(1), int16(jit.OffsetBinN)),
+					target.LDR(vr(3), vr(1), 0),
+					target.LSLI(vr(6), vr(2), 3), target.ADD(vr(6), vr(3), vr(6)),
+					target.LDR(reg(ssa.TypeRef, 1), vr(6), 0),
+				)
+			}(),
+			lower: true,
+		},
+		{
+			name: "array.new_default declines an operation whose bytecode operand is unknown",
+			regs: regs{1: ssa.TypeRef, 2: i32},
+			op:   ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_NEW_DEFAULT, Args: []ssa.Value{2}, Results: []ssa.Value{1}},
 		},
 		{
 			name: "struct.new_default declines an operation whose bytecode operand is unknown",

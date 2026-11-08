@@ -231,7 +231,7 @@ func mapKeys() jen.Code {
 				jen.Id("elems").Op("=").Id("append").Call(jen.Id("elems"), jen.Id("entry").Dot("Key")),
 			)...),
 		),
-		jen.Id("arr").Op(":=").Id("i").Dot("newArraySized").Call(jen.Qual(typesPkg, "NewArrayType").Call(jen.Id("keyType")), jen.Id("len").Call(jen.Id("elems"))),
+		jen.Id("arr").Op(":=").Id("i").Dot("newArray").Call(jen.Qual(typesPkg, "NewArrayType").Call(jen.Id("keyType")), jen.Id("len").Call(jen.Id("elems"))),
 		jen.Id("copy").Call(elems("arr"), jen.Id("elems")),
 		jen.Id("out").Op(":=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("arr"))),
 		jen.Id("i").Dot("release").Call(jen.Id("addr")),
