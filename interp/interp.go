@@ -596,7 +596,10 @@ func (i *Interpreter) Flush() {
 
 // Reset restores the initial interpreter state.
 func (i *Interpreter) Reset() {
-	i.prune()
+	// Keep what the ending run peaked at.
+	dynamic := len(i.heap) - i.base
+	i.structs.trim(dynamic)
+	i.arrays.trim(dynamic)
 	for addr := i.base; addr < len(i.heap); addr++ {
 		value := i.heap[addr]
 		if i.rc[addr] <= 0 {
@@ -605,7 +608,8 @@ func (i *Interpreter) Reset() {
 		i.finalize(addr, value)
 		i.recycle(value, false)
 	}
-	i.settle()
+	i.structs.reset()
+	i.arrays.reset()
 	// Drop every frame above the module's and return it to its first
 	// instruction with its locals zeroed.
 	for i.fp > 1 {
@@ -1956,19 +1960,6 @@ func (i *Interpreter) track(v types.Value) {
 	case *types.Array:
 		i.arrays.add()
 	}
-}
-
-// prune sizes what Reset keeps to the peak of the run that ends.
-func (i *Interpreter) prune() {
-	dynamic := len(i.heap) - i.base
-	i.structs.trim(dynamic)
-	i.arrays.trim(dynamic)
-}
-
-// settle starts the next run's count of live values.
-func (i *Interpreter) settle() {
-	i.structs.reset()
-	i.arrays.reset()
 }
 
 // dispose releases the refs owned by v and finalizes its non-heap resources.
