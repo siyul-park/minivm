@@ -41,6 +41,9 @@ type engine struct {
 	// releases them only at depth 1).
 	borrows [][]bool
 	freeErr error
+	// stock is the default structs built ahead for native code; it is built
+	// with ctx, which first reads it.
+	stock stock
 	// compile is captured once so deoptimization does not add a static
 	// dependency from generated threaded handlers back to their compiler.
 	// Calling i.compile here directly creates the threaded/fusions
@@ -384,11 +387,17 @@ func (e *engine) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 			func(exit jit.Exit) { i.fr.ip += advance; e.materialize(i, exit, start, addr, release) },
 			func() bool { return e.refute(addr, code.Tier) },
 		)
+		if e.depth == 0 && e.stock.dirty {
+			e.stock.flush(i)
+		}
 		if !ok {
 			return invalidate, fault
 		}
 	} else {
 		e.ledgers[addr].Spend(mark - ctx.Budget)
+		if e.depth == 0 && e.stock.dirty {
+			e.stock.flush(i)
+		}
 	}
 	for _, v := range owned {
 		i.releaseBox(v)
@@ -544,6 +553,9 @@ func (e *engine) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 		)
 	} else {
 		s.ledger.Spend(mark - ctx.Budget)
+	}
+	if e.depth == 0 && e.stock.dirty {
+		e.stock.flush(i)
 	}
 	if ok {
 		e.finish(i, s, c)
@@ -833,7 +845,9 @@ func (e *engine) load(i *Interpreter, bp, spare int) {
 		if err != nil {
 			panic(err)
 		}
+		e.stock = newStock(len(i.types))
 		ctx.Budget = e.quota
+		ctx.Stocks = base(e.stock.table)
 		e.ctx = ctx
 	}
 	ctx := e.ctx
@@ -974,8 +988,12 @@ func (e *engine) callout(i *Interpreter, exit jit.Exit, serve callout) (ok bool)
 	for j, o := range m.Stack[len(m.Stack)-exit.Pops:] {
 		args[j] = fromWord(i, o.Value.Kind, ctx.Read(k, o.Value))
 	}
-	v := serve(i, i.function(m.Address).Code[m.IP:], args)
+	code := i.function(m.Address).Code[m.IP:]
+	v := serve(i, code, args)
 	ctx.Results[0] = toWord(i, exit.Results[0], types.BoxRef(i.alloc(v)))
+	if exit.Code == instr.STRUCT_NEW_DEFAULT {
+		e.stock.refill(i, index(code))
+	}
 	return true
 }
 

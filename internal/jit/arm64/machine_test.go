@@ -30,6 +30,12 @@ type regs map[ssa.Value]ssa.Type
 // after its operation.
 type fused struct{ regs }
 
+// typed is regs whose operation carries a type index.
+type typed struct {
+	regs
+	index int
+}
+
 // known is regs where an OpConst defines each value of words.
 type known struct {
 	regs
@@ -56,11 +62,17 @@ func (r regs) Deopt() asm.Label { return exit }
 
 func (r regs) Trap() asm.Label { return exit }
 
+func (r regs) Bridge() (asm.Label, asm.Label) { return exit, resume }
+
+func (r regs) Operand() (int, bool) { return 0, false }
+
 func (r regs) Release(asm.VReg) (asm.Label, asm.Label) { return exit, resume }
 
 func (r regs) Box(asm.VReg) (asm.Label, asm.Label) { return exit, resume }
 
 func (fused) Fuse(ssa.Value) bool { return true }
+
+func (t typed) Operand() (int, bool) { return t.index, true }
 
 func (k known) Const(v ssa.Value) (uint64, bool) {
 	word, ok := k.words[v]
@@ -1384,6 +1396,8 @@ func TestMachine_Lower(t *testing.T) {
 		// consts are the values an OpConst defines, by word.
 		consts map[ssa.Value]uint64
 		op     ssa.Operation
+		// index, when set, is the type index op's bytecode carries.
+		index *int
 		// fuse lowers op through a Site that fuses its result into the
 		// branch right after it.
 		fuse  bool
@@ -1411,6 +1425,7 @@ func TestMachine_Lower(t *testing.T) {
 		target.LDR(target.X17, target.X16, 0),
 	}
 
+	stockIndex, farIndex := 3, 5000
 	var tests []test
 	for _, c := range []struct {
 		code instr.Opcode
@@ -2338,6 +2353,49 @@ func TestMachine_Lower(t *testing.T) {
 			op:   ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{1, 3}, Results: []ssa.Value{4}},
 		},
 		{
+			name:  "struct.new_default takes the last ref of its type's stock or bridges when it is empty",
+			regs:  regs{1: ssa.TypeRef},
+			index: &stockIndex,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_NEW_DEFAULT, Results: []ssa.Value{1}},
+			rows: []asm.Instruction{
+				target.LDR(vr(1), target.Ctx, int16(jit.OffsetStocks)),
+				target.LDR(vr(2), vr(1), int16(3*int(jit.SizeofStock)+int(jit.OffsetStockN))),
+				target.CBZLabel(vr(2), exit),
+				target.SUBI(vr(2), vr(2), 1),
+				target.STR(vr(2), vr(1), int16(3*int(jit.SizeofStock)+int(jit.OffsetStockN))),
+				target.LDR(vr(3), vr(1), int16(3*int(jit.SizeofStock))),
+				target.LSLI(vr(4), vr(2), 3), target.ADD(vr(4), vr(3), vr(4)),
+				target.LDR(reg(ssa.TypeRef, 1), vr(4), 0),
+			},
+			lower: true,
+		},
+		{
+			name:  "struct.new_default reaches a stock entry past the immediate range through an added offset",
+			regs:  regs{1: ssa.TypeRef},
+			index: &farIndex,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_NEW_DEFAULT, Results: []ssa.Value{1}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{target.LDR(vr(1), target.Ctx, int16(jit.OffsetStocks))}
+				rows = append(rows, target.LDI(target.X16, uint64(5000*int(jit.SizeofStock)))...)
+				return append(rows,
+					target.ADD(vr(1), vr(1), target.X16),
+					target.LDR(vr(2), vr(1), int16(jit.OffsetStockN)),
+					target.CBZLabel(vr(2), exit),
+					target.SUBI(vr(2), vr(2), 1),
+					target.STR(vr(2), vr(1), int16(jit.OffsetStockN)),
+					target.LDR(vr(3), vr(1), 0),
+					target.LSLI(vr(4), vr(2), 3), target.ADD(vr(4), vr(3), vr(4)),
+					target.LDR(reg(ssa.TypeRef, 1), vr(4), 0),
+				)
+			}(),
+			lower: true,
+		},
+		{
+			name: "struct.new_default declines an operation whose bytecode operand is unknown",
+			regs: regs{1: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_NEW_DEFAULT, Results: []ssa.Value{1}},
+		},
+		{
 			name:  "struct.get loads a 4-byte field with no bounds check",
 			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: i32, 4: i32},
 			guard: &structShape,
@@ -2577,6 +2635,9 @@ func TestMachine_Lower(t *testing.T) {
 			}
 			if tt.consts != nil {
 				s = known{tt.regs, tt.consts}
+			}
+			if tt.index != nil {
+				s = typed{tt.regs, *tt.index}
 			}
 			start := len(a.Rows())
 			require.Equal(t, tt.lower, m.Lower(a, tt.op, s))

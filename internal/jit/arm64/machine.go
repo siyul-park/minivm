@@ -752,6 +752,8 @@ func (m *Machine) exec(a *asm.Assembler, op ssa.Operation, s compile.Site) bool 
 		return m.arrayLen(a, op, s)
 	case instr.STRING_LEN:
 		return m.stringLen(a, op, s)
+	case instr.STRUCT_NEW_DEFAULT:
+		return m.structNew(a, op, s)
 	case instr.STRUCT_GET:
 		return m.structGet(a, op, s)
 	case instr.STRUCT_SET:
@@ -1117,6 +1119,40 @@ func (m *Machine) arraySet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 			a.Emit(at.row(target.STR, target.STRR, val))
 		}
 	}
+	return true
+}
+
+// structNew takes the default struct of a type from the type's stock, the last
+// of its N boxed refs, and lowers N: a ref native code takes is its alone, with
+// count 1, so neither a count nor a Go pointer is written. An empty stock has
+// the interpreter build the struct, which restocks it. The type index is the
+// bytecode operand, and the interpreter sizes the table to the program's
+// types, which verification bounds it by.
+func (m *Machine) structNew(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	index, ok := s.Operand()
+	if !has(op, 0, 1) || !ok {
+		return false
+	}
+	empty, resume := s.Bridge()
+
+	entry, n, refs := m.vreg(), m.vreg(), m.vreg()
+	a.Emit(target.LDR(entry, target.Ctx, int16(jit.OffsetStocks)))
+	at := index * int(jit.SizeofStock)
+	if at+int(jit.OffsetStockN) > 8*imm12 {
+		a.Emit(target.LDI(target.X16, uint64(at))...)
+		a.Emit(target.ADD(entry, entry, target.X16))
+		at = 0
+	}
+	a.Emit(
+		target.LDR(n, entry, int16(at+int(jit.OffsetStockN))),
+		target.CBZLabel(n, empty),
+		target.SUBI(n, n, 1),
+		target.STR(n, entry, int16(at+int(jit.OffsetStockN))),
+		target.LDR(refs, entry, int16(at)),
+	)
+	taken := m.offset(a, refs, n, 3)
+	a.Emit(target.LDR(s.Reg(op.Results[0]), taken, 0))
+	a.Bind(resume)
 	return true
 }
 
