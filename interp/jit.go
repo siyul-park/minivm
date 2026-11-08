@@ -991,8 +991,11 @@ func (e *engine) callout(i *Interpreter, exit jit.Exit, serve callout) (ok bool)
 	code := i.function(m.Address).Code[m.IP:]
 	v := serve(i, code, args)
 	ctx.Results[0] = toWord(i, exit.Results[0], types.BoxRef(i.alloc(v)))
-	if exit.Code == instr.STRUCT_NEW_DEFAULT {
-		e.stock.refill(i, index(code))
+	switch exit.Code {
+	case instr.STRUCT_NEW_DEFAULT:
+		e.stock.refill(i, index(code), 0)
+	case instr.ARRAY_NEW_DEFAULT:
+		e.stock.refill(i, index(code), int(args[0].I32()))
 	}
 	return true
 }

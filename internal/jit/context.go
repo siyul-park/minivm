@@ -59,10 +59,12 @@ type Record struct {
 // the base of N boxed refs, each an object of count 1 that only native code
 // may take, last first. Native code lowers N and takes Refs[N]; Go alone
 // writes Refs and raises N, so native code never writes a Go pointer or a
-// count.
+// count. Len is the length of every array a stock of an array type holds,
+// which native code compares with the length it is asked for.
 type Stock struct {
 	Refs uintptr
 	N    int64
+	Len  int64
 }
 
 // Trap is how native code last left.
@@ -105,8 +107,9 @@ const (
 	OffsetResults = unsafe.Offsetof(Context{}.Results)
 	OffsetRecords = unsafe.Offsetof(Context{}.Records)
 
-	SizeofStock  = unsafe.Sizeof(Stock{})
-	OffsetStockN = unsafe.Offsetof(Stock{}.N)
+	SizeofStock    = unsafe.Sizeof(Stock{})
+	OffsetStockN   = unsafe.Offsetof(Stock{}.N)
+	OffsetStockLen = unsafe.Offsetof(Stock{}.Len)
 
 	RecordFB   = unsafe.Offsetof(Record{}.FB)
 	RecordSP   = unsafe.Offsetof(Record{}.SP)

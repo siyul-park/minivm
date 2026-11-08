@@ -59,7 +59,7 @@ One wake (analysis, the first compiles, their garbage) costs ~0.3–0.6 ms of in
 | `Arch.Enter` / `Arch.Resume` | Run code on the native stack / continue a suspended activation. Report whether it stopped at an exit. |
 | exit stub | Native code `BLR`s `asm.OffsetStub`; the stub saves registers and returns to Go. `Resume` returns from that call. |
 | `jit.Context` | Built at the interpreter's first native entry. `asm.State` first, then `Trap`, exit id, then `Heap`, `Globals`, `RC`, `Natives`, `Entries`, `Top`, `FB`, `Stocks`, `Upvals`, `Depth`, `Limit`, `Budget`, `Results`, `Records`. `Results` stages a bridge or box exit's result words for native code to reload on resume. The interpreter writes every base before `Enter`; only `Heap` and `RC` are rewritten before each `Resume`, since serving an exit can only relocate those two append-grown slices. |
-| `Context.Stocks` | The base of the `jit.Stock` table, one `{Refs, N}` entry per type index, built with the context and fixed for its life (Reserve). |
+| `Context.Stocks` | The base of the `jit.Stock` table, one `{Refs, N, Len}` entry per type index, built with the context and fixed for its life (Reserve). |
 | `Context.Upvals` | The entering activation's upvals base. Written by the interpreter before an OSR `Enter` and by a native closure call before its branch; read once by a prologue into an ordinary register. |
 | `jit.Trap` | `TrapReturn`, `TrapDeopt`, `TrapBridge`. |
 | `jit.Code` | One unit's native code at one tier. `Free` unmaps once. |
@@ -163,7 +163,7 @@ A deopt stub sits out of line after the next terminator that does not fall throu
 
 | Exit | Resume rule |
 |---|---|
-| Callout | A bridge of `STRING_CONCAT`, `STRING_NEW_UTF32`, `STRING_ENCODE_UTF32`, `ARRAY_NEW_DEFAULT`, or `STRUCT_NEW_DEFAULT` is served by `engine.callout`: the op's own `Interpreter` helper (the one its threaded handler calls) computes the object from the operand words, Go allocates it and hands native code its one reference through `Context.Results`; no scratch frame, operand retain, or handler run. The helper writes no operand count, so a panic (heap exhaustion, the op's own fault) deopts as a trap with every count unchanged and threaded code reports it. A `STRUCT_NEW_DEFAULT` callout also refills the type's stock (Reserve). |
+| Callout | A bridge of `STRING_CONCAT`, `STRING_NEW_UTF32`, `STRING_ENCODE_UTF32`, `ARRAY_NEW_DEFAULT`, or `STRUCT_NEW_DEFAULT` is served by `engine.callout`: the op's own `Interpreter` helper (the one its threaded handler calls) computes the object from the operand words, Go allocates it and hands native code its one reference through `Context.Results`; no scratch frame, operand retain, or handler run. The helper writes no operand count, so a panic (heap exhaustion, the op's own fault) deopts as a trap with every count unchanged and threaded code reports it. A `STRUCT_NEW_DEFAULT` or `ARRAY_NEW_DEFAULT` callout also refills the type's stock (Reserve). |
 | Bridge | `engine.bridge` runs the op's threaded handler once in Go, then native resumes, for every op `bridgeable` admits. It denies a control transfer (the op writes `Branch`), `ARRAY_NEW` (its declared two-operand arity does not cover the `1+count` it pops), and `MAP_KEYS` (it allocates every key before the result array); their bridges deopt. An op with a host-view operand deopts before its handler runs: a view runs `Registry` conversions, which are host code. |
 | Release | `Exit.Word` identifies the last ref; interpreter owns reclamation, then native resumes. |
 | Box | `Exit.Word` carries the wide i64; interpreter allocates a boxed value, then native resumes. |
@@ -173,12 +173,12 @@ A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every ad
 
 ### Reserve
 
-`STRUCT_NEW_DEFAULT` takes its object from a stock instead of exiting. `interp.stock` holds, per type index, default structs it built ahead (`newStruct` and `alloc`, count 1) as boxed refs in a Go array; its `jit.Stock` entry publishes the array base and the count `N` in `Context.Stocks`.
+`STRUCT_NEW_DEFAULT` and `ARRAY_NEW_DEFAULT` take their object from a stock instead of exiting. `interp.stock` holds, per type index, default structs or arrays it built ahead (`newStruct` or `newArrayDefault`, then `alloc`, count 1) as boxed refs in a Go array; its `jit.Stock` entry publishes the array base, the count `N`, and, for an array type, the length `Len` of every array it holds, in `Context.Stocks`.
 
 | Step | Owner | Rule |
 |---|---|---|
-| take | `arm64.Machine` | `N == 0` takes the callout exit; else `N--` and the result is `Refs[N]`. Native code writes no Go pointer and no count: the stock's count becomes the result's. |
-| refill | `engine.callout` | After serving the op, `stock.refill` handles the miss. A type's first miss in an entry only arms it, so a call that allocates once builds nothing ahead. Each later miss builds 16 structs, then twice as many per refill up to 1024, and republishes the entry. A refill that exhausts the heap stops early without failing. |
+| take | `arm64.Machine` | `N == 0` takes the callout exit, and so does an `ARRAY_NEW_DEFAULT` whose runtime length is not `Len`, a negative or huge one always (threaded code then raises its own fault); else `N--` and the result is `Refs[N]`. Native code writes no Go pointer and no count: the stock's count becomes the result's. |
+| refill | `engine.callout` | After serving the op, `stock.refill` handles the miss. A type's first miss in an entry only arms it, so a call that allocates once builds nothing ahead. Each later miss builds 16 objects at the requested length, then twice as many per refill up to 1024, and republishes the entry. A type whose stock holds another length releases it first; when the length changes a second time in an entry, the type alternates and stops stocking until `stock.flush`, so each of its allocations costs the callout alone. An array longer than 4096 elements is not stocked. A refill that exhausts the heap stops early without failing. |
 | exhaustion | `Interpreter.alloc` | At the heap limit, `stock.flush` returns every stocked ref and the allocation retries once; a second failure raises `ErrHeapExhausted` as in threaded code. |
 | flush | `engine.run`, `engine.enter`, `Run` | Native code's return to the interpreter at depth 0, whether it returned, exited, or carries a fault to re-raise, runs `stock.flush` when a miss has armed or stocked a type: one field check otherwise, with no `defer`, which cost every entry. `Run` flushes once more as it returns, since `dispatch` recovers a panic that skipped that return. It releases every unused ref and disarms every type. |
 

@@ -105,6 +105,34 @@ func links(t *testing.T, n, trap int, spare bool) *program.Program {
 	return program.New(code, program.WithLocals(types.TypeI32(), record, record, second), program.WithTypes(record, second))
 }
 
+// chains builds a chain of n default arrays, each holding the one before in its
+// first element, like benchmarks/fixtures/allocation-graph.mvm, and leaves the
+// last array's length on the stack. The first split arrays have length short
+// and the rest length long. Every array stays live to the end, so the heap a
+// run leaves is a function of n alone.
+func chains(t *testing.T, n, split, short, long int) *program.Program {
+	t.Helper()
+	array := types.NewArrayType(types.TypeAny())
+	b := instr.NewBuilder()
+	loop, done, wide, made := b.Label(), b.Label(), b.Label(), b.Label()
+	b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.LOCAL_SET, 0)
+	b.Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_SET, 1)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(split)).Emit(instr.I32_GE_S).BrIf(wide)
+	b.Emit(instr.I32_CONST, uint64(uint32(short))).Br(made)
+	b.Bind(wide).Emit(instr.I32_CONST, uint64(uint32(long)))
+	b.Bind(made).Emit(instr.ARRAY_NEW_DEFAULT, 0)
+	b.Emit(instr.DUP).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_SET)
+	b.Emit(instr.LOCAL_SET, 0)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_LEN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(array, types.TypeI32()), program.WithTypes(array))
+}
+
 // heapOf is the heap a finished run left: its length and every live count.
 func heapOf(vm *interp.Interpreter) (int, []int) {
 	counts := make([]int, vm.HeapLen()-1)

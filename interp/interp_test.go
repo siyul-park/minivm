@@ -2792,6 +2792,35 @@ func TestWithHeapLimit(t *testing.T) {
 		require.ErrorIs(t, threaded.Run(context.Background()), interp.ErrHeapExhausted)
 		require.Equal(t, liveOf(threaded), liveOf(short))
 	})
+
+	t.Run("fails a native ARRAY_NEW_DEFAULT where threaded fails", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		prog := chains(t, 2000, 0, 1, 1)
+
+		limit := fits(t, prog)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHeapLimit(limit))
+		defer vm.Close()
+		warm(t, vm, profiler)
+		vm.Flush()
+		entered := nativeEntries(profiler)
+		require.NoError(t, vm.Run(context.Background()))
+		vm.Flush()
+		require.Greater(t, nativeEntries(profiler), entered)
+		vm.Reset()
+
+		shortProfiler := prof.New()
+		short := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(shortProfiler), interp.WithHeapLimit(limit-1))
+		defer short.Close()
+		warm(t, short, shortProfiler)
+		require.ErrorIs(t, short.Run(context.Background()), interp.ErrHeapExhausted)
+
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1), interp.WithHeapLimit(limit-1))
+		defer threaded.Close()
+		require.ErrorIs(t, threaded.Run(context.Background()), interp.ErrHeapExhausted)
+		require.Equal(t, liveOf(threaded), liveOf(short))
+	})
 }
 
 func TestWithTick(t *testing.T) {
@@ -3738,19 +3767,18 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("invalidates a loop that only bridges and releases", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
-		elem := types.NewArrayType(types.TypeI32())
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
 		b.Bind(loop)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 100).Emit(instr.I32_GE_S).BrIf(done)
-		b.Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.DROP)
+		b.Emit(instr.CONST_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.STRING_CONCAT).Emit(instr.DROP)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
 		b.Br(loop)
 		b.Bind(done).Emit(instr.LOCAL_GET, 0)
 		code, err := b.Assemble()
 		require.NoError(t, err)
-		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithTypes(elem))
+		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithConstants(types.String("a")))
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
@@ -8335,6 +8363,144 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, wantLen, gotLen)
 		require.Equal(t, wantCounts, gotCounts)
 	})
+	t.Run("serves ARRAY_NEW_DEFAULT from a stock and leaves threaded's heap", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		const n = 2000
+		prog := chains(t, n, 0, 1, 1)
+
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		wantLen, wantCounts := heapOf(threaded)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		warm(t, vm, profiler)
+
+		vm.Flush()
+		before, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+		entered := nativeEntries(profiler)
+		require.NoError(t, vm.Run(context.Background()))
+		vm.Flush()
+		after, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+
+		got, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Greater(t, nativeEntries(profiler), entered)
+		require.Less(t, after-before, float64(16))
+		gotLen, gotCounts := heapOf(vm)
+		require.Equal(t, wantLen, gotLen)
+		require.Equal(t, wantCounts, gotCounts)
+	})
+
+	t.Run("restocks ARRAY_NEW_DEFAULT when the requested length changes mid-loop", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		prog := chains(t, 2000, 1000, 1, 3)
+
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(3), want)
+		wantLen, wantCounts := heapOf(threaded)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		warm(t, vm, profiler)
+
+		vm.Flush()
+		before, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+		entered := nativeEntries(profiler)
+		require.NoError(t, vm.Run(context.Background()))
+		vm.Flush()
+		after, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+
+		got, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Greater(t, nativeEntries(profiler), entered)
+		require.Less(t, after-before, float64(64))
+		gotLen, gotCounts := heapOf(vm)
+		require.Equal(t, wantLen, gotLen)
+		require.Equal(t, wantCounts, gotCounts)
+	})
+
+	t.Run("faults a native ARRAY_NEW_DEFAULT of a negative length as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		prog := chains(t, 2000, 1500, 1, -1)
+
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer threaded.Close()
+		wantErr := threaded.Run(context.Background())
+		require.ErrorIs(t, wantErr, interp.ErrSegmentationFault)
+		wantLen, wantCounts := heapOf(threaded)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		warm(t, vm, profiler)
+
+		vm.Flush()
+		entered := nativeEntries(profiler)
+		require.EqualError(t, vm.Run(context.Background()), wantErr.Error())
+		vm.Flush()
+		require.Greater(t, nativeEntries(profiler), entered)
+		gotLen, gotCounts := heapOf(vm)
+		require.Equal(t, wantLen, gotLen)
+		require.Equal(t, wantCounts, gotCounts)
+	})
+
+	t.Run("stops stocking ARRAY_NEW_DEFAULT of a type whose length alternates", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		// Lengths alternate between low and low+1; a low of 0 is a stocked length
+		// like any other.
+		for _, low := range []uint64{1, 0} {
+			array := types.NewArrayType(types.TypeAny())
+			b := instr.NewBuilder()
+			loop, done := b.Label(), b.Label()
+			b.Bind(loop)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2000).Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_AND).Emit(instr.I32_CONST, low).Emit(instr.I32_ADD)
+			b.Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.DROP)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+			b.Br(loop)
+			b.Bind(done).Emit(instr.LOCAL_GET, 0)
+			code, err := b.Assemble()
+			require.NoError(t, err)
+			prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithTypes(array))
+
+			threaded := interp.MustNew(prog, interp.WithThreshold(-1), interp.WithHeap(64))
+			defer threaded.Close()
+			require.NoError(t, threaded.Run(context.Background()))
+			want, err := threaded.Pop()
+			require.NoError(t, err)
+
+			profiler := prof.New()
+			vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHeap(64))
+			defer vm.Close()
+			// The alternating lengths make every allocation a callout, so the ledger
+			// retires the loop's code within the warm-up: it is the window native
+			// code ran in.
+			warm(t, vm, profiler)
+			vm.Flush()
+			cycles, _ := profiler.Metric("vm_gc_cycles_total")
+			require.Positive(t, nativeEntries(profiler))
+			require.Zero(t, cycles)
+
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			require.Equal(t, liveOf(threaded), liveOf(vm))
+		}
+	})
+
 }
 
 func TestMustNew(t *testing.T) {
