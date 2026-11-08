@@ -3347,7 +3347,7 @@ var (
 					if i.sp < v0+1 {
 						panic(ErrStackUnderflow)
 					}
-					v2 := i.newArraySized(v1, v0)
+					v2 := i.newArray(v1, v0)
 					copy(v2.Elems, i.stack[i.sp-v0-1:i.sp-1])
 					i.sp -= v0
 					i.stack[i.sp-1] = types.BoxRef(i.alloc(v2))
@@ -4016,7 +4016,7 @@ var (
 					if v1 < 0 || v0 > len(v2.Elems) || v1 > v0 {
 						panic(ErrIndexOutOfRange)
 					}
-					v3 := i.newArraySized(v2.Typ, v0-v1)
+					v3 := i.newArray(v2.Typ, v0-v1)
 					copy(v3.Elems, v2.Elems[v1:v0])
 					v4 = v3
 				default:
@@ -4733,7 +4733,7 @@ var (
 				default:
 					panic(ErrTypeMismatch)
 				}
-				v5 := i.newArraySized(types.NewArrayType(v2), len(v3))
+				v5 := i.newArray(types.NewArrayType(v2), len(v3))
 				copy(v5.Elems, v3)
 				v6 := types.BoxRef(i.alloc(v5))
 				i.release(v1)

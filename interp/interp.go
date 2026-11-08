@@ -80,8 +80,8 @@ type Interpreter struct {
 	trial   []int
 	work    []int
 	refbuf  []types.Ref
-	arrays  recycler[*types.Array]
-	structs recycler[*types.Struct]
+	arrays  freelist[*types.Array]
+	structs freelist[*types.Struct]
 
 	// enc and dec are the scratch a host value converts through. A conversion
 	// takes a pointer, so building one per field access would allocate on every
@@ -596,32 +596,16 @@ func (i *Interpreter) Flush() {
 
 // Reset restores the initial interpreter state.
 func (i *Interpreter) Reset() {
-	dynamic := len(i.heap) - i.base
-	keepStructs := i.structs.trim(dynamic)
-	keepArrays := i.arrays.trim(dynamic)
+	i.prune()
 	for addr := i.base; addr < len(i.heap); addr++ {
 		value := i.heap[addr]
 		if i.rc[addr] <= 0 {
 			continue
 		}
 		i.finalize(addr, value)
-		switch value := value.(type) {
-		case *types.Struct:
-			if len(value.Typ.Fields) <= 4 && len(i.structs.values) < keepStructs {
-				*value = types.Struct{}
-				i.structs.put(value)
-			}
-		case *types.Array:
-			if len(i.arrays.values) < keepArrays {
-				clear(value.Elems[:cap(value.Elems)])
-				value.Typ = nil
-				value.Elems = value.Elems[:0]
-				i.arrays.put(value)
-			}
-		}
+		i.recycle(value, false)
 	}
-	i.structs.reset()
-	i.arrays.reset()
+	i.settle()
 	// Drop every frame above the module's and return it to its first
 	// instruction with its locals zeroed.
 	for i.fp > 1 {
@@ -1383,29 +1367,13 @@ func (i *Interpreter) newArrayDefault(typ *types.ArrayType, size types.Boxed) ty
 	case types.KindF64:
 		return make(types.TypedArray[float64], n)
 	default:
-		val := i.newArraySized(typ, int(n))
+		val := i.newArray(typ, int(n))
 		for j := range val.Elems {
 			val.Elems[j] = types.BoxedNull
 		}
 		i.retains(0, int(n))
 		return val
 	}
-}
-
-// newArraySized reuses a header invalidated by Reset, with its retained
-// backing storage when it fits size.
-func (i *Interpreter) newArraySized(typ *types.ArrayType, size int) *types.Array {
-	array, ok := i.arrays.get()
-	if !ok {
-		return &types.Array{Typ: typ, Elems: make([]types.Boxed, size)}
-	}
-	if cap(array.Elems) < size {
-		array.Elems = make([]types.Boxed, size)
-	} else {
-		array.Elems = array.Elems[:size]
-	}
-	array.Typ = typ
-	return array
 }
 
 // arrayGet is the generic ARRAY_GET path for all container representations.
@@ -1510,18 +1478,6 @@ func (i *Interpreter) arraySet(addr, at int, val types.Boxed) {
 	default:
 		panic(ErrTypeMismatch)
 	}
-}
-
-// newStruct reuses small struct objects retained by Reset. The pool is only
-// for interpreter-owned heap values; larger structs keep their normal path.
-func (i *Interpreter) newStruct(typ *types.StructType) *types.Struct {
-	if len(typ.Fields) <= 4 {
-		if s, ok := i.structs.get(); ok {
-			s.Reset(typ)
-			return s
-		}
-	}
-	return types.NewStruct(typ)
 }
 
 // structGet is the generic STRUCT_GET path for VM and host structs. Ref fields
@@ -1962,6 +1918,35 @@ func (i *Interpreter) reuse(val types.Value) (int, bool) {
 	return addr, true
 }
 
+// newStruct reuses a small struct a reclaim or Reset kept. Larger structs keep
+// their normal path.
+func (i *Interpreter) newStruct(typ *types.StructType) *types.Struct {
+	if len(typ.Fields) <= 4 {
+		if s, ok := i.structs.get(); ok {
+			s.Reset(typ)
+			return s
+		}
+	}
+	return types.NewStruct(typ)
+}
+
+// newArray reuses a header Reset kept, with its retained backing storage when
+// it fits size.
+func (i *Interpreter) newArray(typ *types.ArrayType, size int) *types.Array {
+	array, ok := i.arrays.get()
+	if !ok {
+		return &types.Array{Typ: typ, Elems: make([]types.Boxed, size)}
+	}
+	if cap(array.Elems) < size {
+		array.Elems = make([]types.Boxed, size)
+	} else {
+		array.Elems = array.Elems[:size]
+	}
+	array.Typ = typ
+	return array
+}
+
+// track counts a newly allocated value the free lists may later keep.
 func (i *Interpreter) track(v types.Value) {
 	switch v := v.(type) {
 	case *types.Struct:
@@ -1971,6 +1956,19 @@ func (i *Interpreter) track(v types.Value) {
 	case *types.Array:
 		i.arrays.add()
 	}
+}
+
+// prune sizes what Reset keeps to the peak of the run that ends.
+func (i *Interpreter) prune() {
+	dynamic := len(i.heap) - i.base
+	i.structs.trim(dynamic)
+	i.arrays.trim(dynamic)
+}
+
+// settle starts the next run's count of live values.
+func (i *Interpreter) settle() {
+	i.structs.reset()
+	i.arrays.reset()
 }
 
 // dispose releases the refs owned by v and finalizes its non-heap resources.
@@ -2182,17 +2180,37 @@ func (i *Interpreter) release(addr int) {
 // address to the free list. The caller has already settled its referents.
 func (i *Interpreter) reclaim(addr int, v types.Value) {
 	i.finalize(addr, v)
+	i.recycle(v, true)
+	i.heap[addr] = nil
+	i.free = append(i.free, addr)
+}
+
+// recycle keeps a freed value for reuse. A struct of up to four fields is
+// kept whenever it is freed; an array only once no one can hold it, because a
+// host may hold an *Array it loaded. escaped reports that someone may still
+// hold v, which Reset and an allocation that was never published know not.
+func (i *Interpreter) recycle(v types.Value, escaped bool) {
 	switch v := v.(type) {
 	case *types.Struct:
-		if len(v.Typ.Fields) <= 4 {
-			i.structs.remove()
+		if len(v.Typ.Fields) > 4 {
+			return
+		}
+		i.structs.remove()
+		if escaped {
+			i.structs.put(v)
+		} else if i.structs.room() {
+			*v = types.Struct{}
 			i.structs.put(v)
 		}
 	case *types.Array:
 		i.arrays.remove()
+		if !escaped && i.arrays.room() {
+			clear(v.Elems[:cap(v.Elems)])
+			v.Typ = nil
+			v.Elems = v.Elems[:0]
+			i.arrays.put(v)
+		}
 	}
-	i.heap[addr] = nil
-	i.free = append(i.free, addr)
 }
 
 func (i *Interpreter) finalize(addr int, v types.Value) {
