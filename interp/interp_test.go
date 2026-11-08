@@ -27,6 +27,9 @@ type trackedValue struct {
 	closed int
 }
 
+// panicCloser is a host value whose Close panics.
+type panicCloser struct{ trackedValue }
+
 type structGetHostFields struct {
 	Count  int32
 	hidden int32
@@ -1885,6 +1888,10 @@ func (upperCodec) Unmarshal(_ *interp.Interpreter, v types.Value, dst any) error
 func (v *trackedValue) Close() error {
 	v.closed++
 	return nil
+}
+
+func (*panicCloser) Close() error {
+	panic("close")
 }
 
 func (h *structGetHostFields) Bump(n int32) int32 {
@@ -8175,6 +8182,53 @@ func TestWithThreshold(t *testing.T) {
 		gotLen, gotCounts := heapOf(vm)
 		require.Equal(t, wantLen, gotLen)
 		require.Equal(t, wantCounts, gotCounts)
+	})
+
+	t.Run("returns the stock when a host value's Close panics in native code", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		record := node()
+		b := instr.NewBuilder()
+		loop, done, keep := b.Label(), b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2000).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1000).Emit(instr.I32_NE).BrIf(keep)
+		b.Emit(instr.REF_NULL).Emit(instr.GLOBAL_SET, 0)
+		b.Bind(keep)
+		b.Emit(instr.STRUCT_NEW_DEFAULT, 0).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.STRUCT_SET)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32(), record, record),
+			program.WithGlobals(types.TypeAny()), program.WithTypes(record))
+
+		// hold stores a value whose Close panics in global 0, which iteration
+		// 1000 releases.
+		hold := func(vm *interp.Interpreter) {
+			addr, err := vm.Alloc(&panicCloser{})
+			require.NoError(t, err)
+			require.NoError(t, vm.SetGlobal(0, types.BoxRef(addr)))
+		}
+
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer threaded.Close()
+		hold(threaded)
+		require.Error(t, threaded.Run(context.Background()))
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		warm(t, vm, profiler)
+		vm.Flush()
+		entered := nativeEntries(profiler)
+		hold(vm)
+		require.Error(t, vm.Run(context.Background()))
+		vm.Flush()
+		require.Greater(t, nativeEntries(profiler), entered)
+		require.Equal(t, liveOf(threaded), liveOf(vm))
 	})
 
 	t.Run("builds no batch for a native call that allocates once", func(t *testing.T) {

@@ -261,6 +261,11 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 		i.ctx = nil
 		i.done = nil
 		if i.jit != nil {
+			// A panic out of native code skips the return that releases
+			// the stock; dispatch recovered it, so release it here.
+			if i.jit.stock.dirty {
+				i.jit.stock.flush(i)
+			}
 			i.jit.quiesce()
 		}
 		return err
@@ -591,12 +596,6 @@ func (i *Interpreter) Flush() {
 
 // Reset restores the initial interpreter state.
 func (i *Interpreter) Reset() {
-	// A panic out of native code can skip the return that releases the
-	// stock: release it before its slots are cleared.
-	if i.jit != nil && i.jit.stock.dirty {
-		i.jit.stock.flush(i)
-	}
-
 	dynamic := len(i.heap) - i.base
 	keepStructs := i.structs.trim(dynamic)
 	keepArrays := i.arrays.trim(dynamic)
