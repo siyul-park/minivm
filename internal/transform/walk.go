@@ -313,6 +313,12 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 			return false
 		}
 		return w.emit(operation, len(record.Fields), []fact{{kind: types.KindRef, structType: record}})
+	case instr.STRUCT_NEW_DEFAULT:
+		record, ok := w.named(inst).(*types.StructType)
+		if !ok {
+			return false
+		}
+		return w.emit(operation, 0, []fact{{kind: types.KindRef, structType: record}})
 	case instr.ARRAY_NEW_DEFAULT:
 		if len(w.stack) == 0 {
 			return false

@@ -2760,14 +2760,10 @@ func TestWithHeapLimit(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		prog := links(t, 2000, -1, true)
 
-		// fits is the smallest limit threaded runs prog within.
-		fits := 1
-		for runProgramErr(t, prog, interp.WithThreshold(-1), interp.WithHeapLimit(fits)) != nil {
-			fits++
-		}
+		limit := fits(t, prog)
 
 		profiler := prof.New()
-		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHeapLimit(fits))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHeapLimit(limit))
 		defer vm.Close()
 		warm(t, vm, profiler)
 		vm.Flush()
@@ -2778,12 +2774,13 @@ func TestWithHeapLimit(t *testing.T) {
 		require.Equal(t, deopts, after)
 		vm.Reset()
 
-		short := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHeapLimit(fits-1))
+		shortProfiler := prof.New()
+		short := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(shortProfiler), interp.WithHeapLimit(limit-1))
 		defer short.Close()
-		warm(t, short, profiler)
+		warm(t, short, shortProfiler)
 		require.ErrorIs(t, short.Run(context.Background()), interp.ErrHeapExhausted)
 
-		threaded := interp.MustNew(prog, interp.WithThreshold(-1), interp.WithHeapLimit(fits-1))
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1), interp.WithHeapLimit(limit-1))
 		defer threaded.Close()
 		require.ErrorIs(t, threaded.Run(context.Background()), interp.ErrHeapExhausted)
 		require.Equal(t, liveOf(threaded), liveOf(short))
@@ -8243,22 +8240,10 @@ func TestWithThreshold(t *testing.T) {
 		prog := program.New(code, program.WithLocals(types.TypeI32(), record, record, types.TypeI32()),
 			program.WithTypes(record, second), program.WithConstants(g.MustBuild()))
 
-		// fits is the smallest limit threaded runs prog within.
-		fits := 1
-		for {
-			threaded, err := interp.New(prog, interp.WithThreshold(-1), interp.WithHeapLimit(fits))
-			if err == nil {
-				err = threaded.Run(context.Background())
-				threaded.Close()
-			}
-			if err == nil {
-				break
-			}
-			fits++
-		}
+		limit := fits(t, prog)
 
 		profiler := prof.New()
-		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHeapLimit(fits))
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHeapLimit(limit))
 		defer vm.Close()
 		warm(t, vm, profiler)
 

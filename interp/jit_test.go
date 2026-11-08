@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -123,6 +124,25 @@ func liveOf(vm *interp.Interpreter) int {
 		}
 	}
 	return live
+}
+
+// fits returns the smallest heap limit threaded code runs prog within. An
+// unlimited Run's HeapLen bounds it, and a larger limit never fails where a
+// smaller one passes, so it is searched by halves.
+func fits(t *testing.T, prog *program.Program) int {
+	t.Helper()
+	unlimited := interp.MustNew(prog, interp.WithThreshold(-1))
+	require.NoError(t, unlimited.Run(context.Background()))
+	bound := unlimited.HeapLen()
+	require.NoError(t, unlimited.Close())
+	return 1 + sort.Search(bound, func(k int) bool {
+		vm, err := interp.New(prog, interp.WithThreshold(-1), interp.WithHeapLimit(k+1))
+		if err != nil {
+			return false
+		}
+		defer vm.Close()
+		return vm.Run(context.Background()) == nil
+	})
 }
 
 // warm runs prog on vm until native code has run it, then resets vm.
