@@ -593,7 +593,7 @@ func (i *Interpreter) Flush() {
 func (i *Interpreter) Reset() {
 	// A panic out of native code can skip the return that releases the
 	// stock: release it before its slots are cleared.
-	if i.jit != nil {
+	if i.jit != nil && i.jit.stock.dirty {
 		i.jit.stock.flush(i)
 	}
 
