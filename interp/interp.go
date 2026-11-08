@@ -591,6 +591,11 @@ func (i *Interpreter) Flush() {
 
 // Reset restores the initial interpreter state.
 func (i *Interpreter) Reset() {
+	// A panic out of native code can skip the return that releases the
+	// stock: release it before its slots are cleared.
+	if i.jit != nil {
+		i.jit.stock.flush(i)
+	}
 
 	dynamic := len(i.heap) - i.base
 	keepStructs := i.structs.trim(dynamic)

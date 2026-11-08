@@ -180,7 +180,7 @@ A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every ad
 | take | `arm64.Machine` | `N == 0` takes the callout exit; else `N--` and the result is `Refs[N]`. Native code writes no Go pointer and no count: the stock's count becomes the result's. |
 | refill | `engine.callout` | After serving the op, `stock.refill` handles the miss. A type's first miss in an entry only arms it, so a call that allocates once builds nothing ahead. Each later miss builds 16 structs, then twice as many per refill up to 1024, and republishes the entry. A refill that exhausts the heap stops early without failing. |
 | exhaustion | `Interpreter.alloc` | At the heap limit, `stock.flush` returns every stocked ref and the allocation retries once; a second failure raises `ErrHeapExhausted` as in threaded code. |
-| flush | `engine.run`, `engine.enter` | Every return to the interpreter at depth 0, including deopt, throw, cancellation, and panic, runs `stock.flush` once, deferred; with nothing stocked it is one check. It releases every unused ref and disarms every type. |
+| flush | `engine.run`, `engine.enter`, `Reset` | Native code's return to the interpreter at depth 0, whether it returned, exited, or carries a fault to re-raise, runs `stock.flush` when a miss has armed or stocked a type: one field check otherwise, with no `defer`, which cost every entry. `Reset` flushes before it clears the heap, in case a panic skipped that return. It releases every unused ref and disarms every type. |
 
 A batch is stored so native code takes its lowest address first, so a single-type program leaves the heap threaded would. With several types, unused refs can sit below taken ones: their slots return to `free` and `HeapLen` can read higher than threaded code's.
 

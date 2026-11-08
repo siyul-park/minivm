@@ -360,9 +360,6 @@ func (e *engine) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	returns := len(fn.Typ.Returns)
 
 	e.load(i, bp, 0)
-	if e.depth == 0 {
-		defer e.stock.flush(i)
-	}
 	ctx := e.ctx
 	mark := ctx.Budget
 
@@ -390,11 +387,17 @@ func (e *engine) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 			func(exit jit.Exit) { i.fr.ip += advance; e.materialize(i, exit, start, addr, release) },
 			func() bool { return e.refute(addr, code.Tier) },
 		)
+		if e.depth == 0 && e.stock.dirty {
+			e.stock.flush(i)
+		}
 		if !ok {
 			return invalidate, fault
 		}
 	} else {
 		e.ledgers[addr].Spend(mark - ctx.Budget)
+		if e.depth == 0 && e.stock.dirty {
+			e.stock.flush(i)
+		}
 	}
 	for _, v := range owned {
 		i.releaseBox(v)
@@ -510,7 +513,12 @@ func (e *engine) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	if (s.entry && len(s.headers) == 0 && cancelled(i)) || len(i.fr.upvals) < len(s.fn.Captures) || e.depth >= uint64(len(e.ctx.Records)) {
 		return false
 	}
-	e.cadence(i, s)
+	if s.onCadence() {
+		e.drain(i)
+		if e.depth == 0 {
+			e.quiesce()
+		}
+	}
 	c := s.code
 	if c.Invalidated() {
 		if c = e.cache.CodeAt(s.address, s.ip); c == nil {
@@ -521,9 +529,6 @@ func (e *engine) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	}
 
 	e.load(i, i.fr.bp, 1)
-	if e.depth == 0 {
-		defer e.stock.flush(i)
-	}
 	ctx := e.ctx
 	ctx.Upvals = base(i.fr.upvals)
 	mark := ctx.Budget
@@ -549,6 +554,9 @@ func (e *engine) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 	} else {
 		s.ledger.Spend(mark - ctx.Budget)
 	}
+	if e.depth == 0 && e.stock.dirty {
+		e.stock.flush(i)
+	}
 	if ok {
 		e.finish(i, s, c)
 	}
@@ -572,18 +580,6 @@ func (e *engine) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 		panic(fault)
 	}
 	return true
-}
-
-// cadence publishes finished compiles at s's cadence, and at depth 0 marks a
-// quiescent point.
-func (e *engine) cadence(i *Interpreter, s *site) {
-	if !s.onCadence() {
-		return
-	}
-	e.drain(i)
-	if e.depth == 0 {
-		e.quiesce()
-	}
 }
 
 // materialize materializes every native activation of the current run, from
