@@ -112,10 +112,11 @@ func (c *tcache) fill(i *Interpreter, t, length int) {
 	}
 	size := c.batch[t]
 	c.batch[t] = min(2*size, maxBatch)
-	// A fill must not collect: it builds no more than the heap holds before
-	// the collection threaded code would run at this live count.
+	// A fill must not collect: it builds at most half of what the heap holds
+	// before the collection threaded code would run at this live count, and
+	// leaves the rest to the program's own allocations.
 	if i.target > 0 {
-		size = min(size, i.target-(len(i.heap)-len(i.free)))
+		size = min(size, (i.target-(len(i.heap)-len(i.free)))/2)
 	}
 	if size <= 0 {
 		return

@@ -8206,7 +8206,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, want, got)
 		require.Greater(t, nativeEntries(profiler), entered)
-		require.Less(t, after-before, float64(16))
+		require.Less(t, after-before, float64(n)/32) // almost every allocation stays native
 		gotLen, gotCounts := heapOf(vm)
 		require.Equal(t, wantLen, gotLen)
 		require.Equal(t, wantCounts, gotCounts)
@@ -8391,7 +8391,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, want, got)
 		require.Greater(t, nativeEntries(profiler), entered)
-		require.Less(t, after-before, float64(16))
+		require.Less(t, after-before, float64(n)/32) // almost every allocation stays native
 		gotLen, gotCounts := heapOf(vm)
 		require.Equal(t, wantLen, gotLen)
 		require.Equal(t, wantCounts, gotCounts)
