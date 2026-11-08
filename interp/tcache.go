@@ -48,6 +48,8 @@ const (
 	// wide is the longest array a bin holds, so that a fill of long
 	// arrays cannot outgrow the memory the heap limit counts in slots.
 	wide = 1 << 12
+	// covered is the batch of a type whose last entry needed no fill.
+	covered = -1
 	// unset is the Len of a bin with no length yet. Native code
 	// compares a requested length with it, and no length is negative.
 	unset = -1
@@ -77,8 +79,21 @@ func (c *tcache) fill(i *Interpreter, t, length int) {
 	c.missed[t]++
 	if c.batch[t] == 0 {
 		// Two misses are served before the first fill, the arming one and
-		// the one that fills.
-		c.batch[t] = min(max(c.learned[t]-2, minBatch), maxBatch)
+		// the one that fills. An entry that learned it needs no more than
+		// those two builds nothing.
+		switch want := c.learned[t] - 2; {
+		case c.learned[t] == 0:
+			c.batch[t] = minBatch
+		case want <= 0:
+			c.batch[t] = covered
+		default:
+			c.batch[t] = min(want, maxBatch)
+		}
+		return
+	}
+	if c.batch[t] == covered {
+		// The entry needs more than it learned: fall back to doubling.
+		c.batch[t] = minBatch
 		return
 	}
 	if length > wide || c.changes[t] > 1 {
@@ -97,6 +112,14 @@ func (c *tcache) fill(i *Interpreter, t, length int) {
 	}
 	size := c.batch[t]
 	c.batch[t] = min(2*size, maxBatch)
+	// A fill must not collect: it builds no more than the heap holds before
+	// the collection threaded code would run at this live count.
+	if i.target > 0 {
+		size = min(size, i.target-(len(i.heap)-len(i.free)))
+	}
+	if size <= 0 {
+		return
+	}
 
 	n := int(c.table[t].N)
 	refs := c.refs[t][:n]

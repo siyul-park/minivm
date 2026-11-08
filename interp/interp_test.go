@@ -8535,6 +8535,95 @@ func TestWithThreshold(t *testing.T) {
 		require.LessOrEqual(t, got, want+96)
 	})
 
+	t.Run("builds nothing ahead for a typed array the entry allocates twice", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		b := instr.NewBuilder()
+		loop, done, skip := b.Label(), b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 4000).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.I32_GE_S).BrIf(skip)
+		b.Emit(instr.I32_CONST, 128).Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.DROP)
+		b.Bind(skip).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithTypes(types.NewArrayType(types.TypeI32())))
+		run := func(vm *interp.Interpreter) float64 {
+			return testing.AllocsPerRun(20, func() {
+				require.NoError(t, vm.Run(context.Background()))
+				vm.Reset()
+			})
+		}
+
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer threaded.Close()
+		run(threaded)
+		want := run(threaded)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		warm(t, vm, profiler)
+		for range 4 {
+			run(vm)
+		}
+
+		vm.Flush()
+		entered := nativeEntries(profiler)
+		got := run(vm)
+		vm.Flush()
+		require.Greater(t, nativeEntries(profiler), entered)
+		// A typed array is never reused, so a batch built ahead and returned
+		// unused costs a Go allocation each; the entry learned it needs only the
+		// two it served.
+		require.LessOrEqual(t, got, want+8)
+	})
+
+	t.Run("fills no more than the heap holds before a collection", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 500).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithTypes(types.NewArrayType(types.TypeAny())))
+
+		threadedProfiler := prof.New()
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1), interp.WithProfiler(threadedProfiler))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		threaded.Flush()
+		want, _ := threadedProfiler.Metric("vm_gc_cycles_total")
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		warm(t, vm, profiler)
+		for range 4 {
+			require.NoError(t, vm.Run(context.Background()))
+			vm.Reset()
+		}
+
+		vm.Flush()
+		entered := nativeEntries(profiler)
+		before, _ := profiler.Metric("vm_gc_cycles_total")
+		const runs = 4
+		for range runs {
+			require.NoError(t, vm.Run(context.Background()))
+			vm.Reset()
+		}
+		vm.Flush()
+		after, _ := profiler.Metric("vm_gc_cycles_total")
+		require.Greater(t, nativeEntries(profiler), entered)
+		require.LessOrEqual(t, after-before, runs*want)
+	})
+
 	t.Run("fills a bin with as many arrays as the last entry used", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		prog := chains(t, 128, 0, 1, 1)
