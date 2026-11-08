@@ -2185,6 +2185,22 @@ func (i *Interpreter) reclaim(addr int, v types.Value) {
 	i.free = append(i.free, addr)
 }
 
+// undo returns the allocation at addr that no one ever published: a value
+// alloc made and nothing yet took. It owns the only reference, so the slot is
+// freed without finalize or a walk of its refs, and recycle keeps the value
+// whole, an array included, for the next allocation. A generic array holds only
+// the nulls newArrayDefault gave it, whose references go with it.
+func (i *Interpreter) undo(addr int) {
+	v := i.heap[addr]
+	if array, ok := v.(*types.Array); ok {
+		i.rc[0] -= len(array.Elems)
+	}
+	i.recycle(v, false)
+	i.heap[addr] = nil
+	i.rc[addr] = 0
+	i.free = append(i.free, addr)
+}
+
 // recycle keeps a freed value for reuse. A struct of up to four fields is
 // kept whenever it is freed; an array only once no one can hold it, because a
 // host may hold an *Array it loaded. escaped reports that someone may still

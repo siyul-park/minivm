@@ -137,6 +137,6 @@ func (s *stock) flush(i *Interpreter) bool {
 func (s *stock) drop(i *Interpreter, t int) {
 	for e := &s.table[t]; e.N > 0; {
 		e.N--
-		i.release(s.refs[t][e.N].Ref())
+		i.undo(s.refs[t][e.N].Ref())
 	}
 }

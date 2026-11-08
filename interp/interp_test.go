@@ -8501,6 +8501,33 @@ func TestWithThreshold(t *testing.T) {
 		}
 	})
 
+	t.Run("reuses the arrays a native entry stocked and did not take", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		prog := chains(t, 2000, 0, 1, 1)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		warm(t, vm, profiler)
+		for range 8 {
+			require.NoError(t, vm.Run(context.Background()))
+			vm.Reset()
+		}
+
+		vm.Flush()
+		entered := nativeEntries(profiler)
+		allocs := testing.AllocsPerRun(20, func() {
+			require.NoError(t, vm.Run(context.Background()))
+			vm.Reset()
+		})
+		vm.Flush()
+		require.Greater(t, nativeEntries(profiler), entered)
+		// What remains is the collector's closure and the free list regrowing
+		// after Reset; a stocked array rebuilt in Go on every entry costs a
+		// hundred more.
+		require.Less(t, allocs, float64(64))
+	})
+
 }
 
 func TestMustNew(t *testing.T) {
