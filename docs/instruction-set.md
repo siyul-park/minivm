@@ -264,7 +264,7 @@ One opcode per row, in opcode-value order.
 | Strings | `STRING_GE` | `string.ge` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Strings | `STRING_ENCODE_UTF32` | `string.encode_utf32` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Arrays | `ARRAY_NEW` | `array.new` | ⬜ | 🔲 | deoptimizes on ARM64: its declared two-operand arity does not cover the `1+count` it pops |
-| Arrays | `ARRAY_NEW_DEFAULT` | `array.new_default` | ⬜ | 🔲 | takes a prebuilt default array of the requested length from the type's stock on ARM64, else bridges and resumes native code (`jit-internals.md`, Reserve) |
+| Arrays | `ARRAY_NEW_DEFAULT` | `array.new_default` | ⬜ | 🔲 | takes a prebuilt default array of the requested length from the type's tcache on ARM64 (fast path), else takes the slow path and resumes native code and resumes native code (`jit-internals.md`, Reserve) |
 | Arrays | `ARRAY_LEN` | `array.len` | ✅ | 🔲 | guarded, else bridges and resumes native code |
 | Arrays | `ARRAY_GET` | `array.get` | ✅ | 🔲 | guarded, else bridges and resumes native code |
 | Arrays | `ARRAY_SET` | `array.set` | ✅ | 🔲 | guarded, else bridges and resumes native code |
@@ -274,7 +274,7 @@ One opcode per row, in opcode-value order.
 | Arrays | `ARRAY_DELETE` | `array.delete` | ⬜ | 🔲 | bridges and resumes native code on ARM64; an array of unknown element type makes the translator decline the whole unit |
 | Arrays | `ARRAY_SLICE` | `array.slice` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Structs | `STRUCT_NEW` | `struct.new` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
-| Structs | `STRUCT_NEW_DEFAULT` | `struct.new_default` | ⬜ | 🔲 | takes a prebuilt default struct from the type's stock on ARM64, else bridges and resumes native code (`jit-internals.md`, Reserve) |
+| Structs | `STRUCT_NEW_DEFAULT` | `struct.new_default` | ⬜ | 🔲 | takes a prebuilt default struct from the type's tcache on ARM64 (fast path), else takes the slow path and resumes native code and resumes native code (`jit-internals.md`, Reserve) |
 | Structs | `STRUCT_GET` | `struct.get` | ✅ | 🔲 | guarded, else bridges and resumes native code |
 | Structs | `STRUCT_SET` | `struct.set` | ✅ | 🔲 | guarded, else bridges and resumes native code |
 | Maps | `MAP_NEW` | `map.new` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |

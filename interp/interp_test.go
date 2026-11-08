@@ -8178,7 +8178,7 @@ func TestWithThreshold(t *testing.T) {
 		}
 	})
 
-	t.Run("serves STRUCT_NEW_DEFAULT from a stock and leaves threaded's heap", func(t *testing.T) {
+	t.Run("serves STRUCT_NEW_DEFAULT from the tcache and leaves threaded's heap", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		const n = 2000
 		prog := links(t, n, -1, false)
@@ -8212,7 +8212,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, wantCounts, gotCounts)
 	})
 
-	t.Run("returns the stock when a host value's Close panics in native code", func(t *testing.T) {
+	t.Run("returns the tcache when a host value's Close panics in native code", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		record := node()
 		b := instr.NewBuilder()
@@ -8293,7 +8293,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Zero(t, cycles)
 	})
 
-	t.Run("returns the stock to a callee that allocates at the heap limit", func(t *testing.T) {
+	t.Run("returns the tcache to a callee that allocates at the heap limit", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		record := node()
 		second := types.NewStructType(types.NewStructField(types.TypeI32()))
@@ -8303,7 +8303,7 @@ func TestWithThreshold(t *testing.T) {
 
 		// Each pass keeps a node, counts to 64 so its work pays for the call,
 		// and calls g, which never compiles: native code reaches it through
-		// ExitCall while its stock holds the nodes it built ahead.
+		// ExitCall while its tcache holds the nodes it built ahead.
 		b := instr.NewBuilder()
 		loop, done, count, counted := b.Label(), b.Label(), b.Label(), b.Label()
 		b.Bind(loop)
@@ -8339,7 +8339,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, types.I32(2000), got)
 	})
 
-	t.Run("returns the stock when a trap leaves native code mid-loop", func(t *testing.T) {
+	t.Run("returns the tcache when a trap leaves native code mid-loop", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		prog := links(t, 2000, 1500, false)
 
@@ -8363,7 +8363,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, wantLen, gotLen)
 		require.Equal(t, wantCounts, gotCounts)
 	})
-	t.Run("serves ARRAY_NEW_DEFAULT from a stock and leaves threaded's heap", func(t *testing.T) {
+	t.Run("serves ARRAY_NEW_DEFAULT from the tcache and leaves threaded's heap", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		const n = 2000
 		prog := chains(t, n, 0, 1, 1)
@@ -8397,7 +8397,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, wantCounts, gotCounts)
 	})
 
-	t.Run("restocks ARRAY_NEW_DEFAULT when the requested length changes mid-loop", func(t *testing.T) {
+	t.Run("refills ARRAY_NEW_DEFAULT when the requested length changes mid-loop", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		prog := chains(t, 2000, 1000, 1, 3)
 
@@ -8456,9 +8456,9 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, wantCounts, gotCounts)
 	})
 
-	t.Run("stops stocking ARRAY_NEW_DEFAULT of a type whose length alternates", func(t *testing.T) {
+	t.Run("stops caching ARRAY_NEW_DEFAULT of a type whose length alternates", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
-		// Lengths alternate between low and low+1; a low of 0 is a stocked length
+		// Lengths alternate between low and low+1; a low of 0 is a cached length
 		// like any other.
 		for _, low := range []uint64{1, 0} {
 			array := types.NewArrayType(types.TypeAny())
@@ -8501,7 +8501,7 @@ func TestWithThreshold(t *testing.T) {
 		}
 	})
 
-	t.Run("reuses the arrays a native entry stocked and did not take", func(t *testing.T) {
+	t.Run("reuses the arrays a native entry cached and did not take", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		prog := chains(t, 2000, 0, 1, 1)
 		run := func(vm *interp.Interpreter) float64 {
@@ -8531,11 +8531,11 @@ func TestWithThreshold(t *testing.T) {
 		vm.Flush()
 		require.Greater(t, nativeEntries(profiler), entered)
 		// Native code and its profiler allocate about 35 more than threaded code
-		// does; a stocked array rebuilt in Go on every entry adds over 140.
+		// does; a cached array rebuilt in Go on every entry adds over 140.
 		require.LessOrEqual(t, got, want+96)
 	})
 
-	t.Run("fills a stock with as many arrays as the last entry used", func(t *testing.T) {
+	t.Run("fills a bin with as many arrays as the last entry used", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		prog := chains(t, 128, 0, 1, 1)
 		limit := fits(t, prog)

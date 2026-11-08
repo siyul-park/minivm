@@ -74,7 +74,7 @@ func node() *types.StructType {
 // links builds a chain of n default nodes, each holding the one before and its
 // index, and leaves the last node's stamp on the stack. A nonnegative trap
 // divides by zero in that iteration; spare also keeps one default struct of a
-// second type, whose stock the loop never takes. Every node stays live to the
+// second type, whose bin the loop never takes. Every node stays live to the
 // end, so the heap a run leaves is a function of n alone.
 func links(t *testing.T, n, trap int, spare bool) *program.Program {
 	t.Helper()

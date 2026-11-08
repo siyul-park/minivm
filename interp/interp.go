@@ -262,9 +262,9 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 		i.done = nil
 		if i.jit != nil {
 			// A panic out of native code skips the return that releases
-			// the stock; dispatch recovered it, so release it here.
-			if i.jit.stock.dirty {
-				i.jit.stock.flush(i)
+			// the tcache; dispatch recovered it, so return it here.
+			if i.jit.tcache.dirty {
+				i.jit.tcache.flush(i)
 			}
 			i.jit.quiesce()
 		}
@@ -1869,7 +1869,7 @@ func (i *Interpreter) alloc(val types.Value) int {
 		}
 	}
 	if limited {
-		if i.jit != nil && i.jit.stock.flush(i) {
+		if i.jit != nil && i.jit.tcache.flush(i) {
 			return i.alloc(val)
 		}
 		panic(ErrHeapExhausted)

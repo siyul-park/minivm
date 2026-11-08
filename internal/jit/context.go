@@ -30,9 +30,9 @@ type Context struct {
 	Entries uintptr
 	Top     uintptr
 	FB      uintptr
-	// Stocks is the base of the Stock table, one entry per type index: the
+	// Bins is the base of the Bin table, one entry per type index: the
 	// default objects Go built ahead for native code to take.
-	Stocks uintptr
+	Bins uintptr
 	// Upvals is the upvals base of the activation being entered, 0 for none:
 	// the interpreter writes it before an OSR Enter and a native closure call
 	// before its branch; only a prologue reads it.
@@ -55,13 +55,13 @@ type Record struct {
 	Exit uint64
 }
 
-// Stock is one type's default objects built ahead of native code: Refs is
+// Bin is one type's default objects built ahead of native code: Refs is
 // the base of N boxed refs, each an object of count 1 that only native code
 // may take, last first. Native code lowers N and takes Refs[N]; Go alone
 // writes Refs and raises N, so native code never writes a Go pointer or a
-// count. Len is the length of every array a stock of an array type holds,
+// count. Len is the length of every array a bin of an array type holds,
 // which native code compares with the length it is asked for.
-type Stock struct {
+type Bin struct {
 	Refs uintptr
 	N    int64
 	Len  int64
@@ -99,7 +99,7 @@ const (
 	OffsetEntries = unsafe.Offsetof(Context{}.Entries)
 	OffsetTop     = unsafe.Offsetof(Context{}.Top)
 	OffsetFB      = unsafe.Offsetof(Context{}.FB)
-	OffsetStocks  = unsafe.Offsetof(Context{}.Stocks)
+	OffsetBins    = unsafe.Offsetof(Context{}.Bins)
 	OffsetUpvals  = unsafe.Offsetof(Context{}.Upvals)
 	OffsetDepth   = unsafe.Offsetof(Context{}.Depth)
 	OffsetLimit   = unsafe.Offsetof(Context{}.Limit)
@@ -107,9 +107,9 @@ const (
 	OffsetResults = unsafe.Offsetof(Context{}.Results)
 	OffsetRecords = unsafe.Offsetof(Context{}.Records)
 
-	SizeofStock    = unsafe.Sizeof(Stock{})
-	OffsetStockN   = unsafe.Offsetof(Stock{}.N)
-	OffsetStockLen = unsafe.Offsetof(Stock{}.Len)
+	SizeofBin    = unsafe.Sizeof(Bin{})
+	OffsetBinN   = unsafe.Offsetof(Bin{}.N)
+	OffsetBinLen = unsafe.Offsetof(Bin{}.Len)
 
 	RecordFB   = unsafe.Offsetof(Record{}.FB)
 	RecordSP   = unsafe.Offsetof(Record{}.SP)

@@ -1124,12 +1124,12 @@ func (m *Machine) arraySet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 	return true
 }
 
-// reserve takes the default object of a type from the type's stock, the last
+// reserve takes the default object of a type from the type's bin, the last
 // of its N boxed refs, and lowers N: a ref native code takes is its alone, with
-// count 1, so neither a count nor a Go pointer is written. An empty stock has
-// the interpreter build the object, which restocks it. An array type's stock
-// holds arrays of one length, so a length operand (args is 1) that is not
-// that length, a negative one included, bridges too. The type index is the
+// count 1, so neither a count nor a Go pointer is written. An empty bin takes
+// the slow path: the interpreter builds the object and fills the bin. An array
+// type's bin holds arrays of one length, so a length operand (args is 1) that
+// is not that length, a negative one included, bridges too. The type index is the
 // bytecode operand, and the interpreter sizes the table to the program's
 // types, which verification bounds it by.
 func (m *Machine) reserve(a *asm.Assembler, op ssa.Operation, s compile.Site, args int) bool {
@@ -1140,29 +1140,29 @@ func (m *Machine) reserve(a *asm.Assembler, op ssa.Operation, s compile.Site, ar
 	empty, resume := s.Bridge()
 
 	entry, n, refs := m.vreg(), m.vreg(), m.vreg()
-	a.Emit(target.LDR(entry, target.Ctx, int16(jit.OffsetStocks)))
-	at := index * int(jit.SizeofStock)
-	if at+int(jit.OffsetStockLen) > 8*imm12 {
+	a.Emit(target.LDR(entry, target.Ctx, int16(jit.OffsetBins)))
+	at := index * int(jit.SizeofBin)
+	if at+int(jit.OffsetBinLen) > 8*imm12 {
 		a.Emit(target.LDI(target.X16, uint64(at))...)
 		a.Emit(target.ADD(entry, entry, target.X16))
 		at = 0
 	}
 	a.Emit(
-		target.LDR(n, entry, int16(at+int(jit.OffsetStockN))),
+		target.LDR(n, entry, int16(at+int(jit.OffsetBinN))),
 		target.CBZLabel(n, empty),
 	)
 	if args == 1 {
 		length, held := m.vreg(), m.vreg()
 		a.Emit(
 			target.SXTW(length, s.Reg(op.Args[0])),
-			target.LDR(held, entry, int16(at+int(jit.OffsetStockLen))),
+			target.LDR(held, entry, int16(at+int(jit.OffsetBinLen))),
 			target.CMP(length, held),
 			target.BCondLabel(target.OpBNE, empty),
 		)
 	}
 	a.Emit(
 		target.SUBI(n, n, 1),
-		target.STR(n, entry, int16(at+int(jit.OffsetStockN))),
+		target.STR(n, entry, int16(at+int(jit.OffsetBinN))),
 		target.LDR(refs, entry, int16(at)),
 	)
 	taken := m.offset(a, refs, n, 3)
