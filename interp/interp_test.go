@@ -4530,7 +4530,7 @@ func TestWithThreshold(t *testing.T) {
 		b.Emit(instr.CONST_GET, 1).Emit(instr.LOCAL_SET, 2)
 		b.Bind(same)
 
-		b.Emit(instr.LOCAL_GET, 2).Emit(instr.CONST_GET, 0).Emit(instr.STRING_EQ).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.CONST_GET, 0).Emit(instr.STRING_LT).Emit(instr.DROP)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
 		b.Bind(done).Emit(instr.LOCAL_GET, 0)
 		code, err := b.Assemble()
@@ -4653,6 +4653,163 @@ func TestWithThreshold(t *testing.T) {
 		require.GreaterOrEqual(t, round, runs)
 
 		require.Less(t, entries, float64(n/2))
+	})
+
+	t.Run("compares strings and refs natively as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		const n = 1000
+		// fresh builds a string from constant c through string.new_utf32, so two
+		// builds of equal content are different refs.
+		fresh := func(b *instr.Builder, c, local int) {
+			b.Emit(instr.CONST_GET, uint64(c)).Emit(instr.STRING_ENCODE_UTF32).Emit(instr.STRING_NEW_UTF32).Emit(instr.LOCAL_SET, uint64(local))
+		}
+		long := func(tail string) string { return "0123456789abcdefghij" + tail }
+		type tc struct {
+			name string
+			op   instr.Opcode
+			x, y string
+		}
+		var cases []tc
+		for _, op := range []instr.Opcode{instr.STRING_EQ, instr.STRING_NE} {
+			for _, c := range [][3]string{
+				{"empty and empty", "", ""},
+				{"empty and non-empty", "", "a"},
+				{"equal contents behind different refs", "hello", "hello"},
+				{"different lengths", "hello", "hell"},
+				{"first byte differs", "xello", "hello"},
+				{"middle byte differs", "hexlo", "hello"},
+				{"last byte differs", "hellx", "hello"},
+				{"one word exactly", "abcdefgh", "abcdefgh"},
+				{"one word differing at the end", "abcdefgh", "abcdefgx"},
+				{"two words and a tail equal", long("kl"), long("kl")},
+				{"second word differs", long("kl")[:8] + "X" + long("kl")[9:], long("kl")},
+				{"tail differs after equal words", long("kl"), long("kX")},
+				{"non-ascii contents", "héllo wörld, ünïcode", "héllo wörld, ünïcode"},
+			} {
+				name := "string.eq"
+				if op == instr.STRING_NE {
+					name = "string.ne"
+				}
+				cases = append(cases, tc{name + " " + c[0], op, c[1], c[2]})
+			}
+		}
+		for _, c := range cases {
+			t.Run(c.name, func(t *testing.T) {
+				b := instr.NewBuilder()
+				loop, done, hit, skip := b.Label(), b.Label(), b.Label(), b.Label()
+				fresh(b, 0, 0)
+				fresh(b, 1, 1)
+				b.Bind(loop)
+				b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, n).Emit(instr.I32_GE_S).BrIf(done)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(c.op).BrIf(hit).Br(skip)
+				b.Bind(hit)
+				b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+				b.Bind(skip)
+				b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).Br(loop)
+				b.Bind(done).Emit(instr.LOCAL_GET, 3)
+				code, err := b.Assemble()
+				require.NoError(t, err)
+				prog := program.New(code,
+					program.WithLocals(types.TypeString(), types.TypeString(), types.TypeI32(), types.TypeI32()),
+					program.WithConstants(types.String(c.x), types.String(c.y)))
+				requireNative(t, prog)
+			})
+		}
+
+		{
+			refOps := map[instr.Opcode]string{instr.REF_EQ: "ref.eq", instr.REF_NE: "ref.ne"}
+			for _, op := range []instr.Opcode{instr.REF_EQ, instr.REF_NE} {
+				for _, c := range []struct {
+					name string
+					x, y func(b *instr.Builder)
+				}{
+					{"same ref", func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0) }, func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0) }},
+					{"different refs of equal contents", func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0) }, func(b *instr.Builder) { b.Emit(instr.CONST_GET, 1) }},
+					{"null and null", func(b *instr.Builder) { b.Emit(instr.REF_NULL) }, func(b *instr.Builder) { b.Emit(instr.REF_NULL) }},
+					{"null and non-null", func(b *instr.Builder) { b.Emit(instr.REF_NULL) }, func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0) }},
+					{"non-null and null", func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0) }, func(b *instr.Builder) { b.Emit(instr.REF_NULL) }},
+				} {
+					t.Run(refOps[op]+" "+c.name, func(t *testing.T) {
+						b := instr.NewBuilder()
+						loop, done, hit, skip := b.Label(), b.Label(), b.Label(), b.Label()
+						c.x(b)
+						b.Emit(instr.LOCAL_SET, 0)
+						c.y(b)
+						b.Emit(instr.LOCAL_SET, 1)
+						b.Bind(loop)
+						b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, n).Emit(instr.I32_GE_S).BrIf(done)
+						b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(op).BrIf(hit).Br(skip)
+						b.Bind(hit)
+						b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+						b.Bind(skip)
+						b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).Br(loop)
+						b.Bind(done).Emit(instr.LOCAL_GET, 3)
+						code, err := b.Assemble()
+						require.NoError(t, err)
+						prog := program.New(code,
+							program.WithLocals(types.TypeAny(), types.TypeAny(), types.TypeI32(), types.TypeI32()),
+							program.WithConstants(types.String("same"), types.String("same")))
+						requireNative(t, prog)
+					})
+				}
+			}
+		}
+
+		{
+			for _, c := range []struct {
+				name string
+				bad  func(vm *interp.Interpreter) types.Boxed
+			}{
+				{"array", func(vm *interp.Interpreter) types.Boxed {
+					addr, err := vm.Alloc(types.TypedArray[int32]{1})
+					require.NoError(t, err)
+					return types.BoxRef(addr)
+				}},
+				{"null", func(*interp.Interpreter) types.Boxed { return types.BoxedNull }},
+			} {
+				t.Run("string.eq traps a "+c.name+" operand as threaded does", func(t *testing.T) {
+					b := instr.NewBuilder()
+					loop, done := b.Label(), b.Label()
+					b.Bind(loop)
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, n).Emit(instr.I32_GE_S).BrIf(done)
+					b.Emit(instr.GLOBAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.STRING_EQ).Emit(instr.DROP)
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+					b.Bind(done)
+					code, err := b.Assemble()
+					require.NoError(t, err)
+					prog := program.New(code,
+						program.WithGlobals(types.TypeAny()),
+						program.WithLocals(types.TypeI32()),
+						program.WithConstants(types.String("abc")))
+
+					run := func(vm *interp.Interpreter, global func(*interp.Interpreter) types.Boxed) error {
+						vm.Reset()
+						require.NoError(t, vm.SetGlobal(0, global(vm)))
+						return vm.Run(context.Background())
+					}
+					threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+					defer threaded.Close()
+					wantErr := run(threaded, c.bad)
+					require.ErrorIs(t, wantErr, interp.ErrTypeMismatch)
+
+					profiler := prof.New()
+					vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+					defer vm.Close()
+					poll(t, func() bool {
+						require.NoError(t, run(vm, func(vm *interp.Interpreter) types.Boxed {
+							addr, err := vm.Alloc(types.String("abc"))
+							require.NoError(t, err)
+							return types.BoxRef(addr)
+						}))
+						vm.Flush()
+						return nativeEntries(profiler) > 0
+					})
+					gotErr := run(vm, c.bad)
+					require.True(t, errorsEqual(gotErr, wantErr), "got %v, want %v", gotErr, wantErr)
+				})
+			}
+		}
 	})
 
 	t.Run("releases a ref slot's old value on store", func(t *testing.T) {

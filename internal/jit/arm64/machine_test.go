@@ -1425,6 +1425,44 @@ func TestMachine_Lower(t *testing.T) {
 		target.LDR(target.X17, target.X16, 0),
 	}
 
+	// stringEq is the rows string.eq and string.ne lower to; equal is the
+	// result for equal strings.
+	stringEq := func(equal uint64) []asm.Instruction {
+		const yes, no, done, words, bytes = 2, 3, 4, 5, 6
+		var rows []asm.Instruction
+		for i, addr := range []int{1, 5} {
+			rows = append(rows,
+				target.SBFX(vr(addr), reg(ssa.TypeRef, ssa.Value(i+1)), 0, 32), target.LSLI(vr(addr), vr(addr), 4),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.ADD(vr(addr), target.X16, vr(addr)),
+				target.LDR(target.X16, vr(addr), 0),
+			)
+			rows = append(rows, target.LDI(target.X17, uint64(jit.Itab(types.String(""))))...)
+			rows = append(rows,
+				target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, exit),
+				target.LDR(vr(addr+1), vr(addr), int16(jit.OffsetData)),
+				target.LDR(vr(addr+2), vr(addr+1), int16(jit.OffsetStringLen)),
+				target.LDR(vr(addr+3), vr(addr+1), 0),
+			)
+		}
+		rows = append(rows,
+			target.CMP(vr(3), vr(7)), target.BCondLabel(target.OpBNE, no),
+			target.CMP(vr(4), vr(8)), target.BCondLabel(target.OpBEQ, yes),
+			target.CMPI(vr(3), 8), target.BCondLabel(target.OpBCC, bytes),
+			target.LDR(target.X16, vr(4), 0), target.LDR(target.X17, vr(8), 0),
+			target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, no),
+			target.ADDI(vr(4), vr(4), 8), target.ADDI(vr(8), vr(8), 8),
+			target.SUBI(vr(3), vr(3), 8), target.BLabel(words),
+			target.CBZLabel(vr(3), yes),
+			target.LDRB(target.X16, vr(4), 0), target.LDRB(target.X17, vr(8), 0),
+			target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, no),
+			target.ADDI(vr(4), vr(4), 1), target.ADDI(vr(8), vr(8), 1),
+			target.SUBI(vr(3), vr(3), 1), target.BLabel(bytes),
+		)
+		rows = append(rows, target.LDI(reg(ssa.TypeI1, 3), equal)...)
+		rows = append(rows, target.BLabel(done))
+		return append(rows, target.LDI(reg(ssa.TypeI1, 3), 1-equal)...)
+	}
 	binIndex, farIndex := 3, 5000
 	var tests []test
 	for _, c := range []struct {
@@ -1457,6 +1495,7 @@ func TestMachine_Lower(t *testing.T) {
 		typ  ssa.Type
 		cond uint8
 	}{
+		{instr.REF_EQ, ssa.TypeRef, target.CondEQ}, {instr.REF_NE, ssa.TypeRef, target.CondNE},
 		{instr.I32_EQ, i32, target.CondEQ}, {instr.I32_NE, i32, target.CondNE},
 		{instr.I32_LT_S, i32, target.CondLT}, {instr.I32_LT_U, i32, target.CondCC},
 		{instr.I32_GT_S, i32, target.CondGT}, {instr.I32_GT_U, i32, target.CondHI},
@@ -2264,6 +2303,20 @@ func TestMachine_Lower(t *testing.T) {
 					target.LDR(reg(i32, 2), vr(2), int16(jit.OffsetStringLen)),
 				)
 			}(),
+			lower: true,
+		},
+		{
+			name:  "string.eq compares lengths, then data pointers, then eight bytes at a time and the tail byte by byte",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: ssa.TypeI1},
+			op:    exec(instr.STRING_EQ, 1, 2),
+			rows:  stringEq(1),
+			lower: true,
+		},
+		{
+			name:  "string.ne is string.eq with the result swapped",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: ssa.TypeI1},
+			op:    exec(instr.STRING_NE, 1, 2),
+			rows:  stringEq(0),
 			lower: true,
 		},
 		{

@@ -928,7 +928,7 @@ func deopt(t *testing.T, n, k int) *program.Program {
 	slow := fb.Label()
 	fb.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(k)).Emit(instr.I32_EQ).BrIf(slow)
 	fb.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
-	fb.Bind(slow).Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 1).Emit(instr.CONST_GET, 1).Emit(instr.STRING_EQ).Emit(instr.I32_ADD).Emit(instr.RETURN)
+	fb.Bind(slow).Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 1).Emit(instr.CONST_GET, 1).Emit(instr.STRING_LT).Emit(instr.I32_ADD).Emit(instr.RETURN)
 	fcode, err := fb.Assemble()
 	require.NoError(t, err)
 	f := &types.Function{
@@ -996,6 +996,48 @@ func fib(t *testing.T, n int) *program.Program {
 	code, err := b.Assemble()
 	require.NoError(t, err)
 	return program.New(code, program.WithLocals(types.TypeI32()), program.WithConstants(fib))
+}
+
+// requireNative runs prog threaded for the want result, then under the
+// optimizing tier until a Run enters native code and never bridges. It requires
+// the native result and the heap's ref counts to equal threaded's.
+func requireNative(t *testing.T, prog *program.Program) {
+	t.Helper()
+
+	threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+	defer threaded.Close()
+	require.NoError(t, threaded.Run(context.Background()))
+	want, err := threaded.Pop()
+	require.NoError(t, err)
+	wantCounts := make([]int, threaded.HeapLen()-1)
+	for i := range wantCounts {
+		wantCounts[i], _ = threaded.RefCount(i + 1)
+	}
+
+	profiler := prof.New()
+	vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+	defer vm.Close()
+	var got types.Value
+	var counts []int
+	var priorBridges, priorEntries, bridges, entries float64
+	poll(t, func() bool {
+		require.NoError(t, vm.Run(context.Background()))
+		got, err = vm.Pop()
+		require.NoError(t, err)
+		counts = make([]int, vm.HeapLen()-1)
+		for i := range counts {
+			counts[i], _ = vm.RefCount(i + 1)
+		}
+		vm.Reset()
+		vm.Flush()
+		total, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+		bridges, priorBridges = total-priorBridges, total
+		total = nativeEntries(profiler)
+		entries, priorEntries = total-priorEntries, total
+		return entries > 0 && bridges == 0
+	})
+	require.Equal(t, want, got)
+	require.Equal(t, wantCounts, counts)
 }
 
 // poll runs cond on the calling goroutine until it holds, so nothing cond

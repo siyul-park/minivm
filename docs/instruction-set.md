@@ -115,8 +115,8 @@ One opcode per row, in opcode-value order.
 | References | `REF_TEST` | `ref.test` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | References | `REF_CAST` | `ref.cast` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | References | `REF_IS_NULL` | `ref.is_null` | ✅ | 🔲 | |
-| References | `REF_EQ` | `ref.eq` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
-| References | `REF_NE` | `ref.ne` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| References | `REF_EQ` | `ref.eq` | ✅ | 🔲 | lowered on ARM64 |
+| References | `REF_NE` | `ref.ne` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I32_CONST` | `i32.const` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I32_ADD` | `i32.add` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I32_SUB` | `i32.sub` | ✅ | 🔲 | lowered on ARM64 |
@@ -256,8 +256,8 @@ One opcode per row, in opcode-value order.
 | Strings | `STRING_NEW_UTF32` | `string.new_utf32` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Strings | `STRING_LEN` | `string.len` | ✅ | 🔲 | lowered on ARM64; a non-string deoptimizes as the operation's own trap |
 | Strings | `STRING_CONCAT` | `string.concat` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
-| Strings | `STRING_EQ` | `string.eq` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
-| Strings | `STRING_NE` | `string.ne` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Strings | `STRING_EQ` | `string.eq` | ✅ | 🔲 | lowered on ARM64; compares bytes; a non-string deoptimizes as the operation's own trap |
+| Strings | `STRING_NE` | `string.ne` | ✅ | 🔲 | lowered on ARM64; compares bytes; a non-string deoptimizes as the operation's own trap |
 | Strings | `STRING_LT` | `string.lt` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Strings | `STRING_GT` | `string.gt` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Strings | `STRING_LE` | `string.le` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
