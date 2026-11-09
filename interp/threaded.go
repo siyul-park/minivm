@@ -4670,74 +4670,79 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				v1 := v0.Ref()
-				var v2 types.Type
-				var v3 []types.Boxed
-				v4 := i.heap[v1]
-				if v0, v1 := v4.(*HostMap); v1 {
+				var v2 *types.Array
+				v3 := i.heap[v1]
+				if v0, v1 := v3.(*HostMap); v1 {
 					v1, v2 := v0.Map(i)
 					if v2 != nil {
 						panic(v2)
 					}
-					v4 = v1
+					v3 = v1
 				}
-				switch v0 := v4.(type) {
+				switch v0 := v3.(type) {
 				case *types.TypedMap[int8]:
-					v2 = v0.Typ.Key
-					v3 = make([]types.Boxed, 0, v0.Len())
+					v2 = i.newArray(types.NewArrayType(v0.Typ.Key), v0.Len())
+					v1 := 0
 					v0.Range(func(k int8, _ types.Boxed) {
-						v3 = append(v3, types.BoxI8(k))
+						v2.Elems[v1] = types.BoxI8(k)
+						v1++
 					})
 				case *types.TypedMap[bool]:
-					v2 = v0.Typ.Key
-					v3 = make([]types.Boxed, 0, v0.Len())
+					v2 = i.newArray(types.NewArrayType(v0.Typ.Key), v0.Len())
+					v1 := 0
 					v0.Range(func(k bool, _ types.Boxed) {
-						v3 = append(v3, types.BoxI1(k))
+						v2.Elems[v1] = types.BoxI1(k)
+						v1++
 					})
 				case *types.TypedMap[int32]:
-					v2 = v0.Typ.Key
-					v3 = make([]types.Boxed, 0, v0.Len())
+					v2 = i.newArray(types.NewArrayType(v0.Typ.Key), v0.Len())
+					v1 := 0
 					v0.Range(func(k int32, _ types.Boxed) {
-						v3 = append(v3, types.BoxI32(k))
+						v2.Elems[v1] = types.BoxI32(k)
+						v1++
 					})
 				case *types.TypedMap[int64]:
-					v2 = v0.Typ.Key
-					v3 = make([]types.Boxed, 0, v0.Len())
+					v2 = i.newArray(types.NewArrayType(v0.Typ.Key), v0.Len())
+					v1 := 0
 					v0.Range(func(k int64, _ types.Boxed) {
-						v3 = append(v3, i.boxI64(k))
+						v2.Elems[v1] = i.boxI64(k)
+						v1++
 					})
 				case *types.TypedMap[float32]:
-					v2 = v0.Typ.Key
-					v3 = make([]types.Boxed, 0, v0.Len())
+					v2 = i.newArray(types.NewArrayType(v0.Typ.Key), v0.Len())
+					v1 := 0
 					v0.Range(func(k float32, _ types.Boxed) {
-						v3 = append(v3, types.BoxF32(k))
+						v2.Elems[v1] = types.BoxF32(k)
+						v1++
 					})
 				case *types.TypedMap[float64]:
-					v2 = v0.Typ.Key
-					v3 = make([]types.Boxed, 0, v0.Len())
+					v2 = i.newArray(types.NewArrayType(v0.Typ.Key), v0.Len())
+					v1 := 0
 					v0.Range(func(k float64, _ types.Boxed) {
-						v3 = append(v3, types.BoxF64(k))
+						v2.Elems[v1] = types.BoxF64(k)
+						v1++
 					})
 				case *types.TypedMap[string]:
-					v2 = v0.Typ.Key
-					v3 = make([]types.Boxed, 0, v0.Len())
+					v2 = i.newArray(types.NewArrayType(v0.Typ.Key), v0.Len())
+					v1 := 0
 					v0.Range(func(k string, _ types.Boxed) {
-						v3 = append(v3, types.BoxRef(i.alloc(types.String(k))))
+						v2.Elems[v1] = types.BoxRef(i.alloc(types.String(k)))
+						v1++
 					})
 				case *types.Map:
-					v2 = v0.Typ.Key
-					v3 = make([]types.Boxed, 0, v0.Len())
+					v2 = i.newArray(types.NewArrayType(v0.Typ.Key), v0.Len())
+					v1 := 0
 					v0.Range(func(_ types.MapKey, entry types.MapEntry) {
 						i.retainBox(entry.Key)
-						v3 = append(v3, entry.Key)
+						v2.Elems[v1] = entry.Key
+						v1++
 					})
 				default:
 					panic(ErrTypeMismatch)
 				}
-				v5 := i.newArray(types.NewArrayType(v2), len(v3))
-				copy(v5.Elems, v3)
-				v6 := types.BoxRef(i.alloc(v5))
+				v4 := types.BoxRef(i.alloc(v2))
 				i.release(v1)
-				i.stack[i.sp-1] = v6
+				i.stack[i.sp-1] = v4
 				i.fr.ip++
 			}
 		},
