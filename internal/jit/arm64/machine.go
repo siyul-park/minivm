@@ -584,10 +584,14 @@ func (m *Machine) base(a *asm.Assembler, slot ssa.Slot) (asm.Reg, bool) {
 // exec lowers an OpExec by its instruction code.
 func (m *Machine) exec(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	switch op.Code {
-	case instr.I32_ADD, instr.I64_ADD:
-		return binary(a, op, s, target.ADD)
-	case instr.I32_SUB, instr.I64_SUB:
-		return binary(a, op, s, target.SUB)
+	case instr.I32_ADD:
+		return arith(a, op, s, asm.Width32, true)
+	case instr.I64_ADD:
+		return arith(a, op, s, asm.Width64, true)
+	case instr.I32_SUB:
+		return arith(a, op, s, asm.Width32, false)
+	case instr.I64_SUB:
+		return arith(a, op, s, asm.Width64, false)
 	case instr.I32_MUL, instr.I64_MUL:
 		return binary(a, op, s, target.MUL)
 	case instr.I32_AND, instr.I64_AND:
@@ -868,18 +872,29 @@ func (m *Machine) compare(a *asm.Assembler, op ssa.Operation, s compile.Site, co
 	if !has(op, 2, 1) {
 		return false
 	}
-	x, y, dst := s.Reg(op.Args[0]), s.Reg(op.Args[1]), s.Reg(op.Results[0])
-	if !match(x.Type(), width, x, y) || !match(asm.RegTypeInt, asm.Width32, dst) {
+	x, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
+	if !match(x.Type(), width, x) || !match(asm.RegTypeInt, asm.Width32, dst) {
 		return false
 	}
-	switch x.Type() {
-	case asm.RegTypeFloat:
-
+	switch n, ok := immediate(s, op.Args[1], width); {
+	case x.Type() == asm.RegTypeFloat:
+		y := s.Reg(op.Args[1])
+		if !match(asm.RegTypeFloat, width, y) {
+			return false
+		}
 		a.Emit(target.FCMP(x, y))
-	case asm.RegTypeInt:
-		a.Emit(target.CMP(x, y))
+	case ok && n >= 0:
+		a.Emit(target.CMPI(x, uint16(n)))
+	case ok && signed(cond):
+		// CMN x, c leaves the flags of x - (-c) but its carry, which only an
+		// unsigned condition reads.
+		a.Emit(target.CMNI(x, uint16(-n)))
 	default:
-		return false
+		y := s.Reg(op.Args[1])
+		if !match(asm.RegTypeInt, width, y) {
+			return false
+		}
+		a.Emit(target.CMP(x, y))
 	}
 	m.set(a, s, op.Results[0], dst, cond)
 	return true
@@ -1460,6 +1475,60 @@ func (m *Machine) vreg() asm.VReg {
 func (m *Machine) ivreg(width asm.RegWidth) asm.VReg {
 	m.temp--
 	return asm.NewVReg(m.temp, asm.RegTypeInt, width)
+}
+
+// arith lowers add or sub at width. A constant operand within imm12 becomes
+// an immediate, a negative one through the opposite operation; only add
+// takes it first.
+func arith(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth, add bool) bool {
+	if !has(op, 2, 1) {
+		return false
+	}
+	src, k := op.Args[0], op.Args[1]
+	n, ok := immediate(s, k, width)
+	if !ok && add {
+		src, k = k, src
+		n, ok = immediate(s, k, width)
+	}
+	if !ok {
+		if add {
+			return binary(a, op, s, target.ADD)
+		}
+		return binary(a, op, s, target.SUB)
+	}
+	x, dst := s.Reg(src), s.Reg(op.Results[0])
+	if !match(asm.RegTypeInt, width, x, dst) {
+		return false
+	}
+	if add == (n >= 0) {
+		a.Emit(target.ADDI(dst, x, uint16(max(n, -n))))
+	} else {
+		a.Emit(target.SUBI(dst, x, uint16(max(n, -n))))
+	}
+	return true
+}
+
+// signed reports whether cond reads no carry flag, so CMN stands for CMP.
+func signed(cond uint8) bool {
+	switch cond {
+	case target.CondEQ, target.CondNE, target.CondLT, target.CondGT, target.CondLE, target.CondGE:
+		return true
+	}
+	return false
+}
+
+// immediate reports the constant v as a signed number at width when its
+// magnitude fits one imm12 field.
+func immediate(s compile.Site, v ssa.Value, width asm.RegWidth) (int64, bool) {
+	word, ok := s.Const(v)
+	if !ok {
+		return 0, false
+	}
+	n := int64(word)
+	if width == asm.Width32 {
+		n = int64(int32(word))
+	}
+	return n, n >= -imm12 && n <= imm12
 }
 
 func binary(a *asm.Assembler, op ssa.Operation, s compile.Site, emit func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
