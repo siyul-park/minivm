@@ -1568,6 +1568,19 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT),
+			instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.MAP_KEYS),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.MAP_CLEAR),
+			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeString(), types.TypeI32())),
+			program.WithConstants(types.String("Hi"), types.String("There")),
+			program.WithLocals(types.NewMapType(types.TypeString(), types.TypeI32()))),
+		values: []types.Value{types.String("HiThere")},
+	},
+	{
+		program: program.New([]instr.Instruction{
 			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
 			instr.MustNew(instr.MAP_ITER), instr.MustNew(instr.CORO_VALUE),
 		}, program.WithTypes(types.NewMapType(types.TypeI32(), types.TypeI32()))),

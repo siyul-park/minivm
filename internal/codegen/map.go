@@ -205,34 +205,36 @@ func mapClear() jen.Code {
 }
 
 func mapKeys() jen.Code {
-	collect := func(params []jen.Code, body ...jen.Code) []jen.Code {
+	// collect fills arr in m's order, one boxed key per entry, with no
+	// intermediate slice.
+	collect := func(params []jen.Code, key jen.Code, body ...jen.Code) []jen.Code {
 		return []jen.Code{
-			jen.Id("keyType").Op("=").Id("m").Dot("Typ").Dot("Key"),
-			jen.Id("elems").Op("=").Id("make").Call(jen.Index().Qual(typesPkg, "Boxed"), jen.Lit(0), jen.Id("m").Dot("Len").Call()),
-			jen.Id("m").Dot("Range").Call(jen.Func().Params(params...).Block(body...)),
+			jen.Id("arr").Op("=").Id("i").Dot("newArray").Call(jen.Qual(typesPkg, "NewArrayType").Call(jen.Id("m").Dot("Typ").Dot("Key")), jen.Id("m").Dot("Len").Call()),
+			jen.Id("n").Op(":=").Lit(0),
+			jen.Id("m").Dot("Range").Call(jen.Func().Params(params...).Block(append(body,
+				jen.Id("arr").Dot("Elems").Index(jen.Id("n")).Op("=").Add(key),
+				jen.Id("n").Op("++"),
+			)...)),
 		}
 	}
 	return handler(underflow(1),
 		container(1),
-		jen.Var().Id("keyType").Qual(typesPkg, "Type"),
-		jen.Var().Id("elems").Index().Qual(typesPkg, "Boxed"),
+		jen.Var().Id("arr").Op("*").Qual(typesPkg, "Array"),
 		jen.Id("source").Op(":=").Id("i").Dot("heap").Index(jen.Id("addr")),
 		view("HostMap", "Map"),
 		mapSwitch(jen.Id("m").Op(":=").Id("source").Assert(jen.Type()),
 			func(k typedKey) []jen.Code {
 				return collect(
 					[]jen.Code{jen.Id("k").Id(k.typ), jen.Id("_").Qual(typesPkg, "Boxed")},
-					jen.Id("elems").Op("=").Id("append").Call(jen.Id("elems"), k.box(jen.Id("k"))),
+					k.box(jen.Id("k")),
 				)
 			},
 			genericMapCase(collect(
 				[]jen.Code{jen.Id("_").Qual(typesPkg, "MapKey"), jen.Id("entry").Qual(typesPkg, "MapEntry")},
+				jen.Id("entry").Dot("Key"),
 				jen.Id("i").Dot("retainBox").Call(jen.Id("entry").Dot("Key")),
-				jen.Id("elems").Op("=").Id("append").Call(jen.Id("elems"), jen.Id("entry").Dot("Key")),
 			)...),
 		),
-		jen.Id("arr").Op(":=").Id("i").Dot("newArray").Call(jen.Qual(typesPkg, "NewArrayType").Call(jen.Id("keyType")), jen.Id("len").Call(jen.Id("elems"))),
-		jen.Id("copy").Call(elems("arr"), jen.Id("elems")),
 		jen.Id("out").Op(":=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("arr"))),
 		jen.Id("i").Dot("release").Call(jen.Id("addr")),
 		top(1).Op("=").Id("out"),
