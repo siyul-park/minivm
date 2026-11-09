@@ -752,6 +752,14 @@ func (m *Machine) exec(a *asm.Assembler, op ssa.Operation, s compile.Site) bool 
 		return m.arrayLen(a, op, s)
 	case instr.STRING_LEN:
 		return m.stringLen(a, op, s)
+	case instr.STRING_EQ:
+		return m.stringEq(a, op, s, true)
+	case instr.STRING_NE:
+		return m.stringEq(a, op, s, false)
+	case instr.REF_EQ:
+		return m.compare(a, op, s, target.CondEQ, asm.Width64)
+	case instr.REF_NE:
+		return m.compare(a, op, s, target.CondNE, asm.Width64)
 	case instr.STRUCT_NEW_DEFAULT:
 		return m.reserve(a, op, s, 0)
 	case instr.ARRAY_NEW_DEFAULT:
@@ -1047,6 +1055,66 @@ func (m *Machine) stringLen(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 	data := m.vreg()
 	a.Emit(target.LDR(data, addr, int16(jit.OffsetData)))
 	a.Emit(target.LDR(s.Reg(op.Results[0]), data, int16(jit.OffsetStringLen)))
+	return true
+}
+
+// stringEq compares two strings' bytes, as threaded STRING_EQ and STRING_NE
+// do: a slot holding anything else, null included, is the operation's own
+// type mismatch, a trap. Interning is gone, so equal contents may sit behind
+// different refs: unequal lengths differ, one shared data pointer is equal,
+// and otherwise a word loop compares 8 bytes while that many remain and a
+// byte loop the tail. It only loads, so no Go pointer is written. want is the
+// result for equal strings: true for STRING_EQ, false for STRING_NE.
+func (m *Machine) stringEq(a *asm.Assembler, op ssa.Operation, s compile.Site, want bool) bool {
+	if !has(op, 2, 1) {
+		return false
+	}
+	var data, size, ptr [2]asm.VReg
+	for i := range data {
+		addr := m.heap(a, s.Reg(op.Args[i]))
+		a.Emit(target.LDR(target.X16, addr, 0))
+		expect(a, uint64(jit.Itab(types.String(""))), s.Trap())
+		data[i], size[i], ptr[i] = m.vreg(), m.vreg(), m.vreg()
+		a.Emit(
+			target.LDR(data[i], addr, int16(jit.OffsetData)),
+			target.LDR(size[i], data[i], int16(jit.OffsetStringLen)),
+			target.LDR(ptr[i], data[i], 0),
+		)
+	}
+	yes, no, done, words, bytes := a.Label(), a.Label(), a.Label(), a.Label(), a.Label()
+	a.Emit(
+		target.CMP(size[0], size[1]), target.BCondLabel(target.OpBNE, no),
+		target.CMP(ptr[0], ptr[1]), target.BCondLabel(target.OpBEQ, yes),
+	)
+	a.Bind(words)
+	a.Emit(
+		target.CMPI(size[0], 8), target.BCondLabel(target.OpBCC, bytes),
+		target.LDR(target.X16, ptr[0], 0), target.LDR(target.X17, ptr[1], 0),
+		target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, no),
+		target.ADDI(ptr[0], ptr[0], 8), target.ADDI(ptr[1], ptr[1], 8),
+		target.SUBI(size[0], size[0], 8), target.BLabel(words),
+	)
+	a.Bind(bytes)
+	a.Emit(
+		target.CBZLabel(size[0], yes),
+		target.LDRB(target.X16, ptr[0], 0), target.LDRB(target.X17, ptr[1], 0),
+		target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, no),
+		target.ADDI(ptr[0], ptr[0], 1), target.ADDI(ptr[1], ptr[1], 1),
+		target.SUBI(size[0], size[0], 1), target.BLabel(bytes),
+	)
+	dst := s.Reg(op.Results[0])
+	flag := func(equal bool) uint64 {
+		if equal == want {
+			return 1
+		}
+		return 0
+	}
+	a.Bind(yes)
+	a.Emit(target.LDI(dst, flag(true))...)
+	a.Emit(target.BLabel(done))
+	a.Bind(no)
+	a.Emit(target.LDI(dst, flag(false))...)
+	a.Bind(done)
 	return true
 }
 
