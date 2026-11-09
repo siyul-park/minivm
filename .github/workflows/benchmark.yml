@@ -1,15 +1,19 @@
 name: Benchmark
 
 concurrency:
-  group: ${{ github.workflow }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 3 * * 1"
-  push:
-    branches: [ main ]
+    inputs:
+      level:
+        description: Benchmark level
+        type: choice
+        options: [quick, standard, deep]
+        default: standard
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore:
       - "docs/**"
       - "**.md"
@@ -20,11 +24,17 @@ permissions:
 jobs:
   benchmark:
     name: Publish Results
+    # Results land with the branch's squash merge: never commit to main.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref_name != 'main') ||
+      (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft)
     # ARM64, because the JIT runs nowhere else.
     runs-on: ubuntu-26.04-arm
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -41,18 +51,21 @@ jobs:
           python-version: "3.15.2"
 
       - name: Run Benchmark
-        run: make benchmark benchmark-level=${{ github.event_name == 'schedule' && 'deep' || 'standard' }}
+        run: make benchmark benchmark-level=${{ inputs.level || 'standard' }}
 
       # A GITHUB_TOKEN push starts no workflow, so this cannot loop.
       - name: Commit Results
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs/benchmarks.md
           git diff --cached --quiet && exit 0
-          git commit -m "docs: update benchmark results [skip ci]"
+          git commit -m "docs: update benchmark results"
           for attempt in 1 2 3; do
-            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            git push origin "HEAD:$BRANCH" && exit 0
+            git fetch origin "$BRANCH" && git rebase "origin/$BRANCH" || exit 1
             sleep 10
           done
           exit 1
