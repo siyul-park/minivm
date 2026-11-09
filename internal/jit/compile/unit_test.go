@@ -118,6 +118,26 @@ func TestCompile(t *testing.T) {
 		require.ErrorIs(t, err, compile.ErrUnsupported)
 	})
 
+	t.Run("inlines a leaf callee at the Optimized tier only", func(t *testing.T) {
+		testenv.MustHaveArch(t, "arm64")
+		caller, module := leafCall(t, instr.F64_ADD)
+		for tier, called := range map[jit.Tier]bool{jit.Baseline: true, jit.Optimized: false} {
+			code, err := compile.Compile(compile.Unit{Address: 1, Function: caller, Module: module, Tier: tier}, arm64.New())
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, code.Free()) })
+			require.Equal(t, called, slices.ContainsFunc(code.Exits, func(e jit.Exit) bool { return e.Kind == jit.ExitCall }))
+		}
+	})
+
+	t.Run("compiles again without inlining when an inlined operation would bridge", func(t *testing.T) {
+		testenv.MustHaveArch(t, "arm64")
+		caller, module := leafCall(t, instr.F64_REM)
+		code, err := compile.Compile(compile.Unit{Address: 1, Function: caller, Module: module, Tier: jit.Optimized}, arm64.New())
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, code.Free()) })
+		require.True(t, slices.ContainsFunc(code.Exits, func(e jit.Exit) bool { return e.Kind == jit.ExitCall }))
+	})
+
 	t.Run("runs the sum loop at every tier", func(t *testing.T) {
 		testenv.MustHaveArch(t, "arm64")
 		for _, tier := range []jit.Tier{jit.Baseline, jit.Optimized} {
@@ -566,4 +586,23 @@ func run(t *testing.T, u compile.Unit, stack []types.Boxed, callees ...compile.U
 func address[T any](t *testing.T, s []T) uintptr {
 	t.Cleanup(func() { runtime.KeepAlive(s) })
 	return uintptr(unsafe.Pointer(&s[0]))
+}
+
+// leafCall is a caller of one f64 parameter whose only work is a call of a
+// leaf computing op over two f64 values, and the module resolving the leaf.
+func leafCall(t *testing.T, op instr.Opcode) (*types.Function, transform.Module) {
+	t.Helper()
+	f64 := &types.FunctionType{Params: []types.Type{types.TypeF64()}, Returns: []types.Type{types.TypeF64()}}
+	b := instr.NewBuilder()
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 0).Emit(op).Emit(instr.RETURN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	leaf := &types.Function{Typ: f64, Code: instr.Marshal(code)}
+
+	b = instr.NewBuilder()
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.RETURN)
+	code, err = b.Assemble()
+	require.NoError(t, err)
+	caller := &types.Function{Typ: f64, Code: instr.Marshal(code)}
+	return caller, transform.Module{Constants: []types.Boxed{types.BoxRef(2)}, Objects: transform.Objects{2: {Function: leaf}}}
 }

@@ -1122,3 +1122,48 @@ func runProgramString(t *testing.T, prog *program.Program) (string, int) {
 	require.NoError(t, err)
 	return value, count
 }
+
+// leafSumProgram sums leaf(i+1, d) for i in [0, 64), d global 0: leaf(a, b)
+// is a/b + a, which traps for b == 0. It returns the program and the leaf's
+// type. Called directly, leaf is constant 0; called indirectly, global 1
+// holds the callee and constants 0 and 1 are leaf and its sibling a-b.
+func leafSumProgram(t *testing.T, indirect bool) *program.Program {
+	t.Helper()
+	typ := &types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}
+	leaf := types.NewFunctionBuilder(typ)
+	leaf.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_DIV_S).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_ADD).Emit(instr.RETURN)
+	sibling := types.NewFunctionBuilder(typ)
+	sibling.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_SUB).Emit(instr.RETURN)
+
+	params := []types.Type{types.TypeI32(), types.TypeI32()}
+	if indirect {
+		params = append(params, typ)
+	}
+	sum := types.NewFunctionBuilder(&types.FunctionType{Params: params, Returns: []types.Type{types.TypeI32()}})
+	sum.Locals(types.TypeI32(), types.TypeI32())
+	i, acc := uint64(len(params)), uint64(len(params)+1)
+	loop, done := sum.Label(), sum.Label()
+	sum.Bind(loop)
+	sum.Emit(instr.LOCAL_GET, i).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_GE_S).BrIf(done)
+	sum.Emit(instr.LOCAL_GET, i).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_GET, 1)
+	if indirect {
+		sum.Emit(instr.LOCAL_GET, 2)
+	} else {
+		sum.Emit(instr.CONST_GET, 0)
+	}
+	sum.Emit(instr.CALL).Emit(instr.LOCAL_GET, acc).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, acc)
+	sum.Emit(instr.LOCAL_GET, i).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, i).Br(loop)
+	sum.Bind(done).Emit(instr.LOCAL_GET, acc).Emit(instr.RETURN)
+
+	b := instr.NewBuilder()
+	b.Emit(instr.I32_CONST, 64).Emit(instr.GLOBAL_GET, 0)
+	if indirect {
+		b.Emit(instr.GLOBAL_GET, 1)
+	}
+	b.Emit(instr.CONST_GET, 2).Emit(instr.CALL)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code,
+		program.WithConstants(leaf.MustBuild(), sibling.MustBuild(), sum.MustBuild()),
+		program.WithGlobals(types.TypeI32(), typ))
+}
