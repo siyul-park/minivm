@@ -52,19 +52,39 @@ func TestState_Exited(t *testing.T) {
 
 func TestState_Abandon(t *testing.T) {
 	testenv.MustHaveArch(t, "arm64")
-	s, err := asm.NewState(arm64.New(), 4096)
-	require.NoError(t, err)
-	probe, _ := linkExit(t, arm64.ADDI(arm64.X0, arm64.SP, 16))
 
-	require.True(t, arm64.New().Enter(probe, &s))
-	first := s.Reg(arm64.X0)
+	t.Run("runs the next activation from the stack's top", func(t *testing.T) {
+		s, err := asm.NewState(arm64.New(), 4096)
+		require.NoError(t, err)
+		probe, _ := linkExit(t, arm64.ADDI(arm64.X0, arm64.SP, 16))
 
-	s.Abandon()
+		require.True(t, arm64.New().Enter(probe, &s))
+		first := s.Reg(arm64.X0)
 
-	require.True(t, arm64.New().Enter(probe, &s))
-	second := s.Reg(arm64.X0)
+		s.Abandon()
 
-	require.Equal(t, first, second)
+		require.True(t, arm64.New().Enter(probe, &s))
+		second := s.Reg(arm64.X0)
+
+		require.Equal(t, first, second)
+	})
+
+	t.Run("keeps the activation suspended below the abandoned one", func(t *testing.T) {
+		s, err := asm.NewState(arm64.New(), 4096)
+		require.NoError(t, err)
+		probe, _ := linkExit(t, arm64.ADDI(arm64.X0, arm64.SP, 16))
+
+		require.True(t, arm64.New().Enter(probe, &s))
+		outer := s.Reg(arm64.X0)
+		require.True(t, arm64.New().Enter(probe, &s))
+		nested := s.Reg(arm64.X0)
+		require.Less(t, nested, outer)
+
+		s.Abandon()
+
+		require.True(t, arm64.New().Enter(probe, &s))
+		require.Equal(t, nested, s.Reg(arm64.X0))
+	})
 }
 
 func TestState_Reg(t *testing.T) {

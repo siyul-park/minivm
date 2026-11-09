@@ -10,6 +10,7 @@ const (
 	stateLR     = asm.OffsetLink + 16
 	statePC     = asm.OffsetPC
 	stateNSP    = asm.OffsetNSP
+	stateBase   = asm.OffsetBase
 	stateExited = asm.OffsetExited
 	stateRegs   = asm.OffsetRegs
 	stateFRegs  = asm.OffsetFRegs
