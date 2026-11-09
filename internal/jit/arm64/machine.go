@@ -91,7 +91,8 @@ func (m *Machine) Reserve() []asm.PReg {
 	return []asm.PReg{target.X16, target.X17, target.X24, target.X25, target.X27}
 }
 
-// Prologue builds the frame, records the activation, counts the entry when
+// Prologue builds the frame, records the activation (its caller's spill base
+// and return address), counts the entry when
 // enabled, and starts non-parameter locals at their zeros, loading each
 // distinct zero once. Register-convention arguments move from X0/X1 into args
 // before those registers are repurposed; the upvals base loads after them.
@@ -102,12 +103,14 @@ func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.
 	*m = Machine{kinds: l.Kinds, temp: -1, end: a.Label(), entry: a.Label(), guards: map[ssa.Value]ssa.Shape{}, slices: map[ssa.Value][2]asm.VReg{}, bounds: map[ssa.Value]bound{}, registers: l.Registers, borrows: l.Borrows}
 	a.Bind(m.entry)
 	a.Emit(
+		target.ADDI(target.X16, target.SP, 0),
 		target.SUBI(target.SP, target.SP, 16),
 		target.STR(target.LR, target.SP, 8),
 		asm.Instruction{Op: uint16(target.OpSUBI), Dst: asm.Physical(target.SP), Src1: asm.Physical(target.SP), Src2: asm.Slots()},
 		target.LSLI(target.X17, target.X27, recordShift),
 		target.ADD(target.X17, target.Ctx, target.X17),
 		target.STR(target.X25, target.X17, int16(jit.OffsetRecords+jit.RecordFB)),
+		target.STR(target.X16, target.X17, int16(jit.OffsetRecords+jit.RecordSP)),
 		target.STR(target.LR, target.X17, int16(jit.OffsetRecords+jit.RecordPC)),
 		target.ADDI(target.X27, target.X27, 1),
 	)
@@ -415,7 +418,6 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	if 8*(c.Base+c.Size) > imm12 {
 		return false
 	}
-	record := func(field uintptr) int16 { return int16(jit.OffsetRecords - unsafe.Sizeof(jit.Record{}) + field) }
 	for i, v := range c.Args {
 		a.Emit(target.STR(box(a, s, v), target.X25, int16((c.Base+i)*8)))
 	}
@@ -439,14 +441,7 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 		target.LDR(target.X17, target.Ctx, int16(jit.OffsetLimit)),
 		target.CMP(target.X27, target.X17),
 		target.BCondLabel(target.OpBCS, c.Stub),
-		target.LSLI(target.X16, target.X27, recordShift),
-		target.ADD(target.X16, target.Ctx, target.X16),
-		target.ADDI(target.X17, target.SP, 0),
-		target.STR(target.X17, target.X16, record(jit.RecordSP)),
 	)
-	a.Emit(target.LDI(target.X17, uint64(c.Exit))...)
-	a.Emit(target.STR(target.X17, target.X16, record(jit.RecordExit)))
-
 	a.Emit(target.SUBSI(target.X24, target.X24, 1), target.BCondLabel(target.OpBLE, c.Safepoint))
 	a.Bind(c.Resume)
 	if c.Upvals {
@@ -472,6 +467,7 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	} else {
 		a.Emit(target.BLR(code))
 	}
+	a.Bind(c.Return)
 
 	for i := range c.Registers {
 		a.Emit(target.DEF(register(i)))
