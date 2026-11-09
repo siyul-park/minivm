@@ -19,11 +19,14 @@ func refOp(state *state, current step) (value, error) {
 }
 
 func produce(state *state, current step) (value, error) {
-	result := value{op: current.op, head: current.op}
+	result := value{at: -1, op: current.op, head: current.op}
+	if !state.standalone {
+		result.at = state.offset
+	}
 	switch current.op {
 	case instr.REF_NULL:
 		result.boxed = jen.Qual(typesPkg, "BoxedNull")
-		result.check = append(result.check, overflow())
+		result.check = append(result.check, overflowAt(result.at))
 		result.push = append(result.push, result.check...)
 		result.push = append(result.push,
 			jen.Id("i").Dot("retain").Call(jen.Lit(0)),
@@ -34,8 +37,8 @@ func produce(state *state, current step) (value, error) {
 	case instr.DUP:
 		result.boxed = jen.Id("value")
 		result.check = append(result.check,
-			underflow(1),
-			overflow(),
+			jen.If(jen.Id("i").Dot("sp").Op("==").Lit(0)).Block(fail("ErrStackUnderflow", result.at)),
+			overflowAt(result.at),
 		)
 		result.body = append(result.body,
 			jen.Id("value").Op(":=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)),
@@ -92,7 +95,7 @@ func consume(state *state, current step) (value, error) {
 		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width))
 	case instr.REF_IS_NULL:
 		if !input.resident && input.room {
-			body = append(body, overflow())
+			body = append(body, overflowAt(input.at))
 		}
 		body = append(body, input.body...)
 		condition := jen.Add(input.boxed).Dot("Ref").Call().Op("==").Lit(0)

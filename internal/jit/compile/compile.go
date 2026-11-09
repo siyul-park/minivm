@@ -211,6 +211,34 @@ func (l *lowering) Deopt() asm.Label {
 	return s.label
 }
 
+// Bridge places a bridge stub serving the current operation, which resumes at
+// resume, where its caller binds.
+func (l *lowering) Bridge() (exit, resume asm.Label) {
+	return l.stub(l.exit(jit.ExitBridge))
+}
+
+// Operand reads the current operation's first immediate operand off the
+// bytecode at its state's innermost frame.
+func (l *lowering) Operand() (int, bool) {
+	state, ok := l.states[l.op.State]
+	if !ok || len(state.Frames) == 0 {
+		return 0, false
+	}
+	frame := state.Frames[len(state.Frames)-1]
+	code := l.fn.Code
+	if member := l.objects[frame.Address].Function; frame.Address != l.address && member != nil {
+		code = member.Code
+	}
+	if frame.IP < 0 || frame.IP >= len(code) {
+		return 0, false
+	}
+	inst := instr.Instruction(code[frame.IP:])
+	if len(instr.TypeOf(inst.Opcode()).Widths) == 0 || len(inst) < inst.Width() {
+		return 0, false
+	}
+	return int(inst.Operand(0)), true
+}
+
 // Release places a release stub for ref.
 func (l *lowering) Release(ref asm.VReg) (exit, resume asm.Label) {
 	return l.word(jit.ExitRelease, types.KindRef, ref)

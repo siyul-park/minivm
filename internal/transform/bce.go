@@ -9,7 +9,7 @@ import (
 	"github.com/siyul-park/minivm/pass"
 )
 
-// BoundPass drops the bounds check of an array op on a slice indexed by a
+// BCEPass drops the bounds check of an array op on a slice indexed by a
 // loop's induction variable i, which counts up from a constant c ≥ 0 by
 // constant steps and stays below the limit n the loop header tests, signed:
 // then 0 ≤ i < n holds in the loop. The index becomes an OpBound. n ≤ length
@@ -17,7 +17,7 @@ import (
 // the header's entry state, even when n is the array's own length: a
 // shrinking op between the two would leave n above it. A loop whose header
 // entry offset is refuted keeps its checks.
-type BoundPass struct {
+type BCEPass struct {
 	profiles Profiles
 }
 
@@ -40,16 +40,16 @@ type loops struct {
 	params    map[ssa.Value]int
 }
 
-var _ pass.Pass[*ssa.Function] = (*BoundPass)(nil)
+var _ pass.Pass[*ssa.Function] = (*BCEPass)(nil)
 
-// NewBoundPass returns the pass; profiles holds, per function, the offsets
+// NewBCEPass returns the pass; profiles holds, per function, the offsets
 // whose guard native code has seen fail (Profile.Refuted).
-func NewBoundPass(profiles Profiles) *BoundPass {
-	return &BoundPass{profiles: profiles}
+func NewBCEPass(profiles Profiles) *BCEPass {
+	return &BCEPass{profiles: profiles}
 }
 
 // Run applies the pass to one SSA function.
-func (p *BoundPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
+func (p *BCEPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	bounded, guards := newLoops(function, p.profiles).bounds()
 	if len(bounded) == 0 {
 		return true, nil

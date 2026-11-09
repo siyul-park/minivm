@@ -9,28 +9,28 @@ import (
 	"github.com/siyul-park/minivm/internal/jit"
 )
 
-func TestNewStore(t *testing.T) {
+func TestNewCache(t *testing.T) {
 	t.Run("serves the given number of addresses", func(t *testing.T) {
-		s := jit.NewStore(4)
+		s := jit.NewCache(4)
 		require.Nil(t, s.Code(3))
 		require.NoError(t, s.Close())
 	})
 
 	t.Run("rejects a non-positive size", func(t *testing.T) {
-		require.Panics(t, func() { jit.NewStore(0) })
+		require.Panics(t, func() { jit.NewCache(0) })
 	})
 }
 
-func TestStore_Natives(t *testing.T) {
-	s := jit.NewStore(2)
+func TestCache_Natives(t *testing.T) {
+	s := jit.NewCache(2)
 	t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 	require.NotZero(t, s.Natives())
 	require.Equal(t, s.Natives(), s.Natives())
 }
 
-func TestStore_Code(t *testing.T) {
-	s := jit.NewStore(2)
+func TestCache_Code(t *testing.T) {
+	s := jit.NewCache(2)
 	t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 	require.Nil(t, s.Code(0))
@@ -41,8 +41,8 @@ func TestStore_Code(t *testing.T) {
 	require.Nil(t, s.Code(2))
 }
 
-func TestStore_CodeAt(t *testing.T) {
-	s := jit.NewStore(2)
+func TestCache_CodeAt(t *testing.T) {
+	s := jit.NewCache(2)
 	t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 	require.Nil(t, s.CodeAt(1, 12))
@@ -54,8 +54,8 @@ func TestStore_CodeAt(t *testing.T) {
 	require.Nil(t, s.Code(1))
 }
 
-func TestStore_Find(t *testing.T) {
-	s := jit.NewStore(1)
+func TestCache_Find(t *testing.T) {
+	s := jit.NewCache(1)
 	t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 	c := code(t, 0, jit.Baseline)
@@ -71,9 +71,9 @@ func TestStore_Find(t *testing.T) {
 	require.Equal(t, o, s.Find(o.Entry()))
 }
 
-func TestStore_Publish(t *testing.T) {
+func TestCache_Publish(t *testing.T) {
 	t.Run("installs at its address and a higher tier replaces it", func(t *testing.T) {
-		s := jit.NewStore(2)
+		s := jit.NewCache(2)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 		low := code(t, 1, jit.Baseline)
@@ -87,7 +87,7 @@ func TestStore_Publish(t *testing.T) {
 	})
 
 	t.Run("refuses and frees a tier no higher than the published one", func(t *testing.T) {
-		s := jit.NewStore(2)
+		s := jit.NewCache(2)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 		first := code(t, 0, jit.Optimized)
@@ -100,7 +100,7 @@ func TestStore_Publish(t *testing.T) {
 	})
 
 	t.Run("refuses a zero tier even when nothing is published", func(t *testing.T) {
-		s := jit.NewStore(1)
+		s := jit.NewCache(1)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 		c := code(t, 0, 0)
@@ -109,7 +109,7 @@ func TestStore_Publish(t *testing.T) {
 	})
 
 	t.Run("refuses an out-of-range address", func(t *testing.T) {
-		s := jit.NewStore(1)
+		s := jit.NewCache(1)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 		c := code(t, 1, jit.Baseline)
@@ -118,7 +118,7 @@ func TestStore_Publish(t *testing.T) {
 	})
 
 	t.Run("installs an OSR code per (address, IP), leaving natives untouched", func(t *testing.T) {
-		s := jit.NewStore(2)
+		s := jit.NewCache(2)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 		c := osrCode(t, 1, 12, jit.Optimized)
@@ -128,7 +128,7 @@ func TestStore_Publish(t *testing.T) {
 	})
 
 	t.Run("refuses a second OSR publish at the same (address, IP)", func(t *testing.T) {
-		s := jit.NewStore(1)
+		s := jit.NewCache(1)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 		first := osrCode(t, 0, 12, jit.Optimized)
@@ -141,7 +141,7 @@ func TestStore_Publish(t *testing.T) {
 	})
 
 	t.Run("distinguishes two OSR headers of the same function", func(t *testing.T) {
-		s := jit.NewStore(1)
+		s := jit.NewCache(1)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 		a := osrCode(t, 0, 12, jit.Optimized)
@@ -153,7 +153,7 @@ func TestStore_Publish(t *testing.T) {
 	})
 
 	t.Run("installs an OSR code whose header sits at IP 0 as OSR, not as ordinary entry code", func(t *testing.T) {
-		s := jit.NewStore(1)
+		s := jit.NewCache(1)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 		c := osrCode(t, 0, 0, jit.Baseline)
@@ -162,8 +162,8 @@ func TestStore_Publish(t *testing.T) {
 		require.Nil(t, s.Code(0))
 	})
 
-	t.Run("publishes, retires, and reclaims safely from concurrent goroutines", func(t *testing.T) {
-		s := jit.NewStore(4)
+	t.Run("publishes, invalidates, and reclaims safely from concurrent goroutines", func(t *testing.T) {
+		s := jit.NewCache(4)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 		var wg sync.WaitGroup
@@ -182,7 +182,7 @@ func TestStore_Publish(t *testing.T) {
 				defer wg.Done()
 				s.Publish(c)
 				_ = s.CodeAt(addr, 12)
-				s.RetireAt(addr, 12)
+				s.InvalidateAt(addr, 12)
 			}(osr)
 		}
 		for range 4 {
@@ -200,15 +200,15 @@ func TestStore_Publish(t *testing.T) {
 	})
 }
 
-func TestStore_Retire(t *testing.T) {
-	t.Run("clears the published code and keeps it findable while retired", func(t *testing.T) {
-		s := jit.NewStore(1)
+func TestCache_Invalidate(t *testing.T) {
+	t.Run("clears the published code and keeps it findable while invalidated", func(t *testing.T) {
+		s := jit.NewCache(1)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 		c := code(t, 0, jit.Optimized)
 		require.True(t, s.Publish(c))
 
-		s.Retire(0)
+		s.Invalidate(0)
 		require.Nil(t, s.Code(0))
 		require.Equal(t, c, s.Find(c.Entry()))
 
@@ -218,85 +218,85 @@ func TestStore_Retire(t *testing.T) {
 	})
 
 	t.Run("is a no-op when nothing is published", func(t *testing.T) {
-		s := jit.NewStore(1)
+		s := jit.NewCache(1)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 
-		s.Retire(0)
+		s.Invalidate(0)
 		require.Nil(t, s.Code(0))
 	})
 
 	t.Run("is a no-op out of range", func(t *testing.T) {
-		s := jit.NewStore(1)
+		s := jit.NewCache(1)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 		require.NotPanics(t, func() {
-			s.Retire(-1)
-			s.Retire(1)
+			s.Invalidate(-1)
+			s.Invalidate(1)
 		})
 	})
 }
 
-func TestStore_RetireAt(t *testing.T) {
-	t.Run("clears the published OSR code and keeps it findable while retired", func(t *testing.T) {
-		s := jit.NewStore(1)
+func TestCache_InvalidateAt(t *testing.T) {
+	t.Run("clears the published OSR code and keeps it findable while invalidated", func(t *testing.T) {
+		s := jit.NewCache(1)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 		c := osrCode(t, 0, 12, jit.Optimized)
 		require.True(t, s.Publish(c))
 
-		s.RetireAt(0, 12)
+		s.InvalidateAt(0, 12)
 		require.Nil(t, s.CodeAt(0, 12))
 		require.Equal(t, c, s.Find(c.Entry()))
 	})
 
 	t.Run("is a no-op when nothing is published there", func(t *testing.T) {
-		s := jit.NewStore(1)
+		s := jit.NewCache(1)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 
-		s.RetireAt(0, 12)
+		s.InvalidateAt(0, 12)
 		require.Nil(t, s.CodeAt(0, 12))
 	})
 }
 
-func TestStore_Attach(t *testing.T) {
-	s := jit.NewStore(1)
+func TestCache_Attach(t *testing.T) {
+	s := jit.NewCache(1)
 	t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 	c := code(t, 0, jit.Baseline)
 	require.True(t, s.Publish(c))
-	s.Retire(0)
+	s.Invalidate(0)
 
-	// A reader attached after the retire never saw c.
+	// A reader attached after the invalidation never saw c.
 	s.Attach()
 	require.NoError(t, s.Reclaim())
 	require.Nil(t, s.Find(c.Entry()))
 }
 
-func TestStore_Reclaim(t *testing.T) {
-	t.Run("frees every retired code when no reader is attached", func(t *testing.T) {
-		s := jit.NewStore(1)
+func TestCache_Reclaim(t *testing.T) {
+	t.Run("frees every invalidated code when no reader is attached", func(t *testing.T) {
+		s := jit.NewCache(1)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 
 		c := code(t, 0, jit.Baseline)
 		require.True(t, s.Publish(c))
-		s.Retire(0)
+		s.Invalidate(0)
 		o := osrCode(t, 0, 12, jit.Optimized)
 		require.True(t, s.Publish(o))
-		s.RetireAt(0, 12)
+		s.InvalidateAt(0, 12)
 
 		require.NoError(t, s.Reclaim())
 		require.Nil(t, s.Find(c.Entry()))
 		require.Nil(t, s.Find(o.Entry()))
 	})
 
-	t.Run("keeps a retired code until every attached reader quiesces after its retire", func(t *testing.T) {
-		s := jit.NewStore(1)
+	t.Run("keeps an invalidated code until every attached reader quiesces after its invalidation", func(t *testing.T) {
+		s := jit.NewCache(1)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
 		a, b := s.Attach(), s.Attach()
 
 		c := code(t, 0, jit.Baseline)
 		require.True(t, s.Publish(c))
-		s.Retire(0)
+		s.Invalidate(0)
 
 		require.NoError(t, s.Reclaim())
 		require.Equal(t, c, s.Find(c.Entry()))
@@ -311,8 +311,8 @@ func TestStore_Reclaim(t *testing.T) {
 	})
 }
 
-func TestStore_Close(t *testing.T) {
-	s := jit.NewStore(2)
+func TestCache_Close(t *testing.T) {
+	s := jit.NewCache(2)
 	base := code(t, 0, jit.Baseline)
 	require.True(t, s.Publish(base))
 	opt := code(t, 0, jit.Optimized)
@@ -324,19 +324,19 @@ func TestStore_Close(t *testing.T) {
 }
 
 func TestReader_Quiesce(t *testing.T) {
-	s := jit.NewStore(2)
+	s := jit.NewCache(2)
 	t.Cleanup(func() { require.NoError(t, s.Close()) })
 	r := s.Attach()
 
 	before := code(t, 0, jit.Baseline)
 	require.True(t, s.Publish(before))
-	s.Retire(0)
+	s.Invalidate(0)
 	r.Quiesce()
 
-	// Retired after r's quiescent point: r may still run it.
+	// Invalidated after r's quiescent point: r may still run it.
 	after := code(t, 1, jit.Baseline)
 	require.True(t, s.Publish(after))
-	s.Retire(1)
+	s.Invalidate(1)
 
 	require.NoError(t, s.Reclaim())
 	require.Nil(t, s.Find(before.Entry()))
@@ -344,13 +344,13 @@ func TestReader_Quiesce(t *testing.T) {
 }
 
 func TestReader_Detach(t *testing.T) {
-	s := jit.NewStore(1)
+	s := jit.NewCache(1)
 	t.Cleanup(func() { require.NoError(t, s.Close()) })
 	r := s.Attach()
 
 	c := code(t, 0, jit.Baseline)
 	require.True(t, s.Publish(c))
-	s.Retire(0)
+	s.Invalidate(0)
 
 	r.Detach()
 	require.NoError(t, s.Reclaim())

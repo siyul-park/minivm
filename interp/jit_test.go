@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -68,6 +69,119 @@ func node() *types.StructType {
 		types.NewStructField(types.TypeI32(), types.FieldWithName("n")),
 		types.NewStructField(types.TypeAny(), types.FieldWithName("held")),
 	)
+}
+
+// links builds a chain of n default nodes, each holding the one before and its
+// index, and leaves the last node's stamp on the stack. A nonnegative trap
+// divides by zero in that iteration; spare also keeps one default struct of a
+// second type, whose bin the loop never takes. Every node stays live to the
+// end, so the heap a run leaves is a function of n alone.
+func links(t *testing.T, n, trap int, spare bool) *program.Program {
+	t.Helper()
+	record := node()
+	second := types.NewStructType(types.NewStructField(types.TypeI32()))
+	b := instr.NewBuilder()
+	loop, done, skip := b.Label(), b.Label(), b.Label()
+	b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+	if spare {
+		b.Emit(instr.STRUCT_NEW_DEFAULT, 1).Emit(instr.LOCAL_SET, 3)
+	}
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	if trap >= 0 {
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(trap)).Emit(instr.I32_NE).BrIf(skip)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.I32_CONST, 0).Emit(instr.I32_DIV_S).Emit(instr.DROP)
+		b.Bind(skip)
+	}
+	b.Emit(instr.STRUCT_NEW_DEFAULT, 0).Emit(instr.LOCAL_SET, 2)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.STRUCT_SET)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.STRUCT_SET)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_SET, 1)
+	b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32(), record, record, second), program.WithTypes(record, second))
+}
+
+// chains builds a chain of n default arrays, each holding the one before in its
+// first element, like benchmarks/fixtures/allocation-graph.mvm, and leaves the
+// last array's length on the stack. The first split arrays have length short
+// and the rest length long. Every array stays live to the end, so the heap a
+// run leaves is a function of n alone.
+func chains(t *testing.T, n, split, short, long int) *program.Program {
+	t.Helper()
+	array := types.NewArrayType(types.TypeAny())
+	b := instr.NewBuilder()
+	loop, done, wide, made := b.Label(), b.Label(), b.Label(), b.Label()
+	b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.LOCAL_SET, 0)
+	b.Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_SET, 1)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_GE_S).BrIf(done)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(split)).Emit(instr.I32_GE_S).BrIf(wide)
+	b.Emit(instr.I32_CONST, uint64(uint32(short))).Br(made)
+	b.Bind(wide).Emit(instr.I32_CONST, uint64(uint32(long)))
+	b.Bind(made).Emit(instr.ARRAY_NEW_DEFAULT, 0)
+	b.Emit(instr.DUP).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_SET)
+	b.Emit(instr.LOCAL_SET, 0)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+	b.Br(loop)
+	b.Bind(done).Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_LEN)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(array, types.TypeI32()), program.WithTypes(array))
+}
+
+// heapOf is the heap a finished run left: its length and every live count.
+func heapOf(vm *interp.Interpreter) (int, []int) {
+	counts := make([]int, vm.HeapLen()-1)
+	for j := range counts {
+		counts[j], _ = vm.RefCount(j + 1)
+	}
+	return vm.HeapLen(), counts
+}
+
+// liveOf is how many objects a finished run left alive.
+func liveOf(vm *interp.Interpreter) int {
+	_, counts := heapOf(vm)
+	live := 0
+	for _, count := range counts {
+		if count > 0 {
+			live++
+		}
+	}
+	return live
+}
+
+// fits returns the smallest heap limit threaded code runs prog within. An
+// unlimited Run's HeapLen bounds it, and a larger limit never fails where a
+// smaller one passes, so it is searched by halves.
+func fits(t *testing.T, prog *program.Program) int {
+	t.Helper()
+	unlimited := interp.MustNew(prog, interp.WithThreshold(-1))
+	require.NoError(t, unlimited.Run(context.Background()))
+	bound := unlimited.HeapLen()
+	require.NoError(t, unlimited.Close())
+	return 1 + sort.Search(bound, func(k int) bool {
+		vm, err := interp.New(prog, interp.WithThreshold(-1), interp.WithHeapLimit(k+1))
+		if err != nil {
+			return false
+		}
+		defer vm.Close()
+		return vm.Run(context.Background()) == nil
+	})
+}
+
+// warm runs prog on vm until native code has run it, then resets vm.
+func warm(t *testing.T, vm *interp.Interpreter, profiler *prof.Profiler) {
+	t.Helper()
+	poll(t, func() bool {
+		_ = vm.Run(context.Background())
+		vm.Reset()
+		vm.Flush()
+		return nativeEntries(profiler) > 0
+	})
 }
 
 // wideArgFunction returns its i64 parameter plus one.
@@ -814,7 +928,7 @@ func deopt(t *testing.T, n, k int) *program.Program {
 	slow := fb.Label()
 	fb.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(k)).Emit(instr.I32_EQ).BrIf(slow)
 	fb.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
-	fb.Bind(slow).Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 1).Emit(instr.CONST_GET, 1).Emit(instr.STRING_EQ).Emit(instr.I32_ADD).Emit(instr.RETURN)
+	fb.Bind(slow).Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 1).Emit(instr.CONST_GET, 1).Emit(instr.STRING_LT).Emit(instr.I32_ADD).Emit(instr.RETURN)
 	fcode, err := fb.Assemble()
 	require.NoError(t, err)
 	f := &types.Function{
@@ -882,6 +996,48 @@ func fib(t *testing.T, n int) *program.Program {
 	code, err := b.Assemble()
 	require.NoError(t, err)
 	return program.New(code, program.WithLocals(types.TypeI32()), program.WithConstants(fib))
+}
+
+// requireNative runs prog threaded for the want result, then under the
+// optimizing tier until a Run enters native code and never bridges. It requires
+// the native result and the heap's ref counts to equal threaded's.
+func requireNative(t *testing.T, prog *program.Program) {
+	t.Helper()
+
+	threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+	defer threaded.Close()
+	require.NoError(t, threaded.Run(context.Background()))
+	want, err := threaded.Pop()
+	require.NoError(t, err)
+	wantCounts := make([]int, threaded.HeapLen()-1)
+	for i := range wantCounts {
+		wantCounts[i], _ = threaded.RefCount(i + 1)
+	}
+
+	profiler := prof.New()
+	vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+	defer vm.Close()
+	var got types.Value
+	var counts []int
+	var priorBridges, priorEntries, bridges, entries float64
+	poll(t, func() bool {
+		require.NoError(t, vm.Run(context.Background()))
+		got, err = vm.Pop()
+		require.NoError(t, err)
+		counts = make([]int, vm.HeapLen()-1)
+		for i := range counts {
+			counts[i], _ = vm.RefCount(i + 1)
+		}
+		vm.Reset()
+		vm.Flush()
+		total, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+		bridges, priorBridges = total-priorBridges, total
+		total = nativeEntries(profiler)
+		entries, priorEntries = total-priorEntries, total
+		return entries > 0 && bridges == 0
+	})
+	require.Equal(t, want, got)
+	require.Equal(t, wantCounts, counts)
 }
 
 // poll runs cond on the calling goroutine until it holds, so nothing cond

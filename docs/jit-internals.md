@@ -37,10 +37,10 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 | Rule | Contract |
 |---|---|
 | Dormant | No JIT state but `Interpreter.heat` (`dormancy`, 2^21 units, ~30 ms threaded): no analysis, observers, or code. Threaded code spends one unit at every frame entry (CALL, closure call, tail call) and every taken back edge (`BR`, `BR_IF`, `BR_TABLE` to an offset ≤ its own), whatever the Run's context; a Run start spends `dormancy/32`. The unit that runs heat out parks its frame at ip `park`; dispatch leaves its loop, restores the ip, and wakes the JIT, so no handler calls or writes a pointer. |
-| Off | A program whose code is all brief (below) has nothing to repay a Go entry: waking leaves it without a JIT. |
-| Wake | `heat` reaching 0 builds the live runtime in place: store, queue, OSR observers of every function bound at construction. A `Pool` member wakes on joining. |
-| Brief | Code whose every run executes fewer than `short` (32) instructions, its constant callees' included (no loop, no other call, no tail call, no recursion), is never entered from Go: a Go entry's ~15 ns round trip outweighs ~0.5 ns saved per instruction. Module code that brief gets no entry site; a brief function's CALL hook is gated (`native.gates`), so only its native callers' served calls count it (`replay`) and it compiles for them. |
-| Back-off | Each retire of an address's code raises its call and promotion thresholds 4×, at most `steps` (4) times: `ceiling` = 65536. An OSR re-arm raises its site's threshold 4×, at most `ceiling`. Thresholds never fall. |
+| Off | A program whose code is all trivial (below) has nothing to repay a Go entry: waking leaves it without a JIT. |
+| Wake | `heat` reaching 0 builds the live runtime in place: cache, queue, OSR observers of every function bound at construction. A `Pool` member wakes on joining. |
+| Trivial | Code whose every run executes fewer than `short` (32) instructions, its constant callees' included (no loop, no other call, no tail call, no recursion), is never entered from Go: a Go entry's ~15 ns round trip outweighs ~0.5 ns saved per instruction. Module code that is trivial gets no entry site; a trivial function's CALL hook is gated (`policy.gates`), so only its native callers' served calls count it (`replay`) and it compiles for them. |
+| Back-off | Each invalidation of an address's code raises its call and promotion thresholds 4×, at most `steps` (4) times: `ceiling` = 65536. An OSR re-arm raises its site's threshold 4×, at most `ceiling`. Thresholds never fall. |
 | Bound | Recompiles stay bounded by monotone feedback and failed tiers (Exit policy); back-off spaces them geometrically. |
 | Cost | Dormant: one decrement per frame entry and taken back edge, one subtraction per Run. Live, fixed, or off: one compare of `heat` against zero at each frame entry and back-edge handler (forward branches are compiled without it). Thresholds are read only where counts are compared. |
 
@@ -48,22 +48,24 @@ One wake (analysis, the first compiles, their garbage) costs ~0.3–0.6 ms of in
 
 ## Owners
 
-`architecture.md`'s Package Ownership table owns package boundaries. Within `interp/`, threaded execution, tiering, and exit handling specifically live in `native.go` and `osr.go`.
+`architecture.md`'s Package Ownership table owns package boundaries. Within `interp/`, native execution and exit handling live in `jit.go` (`engine`), tier decisions in `policy.go` (`policy`), runtime feedback in `feedback.go` (`feedback`), and the default structs built ahead for native code in `tcache.go` (`tcache`).
 
 ## Runtime contract
 
 | Symbol | Contract |
 |---|---|
-| `asm.State` | Native stack, saved Go registers, native SP/PC/register file at the last exit. No Go pointer on the native stack but a slice's element pointer (below). |
-| `asm.Enter` / `asm.Resume` | Run code on the native stack / continue a suspended activation. Report whether it stopped at an exit. |
+| `asm.Arch` | One architecture's assembler and native runtime: encoder, `Enter`, `Resume`, exit stub, instruction-cache `Flush`. `internal/asm` has no architecture-specific file. `asm/host.Arch` names the running one as a type, so the runtime calls `Enter` and `Resume` without interface dispatch (3% on binary-trees). |
+| `asm.State` | Same struct on every architecture. Native stack, saved Go registers, native SP/PC/register file at the last exit. No Go pointer on the native stack but a slice's element pointer (below). |
+| `Arch.Enter` / `Arch.Resume` | Run code on the native stack / continue a suspended activation. Report whether it stopped at an exit. |
 | exit stub | Native code `BLR`s `asm.OffsetStub`; the stub saves registers and returns to Go. `Resume` returns from that call. |
-| `jit.Context` | Built at the interpreter's first native entry. `asm.State` first, then `Trap`, exit id, then `Heap`, `Globals`, `RC`, `Natives`, `Entries`, `Top`, `FB`, `Upvals`, `Depth`, `Limit`, `Budget`, `Results`, `Records`. `Results` stages a bridge or box exit's result words for native code to reload on resume. The interpreter writes every base before `Enter`; only `Heap` and `RC` are rewritten before each `Resume`, since serving an exit can only relocate those two append-grown slices. |
+| `jit.Context` | Built at the interpreter's first native entry. `asm.State` first, then `Trap`, exit id, then `Heap`, `Globals`, `RC`, `Natives`, `Entries`, `Top`, `FB`, `Bins`, `Upvals`, `Depth`, `Limit`, `Budget`, `Results`, `Records`. `Results` stages a bridge or box exit's result words for native code to reload on resume. The interpreter writes every base before `Enter`; only `Heap` and `RC` are rewritten before each `Resume`, since serving an exit can only relocate those two append-grown slices. |
+| `Context.Bins` | The base of the `jit.Bin` table, one `{Refs, N, Len}` entry per type index, built with the context and fixed for its life (Reserve). |
 | `Context.Upvals` | The entering activation's upvals base. Written by the interpreter before an OSR `Enter` and by a native closure call before its branch; read once by a prologue into an ordinary register. |
 | `jit.Trap` | `TrapReturn`, `TrapDeopt`, `TrapBridge`. |
 | `jit.Code` | One unit's native code at one tier. `Free` unmaps once. |
-| `jit.Store` | Published code and `Context.Natives`. |
+| `jit.Cache` | Published code and `Context.Natives`. |
 
-- Native code never runs on a goroutine stack; async preemption cannot reach it, so back edges, calls, and returns spend `Budget` explicitly. Back edges and calls branch to safepoint on exhaustion; returns only credit the work. `Budget` carries across Go entries and served calls; each safepoint adds `native.quota` (Ticks).
+- Native code never runs on a goroutine stack; async preemption cannot reach it, so back edges, calls, and returns spend `Budget` explicitly. Back edges and calls branch to safepoint on exhaustion; returns only credit the work. `Budget` carries across Go entries and served calls; each safepoint adds `engine.quota` (Ticks).
 - Native code writes no Go pointer. It reads heap interface words through `Context.Heap` and object fields at `jit.Offset*`.
 - A slice (`ssa.OpSlice`, placed by LICM in a quiet loop's preheader: `pass-system.md`) loads a guarded array's element pointer and length once; the loop's array ops read them, not `Context.Heap`. They are never reloaded: a quiet loop resizes or replaces no container, and neither do the exits it resumes from (a safepoint, a bridge of an op that writes nothing), though a bridge may move `Context.Heap`. The pointer may sit in a register or a spill slot; it is no GC root, and its container, which a quiet loop never releases, keeps the array reachable.
 - Registers: X24 budget, X25 frame base, X27 activation depth, X26 context, X16/X17 scratch, X18/X28 untouched. Allocatable: X0–X15, X19–X23, D0–D31.
@@ -77,7 +79,7 @@ One wake (analysis, the first compiles, their garbage) costs ~0.3–0.6 ms of in
 |---|---|
 | Translate | bytecode → SSA; attach interpreter state to each `OpExec`, return, and completion; block 0 has no predecessors |
 | Baseline | fold → DCE |
-| Optimized | fold → forward → CSE → guard → DCE → promote → hoist → bound → DCE |
+| Optimized | fold → forward → CSE → guard → DCE → promote → LICM → BCE → DCE |
 | Lower | assign registers by SSA type, including register-passed parameters the machine prologue fills, order blocks in reverse postorder with an edge to the next block falling through, resolve block parameters with edge moves, fuse a compare into the branch right after it when nothing else uses it |
 | Build | assemble, allocate, encode, publish through `jit.Code` |
 
@@ -117,9 +119,9 @@ A static `RETURN_CALL` loops, as threaded frame reuse does, when its callee can 
 |---|---|
 | Exit states | Each carries its own member's `Address` and `ip`; `Lower` resumes an `ExitCall` after the instruction of the function that state names. Slot kinds, layout, and result convention are the root's, which identical `Declared()` and `Returns` make valid for every member. |
 | Membership | Fixed before the joint analysis. Each function is analyzed alone with every tail call to another function an exit, and the targets its walker proves (a constant function reference, by the translator's own facts, not by bytecode pattern) are collected; breadth first, at most 4 functions, a target joins when it meets the rule above and translates alone. A target proven only by facts that flow across members stays an exit. |
-| Feedback | One `transform.Profile` per function (`Callees`, `Refuted`, `Generation`), looked up by address in the `transform.Profiles` snapshot beside `transform.Module`. A member's walker reads that member's profile, so offsets never collide; `BoundPass` reads `Refuted` by the state frame's `(Address, IP)`. A guard failing in a member records against the member (`native.record`). |
+| Feedback | One `transform.Profile` per function (`Callees`, `Refuted`, `Generation`), looked up by address in the `transform.Profiles` snapshot beside `transform.Module`. A member's walker reads that member's profile, so offsets never collide; `BCEPass` reads `Refuted` by the state frame's `(Address, IP)`. A guard failing in a member records against the member (`feedback.record`). |
 | Dependencies | `jit.Code.Deps` lists the `(Address, Generation)` of the root's and each member's profile. Code is stale when any generation moved: a member's refutation recompiles the root. |
-| Ownership | Threaded `RETURN_CALL` releases the entering reference at the jump (when the entering call owned it) and runs the callee through a reference of its own. Native code releases it when its call returns, as for any call. `native.frame` makes a materialized frame match threaded: a frame whose function is not the one its entering reference names takes that function as `ref`, `release` false, and releases the entering reference there if the call owned it, exactly once. |
+| Ownership | Threaded `RETURN_CALL` releases the entering reference at the jump (when the entering call owned it) and runs the callee through a reference of its own. Native code releases it when its call returns, as for any call. `engine.frame` makes a materialized frame match threaded: a frame whose function is not the one its entering reference names takes that function as `ref`, `release` false, and releases the entering reference there if the call owned it, exactly once. |
 
 A reference parameter its function never writes (`transform.Borrows`) is borrowed: a native caller lends a local- or constant-backed argument without a retain, and releases an owned one after the call.
 
@@ -161,17 +163,30 @@ A deopt stub sits out of line after the next terminator that does not fall throu
 
 | Exit | Resume rule |
 |---|---|
-| Callout | A bridge of `STRING_CONCAT`, `STRING_NEW_UTF32`, `STRING_ENCODE_UTF32`, `ARRAY_NEW_DEFAULT`, or `STRUCT_NEW_DEFAULT` is served by `native.callout`: the op's own `Interpreter` helper (the one its threaded handler calls) computes the object from the operand words, Go allocates it and hands native code its one reference through `Context.Results`; no scratch frame, operand retain, or handler run. The helper writes no operand count, so a panic (heap exhaustion, the op's own fault) deopts as a trap with every count unchanged and threaded code reports it. |
-| Bridge | `native.bridge` runs the op's threaded handler once in Go, then native resumes, for every op `bridgeable` admits. It denies a control transfer (the op writes `Branch`), `ARRAY_NEW` (its declared two-operand arity does not cover the `1+count` it pops), and `MAP_KEYS` (it allocates every key before the result array); their bridges deopt. An op with a host-view operand deopts before its handler runs: a view runs `Registry` conversions, which are host code. |
+| Callout | A bridge of `STRING_CONCAT`, `STRING_NEW_UTF32`, `STRING_ENCODE_UTF32`, `ARRAY_NEW_DEFAULT`, or `STRUCT_NEW_DEFAULT` is served by `engine.callout`: the op's own `Interpreter` helper (the one its threaded handler calls) computes the object from the operand words, Go allocates it and hands native code its one reference through `Context.Results`; no scratch frame, operand retain, or handler run. The helper writes no operand count, so a panic (heap exhaustion, the op's own fault) deopts as a trap with every count unchanged and threaded code reports it. A `STRUCT_NEW_DEFAULT` or `ARRAY_NEW_DEFAULT` callout also fills the type's bin (Reserve). |
+| Bridge | `engine.bridge` runs the op's threaded handler once in Go, then native resumes, for every op `bridgeable` admits. It denies a control transfer (the op writes `Branch`), `ARRAY_NEW` (its declared two-operand arity does not cover the `1+count` it pops), and `MAP_KEYS` (it allocates every key before the result array); their bridges deopt. An op with a host-view operand deopts before its handler runs: a view runs `Registry` conversions, which are host code. |
 | Release | `Exit.Word` identifies the last ref; interpreter owns reclamation, then native resumes. |
 | Box | `Exit.Word` carries the wide i64; interpreter allocates a boxed value, then native resumes. |
 | Trap | A bridge whose handler panics restores each heap operand to the count it saved before the attempt, then deopts; threaded code runs the op again and reports its trap. The declined attempt leaves only heap and count storage growth, stack slots above the frame, and the scratch frame changed: no admitted handler writes heap contents, allocates, or retains anything but its operands before its last panic point. A box trap deopts the same way. |
 
 A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every admitted op are exactly the operands its handler pops; it uses a scratch stack and leaves native registers untouched. The bridge retains every ref operand for the handler, so none reaches zero during an attempt; a boxed wide i64 is a fresh heap value the handler owns. After a completed handler, the bridge releases its retain of each operand the op adopts (`transform.Adopts`: the stored value of a heap write with no result), since native code handed the op that operand's own reference; native code releases the other operands it owns. Result words are unboxed per kind; a heap-boxed i64 result is consumed into a raw word. The materializer retains borrowed refs.
 
+### Reserve
+
+`STRUCT_NEW_DEFAULT` and `ARRAY_NEW_DEFAULT` take their object from a tcache instead of exiting. `interp.tcache` holds, per type index, default structs or arrays it built ahead (`newStruct` or `newArrayDefault`, then `alloc`, count 1) as boxed refs in a Go array; its `jit.Bin` entry publishes the array base, the count `N`, and, for an array type, the length `Len` of every array it holds, in `Context.Bins`.
+
+| Step | Owner | Rule |
+|---|---|---|
+| fast path | `arm64.Machine` | `N == 0` takes the callout exit, and so does an `ARRAY_NEW_DEFAULT` whose runtime length is not `Len`, a negative or huge one always (threaded code then raises its own fault); else `N--` and the result is `Refs[N]`. Native code writes no Go pointer and no count: the bin's count becomes the result's. |
+| slow path | `engine.callout` | After serving the op, `tcache.fill` handles the miss. A type's first miss in an entry only arms it, so a call that allocates once builds nothing ahead. The next builds as many as the last entry used less the two misses served (used is taken plus missed), at most 1024, each array of the requested length, and nothing when those two covered it; a type with no history builds 16, and a miss after a covered one does too, and each later miss in the entry doubles that, up to 1024. A fill builds at most half the heap's headroom before a collection (`target` less the live count), so neither it nor the program's own allocations after it trigger one early; the entry is republished. A type whose bin holds another length returns it first; when the length changes a second time in an entry, the type alternates and stops caching until `tcache.flush`, so each of its allocations costs the callout alone. An array longer than 4096 elements is not cached. A fill that exhausts the heap stops early without failing. |
+| exhaustion | `Interpreter.alloc` | At the heap limit, `tcache.flush` returns every cached ref and the allocation retries once; a second failure raises `ErrHeapExhausted` as in threaded code. |
+| flush | `engine.run`, `engine.enter`, `Run` | Native code's return to the interpreter at depth 0, whether it returned, exited, or carries a fault to re-raise, runs `tcache.flush` when a miss has armed or filled a type: one field check otherwise, with no `defer`, which cost every entry. `Run` flushes once more as it returns, since `dispatch` recovers a panic that skipped that return. It returns every unused ref through `Interpreter.undo`, which frees the slot without finalize or a refs walk and keeps the object, an array included, for the next fill, since no one could hold it; it disarms every type. |
+
+A batch is stored so native code takes its lowest address first, so a single-type program leaves the heap threaded would. With several types, unused refs can sit below taken ones: their slots return to `free` and `HeapLen` can read higher than threaded code's.
+
 ### Exit policy
 
-`interp.native.settle` gives every exit outcome one `jit.Class`; the class decides what the exit costs the code.
+`interp.engine.settle` gives every exit outcome one `jit.Class`; the class decides what the exit costs the code.
 
 | Outcome | Class | Cost |
 |---|---|---|
@@ -184,23 +199,23 @@ A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every ad
 
 | Rule | Contract |
 |---|---|
-| Ledger | Per Go-entered address (`native.ledgers`) and per OSR site, in work units (`Budget`'s back edges, calls, returns), credited on every exit and return. `Charge` adds the class price (bridge 2.4, callout 1.75, release 0.75, call 3.5 units; guard and trap 0) and reports whether debt ≤ 64 units; credit is floored at −64 units. A bridge, callout, box, or call is charged before it is served; a refusal deopts (replaying a call) and retires the run's code. A release cannot deopt: its charge takes effect at the next bridge or call. |
+| Ledger | Per Go-entered address (`policy.ledgers`) and per OSR site, in work units (`Budget`'s back edges, calls, returns), credited on every exit and return. `Charge` adds the class price (bridge 2.4, callout 1.75, release 0.75, call 3.5 units; guard and trap 0) and reports whether debt ≤ 64 units; credit is floored at −64 units. A bridge, callout, box, or call is charged before it is served; a refusal deopts (replaying a call) and invalidates the run's code. A release cannot deopt: its charge takes effect at the next bridge or call. |
 | Prices | Time one served exit adds over threaded code (bridge ~53 ns, release ~17 ns, call ~76 ns on the reference arm64 machine; a callout 0.75 of a bridge measured side by side) divided by native time saved per work unit (~22 ns in exiting kernels). |
-| Guard | Deopts. An `ExitDeopt` guard records its site in its frame's function's `transform.Profile.Refuted` (`native.record`). It is judged against the code that took it: the run's own code, or a native callee's still-published code, retired in place. That code retires at once when its feedback moved since it was built, else on the `tolerance` (8)th refutation. |
+| Guard | Deopts. An `ExitDeopt` guard records its site in its frame's function's `transform.Profile.Refuted` (`feedback.record`). It is judged against the code that took it: the run's own code, or a native callee's still-published code, invalidated in place. That code is invalidated at once when its feedback moved since it was built, else on the `tolerance` (8)th refutation. |
 | Generic site | The translator emits no container `guard.shape` at a refuted offset: the op bridges. Call sites become generic through `Callees` (replay records the new callee). |
-| Oscillation | Feedback per address is monotone and finite (each change publishes a new `Profile` at the next generation, copy on write) (call sites unset → callee → mixed; refuted sites only added); a retire either consumes a feedback step or fails the tier. An OSR site whose feedback moved re-arms (resubmits) instead of disabling, and each re-arm counts toward `tolerance`. |
+| Oscillation | Feedback per address is monotone and finite (each change publishes a new `Profile` at the next generation, copy on write) (call sites unset → callee → mixed; refuted sites only added); an invalidation either consumes a feedback step or fails the tier. An OSR site whose feedback moved re-arms (resubmits) instead of disabling, and each re-arm counts toward `tolerance`. |
 
 `Exit.Lent` slots are retained when a callee is materialized or the interpreter runs an ExitCall; `Exit.Kept` slots (owned arguments to borrowed parameters, which native code releases after the call) are retained for a served call and released again if its caller never resumes. `Exit.Target` locates the callee value of a closure call or a generic call: the interpreter pushes it, and the materialized callee frame runs through it with its upvals. `Exit.Args` is the argument count of every `ExitCall`; `Exit.Returns` are the kinds a generic call reads back from slots.
 
 ### Served calls
 
-`native.nest` serves an `ExitCall` while its native caller stays suspended:
+`engine.reenter` serves an `ExitCall` while its native caller stays suspended:
 
 | Concern | Rule |
 |---|---|
 | Frames | The caller's activations keep frame slots from the run's start; a stand-in frame for the innermost runs only its exact-code `CALL` (code cut past it), so `Interpreter.dispatch` stops when the callee returns to it. |
-| Handlers | `Interpreter.floor` hides the suspended slots from every handler search; a panic not caught above it re-panics from `dispatch` to `nest`. |
-| Native entries | Start at `Context.Depth` = the suspended depth (`native.depth`), on the same native stack below the suspended frames; `Records` bounds the total depth, and no entry starts once they are full. `Limit` counts the suspended activations. A Go entry above depth 0 releases its borrowed parameters itself after it returns, since `OpReturn` releases them only at depth 1. |
+| Handlers | `Interpreter.floor` hides the suspended slots from every handler search; a panic not caught above it re-panics from `dispatch` to `reenter`. |
+| Native entries | Start at `Context.Depth` = the suspended depth (`engine.depth`), on the same native stack below the suspended frames; `Records` bounds the total depth, and no entry starts once they are full. `Limit` counts the suspended activations. A Go entry above depth 0 releases its borrowed parameters itself after it returns, since `OpReturn` releases them only at depth 1. |
 | State | `asm.State`, `Limit`, and `Depth` are saved before and restored after; the nested run spends the caller's `Budget`. |
 | Hook | Under `WithHook` no call is served: the suspended callers' frame slots stay unmaterialized below the floor, where a hook would read them. The `ExitCall` deopts and replays the call. |
 | Callee | A generic call has `Exit.Callee` 0: the interpreter resolves its `Target` value to a function or closure whose parameter count is `Exit.Args` and whose return kinds are `Exit.Returns`; any other callee deopts and replays the call. |
@@ -213,27 +228,27 @@ A native safepoint is the interpreter's tick (`WithTick`) when the interpreter h
 
 | Concern | Contract |
 |---|---|
-| Quota | `native.quota` work units (Exit policy, Ledger) per safepoint: `tick` with a hook or fuel, else `budget`. |
+| Quota | `engine.quota` work units (Exit policy, Ledger) per safepoint: `tick` with a hook or fuel, else `budget`. |
 | Fuel, profiler | The safepoint charges one tick of fuel, if any, (`Interpreter.burn`), samples the innermost activation's `(address, ip)` (`Interpreter.sample`), and resumes; nothing materializes. |
-| Hook, or fuel spent | The safepoint deopts every native activation, points each materialized frame at its observed threaded code where its ip has a handler (`native.rethread`), and parks the innermost frame with a tick due (`Interpreter.due`). `dispatch` runs `Interpreter.safepoint` before the next instruction: the hook reads and writes the state threaded code would have, and its error or `ErrFuelExhausted` returns from `Run` as is. A loop header's observer re-enters native code. |
+| Hook, or fuel spent | The safepoint deopts every native activation, points each materialized frame at its observed threaded code where its ip has a handler (`engine.rethread`), and parks the innermost frame with a tick due (`Interpreter.due`). `dispatch` runs `Interpreter.safepoint` before the next instruction: the hook reads and writes the state threaded code would have, and its error or `ErrFuelExhausted` returns from `Run` as is. A loop header's observer re-enters native code. |
 | Fuel bound | `WithFuel(F)` gives ⌈F/T⌉ ticks (T = `tick`). Native code runs at most (ticks + 1)·T work units, plus returns past the last check (at most the native depth). A work unit executes at least one bytecode instruction and at most the longest loop-free bytecode path between budget points, so native code can execute more instructions than threaded code for the same fuel. |
 | Hook rate | One hook call per T native work units, against one per T threaded instructions. |
 
-## Store and tiers
+## Cache and tiers
 
 | Concern | Contract |
 |---|---|
 | Publish | Non-OSR code replaces only a lower tier at an address; OSR code installs once at `(address, ip)`. |
-| Retire | `Retire`/`RetireAt` unpublish; retired code remains discoverable until safe to reclaim. |
-| Reclaim | Quiescent-state: each retire stamps its code with the next store epoch. Each interpreter attaches a `jit.Reader`, which publishes the epoch it observed at a quiescent point — `Run` end, or an OSR site's drain cadence at native depth 0 — with no atomic read-modify-write and a store only when the epoch moved, never per entry; `Reclaim` runs there and frees every code whose epoch all attached readers have observed. An idle interpreter, Pool members included, holds code retired since its last quiescent point until it runs again or closes. Entry re-checks a cached code's `Retired`. |
+| Invalidate | `Invalidate`/`InvalidateAt` unpublish; invalidated code remains discoverable until safe to reclaim. |
+| Reclaim | Quiescent-state: each invalidation stamps its code with the next cache epoch. Each interpreter attaches a `jit.Reader`, which publishes the epoch it observed at a quiescent point — `Run` end, or an OSR site's drain cadence at native depth 0 — with no atomic read-modify-write and a store only when the epoch moved, never per entry; `Reclaim` runs there and frees every code whose epoch all attached readers have observed. An idle interpreter, Pool members included, holds code invalidated since its last quiescent point until it runs again or closes. Entry re-checks a cached code's `Invalidated`. |
 | Promotion | Baseline entries count calls; a live Baseline reaching its promotion threshold (`graduate`, raised by back-off) queues Optimized. Optimized/OSR entries do not count. |
-| Failure | Code retires by its exit policy (Exits). A compile failure, or a retire, is permanent only when no profile it read moved (`jit.Code.Deps`; a failed compile has no code, so only its root's generation counts). |
+| Failure | Code is invalidated by its exit policy (Exits). A compile failure, or an invalidation, is permanent only when no profile it read moved (`jit.Code.Deps`; a failed compile has no code, so only its root's generation counts). |
 | Async | `compile.Queue` compiles one unit per address; its workers start at the first `Submit`; publication is drained at the next call, OSR observation or entry, or safepoint. `Close` discards units no worker started and does not wait: a worker still compiling frees that code. |
-| Pool | `Pool` shares `Store`, `Queue`, module data, the Baseline promotion candidate list, each address's CALL count, and each OSR/entry site's count until it submits, so a pooled workload compiles after about `t` entries in total. Each interpreter keeps its own `jit.Context`, feedback, graduate entries, refutations, ledgers, failure marks, and a submitted site's cadence. A pooled interpreter whose entries reach the graduate threshold requests Optimized even if a different interpreter drained its Baseline job. A pooled interpreter whose deopts refute shared code retires it for the pool and blocks only its own tier. |
+| Pool | `Pool` shares `Cache`, `Queue`, module data, the Baseline promotion candidate list, each address's CALL count, and each OSR/entry site's count until it submits, so a pooled workload compiles after about `t` entries in total. Each interpreter keeps its own `jit.Context`, feedback, graduate entries, refutations, ledgers, failure marks, and a submitted site's cadence. A pooled interpreter whose entries reach the graduate threshold requests Optimized even if a different interpreter drained its Baseline job. A pooled interpreter whose deopts refute shared code invalidates it for the pool and blocks only its own tier. |
 
 ## OSR
 
-Every loop header, including module code, has an observer; module code also has one at ip 0, whether or not it has loops. Each site fixes its threshold and cadence when the JIT wakes (Entries table); an automatic re-arm raises the threshold (Policy). Past the threshold it retries submission and looks up `Store.CodeAt` at its cadence; a resolved site also drains at that cadence on entry, so a callee reached only from its native code still tiers up. Compile failure, or a retire whose feedback has not moved, restores the threaded handler and disables the site; a retire whose feedback moved re-arms it (Exit policy).
+Every loop header, including module code, has an observer; module code also has one at ip 0, whether or not it has loops. Each site fixes its threshold and cadence when the JIT wakes (Entries table); an automatic re-arm raises the threshold (Policy). Past the threshold it retries submission and looks up `Cache.CodeAt` at its cadence; a resolved site also drains at that cadence on entry, so a callee reached only from its native code still tiers up. Compile failure, or an invalidation whose feedback has not moved, restores the threaded handler and disables the site; an invalidation whose feedback moved re-arms it (Exit policy).
 
 Loop-free code reaches no safepoint, so its ip-0 site drains on every entry and declines an already-cancelled Run, leaving threaded code to report it. Its threshold floor of 2 keeps a module run once from compiling ahead of its callees.
 

@@ -584,10 +584,14 @@ func (m *Machine) base(a *asm.Assembler, slot ssa.Slot) (asm.Reg, bool) {
 // exec lowers an OpExec by its instruction code.
 func (m *Machine) exec(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	switch op.Code {
-	case instr.I32_ADD, instr.I64_ADD:
-		return binary(a, op, s, target.ADD)
-	case instr.I32_SUB, instr.I64_SUB:
-		return binary(a, op, s, target.SUB)
+	case instr.I32_ADD:
+		return arith(a, op, s, asm.Width32, true)
+	case instr.I64_ADD:
+		return arith(a, op, s, asm.Width64, true)
+	case instr.I32_SUB:
+		return arith(a, op, s, asm.Width32, false)
+	case instr.I64_SUB:
+		return arith(a, op, s, asm.Width64, false)
 	case instr.I32_MUL, instr.I64_MUL:
 		return binary(a, op, s, target.MUL)
 	case instr.I32_AND, instr.I64_AND:
@@ -752,6 +756,18 @@ func (m *Machine) exec(a *asm.Assembler, op ssa.Operation, s compile.Site) bool 
 		return m.arrayLen(a, op, s)
 	case instr.STRING_LEN:
 		return m.stringLen(a, op, s)
+	case instr.STRING_EQ:
+		return m.stringEq(a, op, s, true)
+	case instr.STRING_NE:
+		return m.stringEq(a, op, s, false)
+	case instr.REF_EQ:
+		return m.compare(a, op, s, target.CondEQ, asm.Width64)
+	case instr.REF_NE:
+		return m.compare(a, op, s, target.CondNE, asm.Width64)
+	case instr.STRUCT_NEW_DEFAULT:
+		return m.reserve(a, op, s, 0)
+	case instr.ARRAY_NEW_DEFAULT:
+		return m.reserve(a, op, s, 1)
 	case instr.STRUCT_GET:
 		return m.structGet(a, op, s)
 	case instr.STRUCT_SET:
@@ -856,18 +872,29 @@ func (m *Machine) compare(a *asm.Assembler, op ssa.Operation, s compile.Site, co
 	if !has(op, 2, 1) {
 		return false
 	}
-	x, y, dst := s.Reg(op.Args[0]), s.Reg(op.Args[1]), s.Reg(op.Results[0])
-	if !match(x.Type(), width, x, y) || !match(asm.RegTypeInt, asm.Width32, dst) {
+	x, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
+	if !match(x.Type(), width, x) || !match(asm.RegTypeInt, asm.Width32, dst) {
 		return false
 	}
-	switch x.Type() {
-	case asm.RegTypeFloat:
-
+	switch n, ok := immediate(s, op.Args[1], width); {
+	case x.Type() == asm.RegTypeFloat:
+		y := s.Reg(op.Args[1])
+		if !match(asm.RegTypeFloat, width, y) {
+			return false
+		}
 		a.Emit(target.FCMP(x, y))
-	case asm.RegTypeInt:
-		a.Emit(target.CMP(x, y))
+	case ok && n >= 0:
+		a.Emit(target.CMPI(x, uint16(n)))
+	case ok && signed(cond):
+		// CMN x, c leaves the flags of x - (-c) but its carry, which only an
+		// unsigned condition reads.
+		a.Emit(target.CMNI(x, uint16(-n)))
 	default:
-		return false
+		y := s.Reg(op.Args[1])
+		if !match(asm.RegTypeInt, width, y) {
+			return false
+		}
+		a.Emit(target.CMP(x, y))
 	}
 	m.set(a, s, op.Results[0], dst, cond)
 	return true
@@ -1046,6 +1073,66 @@ func (m *Machine) stringLen(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 	return true
 }
 
+// stringEq compares two strings' bytes, as threaded STRING_EQ and STRING_NE
+// do: a slot holding anything else, null included, is the operation's own
+// type mismatch, a trap. Interning is gone, so equal contents may sit behind
+// different refs: unequal lengths differ, one shared data pointer is equal,
+// and otherwise a word loop compares 8 bytes while that many remain and a
+// byte loop the tail. It only loads, so no Go pointer is written. want is the
+// result for equal strings: true for STRING_EQ, false for STRING_NE.
+func (m *Machine) stringEq(a *asm.Assembler, op ssa.Operation, s compile.Site, want bool) bool {
+	if !has(op, 2, 1) {
+		return false
+	}
+	var data, size, ptr [2]asm.VReg
+	for i := range data {
+		addr := m.heap(a, s.Reg(op.Args[i]))
+		a.Emit(target.LDR(target.X16, addr, 0))
+		expect(a, uint64(jit.Itab(types.String(""))), s.Trap())
+		data[i], size[i], ptr[i] = m.vreg(), m.vreg(), m.vreg()
+		a.Emit(
+			target.LDR(data[i], addr, int16(jit.OffsetData)),
+			target.LDR(size[i], data[i], int16(jit.OffsetStringLen)),
+			target.LDR(ptr[i], data[i], 0),
+		)
+	}
+	yes, no, done, words, bytes := a.Label(), a.Label(), a.Label(), a.Label(), a.Label()
+	a.Emit(
+		target.CMP(size[0], size[1]), target.BCondLabel(target.OpBNE, no),
+		target.CMP(ptr[0], ptr[1]), target.BCondLabel(target.OpBEQ, yes),
+	)
+	a.Bind(words)
+	a.Emit(
+		target.CMPI(size[0], 8), target.BCondLabel(target.OpBCC, bytes),
+		target.LDR(target.X16, ptr[0], 0), target.LDR(target.X17, ptr[1], 0),
+		target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, no),
+		target.ADDI(ptr[0], ptr[0], 8), target.ADDI(ptr[1], ptr[1], 8),
+		target.SUBI(size[0], size[0], 8), target.BLabel(words),
+	)
+	a.Bind(bytes)
+	a.Emit(
+		target.CBZLabel(size[0], yes),
+		target.LDRB(target.X16, ptr[0], 0), target.LDRB(target.X17, ptr[1], 0),
+		target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, no),
+		target.ADDI(ptr[0], ptr[0], 1), target.ADDI(ptr[1], ptr[1], 1),
+		target.SUBI(size[0], size[0], 1), target.BLabel(bytes),
+	)
+	dst := s.Reg(op.Results[0])
+	flag := func(equal bool) uint64 {
+		if equal == want {
+			return 1
+		}
+		return 0
+	}
+	a.Bind(yes)
+	a.Emit(target.LDI(dst, flag(true))...)
+	a.Emit(target.BLabel(done))
+	a.Bind(no)
+	a.Emit(target.LDI(dst, flag(false))...)
+	a.Bind(done)
+	return true
+}
+
 // arrayGet loads the element at a bounds-checked index off a guarded array.
 // A ref element is retained, matching interp.(*Interpreter).arrayGet.
 func (m *Machine) arrayGet(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
@@ -1058,7 +1145,7 @@ func (m *Machine) arrayGet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 	}
 	ptr, ln := m.elements(a, s, op.Args[0], shape)
 	dst := s.Reg(op.Results[0])
-	switch width(shape.Kind) {
+	switch stride(shape.Kind) {
 	case 1:
 		at := m.element(a, s, op, ptr, ln, 0)
 		if shape.Kind == types.KindI8 {
@@ -1090,7 +1177,7 @@ func (m *Machine) arraySet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 	}
 	ptr, ln := m.elements(a, s, op.Args[0], shape)
 	val := s.Reg(op.Args[2])
-	switch width(shape.Kind) {
+	switch stride(shape.Kind) {
 	case 1:
 		at := m.element(a, s, op, ptr, ln, 0)
 		if shape.Kind == types.KindI1 && s.Type(op.Args[2]).Kind() != types.KindI1 {
@@ -1117,6 +1204,53 @@ func (m *Machine) arraySet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 			a.Emit(at.row(target.STR, target.STRR, val))
 		}
 	}
+	return true
+}
+
+// reserve takes the default object of a type from the type's bin, the last
+// of its N boxed refs, and lowers N: a ref native code takes is its alone, with
+// count 1, so neither a count nor a Go pointer is written. An empty bin takes
+// the slow path: the interpreter builds the object and fills the bin. An array
+// type's bin holds arrays of one length, so a length operand (args is 1) that
+// is not that length, a negative one included, bridges too. The type index is the
+// bytecode operand, and the interpreter sizes the table to the program's
+// types, which verification bounds it by.
+func (m *Machine) reserve(a *asm.Assembler, op ssa.Operation, s compile.Site, args int) bool {
+	index, ok := s.Operand()
+	if !has(op, args, 1) || !ok {
+		return false
+	}
+	empty, resume := s.Bridge()
+
+	entry, n, refs := m.vreg(), m.vreg(), m.vreg()
+	a.Emit(target.LDR(entry, target.Ctx, int16(jit.OffsetBins)))
+	at := index * int(jit.SizeofBin)
+	if at+int(jit.OffsetBinLen) > 8*imm12 {
+		a.Emit(target.LDI(target.X16, uint64(at))...)
+		a.Emit(target.ADD(entry, entry, target.X16))
+		at = 0
+	}
+	a.Emit(
+		target.LDR(n, entry, int16(at+int(jit.OffsetBinN))),
+		target.CBZLabel(n, empty),
+	)
+	if args == 1 {
+		length, held := m.vreg(), m.vreg()
+		a.Emit(
+			target.SXTW(length, s.Reg(op.Args[0])),
+			target.LDR(held, entry, int16(at+int(jit.OffsetBinLen))),
+			target.CMP(length, held),
+			target.BCondLabel(target.OpBNE, empty),
+		)
+	}
+	a.Emit(
+		target.SUBI(n, n, 1),
+		target.STR(n, entry, int16(at+int(jit.OffsetBinN))),
+		target.LDR(refs, entry, int16(at)),
+	)
+	taken := m.offset(a, refs, n, 3)
+	a.Emit(target.LDR(s.Reg(op.Results[0]), taken, 0))
+	a.Bind(resume)
 	return true
 }
 
@@ -1341,6 +1475,60 @@ func (m *Machine) vreg() asm.VReg {
 func (m *Machine) ivreg(width asm.RegWidth) asm.VReg {
 	m.temp--
 	return asm.NewVReg(m.temp, asm.RegTypeInt, width)
+}
+
+// arith lowers add or sub at width. A constant operand within imm12 becomes
+// an immediate, a negative one through the opposite operation; only add
+// takes it first.
+func arith(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth, add bool) bool {
+	if !has(op, 2, 1) {
+		return false
+	}
+	src, k := op.Args[0], op.Args[1]
+	n, ok := immediate(s, k, width)
+	if !ok && add {
+		src, k = k, src
+		n, ok = immediate(s, k, width)
+	}
+	if !ok {
+		if add {
+			return binary(a, op, s, target.ADD)
+		}
+		return binary(a, op, s, target.SUB)
+	}
+	x, dst := s.Reg(src), s.Reg(op.Results[0])
+	if !match(asm.RegTypeInt, width, x, dst) {
+		return false
+	}
+	if add == (n >= 0) {
+		a.Emit(target.ADDI(dst, x, uint16(max(n, -n))))
+	} else {
+		a.Emit(target.SUBI(dst, x, uint16(max(n, -n))))
+	}
+	return true
+}
+
+// signed reports whether cond reads no carry flag, so CMN stands for CMP.
+func signed(cond uint8) bool {
+	switch cond {
+	case target.CondEQ, target.CondNE, target.CondLT, target.CondGT, target.CondLE, target.CondGE:
+		return true
+	}
+	return false
+}
+
+// immediate reports the constant v as a signed number at width when its
+// magnitude fits one imm12 field.
+func immediate(s compile.Site, v ssa.Value, width asm.RegWidth) (int64, bool) {
+	word, ok := s.Const(v)
+	if !ok {
+		return 0, false
+	}
+	n := int64(word)
+	if width == asm.Width32 {
+		n = int64(int32(word))
+	}
+	return n, n >= -imm12 && n <= imm12
 }
 
 func binary(a *asm.Assembler, op ssa.Operation, s compile.Site, emit func(dst, src1, src2 asm.Reg) asm.Instruction) bool {

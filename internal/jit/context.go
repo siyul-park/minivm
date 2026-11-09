@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	"github.com/siyul-park/minivm/internal/asm"
+	"github.com/siyul-park/minivm/internal/asm/host"
 )
 
 // Context is the runtime state shared by native code and the interpreter.
@@ -29,6 +30,9 @@ type Context struct {
 	Entries uintptr
 	Top     uintptr
 	FB      uintptr
+	// Bins is the base of the Bin table, one entry per type index: the
+	// default objects Go built ahead for native code to take.
+	Bins uintptr
 	// Upvals is the upvals base of the activation being entered, 0 for none:
 	// the interpreter writes it before an OSR Enter and a native closure call
 	// before its branch; only a prologue reads it.
@@ -51,6 +55,18 @@ type Record struct {
 	Exit uint64
 }
 
+// Bin is one type's default objects built ahead of native code: Refs is
+// the base of N boxed refs, each an object of count 1 that only native code
+// may take, last first. Native code lowers N and takes Refs[N]; Go alone
+// writes Refs and raises N, so native code never writes a Go pointer or a
+// count. Len is the length of every array a bin of an array type holds,
+// which native code compares with the length it is asked for.
+type Bin struct {
+	Refs uintptr
+	N    int64
+	Len  int64
+}
+
 // Trap is how native code last left.
 type Trap uint64
 
@@ -66,9 +82,10 @@ const (
 	TrapBridge
 )
 
-// Convention is how many values a function passes or returns in registers
-// (X0, X1 on ARM64); more travel through its VM frame. Context.Results
-// stages that many words.
+// Convention is how many values a native function passes or returns in
+// registers; more travel through its VM frame. It is VM ABI policy shared by
+// every backend: each compile.Machine picks which registers carry them.
+// Context.Results stages that many words.
 const Convention = 2
 
 // Offsets of the Context fields native code writes before an exit.
@@ -82,12 +99,17 @@ const (
 	OffsetEntries = unsafe.Offsetof(Context{}.Entries)
 	OffsetTop     = unsafe.Offsetof(Context{}.Top)
 	OffsetFB      = unsafe.Offsetof(Context{}.FB)
+	OffsetBins    = unsafe.Offsetof(Context{}.Bins)
 	OffsetUpvals  = unsafe.Offsetof(Context{}.Upvals)
 	OffsetDepth   = unsafe.Offsetof(Context{}.Depth)
 	OffsetLimit   = unsafe.Offsetof(Context{}.Limit)
 	OffsetBudget  = unsafe.Offsetof(Context{}.Budget)
 	OffsetResults = unsafe.Offsetof(Context{}.Results)
 	OffsetRecords = unsafe.Offsetof(Context{}.Records)
+
+	SizeofBin    = unsafe.Sizeof(Bin{})
+	OffsetBinN   = unsafe.Offsetof(Bin{}.N)
+	OffsetBinLen = unsafe.Offsetof(Bin{}.Len)
 
 	RecordFB   = unsafe.Offsetof(Record{}.FB)
 	RecordSP   = unsafe.Offsetof(Record{}.SP)
@@ -103,7 +125,7 @@ var _ [0]struct{} = [unsafe.Offsetof(Context{}.State)]struct{}{}
 // and reports how it left. Anything but TrapReturn leaves it suspended for
 // Resume.
 func Enter(code uintptr, ctx *Context) Trap {
-	if !asm.Enter(code, &ctx.State) {
+	if !(host.Arch{}).Enter(code, &ctx.State) {
 		return TrapReturn
 	}
 	return ctx.Trap()
@@ -111,7 +133,7 @@ func Enter(code uintptr, ctx *Context) Trap {
 
 // Resume continues the suspended activation and reports how it left next.
 func Resume(ctx *Context) Trap {
-	if !asm.Resume(&ctx.State) {
+	if !(host.Arch{}).Resume(&ctx.State) {
 		return TrapReturn
 	}
 	return ctx.Trap()
@@ -119,7 +141,7 @@ func Resume(ctx *Context) Trap {
 
 // NewContext returns a context owning a native stack of size bytes.
 func NewContext(size int) (*Context, error) {
-	s, err := asm.NewState(size)
+	s, err := asm.NewState(host.Arch{}, size)
 	if err != nil {
 		return nil, err
 	}

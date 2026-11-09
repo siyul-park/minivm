@@ -48,46 +48,6 @@ func init() {
 	}
 }
 
-// ReadU8 returns v truncated to 8 bits.
-func ReadU8(v uint64) int {
-	return int(uint8(v))
-}
-
-// ReadI8 returns v sign-extended from 8 bits.
-func ReadI8(v uint64) int {
-	return int(int8(uint8(v)))
-}
-
-// ReadU16 returns v truncated to 16 bits.
-func ReadU16(v uint64) int {
-	return int(uint16(v))
-}
-
-// ReadI16 returns v sign-extended from 16 bits.
-func ReadI16(v uint64) int {
-	return int(int16(uint16(v)))
-}
-
-// ReadU32 returns v truncated to 32 bits.
-func ReadU32(v uint64) int {
-	return int(uint32(v))
-}
-
-// ReadI32 returns v sign-extended from 32 bits.
-func ReadI32(v uint64) int {
-	return int(int32(uint32(v)))
-}
-
-// ParseU8 reads an unsigned 8-bit value from code[offset:].
-func ParseU8(code []byte, offset int) int {
-	return int(code[offset])
-}
-
-// ParseI8 reads a signed 8-bit value from code[offset:].
-func ParseI8(code []byte, offset int) int {
-	return int(int8(code[offset]))
-}
-
 // ParseI16 reads a little-endian signed 16-bit value from code[offset:].
 func ParseI16(code []byte, offset int) int {
 	return int(int16(uint16(ParseU16(code, offset))))
@@ -97,19 +57,6 @@ func ParseI16(code []byte, offset int) int {
 func ParseU16(code []byte, offset int) int {
 	return int(uint16(code[offset]) |
 		uint16(code[offset+1])<<8)
-}
-
-// ParseI32 reads a little-endian signed 32-bit value from code[offset:].
-func ParseI32(code []byte, offset int) int {
-	return int(int32(uint32(ParseU32(code, offset))))
-}
-
-// ParseU32 reads a little-endian unsigned 32-bit value from code[offset:].
-func ParseU32(code []byte, offset int) int {
-	return int(uint32(code[offset]) |
-		uint32(code[offset+1])<<8 |
-		uint32(code[offset+2])<<16 |
-		uint32(code[offset+3])<<24)
 }
 
 // ParseAll parses instructions and labels, then resolves symbolic branches with

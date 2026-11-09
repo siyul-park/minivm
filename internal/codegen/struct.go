@@ -31,7 +31,7 @@ func structGet(state *state, current step) (value, error) {
 		if !ok {
 			return value{}, fmt.Errorf("unsupported struct field kind %s", kind)
 		}
-		body := []jen.Code{overflow()}
+		body := []jen.Code{overflowAt(0)}
 		body = append(body, container.check...)
 		body = append(body, container.body...)
 		body = append(body,
