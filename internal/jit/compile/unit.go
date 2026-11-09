@@ -1,6 +1,7 @@
 package compile
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/siyul-park/minivm/internal/jit"
@@ -29,8 +30,17 @@ type Unit struct {
 }
 
 // Compile translates u at its IP, optimizes it for its tier, and lowers
-// it with m.
+// it with m. A lowering that finds an inlined operation it cannot give its
+// own state (ErrInlined) is compiled again without inlining.
 func Compile(u Unit, m Machine) (*jit.Code, error) {
+	c, err := build(u, m, true)
+	if errors.Is(err, ErrInlined) {
+		return build(u, m, false)
+	}
+	return c, err
+}
+
+func build(u Unit, m Machine, inline bool) (*jit.Code, error) {
 	f, members, err := transform.Translate(u.Module, u.Profiles, u.Address, u.Function, u.IP)
 	if err != nil {
 		return nil, fmt.Errorf("compile: translate: %w", err)
@@ -42,7 +52,7 @@ func Compile(u Unit, m Machine) (*jit.Code, error) {
 		return nil, fmt.Errorf("compile: verify: %w", err)
 	}
 
-	stages := passes(u.Tier, u.Profiles)
+	stages := passes(u, inline)
 	if stages == nil {
 		return nil, fmt.Errorf("%w: tier %d", ErrUnsupported, u.Tier)
 	}
@@ -90,14 +100,19 @@ func completion(f *ssa.Function) int {
 	return 0
 }
 
-// passes is the tier's pipeline. Optimized also drops the bounds checks no
-// refuted guard keeps (profiles Profile.Refuted).
-func passes(tier jit.Tier, profiles transform.Profiles) []pass.Pass[*ssa.Function] {
-	switch tier {
+// passes is the tier's pipeline. Optimized also inlines leaf callees, when
+// inline, and drops the bounds checks no refuted guard keeps (profiles
+// Profile.Refuted).
+func passes(u Unit, inline bool) []pass.Pass[*ssa.Function] {
+	switch u.Tier {
 	case jit.Baseline:
 		return transform.O1()
 	case jit.Optimized:
-		return transform.O3(transform.NewBCEPass(profiles))
+		stages := transform.O3(transform.NewBCEPass(u.Profiles))
+		if inline {
+			stages = append([]pass.Pass[*ssa.Function]{transform.NewInlinePass(u.Module)}, stages...)
+		}
+		return stages
 	default:
 		return nil
 	}

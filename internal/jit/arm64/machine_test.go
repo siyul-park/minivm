@@ -329,7 +329,7 @@ func TestNew(t *testing.T) {
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		stack := []types.Boxed{0}
-		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, []types.Type{types.TypeI32()}), nil, 0, false)
+		code, exits := lower(t, arm64.New(), b.Build(), &types.Function{Typ: &types.FunctionType{}, Locals: []types.Type{types.TypeI32()}, Code: instr.Marshal([]instr.Instruction{instr.MustNew(instr.MAP_GET)})}, nil, 0, false)
 		ctx := enter(t, stack)
 
 		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))

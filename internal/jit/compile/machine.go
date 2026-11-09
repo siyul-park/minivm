@@ -175,5 +175,12 @@ type Call struct {
 	Generic bool
 }
 
-// ErrUnsupported reports SSA the backend does not lower.
-var ErrUnsupported = errors.New("unsupported lowering")
+var (
+	// ErrUnsupported reports SSA the backend does not lower.
+	ErrUnsupported = errors.New("unsupported lowering")
+	// ErrInlined reports a bridge or callout whose state does not name its own
+	// operation: the interpreter would serve the opcode at the state's IP, so
+	// the operation must not be lowered with that state (inlined code carries
+	// its caller's).
+	ErrInlined = errors.New("bridge state names another operation")
+)

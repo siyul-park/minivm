@@ -838,12 +838,16 @@ func (l *lowering) exit(k jit.Kind) int {
 	f := &e.Frame
 	*f = jit.Frame{Address: frame.Address, IP: frame.IP, Returns: frame.Returns}
 	stack := frame.Stack
+	code := l.fn.Code
+	if member := l.objects[f.Address].Function; f.Address != l.address && member != nil {
+		code = member.Code
+	}
+	if k == jit.ExitBridge && (f.IP >= len(code) || instr.Instruction(code[f.IP:]).Opcode() != l.op.Code) {
+		l.fail(fmt.Errorf("%w: bridge of %s at ip %d", ErrInlined, instr.TypeOf(l.op.Code).Mnemonic, f.IP))
+		return id
+	}
 	if k == jit.ExitCall {
 		stack = stack[:len(stack)-len(l.op.Args)]
-		code := l.fn.Code
-		if member := l.objects[f.Address].Function; f.Address != l.address && member != nil {
-			code = member.Code
-		}
 		f.IP += instr.Instruction(code[f.IP:]).Width()
 	}
 	if len(stack) > 0 {

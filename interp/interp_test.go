@@ -2883,6 +2883,57 @@ func TestWithThreshold(t *testing.T) {
 		require.ErrorIs(t, run(0), interp.ErrDivideByZero)
 	})
 
+	t.Run("runs a call of a leaf callee as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		for _, indirect := range []bool{false, true} {
+			prog := leafSumProgram(t, indirect)
+			run := func(vm *interp.Interpreter, divisor int32) (int32, error) {
+				vm.Reset()
+				require.NoError(t, vm.SetGlobal(0, types.BoxI32(divisor)))
+				if indirect {
+					require.NoError(t, vm.SetGlobal(1, types.BoxRef(1)))
+				}
+				if err := vm.Run(context.Background()); err != nil {
+					return 0, err
+				}
+				v, err := vm.Pop()
+				require.NoError(t, err)
+				return int32(v.(types.I32)), nil
+			}
+			threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+			defer threaded.Close()
+			profiler := prof.New()
+			vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+			defer vm.Close()
+
+			// Both the sum and its caller graduate to Optimized after 1024 entries.
+			poll(t, func() bool {
+				for range 1100 {
+					_, err := run(vm, 1)
+					require.NoError(t, err)
+				}
+				vm.Flush()
+				compiled, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+				return compiled >= 2
+			})
+
+			// A zero divisor traps inside the leaf; native code must raise the
+			// same error from the callee, then keep running afterwards.
+			for range 40 {
+				for _, divisor := range []int32{1, 3, -7, 5, 0, 2, 0, 4, 9} {
+					want, wantErr := run(threaded, divisor)
+					got, gotErr := run(vm, divisor)
+					require.Equal(t, wantErr, gotErr, "indirect=%v divisor=%d", indirect, divisor)
+					require.Equal(t, want, got, "indirect=%v divisor=%d", indirect, divisor)
+				}
+				time.Sleep(time.Millisecond)
+			}
+			vm.Flush()
+			require.Positive(t, nativeEntries(profiler))
+		}
+	})
+
 	t.Run("reports a fused trap at the faulting instruction in every tier", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 
@@ -3718,7 +3769,13 @@ func TestWithThreshold(t *testing.T) {
 		b.Emit(instr.I32_CONST, 0)
 		code, err := b.Assemble()
 		require.NoError(t, err)
-		prog := program.New(code, program.WithTypes(record), program.WithConstants(incFunction()))
+		// The callee is too large to inline, so its calls stay calls.
+		inc := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
+		for range 40 {
+			inc.Emit(instr.NOP)
+		}
+		inc.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.RETURN)
+		prog := program.New(code, program.WithTypes(record), program.WithConstants(inc.MustBuild()))
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
@@ -3968,7 +4025,7 @@ func TestWithThreshold(t *testing.T) {
 			}
 			vm.Reset()
 			vm.Flush()
-			entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+			entries = nativeEntries(profiler)
 			return entries > 0
 		})
 		require.NoError(t, runErr)
@@ -8426,7 +8483,7 @@ func TestWithThreshold(t *testing.T) {
 					}
 					vm.Reset()
 					vm.Flush()
-					entries, _ = profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+					entries = nativeEntries(profiler)
 					deopts, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
 					return entries > 0
 				})

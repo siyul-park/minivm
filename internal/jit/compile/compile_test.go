@@ -371,13 +371,13 @@ func TestLower(t *testing.T) {
 		entry := b.Block()
 		m1 := constant(b, entry, types.BoxRef(1))
 		key := constant(b, entry, types.BoxI32(2))
-		at := state(b, entry, 7, ssa.Operand{Value: m1, Owned: true}, ssa.Operand{Value: key})
+		at := state(b, entry, 0, ssa.Operand{Value: m1, Owned: true}, ssa.Operand{Value: key})
 		got := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_GET, Args: []ssa.Value{m1, key}, State: at, Results: []ssa.Value{got}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
-		assembly, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		assembly, err := compile.Lower(b.Build(), m, function(0, 0, instr.MustNew(instr.MAP_GET)), nil, 0, false, true)
 		require.NoError(t, err)
 		exits := assembly.Exits
 		require.Equal(t, []string{"prologue", "const", "const", "exit 0 1", "results", "return", "epilogue", "enter"}, m.calls)
@@ -386,12 +386,26 @@ func TestLower(t *testing.T) {
 			Kind: jit.ExitBridge,
 			Code: instr.MAP_GET,
 			Pops: 2,
-			Frame: jit.Frame{Address: 1, IP: 7, Returns: 1, Stack: []jit.Operand{
+			Frame: jit.Frame{Address: 1, IP: 0, Returns: 1, Stack: []jit.Operand{
 				{Value: jit.Value{Kind: types.KindRef, Loc: asm.Loc{Reg: arm64.X0}}, Owned: true},
 				{Value: jit.Value{Kind: types.KindI32, Loc: asm.Loc{Reg: arm64.W1}}},
 			}},
 			Results: []types.Kind{types.KindRef},
 		}}, exits)
+	})
+
+	t.Run("rejects a bridge whose state names another opcode", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		m1 := constant(b, entry, types.BoxRef(1))
+		key := constant(b, entry, types.BoxI32(2))
+		at := state(b, entry, 0, ssa.Operand{Value: m1}, ssa.Operand{Value: key})
+		got := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_GET, Args: []ssa.Value{m1, key}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+
+		_, err := compile.Lower(b.Build(), new(machine), function(0, 0, instr.MustNew(instr.CALL)), nil, 0, false, true)
+		require.ErrorIs(t, err, compile.ErrInlined)
 	})
 
 	t.Run("places a resumable bridge stub and reads the operation's operand off its bytecode", func(t *testing.T) {
@@ -419,12 +433,12 @@ func TestLower(t *testing.T) {
 		m1 := constant(b, entry, types.BoxRef(1))
 		key := constant(b, entry, types.BoxI32(2))
 		val := constant(b, entry, types.BoxRef(3))
-		at := state(b, entry, 7, ssa.Operand{Value: m1}, ssa.Operand{Value: key}, ssa.Operand{Value: val, Owned: true})
+		at := state(b, entry, 0, ssa.Operand{Value: m1}, ssa.Operand{Value: key}, ssa.Operand{Value: val, Owned: true})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_SET, Args: []ssa.Value{m1, key, val}, State: at})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
 
 		m := new(machine)
-		assembly, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		assembly, err := compile.Lower(b.Build(), m, function(0, 0, instr.MustNew(instr.MAP_SET)), nil, 0, false, true)
 		require.NoError(t, err)
 		exits := assembly.Exits
 		require.Len(t, exits, 1)
