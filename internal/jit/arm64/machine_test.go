@@ -38,7 +38,7 @@ type typed struct {
 
 // known is regs where an OpConst defines each value of words.
 type known struct {
-	regs
+	compile.Site
 	words map[ssa.Value]uint64
 }
 
@@ -1581,6 +1581,122 @@ func TestMachine_Lower(t *testing.T) {
 		})
 	}
 
+	// immediates are add, sub and compare rows over a constant operand: the
+	// constant becomes an immediate only when it fits imm12 at the op's width.
+	for _, c := range []struct {
+		name string
+		typ  ssa.Type
+		word uint64
+		// code is the opcode lowered, with the constant second unless first.
+		code  instr.Opcode
+		first bool
+		fuse  bool
+		rows  func(x, y asm.VReg) []asm.Instruction
+	}{
+		{"i32.add 7", i32, 7, instr.I32_ADD, false, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.ADDI(reg(i32, 3), x, 7)} }},
+		{"i32.add 0", i32, 0, instr.I32_ADD, false, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.ADDI(reg(i32, 3), x, 0)} }},
+		{"i32.add 4095", i32, 4095, instr.I32_ADD, false, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.ADDI(reg(i32, 3), x, 4095)} }},
+		{"i32.add 4096", i32, 4096, instr.I32_ADD, false, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.ADD(reg(i32, 3), x, y)} }},
+		{"i32.add 1<<20", i32, 1 << 20, instr.I32_ADD, false, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.ADD(reg(i32, 3), x, y)} }},
+		{"i32.add -1 wraps at 32 bits", i32, 0xFFFFFFFF, instr.I32_ADD, false, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.SUBI(reg(i32, 3), x, 1)} }},
+		{"i32.add -4095", i32, 0xFFFFF001, instr.I32_ADD, false, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.SUBI(reg(i32, 3), x, 4095)} }},
+		{"i32.add -4096", i32, 0xFFFFF000, instr.I32_ADD, false, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.ADD(reg(i32, 3), x, y)} }},
+		{"i32.add first", i32, 7, instr.I32_ADD, true, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.ADDI(reg(i32, 3), y, 7)} }},
+		{"i32.sub 7", i32, 7, instr.I32_SUB, false, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.SUBI(reg(i32, 3), x, 7)} }},
+		{"i32.sub -1 wraps at 32 bits", i32, 0xFFFFFFFF, instr.I32_SUB, false, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.ADDI(reg(i32, 3), x, 1)} }},
+		{"i32.sub 4096", i32, 4096, instr.I32_SUB, false, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.SUB(reg(i32, 3), x, y)} }},
+		{"i32.sub first", i32, 7, instr.I32_SUB, true, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.SUB(reg(i32, 3), x, y)} }},
+		{"i64.add 4095", i64, 4095, instr.I64_ADD, false, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.ADDI(reg(i64, 3), x, 4095)} }},
+		{"i64.add 4096", i64, 4096, instr.I64_ADD, false, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.ADD(reg(i64, 3), x, y)} }},
+		{"i64.add 0xFFFFFFFF is not -1", i64, 0xFFFFFFFF, instr.I64_ADD, false, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.ADD(reg(i64, 3), x, y)} }},
+		{"i64.add -1", i64, math.MaxUint64, instr.I64_ADD, false, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.SUBI(reg(i64, 3), x, 1)} }},
+		{"i64.sub -4095", i64, 0xFFFFFFFFFFFFF001, instr.I64_SUB, false, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.ADDI(reg(i64, 3), x, 4095)} }},
+		{"i64.sub -4096", i64, 0xFFFFFFFFFFFFF000, instr.I64_SUB, false, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.SUB(reg(i64, 3), x, y)} }},
+		{"i64.add first", i64, 1 << 20, instr.I64_ADD, true, false, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.ADD(reg(i64, 3), x, y)} }},
+		{"i32.lt_s 2", i32, 2, instr.I32_LT_S, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMPI(x, 2), target.CSET(reg(ssa.TypeI1, 3), target.CondLT)}
+		}},
+		{"i32.lt_s 0", i32, 0, instr.I32_LT_S, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMPI(x, 0), target.CSET(reg(ssa.TypeI1, 3), target.CondLT)}
+		}},
+		{"i32.lt_s 4095", i32, 4095, instr.I32_LT_S, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMPI(x, 4095), target.CSET(reg(ssa.TypeI1, 3), target.CondLT)}
+		}},
+		{"i32.lt_s 4096", i32, 4096, instr.I32_LT_S, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMP(x, y), target.CSET(reg(ssa.TypeI1, 3), target.CondLT)}
+		}},
+		{"i32.lt_s 1<<20", i32, 1 << 20, instr.I32_LT_S, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMP(x, y), target.CSET(reg(ssa.TypeI1, 3), target.CondLT)}
+		}},
+		{"i32.lt_s -1 wraps at 32 bits", i32, 0xFFFFFFFF, instr.I32_LT_S, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMNI(x, 1), target.CSET(reg(ssa.TypeI1, 3), target.CondLT)}
+		}},
+		{"i32.ge_s -4095", i32, 0xFFFFF001, instr.I32_GE_S, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMNI(x, 4095), target.CSET(reg(ssa.TypeI1, 3), target.CondGE)}
+		}},
+		{"i32.lt_s -4096", i32, 0xFFFFF000, instr.I32_LT_S, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMP(x, y), target.CSET(reg(ssa.TypeI1, 3), target.CondLT)}
+		}},
+		{"i32.eq -1", i32, 0xFFFFFFFF, instr.I32_EQ, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMNI(x, 1), target.CSET(reg(ssa.TypeI1, 3), target.CondEQ)}
+		}},
+		{"i32.lt_u 2", i32, 2, instr.I32_LT_U, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMPI(x, 2), target.CSET(reg(ssa.TypeI1, 3), target.CondCC)}
+		}},
+		{"i32.lt_u -1 stays a register compare", i32, 0xFFFFFFFF, instr.I32_LT_U, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMP(x, y), target.CSET(reg(ssa.TypeI1, 3), target.CondCC)}
+		}},
+		{"i32.ge_u -1 stays a register compare", i32, 0xFFFFFFFF, instr.I32_GE_U, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMP(x, y), target.CSET(reg(ssa.TypeI1, 3), target.CondCS)}
+		}},
+		{"i32.lt_s first", i32, 2, instr.I32_LT_S, true, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMP(x, y), target.CSET(reg(ssa.TypeI1, 3), target.CondLT)}
+		}},
+		{"i64.gt_s 4095", i64, 4095, instr.I64_GT_S, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMPI(x, 4095), target.CSET(reg(ssa.TypeI1, 3), target.CondGT)}
+		}},
+		{"i64.gt_s 0xFFFFFFFF is not -1", i64, 0xFFFFFFFF, instr.I64_GT_S, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMP(x, y), target.CSET(reg(ssa.TypeI1, 3), target.CondGT)}
+		}},
+		{"i64.le_s -1", i64, math.MaxUint64, instr.I64_LE_S, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMNI(x, 1), target.CSET(reg(ssa.TypeI1, 3), target.CondLE)}
+		}},
+		{"i64.ne -4096", i64, 0xFFFFFFFFFFFFF000, instr.I64_NE, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMP(x, y), target.CSET(reg(ssa.TypeI1, 3), target.CondNE)}
+		}},
+		{"i64.gt_u -1 stays a register compare", i64, math.MaxUint64, instr.I64_GT_U, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMP(x, y), target.CSET(reg(ssa.TypeI1, 3), target.CondHI)}
+		}},
+		{"i64.le_u 9", i64, 9, instr.I64_LE_U, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMPI(x, 9), target.CSET(reg(ssa.TypeI1, 3), target.CondLS)}
+		}},
+		{"ref.eq 3", ssa.TypeRef, 3, instr.REF_EQ, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMPI(x, 3), target.CSET(reg(ssa.TypeI1, 3), target.CondEQ)}
+		}},
+		{"ref.ne boxed", ssa.TypeRef, uint64(types.BoxRef(5)), instr.REF_NE, false, false, func(x, y asm.VReg) []asm.Instruction {
+			return []asm.Instruction{target.CMP(x, y), target.CSET(reg(ssa.TypeI1, 3), target.CondNE)}
+		}},
+		{"i32.lt_s 2 fused", i32, 2, instr.I32_LT_S, false, true, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.CMPI(x, 2)} }},
+		{"i32.lt_s -1 fused", i32, 0xFFFFFFFF, instr.I32_LT_S, false, true, func(x, y asm.VReg) []asm.Instruction { return []asm.Instruction{target.CMNI(x, 1)} }},
+	} {
+		// The constant is the second operand, or the first; add and sub
+		// keep their operand type, a comparison yields i1.
+		operand, result := ssa.Value(2), ssa.TypeI1
+		if c.first {
+			operand = 1
+		}
+		if slices.Contains([]instr.Opcode{instr.I32_ADD, instr.I32_SUB, instr.I64_ADD, instr.I64_SUB}, c.code) {
+			result = c.typ
+		}
+		tests = append(tests, test{
+			name:   c.name + " immediate",
+			regs:   regs{1: c.typ, 2: c.typ, 3: result},
+			consts: map[ssa.Value]uint64{operand: c.word},
+			op:     exec(c.code, 1, 2), fuse: c.fuse,
+			rows: c.rows(reg(c.typ, 1), reg(c.typ, 2)), lower: true,
+		})
+	}
+
 	x := func(v ssa.Value) asm.VReg { return reg(i64, v) }
 	w := func(v ssa.Value) asm.VReg { return reg(i32, v) }
 	tests = append(tests, []test{
@@ -2738,7 +2854,7 @@ func TestMachine_Lower(t *testing.T) {
 				s = fused{tt.regs}
 			}
 			if tt.consts != nil {
-				s = known{tt.regs, tt.consts}
+				s = known{s, tt.consts}
 			}
 			if tt.index != nil {
 				s = typed{tt.regs, *tt.index}

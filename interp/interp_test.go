@@ -4757,6 +4757,86 @@ func TestWithThreshold(t *testing.T) {
 		}
 
 		{
+			const limit = 10000
+			ops32 := []instr.Opcode{
+				instr.I32_ADD, instr.I32_SUB, instr.I32_EQ, instr.I32_NE,
+				instr.I32_LT_S, instr.I32_GT_S, instr.I32_LE_S, instr.I32_GE_S,
+				instr.I32_LT_U, instr.I32_GT_U, instr.I32_LE_U, instr.I32_GE_U,
+			}
+			ops64 := []instr.Opcode{
+				instr.I64_ADD, instr.I64_SUB, instr.I64_EQ, instr.I64_NE,
+				instr.I64_LT_S, instr.I64_GT_S, instr.I64_LE_S, instr.I64_GE_S,
+				instr.I64_LT_U, instr.I64_GT_U, instr.I64_LE_U, instr.I64_GE_U,
+			}
+			edges := []int64{0, 1, -1, 4095, 4096, -4095, -4096, math.MinInt32, math.MaxInt32}
+			wide := append([]int64{1 << 32, 1<<32 - 1, math.MinInt64, math.MaxInt64}, edges...)
+
+			// Locals: 0 index, 1 fold, 2 i32 operand, 3 i32 operand across the sign
+			// bit, 4 and 5 their i64 extensions. Wide i64 results stay on the
+			// stack and fold to i32 halves, so no box outlives the run.
+			for _, order := range []string{"constant second", "constant first"} {
+				t.Run("folds immediate-range constants as threaded does, "+order, func(t *testing.T) {
+					b := instr.NewBuilder()
+					loop, done := b.Label(), b.Label()
+					b.Bind(loop)
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, limit).Emit(instr.I32_GE_S).BrIf(done)
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(limit/2))).Emit(instr.I32_SUB).Emit(instr.LOCAL_SET, 2)
+					b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 0x80000000).Emit(instr.I32_XOR).Emit(instr.LOCAL_SET, 3)
+					b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_TO_I64_S).Emit(instr.LOCAL_SET, 4)
+					b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_TO_I64_S).Emit(instr.LOCAL_SET, 5)
+					operand := func(c int64, x int, wide bool, op instr.Opcode) {
+						push := func() {
+							if wide {
+								b.Emit(instr.I64_CONST, uint64(c))
+							} else {
+								b.Emit(instr.I32_CONST, uint64(uint32(c)))
+							}
+						}
+						if order == "constant first" {
+							push()
+						}
+						b.Emit(instr.LOCAL_GET, uint64(x))
+						if order == "constant second" {
+							push()
+						}
+						b.Emit(op)
+					}
+					fold := func() {
+						b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 31).Emit(instr.I32_MUL).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+					}
+					for _, op := range ops32 {
+						for _, c := range edges {
+							for _, x := range []int{2, 3} {
+								operand(c, x, false, op)
+								fold()
+							}
+						}
+					}
+					for _, op := range ops64 {
+						for _, c := range wide {
+							for _, x := range []int{4, 5} {
+								operand(c, x, true, op)
+								if op == instr.I64_ADD || op == instr.I64_SUB {
+									b.Emit(instr.DUP).Emit(instr.I64_TO_I32)
+									fold()
+									b.Emit(instr.I64_CONST, 32).Emit(instr.I64_SHR_S).Emit(instr.I64_TO_I32)
+								}
+								fold()
+							}
+						}
+					}
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+					b.Bind(done).Emit(instr.LOCAL_GET, 1)
+					code, err := b.Assemble()
+					require.NoError(t, err)
+					prog := program.New(code, program.WithLocals(
+						types.TypeI32(), types.TypeI32(), types.TypeI32(), types.TypeI32(), types.TypeI64(), types.TypeI64()))
+					requireNative(t, prog)
+				})
+			}
+		}
+
+		{
 			for _, c := range []struct {
 				name string
 				bad  func(vm *interp.Interpreter) types.Boxed
