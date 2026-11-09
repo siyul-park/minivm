@@ -143,7 +143,7 @@ func TestNew(t *testing.T) {
 
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		require.Equal(t, types.BoxI32(43), stack[0])
-		require.Zero(t, ctx.Depth)
+		require.Zero(t, ctx.Level())
 	})
 
 	t.Run("suspends at the loop safepoint until the budget is refilled", func(t *testing.T) {
@@ -411,7 +411,7 @@ func TestNew(t *testing.T) {
 
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		require.Equal(t, types.BoxI32(55), stack[0])
-		require.Zero(t, ctx.Depth)
+		require.Zero(t, ctx.Level())
 		require.Equal(t, []int{0, 0, 1}, rc)
 	})
 
@@ -434,11 +434,11 @@ func TestNew(t *testing.T) {
 		ctx := enter(t, stack)
 		ctx.Natives = address(t, natives)
 		ctx.RC = address(t, rc)
-		ctx.Limit = 2
+		ctx.SetEdge(2)
 
 		require.Equal(t, jit.TrapBridge, jit.Enter(code+uintptr(assembly.Entry), ctx))
 		require.Equal(t, jit.ExitCall, assembly.Exits[ctx.Exit()].Kind)
-		require.Equal(t, uint64(2), ctx.Depth)
+		require.Equal(t, 2, ctx.Level())
 		require.GreaterOrEqual(t, ctx.Records[1].PC, code)
 		require.Less(t, ctx.Records[1].PC, code+uintptr(len(assembly.Bytes)))
 	})
@@ -489,7 +489,7 @@ func TestNew(t *testing.T) {
 		rc := []int{0, 0, 1}
 
 		for _, limit := range []func(ctx *jit.Context, stack []types.Boxed){
-			func(ctx *jit.Context, _ []types.Boxed) { ctx.Limit = 1 },
+			func(ctx *jit.Context, _ []types.Boxed) { ctx.SetEdge(1) },
 			func(ctx *jit.Context, stack []types.Boxed) { ctx.Top = uintptr(unsafe.Pointer(&stack[1])) },
 		} {
 			stack := make([]types.Boxed, 64)
@@ -501,7 +501,7 @@ func TestNew(t *testing.T) {
 
 			require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
 			require.Equal(t, jit.ExitCall, exits[ctx.Exit()].Kind)
-			require.Equal(t, uint64(1), ctx.Depth)
+			require.Equal(t, 1, ctx.Level())
 		}
 	})
 
@@ -668,7 +668,7 @@ func TestNew(t *testing.T) {
 
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		require.Equal(t, types.BoxI32(100), stack[0])
-		require.Zero(t, ctx.Depth)
+		require.Zero(t, ctx.Level())
 	})
 
 	t.Run("reads a sliced array across bridge and safepoint resumes that relocate Context.Heap", func(t *testing.T) {
@@ -1054,7 +1054,7 @@ func TestNew(t *testing.T) {
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		// A cleared bonus (an entry-0 prologue's mistake here) would return 2.
 		require.Equal(t, types.BoxI32(105), stack[0])
-		require.Zero(t, ctx.Depth)
+		require.Zero(t, ctx.Level())
 	})
 
 	t.Run("deopts an OSR entry's own body with the right IP and values, locals left as the interpreter set them", func(t *testing.T) {
@@ -1119,7 +1119,7 @@ func TestNew(t *testing.T) {
 		require.NoError(t, err)
 		ctx.FB = address(t, stack)
 		ctx.Top = ctx.FB + uintptr(len(stack))*unsafe.Sizeof(stack[0])
-		ctx.Limit = uint64(len(ctx.Records))
+		ctx.SetEdge(len(ctx.Records))
 		ctx.Budget = 1000
 		entries := make([]int64, at+1)
 		ctx.Entries = address(t, entries)
@@ -1147,12 +1147,9 @@ func TestMachine_Prologue(t *testing.T) {
 			target.SUBI(target.SP, target.SP, 16),
 			target.STR(target.LR, target.SP, 8),
 			{Op: uint16(target.OpSUBI), Dst: asm.Physical(target.SP), Src1: asm.Physical(target.SP), Src2: asm.Slots()},
-			target.LSLI(target.X17, target.X27, 5),
-			target.ADD(target.X17, target.Ctx, target.X17),
-			target.STR(target.X25, target.X17, int16(jit.OffsetRecords+jit.RecordFB)),
-			target.STR(target.X16, target.X17, int16(jit.OffsetRecords+jit.RecordSP)),
-			target.STR(target.LR, target.X17, int16(jit.OffsetRecords+jit.RecordPC)),
-			target.ADDI(target.X27, target.X27, 1),
+			target.STP(target.X25, target.X16, target.X27, int16(jit.RecordFB)),
+			target.STR(target.LR, target.X27, int16(jit.RecordPC)),
+			target.ADDI(target.X27, target.X27, uint16(jit.SizeofRecord)),
 			target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)),
 			target.LDR(target.X17, target.X16, 24),
 			target.ADDI(target.X17, target.X17, 1),
@@ -1177,7 +1174,7 @@ func TestMachine_Prologue(t *testing.T) {
 			target.STR(target.X16, target.X25, 24),
 			target.STR(target.XZR, target.X25, 16),
 			target.STR(target.XZR, target.X25, 32),
-		}, a.Rows()[10:])
+		}, a.Rows()[7:])
 	})
 
 	t.Run("counts entry through a register when the offset exceeds imm12", func(t *testing.T) {
@@ -1194,13 +1191,13 @@ func TestMachine_Prologue(t *testing.T) {
 			target.STR(target.X16, target.X25, 8),
 			target.MOVZ(target.X16, 0x7ff6, 48),
 			target.STR(target.X16, target.X25, 16),
-		}, a.Rows()[10:])
+		}, a.Rows()[7:])
 	})
 
 	t.Run("skips entry count", func(t *testing.T) {
 		a := asm.New(target.New())
 		arm64.New().Prologue(a, 3, false, compile.Layout{Kinds: []types.Kind{types.KindI32, types.KindI64, types.KindRef}, Zeros: []types.Boxed{types.BoxI64(0), types.BoxedNull}}, nil)
-		require.Len(t, a.Rows(), 14)
+		require.Len(t, a.Rows(), 11)
 		require.NotContains(t, a.Rows(), target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)))
 	})
 
@@ -1213,7 +1210,7 @@ func TestMachine_Prologue(t *testing.T) {
 			target.DEF(target.X1),
 			target.MOVW(args[0], target.X0),
 			target.MOV(args[1], target.X1),
-		}, a.Rows()[10:])
+		}, a.Rows()[7:])
 	})
 
 	t.Run("loads the upvals base after the register-passed parameters", func(t *testing.T) {
@@ -1224,7 +1221,7 @@ func TestMachine_Prologue(t *testing.T) {
 			target.DEF(target.X0),
 			target.MOVW(args[0], target.X0),
 			target.LDR(vr(1), target.Ctx, int16(jit.OffsetUpvals)),
-		}, a.Rows()[10:])
+		}, a.Rows()[7:])
 	})
 
 	t.Run("moves a float register-passed parameter by FMOV and an i64 by a raw 64-bit MOV", func(t *testing.T) {
@@ -1251,14 +1248,14 @@ func TestMachine_Prologue(t *testing.T) {
 				target.DEF(target.X1),
 				c.move(c.args[0], target.X0),
 				c.move(c.args[1], target.X1),
-			}, a.Rows()[10:])
+			}, a.Rows()[7:])
 		}
 	})
 }
 
 func TestMachine_Epilogue(t *testing.T) {
 	pop := []asm.Instruction{
-		target.SUBI(target.X27, target.X27, 1),
+		target.SUBI(target.X27, target.X27, uint16(jit.SizeofRecord)),
 		{Op: uint16(target.OpADDI), Dst: asm.Physical(target.SP), Src1: asm.Physical(target.SP), Src2: asm.Slots()},
 		target.LDR(target.LR, target.SP, 8),
 		target.ADDI(target.SP, target.SP, 16),
@@ -1283,7 +1280,7 @@ func TestMachine_Enter(t *testing.T) {
 		entry := asm.Label(1)
 		require.Equal(t, []asm.Instruction{
 			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
-			target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+			target.LDR(target.X27, target.Ctx, int16(jit.OffsetNext)),
 			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 			target.SUBI(target.SP, target.SP, 16),
 			target.STR(target.LR, target.SP, 8),
@@ -1305,7 +1302,7 @@ func TestMachine_Enter(t *testing.T) {
 	t.Run("boxes results by kind: a narrow one by tag in slot 0, a ref raw in slot 1, a wide one raw", func(t *testing.T) {
 		head := []asm.Instruction{
 			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
-			target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+			target.LDR(target.X27, target.Ctx, int16(jit.OffsetNext)),
 			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 			target.SUBI(target.SP, target.SP, 16),
 			target.STR(target.LR, target.SP, 8),
@@ -1345,7 +1342,7 @@ func TestMachine_Enter(t *testing.T) {
 	t.Run("loads and unboxes register-passed parameters from their slots before the body", func(t *testing.T) {
 		pin := []asm.Instruction{
 			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
-			target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+			target.LDR(target.X27, target.Ctx, int16(jit.OffsetNext)),
 			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 		}
 		call := []asm.Instruction{
@@ -3037,7 +3034,7 @@ func TestMachine_Return(t *testing.T) {
 		start := len(a.Rows())
 		m.Return(a, ssa.Terminator{Op: ssa.OpReturn}, r)
 		require.Equal(t, slices.Concat(
-			[]asm.Instruction{target.CMPI(target.X27, 1), target.BCondLabel(target.OpBNE, skip)},
+			[]asm.Instruction{target.ADDI(target.X16, target.Ctx, uint16(jit.OffsetRecords+jit.SizeofRecord)), target.CMP(target.X27, target.X16), target.BCondLabel(target.OpBNE, skip)},
 			[]asm.Instruction{target.LDR(word2, target.X25, 0)},
 			release(word2),
 			[]asm.Instruction{target.STR(target.XZR, target.X25, 0)},
@@ -3113,7 +3110,7 @@ func TestMachine_Exit(t *testing.T) {
 	rows := func(id uint64, trap jit.Trap) []asm.Instruction {
 		return slices.Concat(
 			[]asm.Instruction{
-				target.STR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+				target.STR(target.X27, target.Ctx, int16(jit.OffsetNext)),
 				target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 			},
 			target.LDI(target.X16, id),
@@ -3199,7 +3196,7 @@ func TestMachine_Call(t *testing.T) {
 				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
 				target.CMP(target.X16, target.X17),
 				target.BCondLabel(target.OpBHI, bridge),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetLimit)),
+				target.LDR(target.X17, target.Ctx, int16(jit.OffsetEdge)),
 				target.CMP(target.X27, target.X17),
 				target.BCondLabel(target.OpBCS, bridge),
 				target.SUBSI(target.X24, target.X24, 1),
@@ -3279,7 +3276,7 @@ func TestMachine_Call(t *testing.T) {
 				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
 				target.CMP(target.X16, target.X17),
 				target.BCondLabel(target.OpBHI, bridge),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetLimit)),
+				target.LDR(target.X17, target.Ctx, int16(jit.OffsetEdge)),
 				target.CMP(target.X27, target.X17),
 				target.BCondLabel(target.OpBCS, bridge),
 				target.SUBSI(target.X24, target.X24, 1),
@@ -3328,7 +3325,7 @@ func TestMachine_Call(t *testing.T) {
 				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
 				target.CMP(target.X16, target.X17),
 				target.BCondLabel(target.OpBHI, bridge),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetLimit)),
+				target.LDR(target.X17, target.Ctx, int16(jit.OffsetEdge)),
 				target.CMP(target.X27, target.X17),
 				target.BCondLabel(target.OpBCS, bridge),
 				target.SUBSI(target.X24, target.X24, 1),
@@ -3371,7 +3368,7 @@ func TestMachine_Call(t *testing.T) {
 				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
 				target.CMP(target.X16, target.X17),
 				target.BCondLabel(target.OpBHI, bridge),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetLimit)),
+				target.LDR(target.X17, target.Ctx, int16(jit.OffsetEdge)),
 				target.CMP(target.X27, target.X17),
 				target.BCondLabel(target.OpBCS, bridge),
 				target.SUBSI(target.X24, target.X24, 1),
@@ -3409,7 +3406,7 @@ func TestMachine_Call(t *testing.T) {
 				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
 				target.CMP(target.X16, target.X17),
 				target.BCondLabel(target.OpBHI, bridge),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetLimit)),
+				target.LDR(target.X17, target.Ctx, int16(jit.OffsetEdge)),
 				target.CMP(target.X27, target.X17),
 				target.BCondLabel(target.OpBCS, bridge),
 				target.SUBSI(target.X24, target.X24, 1),
@@ -3463,7 +3460,7 @@ func TestMachine_Call(t *testing.T) {
 				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
 				target.CMP(target.X16, target.X17),
 				target.BCondLabel(target.OpBHI, bridge),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetLimit)),
+				target.LDR(target.X17, target.Ctx, int16(jit.OffsetEdge)),
 				target.CMP(target.X27, target.X17),
 				target.BCondLabel(target.OpBCS, bridge),
 				target.SUBSI(target.X24, target.X24, 1),
@@ -3509,7 +3506,7 @@ func TestMachine_Call(t *testing.T) {
 				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
 				target.CMP(target.X16, target.X17),
 				target.BCondLabel(target.OpBHI, bridge),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetLimit)),
+				target.LDR(target.X17, target.Ctx, int16(jit.OffsetEdge)),
 				target.CMP(target.X27, target.X17),
 				target.BCondLabel(target.OpBCS, bridge),
 				target.SUBSI(target.X24, target.X24, 1),
@@ -3632,7 +3629,7 @@ func enter(t *testing.T, stack []types.Boxed) *jit.Context {
 	require.NoError(t, err)
 	ctx.FB = address(t, stack)
 	ctx.Top = ctx.FB + uintptr(len(stack))*unsafe.Sizeof(stack[0])
-	ctx.Limit = uint64(len(ctx.Records))
+	ctx.SetEdge(len(ctx.Records))
 	ctx.Budget = 1000
 	// entries backs the prologue's own entry count, indexed by address;
 	// none of these cases uses past 7.

@@ -2,9 +2,7 @@
 package arm64
 
 import (
-	"math/bits"
 	"slices"
-	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/asm"
@@ -71,11 +69,6 @@ var jumps = [...]target.Op{
 	target.CondGT: target.OpBGT, target.CondLE: target.OpBLE,
 }
 
-// recordShift is jit.Record's size expressed as a left-shift amount, so the
-// activation depth (X27) turns into a Records byte offset by shifting
-// instead of multiplying; jit's own layout test pins the size to 32.
-var recordShift = uint8(bits.TrailingZeros64(uint64(unsafe.Sizeof(jit.Record{}))))
-
 // New returns an ARM64 machine.
 func New() *Machine {
 	return &Machine{}
@@ -86,7 +79,7 @@ func (m *Machine) Arch() asm.Arch {
 	return target.New()
 }
 
-// Reserve returns the scratch, budget, frame-base, and depth registers.
+// Reserve returns the scratch, budget, frame-base, and record-pointer registers.
 func (m *Machine) Reserve() []asm.PReg {
 	return []asm.PReg{target.X16, target.X17, target.X24, target.X25, target.X27}
 }
@@ -107,12 +100,9 @@ func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.
 		target.SUBI(target.SP, target.SP, 16),
 		target.STR(target.LR, target.SP, 8),
 		asm.Instruction{Op: uint16(target.OpSUBI), Dst: asm.Physical(target.SP), Src1: asm.Physical(target.SP), Src2: asm.Slots()},
-		target.LSLI(target.X17, target.X27, recordShift),
-		target.ADD(target.X17, target.Ctx, target.X17),
-		target.STR(target.X25, target.X17, int16(jit.OffsetRecords+jit.RecordFB)),
-		target.STR(target.X16, target.X17, int16(jit.OffsetRecords+jit.RecordSP)),
-		target.STR(target.LR, target.X17, int16(jit.OffsetRecords+jit.RecordPC)),
-		target.ADDI(target.X27, target.X27, 1),
+		target.STP(target.X25, target.X16, target.X27, int16(jit.RecordFB)),
+		target.STR(target.LR, target.X27, int16(jit.RecordPC)),
+		target.ADDI(target.X27, target.X27, uint16(jit.SizeofRecord)),
 	)
 	if count {
 		a.Emit(target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)))
@@ -161,7 +151,7 @@ func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.
 func (m *Machine) Epilogue(a *asm.Assembler) {
 	a.Bind(m.end)
 	a.Emit(
-		target.SUBI(target.X27, target.X27, 1),
+		target.SUBI(target.X27, target.X27, uint16(jit.SizeofRecord)),
 		asm.Instruction{Op: uint16(target.OpADDI), Dst: asm.Physical(target.SP), Src1: asm.Physical(target.SP), Src2: asm.Slots()},
 		target.LDR(target.LR, target.SP, 8),
 		target.ADDI(target.SP, target.SP, 16),
@@ -177,7 +167,7 @@ func (m *Machine) Enter(a *asm.Assembler, l compile.Layout) asm.Label {
 	a.Bind(label)
 	a.Emit(
 		target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
-		target.LDR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+		target.LDR(target.X27, target.Ctx, int16(jit.OffsetNext)),
 		target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 	)
 	for i, k := range l.Arguments {
@@ -307,7 +297,11 @@ func (m *Machine) Return(a *asm.Assembler, t ssa.Terminator, s compile.Site) {
 		base = 0
 		if slices.Contains(m.borrows, true) {
 			skip := a.Label()
-			a.Emit(target.CMPI(target.X27, 1), target.BCondLabel(target.OpBNE, skip))
+			a.Emit(
+				target.ADDI(target.X16, target.Ctx, uint16(jit.OffsetRecords+jit.SizeofRecord)),
+				target.CMP(target.X27, target.X16),
+				target.BCondLabel(target.OpBNE, skip),
+			)
 			for i, borrowed := range m.borrows {
 				if !borrowed {
 					continue
@@ -359,7 +353,7 @@ func (m *Machine) Budget(a *asm.Assembler, safepoint asm.Label) {
 	)
 }
 
-// Exit stores X27 to Context.Depth and X24 to Context.Budget (their only
+// Exit stores X27 to Context.Next and X24 to Context.Budget (their only
 // writer, so both are exact at every trap), writes the exit id and trap,
 // then calls the preserving stub through EXIT; a resumed exit reloads X24,
 // which Go may have refilled. EXIT has BLR encoding with FlowNext, so use
@@ -371,7 +365,7 @@ func (m *Machine) Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg) {
 		trap = jit.TrapDeopt
 	}
 	a.Emit(
-		target.STR(target.X27, target.Ctx, int16(jit.OffsetDepth)),
+		target.STR(target.X27, target.Ctx, int16(jit.OffsetNext)),
 		target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
 	)
 	a.Emit(target.LDI(target.X16, uint64(id))...)
@@ -438,7 +432,7 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 		target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
 		target.CMP(target.X16, target.X17),
 		target.BCondLabel(target.OpBHI, c.Stub),
-		target.LDR(target.X17, target.Ctx, int16(jit.OffsetLimit)),
+		target.LDR(target.X17, target.Ctx, int16(jit.OffsetEdge)),
 		target.CMP(target.X27, target.X17),
 		target.BCondLabel(target.OpBCS, c.Stub),
 	)
