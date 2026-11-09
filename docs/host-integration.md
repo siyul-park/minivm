@@ -81,7 +81,9 @@ func(vm *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error)
 
 A non-nil error ends the call and is raised as a VM trap with code `TrapCodeHostError`. A guest `try` region covering the call catches it as an `Error` value. An uncaught error ends `Run` with a `*RuntimeError` that wraps it, so `errors.Is` finds the host error.
 
-Calling a Go func bound to a VM function from inside a host function, or while `Run` is active, returns `ErrInterpreterBusy`.
+Calling a Go func bound to a VM function from inside a host function runs the VM function nested on the same interpreter. The nested call sees the host function's arguments untouched, uses the stack above them, and takes the context the Go func receives. A trap or cancellation in the nested call returns as the Go func's error, and the interpreter returns to the state the host function saw. The host function decides whether to return that error: if it does, the outer call raises it as above. A nested call cannot yield: coroutines do not cross the host boundary.
+
+`ErrInterpreterBusy` is returned only when `Run` is active and no host function is running, for example from another goroutine or a hook.
 
 ## Boxed Values
 

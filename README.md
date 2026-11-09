@@ -141,7 +141,7 @@ if err != nil {
 fmt.Println(n) // 42
 ```
 
-Declare a trailing `error` on the func type: without one, a failed call panics. Calling it while `vm.Run` is active returns `interp.ErrInterpreterBusy`.
+Declare a trailing `error` on the func type: without one, a failed call panics. A host function may call it: the call runs nested on the same interpreter. Calling it while `vm.Run` is active outside a host function returns `interp.ErrInterpreterBusy`.
 
 See [Host Integration](docs/host-integration.md) for the conversion table, ownership of each API, and the low-level `HostFunction` path.
 

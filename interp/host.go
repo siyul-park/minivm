@@ -17,6 +17,10 @@ import (
 // which takes one owned reference per KindRef result; returning a param as a
 // result hands that param's reference on. A non-nil error ends the call and the
 // results are ignored.
+//
+// Fn may call a VM function through a func Unmarshal bound: the call runs
+// nested on i and returns the callee's failure as an error. Fn MUST NOT call
+// Run.
 type HostFunction struct {
 	Typ *types.FunctionType
 	Fn  func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error)

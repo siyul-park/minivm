@@ -141,7 +141,7 @@ if err != nil {
 fmt.Println(n) // 42
 ```
 
-함수 타입에는 마지막 `error` 결과를 선언하세요. 없으면 호출 실패 시 panic이 발생합니다. `vm.Run` 실행 중에 호출하면 `interp.ErrInterpreterBusy`를 반환합니다.
+함수 타입에는 마지막 `error` 결과를 선언하세요. 없으면 호출 실패 시 panic이 발생합니다. 호스트 함수 안에서 호출하면 같은 인터프리터에서 중첩 실행됩니다. 호스트 함수 밖에서 `vm.Run` 실행 중에 호출하면 `interp.ErrInterpreterBusy`를 반환합니다.
 
 변환 표, API별 소유권, 저수준 `HostFunction` 경로는 [호스트 연동](docs/host-integration.md)을 참고하세요.
 

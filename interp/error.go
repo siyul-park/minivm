@@ -76,8 +76,11 @@ var (
 	ErrHeapExhausted       = errors.New("heap exhausted")
 	ErrYield               = errors.New("yield")
 	ErrCoroutineDone       = errors.New("coroutine done")
-	ErrInterpreterBusy     = errors.New("interpreter busy")
-	ErrUncaughtException   = errors.New("uncaught exception")
+	// ErrInterpreterBusy is returned by a func Unmarshal bound to a VM function
+	// when Run is active and no host function is running, such as from another
+	// goroutine or a hook. Inside a host function the call runs nested instead.
+	ErrInterpreterBusy   = errors.New("interpreter busy")
+	ErrUncaughtException = errors.New("uncaught exception")
 
 	// errYield is the panic value a root-frame YIELD raises to unwind the Run loop.
 	// Run recovers it and returns ErrYield without wrapping, preserving all state so

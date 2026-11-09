@@ -366,7 +366,9 @@ func invoke(targetSlots, advance int, tail bool) []jen.Code {
 		jen.Id("args").Op(":=").Id("i").Dot("stack").Index(
 			adjust(jen.Id("i").Dot("sp").Op("-").Id("params"), -targetSlots).Op(":").Add(adjust(jen.Id("i").Dot("sp"), -targetSlots)),
 		),
+		jen.Id("i").Dot("hosts").Op("++"),
 		jen.Id("out").Op(",").Id("err").Op(":=").Id("fn").Dot("Fn").Call(jen.Id("i"), jen.Id("args")),
+		jen.Id("i").Dot("hosts").Op("--"),
 		jen.If(jen.Id("err").Op("!=").Nil()).Block(jen.Panic(jen.Id("err"))),
 		releaseArgs(jen.Id("args"), jen.Id("out")),
 	)

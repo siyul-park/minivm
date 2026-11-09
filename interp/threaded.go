@@ -296,7 +296,9 @@ var (
 							panic(ErrStackOverflow)
 						}
 						v4 := i.stack[i.sp-v2-1 : i.sp-1]
+						i.hosts++
 						v5, v6 := v0.Fn(i, v4)
+						i.hosts--
 						if v6 != nil {
 							panic(v6)
 						}
@@ -544,7 +546,9 @@ var (
 							panic(ErrStackOverflow)
 						}
 						v4 := i.stack[i.sp-v2-1 : i.sp-1]
+						i.hosts++
 						v5, v6 := v0.Fn(i, v4)
+						i.hosts--
 						if v6 != nil {
 							panic(v6)
 						}
@@ -80440,7 +80444,9 @@ var (
 								panic(ErrStackOverflow)
 							}
 							v3 := i.stack[i.sp-v1 : i.sp]
+							i.hosts++
 							v4, v5 := v0.Fn(i, v3)
+							i.hosts--
 							if v5 != nil {
 								panic(v5)
 							}
@@ -80700,7 +80706,9 @@ var (
 								panic(ErrStackOverflow)
 							}
 							v3 := i.stack[i.sp-v1 : i.sp]
+							i.hosts++
 							v4, v5 := v0.Fn(i, v3)
+							i.hosts--
 							if v5 != nil {
 								panic(v5)
 							}
