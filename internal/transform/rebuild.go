@@ -1,6 +1,9 @@
 package transform
 
-import "github.com/siyul-park/minivm/internal/ssa"
+import (
+	"github.com/siyul-park/minivm/internal/graph"
+	"github.com/siyul-park/minivm/internal/ssa"
+)
 
 type rebuilder struct {
 	from    *ssa.Function
@@ -18,6 +21,50 @@ func newRebuilder(function *ssa.Function) *rebuilder {
 		blocks:  map[int]int{},
 		values:  map[ssa.Value]ssa.Value{},
 	}
+}
+
+// splice emits the CALL operation as body in the rebuilt function: id jumps
+// to the body's entry, every return jumps to a join whose params are the
+// CALL's results, and the join is the block the caller's code continues in.
+// Each body operation that has a state takes the CALL's.
+func (r *rebuilder) splice(id int, call ssa.Operation, body *ssa.Function) int {
+	args, state := r.list(call.Args), r.value(call.State)
+	join := r.builder.Block()
+	for _, result := range call.Results {
+		r.alias(result, r.builder.Param(join, r.from.Type(result)))
+	}
+
+	inner := &rebuilder{from: body, builder: r.builder, blocks: map[int]int{}, values: map[ssa.Value]ssa.Value{}}
+	r.builder.Term(id, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: inner.block(0)}}})
+	for _, block := range graph.Order(body) {
+		at := inner.open(block)
+		b := body.Block(block)
+		for _, operation := range b.Operations {
+			switch {
+			case operation.Op == ssa.OpState:
+				continue
+			case operation.Op == ssa.OpLoad:
+				if operation.Slot.Index < len(args)-1 {
+					inner.alias(operation.Results[0], args[operation.Slot.Index])
+					continue
+				}
+				operation = ssa.Operation{Op: ssa.OpConst, Results: operation.Results}
+			}
+			held := operation.State != ssa.NoValue
+			operation = inner.operation(operation)
+			if held {
+				operation.State = state
+			}
+			r.builder.Add(at, inner.define(operation))
+		}
+		term := inner.terminator(b.Terminator)
+		term.State = ssa.NoValue
+		if term.Op == ssa.OpReturn {
+			term = ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join, Args: term.Args}}}
+		}
+		r.builder.Term(at, term)
+	}
+	return join
 }
 
 // open returns block's id in the rebuilt function, declaring its params.
