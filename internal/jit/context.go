@@ -30,7 +30,7 @@ type Context struct {
 	Entries uintptr
 	Top     uintptr
 	FB      uintptr
-	// Bins is the base of the Bin table, one entry per type index: the
+	// Bins is the base of the Bin table, Classes entries per type index: the
 	// default objects Go built ahead for native code to take.
 	Bins uintptr
 	// Upvals is the upvals base of the activation being entered, 0 for none:
@@ -67,12 +67,13 @@ type Record struct {
 	_ uintptr
 }
 
-// Bin is one type's default objects built ahead of native code: Refs is
-// the base of N boxed refs, each an object of count 1 that only native code
+// Bin is one size class of a type's default objects built ahead of native
+// code: Refs is the base of N boxed refs, each an object of count 1 that only native code
 // may take, last first. Native code lowers N and takes Refs[N]; Go alone
 // writes Refs and raises N, so native code never writes a Go pointer or a
 // count. Len is the length of every array a bin of an array type holds,
-// which native code compares with the length it is asked for.
+// which native code compares with the length it is asked for; the bins of
+// type t are Bins[t*Classes : (t+1)*Classes].
 type Bin struct {
 	Refs uintptr
 	N    int64
@@ -81,6 +82,11 @@ type Bin struct {
 
 // Trap is how native code last left.
 type Trap uint64
+
+// Classes is how many bins each type has: class c below the last holds
+// arrays of length c, and the last holds arrays of one exact length at or
+// past it. A struct type uses class 0.
+const Classes = 8
 
 const (
 	// TrapReturn is a native activation returning: no native frame of that

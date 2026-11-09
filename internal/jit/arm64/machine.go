@@ -1199,10 +1199,12 @@ func (m *Machine) arraySet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 
 // reserve takes the default object of a type from the type's bin, the last
 // of its N boxed refs, and lowers N: a ref native code takes is its alone, with
-// count 1, so neither a count nor a Go pointer is written. An empty bin takes
-// the slow path: the interpreter builds the object and fills the bin. An array
-// type's bin holds arrays of one length, so a length operand (args is 1) that
-// is not that length, a negative one included, bridges too. The type index is the
+// count 1, so neither a count nor a Go pointer is written. A type has jit.Classes
+// bins, and a struct uses the first. An empty bin takes
+// the slow path: the interpreter builds the object and fills the bin. A length
+// operand (args is 1) picks the bin of its class, the length itself below
+// the last class; a bin holds arrays of one length, so a length that is not
+// that length, a negative one included, bridges too. The type index is the
 // bytecode operand, and the interpreter sizes the table to the program's
 // types, which verification bounds it by.
 func (m *Machine) reserve(a *asm.Assembler, op ssa.Operation, s compile.Site, args int) bool {
@@ -1214,20 +1216,34 @@ func (m *Machine) reserve(a *asm.Assembler, op ssa.Operation, s compile.Site, ar
 
 	entry, n, refs := m.vreg(), m.vreg(), m.vreg()
 	a.Emit(target.LDR(entry, target.Ctx, int16(jit.OffsetBins)))
-	at := index * int(jit.SizeofBin)
+	at := index * jit.Classes * int(jit.SizeofBin)
 	if at+int(jit.OffsetBinLen) > 8*imm12 {
 		a.Emit(target.LDI(target.X16, uint64(at))...)
 		a.Emit(target.ADD(entry, entry, target.X16))
 		at = 0
+	}
+	var length, held asm.VReg
+	if args == 1 {
+		// The class is the length below the last class and the last class
+		// from there up; a negative length compares as huge, so it lands in
+		// the last class, whose Len no negative length equals.
+		length, held = m.vreg(), m.vreg()
+		class := m.vreg()
+		a.Emit(target.SXTW(length, s.Reg(op.Args[0])))
+		a.Emit(target.LDI(target.X17, jit.Classes-1)...)
+		a.Emit(
+			target.CMPI(length, jit.Classes-1),
+			target.CSEL(class, length, target.X17, target.CondCC),
+		)
+		a.Emit(target.LDI(target.X16, uint64(jit.SizeofBin))...)
+		a.Emit(target.MADD(entry, class, target.X16, entry))
 	}
 	a.Emit(
 		target.LDR(n, entry, int16(at+int(jit.OffsetBinN))),
 		target.CBZLabel(n, empty),
 	)
 	if args == 1 {
-		length, held := m.vreg(), m.vreg()
 		a.Emit(
-			target.SXTW(length, s.Reg(op.Args[0])),
 			target.LDR(held, entry, int16(at+int(jit.OffsetBinLen))),
 			target.CMP(length, held),
 			target.BCondLabel(target.OpBNE, empty),
