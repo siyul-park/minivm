@@ -125,7 +125,7 @@ func TestCompile(t *testing.T) {
 			ctx, trap := run(t, compile.Unit{Address: 1, Function: sum(t), Tier: tier}, stack)
 			require.Equal(t, jit.TrapReturn, trap)
 			require.Equal(t, types.BoxI32(45), stack[0])
-			require.Zero(t, ctx.Depth)
+			require.Zero(t, ctx.Level())
 		}
 	})
 
@@ -214,7 +214,7 @@ func TestCompile(t *testing.T) {
 			ctx, trap := run(t, u, stack)
 			require.Equal(t, jit.TrapReturn, trap)
 			require.Equal(t, types.BoxI32(105), stack[0])
-			require.Zero(t, ctx.Depth)
+			require.Zero(t, ctx.Level())
 		}
 	})
 
@@ -248,7 +248,7 @@ func TestCompile(t *testing.T) {
 
 		want := int64(0 ^ 0 ^ 1 ^ 2 ^ 3 ^ 4)
 		require.Equal(t, types.Boxed(uint64(want)), stack[0])
-		require.Zero(t, ctx.Depth)
+		require.Zero(t, ctx.Level())
 	})
 
 	t.Run("keeps module code's own completion value count", func(t *testing.T) {
@@ -329,7 +329,7 @@ func TestCompile(t *testing.T) {
 			ctx, trap := run(t, compile.Unit{Address: 2, Function: fib, Module: module, Tier: tier}, stack)
 			require.Equal(t, jit.TrapReturn, trap)
 			require.Equal(t, types.BoxI32(610), stack[0])
-			require.Zero(t, ctx.Depth)
+			require.Zero(t, ctx.Level())
 		}
 	})
 
@@ -360,7 +360,7 @@ func TestCompile(t *testing.T) {
 			ctx, trap := run(t, compile.Unit{Address: 1, Function: fn, Module: module, Tier: tier}, stack, ident)
 			require.Equal(t, jit.TrapReturn, trap)
 			require.Equal(t, types.BoxI32(42), stack[0])
-			require.Zero(t, ctx.Depth)
+			require.Zero(t, ctx.Level())
 		}
 	})
 
@@ -387,7 +387,7 @@ func TestCompile(t *testing.T) {
 			ctx, trap := run(t, compile.Unit{Address: 1, Function: fn, Tier: tier}, stack)
 			require.Equal(t, jit.TrapReturn, trap)
 			require.Equal(t, types.BoxI32(5), stack[0])
-			require.Zero(t, ctx.Depth)
+			require.Zero(t, ctx.Level())
 		}
 	})
 
@@ -442,7 +442,7 @@ func TestCompile(t *testing.T) {
 			ctx, trap := run(t, compile.Unit{Address: 1, Function: fn, Tier: tier}, stack)
 			require.Equal(t, jit.TrapReturn, trap)
 			require.Equal(t, types.BoxI32(8), stack[0])
-			require.Zero(t, ctx.Depth)
+			require.Zero(t, ctx.Level())
 		}
 	})
 }
@@ -512,7 +512,7 @@ func context(t *testing.T, stack []types.Boxed, heap []types.Value) *jit.Context
 	}
 	ctx.FB = address(t, stack)
 	ctx.Top = ctx.FB + uintptr(len(stack))*unsafe.Sizeof(stack[0])
-	ctx.Limit = uint64(len(ctx.Records))
+	ctx.SetEdge(len(ctx.Records))
 	ctx.Budget = 1 << 20
 	ctx.Heap = address(t, heap)
 	ctx.RC = address(t, rc)
@@ -551,7 +551,7 @@ func run(t *testing.T, u compile.Unit, stack []types.Boxed, callees ...compile.U
 	require.NoError(t, err)
 	ctx.FB = address(t, stack)
 	ctx.Top = ctx.FB + uintptr(len(stack))*unsafe.Sizeof(stack[0])
-	ctx.Limit = uint64(len(ctx.Records))
+	ctx.SetEdge(len(ctx.Records))
 	ctx.Budget = 1 << 20
 	ctx.Natives = cache.Natives()
 	ctx.RC = address(t, rc)

@@ -38,8 +38,17 @@ type Context struct {
 	// before its branch; only a prologue reads it.
 	Upvals uintptr
 
-	Depth   uint64
-	Limit   uint64
+	// Next is the address of the record the next native prologue fills,
+	// &Records[depth]: native code keeps it in a register and moves it by
+	// SizeofRecord, so a call never turns a depth into an address. It
+	// assumes Context never moves while native code runs: it is Go-heap
+	// allocated by NewContext and Go's collector does not move heap objects.
+	// Level and SetLevel convert it to and from an activation count; Go never
+	// reads it as one.
+	Next uintptr
+	// Edge is the address from which Next may not advance a call: the
+	// address of Records[limit]. SetEdge converts a record count.
+	Edge    uintptr
 	Budget  int64
 	Results [Convention]uint64
 	Records [256]Record
@@ -54,8 +63,7 @@ type Record struct {
 	SP uintptr
 	// PC is the caller return address.
 	PC uintptr
-	// The record is padded to a power of two, so the activation depth turns
-	// into a Records offset by a shift.
+	// The record is padded to a power of two, so records stay aligned.
 	_ uintptr
 }
 
@@ -105,8 +113,8 @@ const (
 	OffsetFB      = unsafe.Offsetof(Context{}.FB)
 	OffsetBins    = unsafe.Offsetof(Context{}.Bins)
 	OffsetUpvals  = unsafe.Offsetof(Context{}.Upvals)
-	OffsetDepth   = unsafe.Offsetof(Context{}.Depth)
-	OffsetLimit   = unsafe.Offsetof(Context{}.Limit)
+	OffsetNext    = unsafe.Offsetof(Context{}.Next)
+	OffsetEdge    = unsafe.Offsetof(Context{}.Edge)
 	OffsetBudget  = unsafe.Offsetof(Context{}.Budget)
 	OffsetResults = unsafe.Offsetof(Context{}.Results)
 	OffsetRecords = unsafe.Offsetof(Context{}.Records)
@@ -115,9 +123,10 @@ const (
 	OffsetBinN   = unsafe.Offsetof(Bin{}.N)
 	OffsetBinLen = unsafe.Offsetof(Bin{}.Len)
 
-	RecordFB = unsafe.Offsetof(Record{}.FB)
-	RecordSP = unsafe.Offsetof(Record{}.SP)
-	RecordPC = unsafe.Offsetof(Record{}.PC)
+	SizeofRecord = unsafe.Sizeof(Record{})
+	RecordFB     = unsafe.Offsetof(Record{}.FB)
+	RecordSP     = unsafe.Offsetof(Record{}.SP)
+	RecordPC     = unsafe.Offsetof(Record{}.PC)
 )
 
 // The pinned register names the Context and, through asm.OffsetStub, its
@@ -148,7 +157,24 @@ func NewContext(size int) (*Context, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Context{State: s}, nil
+	c := &Context{State: s}
+	c.SetLevel(0)
+	return c, nil
+}
+
+// Level returns how many native activations are live: Next as a record count.
+func (c *Context) Level() int {
+	return int((c.Next - uintptr(unsafe.Pointer(&c.Records[0]))) / SizeofRecord)
+}
+
+// SetLevel sets Next to the record after n live activations.
+func (c *Context) SetLevel(n int) {
+	c.Next = uintptr(unsafe.Pointer(&c.Records[0])) + uintptr(n)*SizeofRecord
+}
+
+// SetEdge sets Edge so that native calls stop once n records are live.
+func (c *Context) SetEdge(n int) {
+	c.Edge = uintptr(unsafe.Pointer(&c.Records[0])) + uintptr(n)*SizeofRecord
 }
 
 // Exit reports the exit identifier native code last wrote before leaving;
@@ -166,7 +192,7 @@ func (c *Context) Trap() Trap {
 // the one its callee recorded, in the next record, because registers are
 // clobbered across calls.
 func (c *Context) Read(record int, v Value) uint64 {
-	if record == int(c.Depth)-1 {
+	if record == c.Level()-1 {
 		if v.Loc.Spilled {
 			return c.Slot(v.Loc.Slot)
 		}

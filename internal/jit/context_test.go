@@ -31,7 +31,7 @@ func TestContext_Layout(t *testing.T) {
 		want uintptr
 	}{
 		{"state", unsafe.Offsetof(jit.Context{}.State), 0},
-		{"record size", unsafe.Sizeof(jit.Record{}), 32},
+		{"record size", jit.SizeofRecord, 32},
 		{"record fb", jit.RecordFB, 0},
 		{"record sp", jit.RecordSP, 8},
 		{"record pc", jit.RecordPC, 16},
@@ -100,6 +100,38 @@ func TestNewContext(t *testing.T) {
 	})
 }
 
+func TestContext_Level(t *testing.T) {
+	t.Run("counts the records below Next", func(t *testing.T) {
+		ctx, err := jit.NewContext(4096)
+		require.NoError(t, err)
+		require.Zero(t, ctx.Level())
+
+		ctx.Next += 3 * jit.SizeofRecord
+		require.Equal(t, 3, ctx.Level())
+	})
+}
+
+func TestContext_SetLevel(t *testing.T) {
+	t.Run("points Next at the record after n activations", func(t *testing.T) {
+		ctx, err := jit.NewContext(4096)
+		require.NoError(t, err)
+
+		ctx.SetLevel(2)
+		require.Equal(t, uintptr(unsafe.Pointer(&ctx.Records[2])), ctx.Next)
+		require.Equal(t, 2, ctx.Level())
+	})
+}
+
+func TestContext_SetEdge(t *testing.T) {
+	t.Run("points Edge at the record n activations in", func(t *testing.T) {
+		ctx, err := jit.NewContext(4096)
+		require.NoError(t, err)
+
+		ctx.SetEdge(len(ctx.Records))
+		require.Equal(t, uintptr(unsafe.Pointer(&ctx.Records[0]))+uintptr(len(ctx.Records))*jit.SizeofRecord, ctx.Edge)
+	})
+}
+
 func TestContext_Trap(t *testing.T) {
 	testenv.MustHaveArch(t, "arm64")
 	ctx, err := jit.NewContext(4096)
@@ -114,7 +146,7 @@ func TestContext_Read(t *testing.T) {
 	t.Run("innermost register value reads the saved register file", func(t *testing.T) {
 		ctx, err := jit.NewContext(4096)
 		require.NoError(t, err)
-		ctx.Depth = 1
+		ctx.SetLevel(1)
 		ctx.SetReg(arm64.X0, 42)
 
 		got := ctx.Read(0, jit.Value{Loc: asm.Loc{Reg: arm64.X0}})
@@ -143,7 +175,7 @@ func TestContext_Read(t *testing.T) {
 		require.NoError(t, err)
 
 		require.True(t, arm64.New().Enter(address, &ctx.State))
-		ctx.Depth = 2
+		ctx.SetLevel(2)
 		ctx.Records[1].SP = uintptr(ctx.Reg(arm64.X0))
 
 		got := ctx.Read(0, jit.Value{Loc: asm.Loc{Spilled: true, Slot: 2}})
@@ -153,7 +185,7 @@ func TestContext_Read(t *testing.T) {
 	t.Run("outer activation with a register location is a programmer error", func(t *testing.T) {
 		ctx, err := jit.NewContext(4096)
 		require.NoError(t, err)
-		ctx.Depth = 2
+		ctx.SetLevel(2)
 
 		require.Panics(t, func() { ctx.Read(0, jit.Value{Loc: asm.Loc{Reg: arm64.X0}}) })
 	})
@@ -176,7 +208,7 @@ func TestContext_Read(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, buffer.Free()) })
 		address, err := buffer.Link(code)
 		require.NoError(t, err)
-		ctx.Depth = 1
+		ctx.SetLevel(1)
 
 		require.True(t, arm64.New().Enter(address, &ctx.State))
 

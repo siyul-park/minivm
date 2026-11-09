@@ -588,7 +588,7 @@ func (e *engine) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 // release reports whether it owns that reference.
 func (e *engine) materialize(i *Interpreter, exit jit.Exit, start, ref int, release bool) {
 	ctx := e.ctx
-	floor, depth := int(e.depth), int(ctx.Depth)
+	floor, depth := int(e.depth), ctx.Level()
 
 	maps := make([]jit.Frame, depth-floor)
 	refs := make([]int, depth-floor)
@@ -675,7 +675,7 @@ func (e *engine) frame(i *Interpreter, at, k int, m jit.Frame, ref int, release 
 		i.stack[addr] = boxed
 	}
 
-	if k == int(ctx.Depth)-1 {
+	if k == ctx.Level()-1 {
 		if sp > len(i.stack) {
 			panic(ErrStackOverflow)
 		}
@@ -724,7 +724,7 @@ func (e *engine) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 		}
 
 		entered := code
-		if ctx.Depth != e.depth+1 {
+		if ctx.Level() != int(e.depth)+1 {
 			entered = e.cache.Find(ctx.PC())
 		}
 		exit := entered.Exits[ctx.Exit()]
@@ -754,7 +754,7 @@ func (e *engine) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 		case jit.ExitRelease:
 
 			ledger.Charge(jit.ClassRelease)
-			if ref := types.Boxed(ctx.Read(int(ctx.Depth)-1, exit.Word)).Ref(); ref != 0 {
+			if ref := types.Boxed(ctx.Read(ctx.Level()-1, exit.Word)).Ref(); ref != 0 {
 				i.release(ref)
 			}
 			e.sync(i)
@@ -793,7 +793,7 @@ func (e *engine) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 			deopt(exit)
 			return false, e.judge(entered, code, refute), nil
 		case jit.ExitCall:
-			ref := e.callee(int(ctx.Depth)-1, exit)
+			ref := e.callee(ctx.Level()-1, exit)
 			if i.hook != nil {
 
 				deopt(exit)
@@ -862,8 +862,8 @@ func (e *engine) load(i *Interpreter, bp, spare int) {
 	ctx.Entries = base(e.entries)
 	ctx.Top = end(i.stack)
 	ctx.FB = base(i.stack[bp:])
-	ctx.Limit = uint64(min(len(ctx.Records), int(e.depth)+len(i.frames)-i.fp+spare))
-	ctx.Depth = e.depth
+	ctx.SetEdge(min(len(ctx.Records), int(e.depth)+len(i.frames)-i.fp+spare))
+	ctx.SetLevel(int(e.depth))
 }
 
 // sync points the native context at i's heap and counts, which a bridge or a
@@ -881,7 +881,7 @@ func (e *engine) box(i *Interpreter, exit jit.Exit) (ok bool) {
 			ok = false
 		}
 	}()
-	k := int(e.ctx.Depth) - 1
+	k := e.ctx.Level() - 1
 	v := int64(e.ctx.Read(k, exit.Word))
 	e.ctx.Results[0] = uint64(i.boxI64(v))
 	return true
@@ -916,7 +916,7 @@ func (e *engine) bridge(i *Interpreter, exit jit.Exit) jit.Class {
 	}
 
 	ctx := e.ctx
-	k := int(ctx.Depth) - 1
+	k := ctx.Level() - 1
 	m := exit.Frame
 	bp := e.frameBase(i, k)
 	sp := bp + slots(i.function(m.Address))
@@ -987,7 +987,7 @@ func (e *engine) callout(i *Interpreter, exit jit.Exit, serve callout) (ok bool)
 		}
 	}()
 	ctx := e.ctx
-	k := int(ctx.Depth) - 1
+	k := ctx.Level() - 1
 	m := exit.Frame
 	var args [2]types.Boxed
 	for j, o := range m.Stack[len(m.Stack)-exit.Pops:] {
@@ -1012,7 +1012,7 @@ func (e *engine) nests(i *Interpreter, exit jit.Exit, addr int) bool {
 	if addr < len(i.coros) && i.coros[addr] {
 		return false
 	}
-	k := int(e.ctx.Depth) - 1
+	k := e.ctx.Level() - 1
 	bp := e.frameBase(i, k)
 	return bp+slots(i.function(exit.Frame.Address))+len(exit.Frame.Stack)+exit.Args < len(i.stack)
 }
@@ -1029,12 +1029,12 @@ func (e *engine) nests(i *Interpreter, exit jit.Exit, addr int) bool {
 // runs again over the materialized frames, and any other panic is fault.
 func (e *engine) reenter(i *Interpreter, exit jit.Exit, ref, start int, deopt func(jit.Exit)) (fault any, ok bool) {
 	ctx := e.ctx
-	k := int(ctx.Depth) - 1
+	k := ctx.Level() - 1
 	m := exit.Frame
 	at := start + k - int(e.depth)
 	bp := e.frameBase(i, k)
 
-	state, limit, depth, floor := ctx.State, ctx.Limit, e.depth, i.floor
+	state, edge, depth, floor := ctx.State, ctx.Edge, e.depth, i.floor
 	fr, fp, sp, saved := i.fr, i.fp, i.sp, i.frames[at]
 
 	code := e.unfusedCode(i, m.Address)
@@ -1055,7 +1055,8 @@ func (e *engine) reenter(i *Interpreter, exit jit.Exit, ref, start int, deopt fu
 			ctx.Results[j] = toWord(i, kind, i.stack[i.sp-len(exit.Results)+j])
 		}
 		i.fr, i.fp, i.sp, i.frames[at] = fr, fp, sp, saved
-		ctx.State, ctx.Limit, ctx.Depth = state, limit, uint64(k+1)
+		ctx.State, ctx.Edge = state, edge
+		ctx.SetLevel(k + 1)
 		return nil, true
 	}
 
@@ -1065,7 +1066,8 @@ func (e *engine) reenter(i *Interpreter, exit jit.Exit, ref, start int, deopt fu
 
 	ip, live := i.frames[at].ip, [...]int{i.fp, i.sp}
 	inner := i.fr
-	ctx.State, ctx.Depth = state, uint64(k+1)
+	ctx.State = state
+	ctx.SetLevel(k + 1)
 	i.fr, i.fp, i.sp, i.frames[at] = fr, fp, sp, saved
 	deopt(exit)
 	i.frames[at].ip = ip
