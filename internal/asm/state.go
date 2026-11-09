@@ -18,9 +18,12 @@ type State struct {
 	link     [3]uintptr
 	pc       uintptr
 	nsp, top unsafe.Pointer
-	exited   uint64
-	regs     [32]uint64
-	fregs    [32]uint64
+	// base is the native stack pointer the latest Enter started from: below
+	// any activation still suspended when it ran.
+	base   unsafe.Pointer
+	exited uint64
+	regs   [32]uint64
+	fregs  [32]uint64
 }
 
 // Field offsets for native code and each architecture's trampoline.
@@ -29,6 +32,7 @@ const (
 	OffsetLink   = unsafe.Offsetof(State{}.link)
 	OffsetPC     = unsafe.Offsetof(State{}.pc)
 	OffsetNSP    = unsafe.Offsetof(State{}.nsp)
+	OffsetBase   = unsafe.Offsetof(State{}.base)
 	OffsetExited = unsafe.Offsetof(State{}.exited)
 	OffsetRegs   = unsafe.Offsetof(State{}.regs)
 	OffsetFRegs  = unsafe.Offsetof(State{}.fregs)
@@ -47,7 +51,7 @@ func NewState(arch Arch, size int) (State, error) {
 		index--
 	}
 	top := unsafe.Add(base, index*8)
-	return State{stub: arch.Stub(), nsp: top, top: top, stack: stack}, nil
+	return State{stub: arch.Stub(), nsp: top, top: top, base: top, stack: stack}, nil
 }
 
 // PC reports where the last exit left: the exit stub's return address, which
@@ -61,11 +65,11 @@ func (s *State) Exited() bool {
 	return s.exited != 0
 }
 
-// Abandon discards a suspended native stack, so the next Enter runs a fresh
-// activation from the stack's top rather than nesting below the abandoned
-// one.
+// Abandon discards the activations the latest Enter started, so the next
+// Enter runs from where that one did: the stack's top, or below an
+// activation suspended before it, which stays intact.
 func (s *State) Abandon() {
-	s.nsp = s.top
+	s.nsp = s.base
 	s.exited = 0
 }
 

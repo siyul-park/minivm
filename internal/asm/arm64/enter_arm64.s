@@ -15,6 +15,7 @@ TEXT ·enter(SB), NOSPLIT|NOFRAME, $0-16
 	MOVD	R29, const_stateFP(R26)
 	MOVD	R30, const_stateLR(R26)
 	MOVD	const_stateNSP(R26), R17
+	MOVD	R17, const_stateBase(R26)
 	MOVD	R17, RSP
 	BL	(R16)
 	// A native activation returned: its entry SP is the native SP again.
