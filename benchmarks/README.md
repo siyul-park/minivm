@@ -36,20 +36,20 @@ Yaegi supplies the compiled `registry.Register` and dependency symbols, evaluate
 
 ## Runtimes
 
-The corpus contains 25 workloads.
+The corpus contains 26 workloads.
 
 | Runtime | Coverage | Notes |
 |---|---:|---|
-| Threaded | 25 | minivm interpreter with JIT disabled |
-| JIT | 25 | minivm default execution |
-| Native Go | 25 | direct compiled Go implementation |
+| Threaded | 26 | minivm interpreter with JIT disabled |
+| JIT | 26 | minivm default execution |
+| Native Go | 26 | direct compiled Go implementation |
 | Wazero | 7 | exact WebAssembly implementations |
-| Tengo | 25 | all workloads |
-| GopherLua | 22 | I32 workloads; exact I64 values are outside Lua's numeric model |
-| Goja | 25 | I32 plus BigInt-based I64 fixtures |
-| gpython | 25 | Python fixture |
-| CPython | 25 | same Python fixture through `python3.13` |
-| Yaegi | 25 | Go fixture; two cases are intentionally unmeasured |
+| Tengo | 26 | all workloads |
+| GopherLua | 23 | I32 workloads; exact I64 values are outside Lua's numeric model |
+| Goja | 26 | I32 plus BigInt-based I64 fixtures |
+| gpython | 26 | Python fixture |
+| CPython | 26 | same Python fixture through `python3.13` |
+| Yaegi | 26 | Go fixture; two cases are intentionally unmeasured |
 
 A runtime cell is `—` only when no meaningful implementation exists or the benchmark is intentionally inapplicable. Yaegi skips `typed-array-sum` because its generic typed-array program is outside Yaegi's supported syntax and `recursive-fib-35` because the interpreted workload is impractical.
 
