@@ -13,7 +13,6 @@ func executable(m memory) error {
 	if len(m) == 0 {
 		return nil
 	}
-	flushICache(m)
 	_, _, errno := syscall.Syscall(
 		syscall.SYS_MPROTECT,
 		uintptr(unsafe.Pointer(&m[0])),

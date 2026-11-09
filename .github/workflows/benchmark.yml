@@ -1,23 +1,33 @@
 name: Benchmark
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   schedule:
     - cron: "0 3 * * 1"
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   benchmark:
-    name: Benchmark (deep)
-    runs-on: ubuntu-24.04
+    name: Publish Results
+    # ARM64, because the JIT runs nowhere else.
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: .go-version
           cache: true
@@ -25,5 +35,24 @@ jobs:
             go.sum
             benchmarks/go.sum
 
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.15.2"
+
       - name: Run Benchmark
-        run: make benchmark benchmark-level=deep
+        run: make benchmark benchmark-level=${{ github.event_name == 'schedule' && 'deep' || 'standard' }}
+
+      # A GITHUB_TOKEN push starts no workflow, so this cannot loop.
+      - name: Commit Results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/benchmarks.md
+          git diff --cached --quiet && exit 0
+          git commit -m "docs: update benchmark results [skip ci]"
+          for attempt in 1 2 3; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep 10
+          done
+          exit 1

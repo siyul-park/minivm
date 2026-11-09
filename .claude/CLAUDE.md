@@ -14,9 +14,8 @@ Claude-specific additions to the shared contract. `AGENTS.md` owns repository wo
 
 ## Benchmarks
 
-- `make benchmark-pr` — quick report.
-- `make benchmark-core` — canonical suite.
-- `make benchmark-compare` — tagged external comparisons only.
+- `make benchmark-diff base=<ref>` — compare a change, or read the branch's CI job summary.
+- CI publishes `docs/benchmarks.md`; do not commit a locally measured table.
 - Do not substitute benchmark results for correctness tests.
 
 ## CodeGraph

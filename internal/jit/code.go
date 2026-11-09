@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/siyul-park/minivm/internal/asm"
+	"github.com/siyul-park/minivm/internal/asm/host"
 	"github.com/siyul-park/minivm/types"
 )
 
@@ -16,7 +17,7 @@ type Code struct {
 	// IP is the bytecode offset this code is rooted at.
 	IP int
 	// OSR reports whether c is rooted at a loop header instead of Address's
-	// own entry: never a call target, so Store keys it by (Address, IP)
+	// own entry: never a call target, so Cache keys it by (Address, IP)
 	// instead of installing it into Context.Natives.
 	OSR  bool
 	Tier Tier
@@ -46,9 +47,9 @@ type Code struct {
 	entry  uintptr
 	size   int
 	buffer *asm.Buffer
-	// retired is the store epoch of c's retire, zero while published; set by
-	// Store under its lock before c joins the retired list.
-	retired atomic.Uint64
+	// invalidated is the cache epoch of c's invalidation, zero while published; set by
+	// Cache under its lock before c joins the invalidated list.
+	invalidated atomic.Uint64
 }
 
 // Assembly is one unit's machine code before NewCode links it: the bytes,
@@ -80,7 +81,7 @@ func NewCode(address, ip int, osr bool, tier Tier, results int, registers, argum
 	if a.Entry < 0 || a.Entry > len(a.Bytes) {
 		return nil, fmt.Errorf("%w: entry stub offset %d", asm.ErrInvalidArgs, a.Entry)
 	}
-	buffer, err := asm.NewBuffer(len(a.Bytes))
+	buffer, err := asm.NewBuffer(host.Arch{}, len(a.Bytes))
 	if err != nil {
 		return nil, err
 	}
@@ -107,10 +108,10 @@ func (c *Code) Entry() uintptr {
 	return c.entry
 }
 
-// Retired reports whether Store has retired c: an interpreter that cached c
+// Invalidated reports whether Cache has invalidated c: an interpreter that cached c
 // may run it without a lookup until then.
-func (c *Code) Retired() bool {
-	return c.retired.Load() != 0
+func (c *Code) Invalidated() bool {
+	return c.invalidated.Load() != 0
 }
 
 // Free unmaps c's executable memory; a second call is a no-op. Nothing may
@@ -136,10 +137,10 @@ func (c *Code) holds(pc uintptr) bool {
 	return pc >= c.native && pc < c.native+uintptr(c.size)
 }
 
-func (c *Code) retire(epoch uint64) {
-	c.retired.Store(epoch)
+func (c *Code) invalidate(epoch uint64) {
+	c.invalidated.Store(epoch)
 }
 
-func (c *Code) retiredAt() uint64 {
-	return c.retired.Load()
+func (c *Code) invalidatedAt() uint64 {
+	return c.invalidated.Load()
 }

@@ -30,6 +30,12 @@ type regs map[ssa.Value]ssa.Type
 // after its operation.
 type fused struct{ regs }
 
+// typed is regs whose operation carries a type index.
+type typed struct {
+	regs
+	index int
+}
+
 // known is regs where an OpConst defines each value of words.
 type known struct {
 	regs
@@ -56,11 +62,17 @@ func (r regs) Deopt() asm.Label { return exit }
 
 func (r regs) Trap() asm.Label { return exit }
 
+func (r regs) Bridge() (asm.Label, asm.Label) { return exit, resume }
+
+func (r regs) Operand() (int, bool) { return 0, false }
+
 func (r regs) Release(asm.VReg) (asm.Label, asm.Label) { return exit, resume }
 
 func (r regs) Box(asm.VReg) (asm.Label, asm.Label) { return exit, resume }
 
 func (fused) Fuse(ssa.Value) bool { return true }
+
+func (t typed) Operand() (int, bool) { return t.index, true }
 
 func (k known) Const(v ssa.Value) (uint64, bool) {
 	word, ok := k.words[v]
@@ -409,7 +421,7 @@ func TestNew(t *testing.T) {
 		require.NoError(t, err)
 		assembly, err := compile.Lower(f, arm64.New(), fib, module.Objects, 0, false, true)
 		require.NoError(t, err)
-		buffer, err := asm.NewBuffer(len(assembly.Bytes))
+		buffer, err := asm.NewBuffer(target.New(), len(assembly.Bytes))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, buffer.Free()) })
 		code, err := buffer.Link(assembly.Bytes)
@@ -566,7 +578,7 @@ func TestNew(t *testing.T) {
 		// natives[address] holds the body, not the Go entry stub.
 		calleeAssembly, err := compile.Lower(b.Build(), arm64.New(), callee, nil, 7, false, true)
 		require.NoError(t, err)
-		calleeBuffer, err := asm.NewBuffer(len(calleeAssembly.Bytes))
+		calleeBuffer, err := asm.NewBuffer(target.New(), len(calleeAssembly.Bytes))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, calleeBuffer.Free()) })
 		calleeBody, err := calleeBuffer.Link(calleeAssembly.Bytes)
@@ -680,7 +692,7 @@ func TestNew(t *testing.T) {
 			b.Bind(done).Emit(instr.LOCAL_GET, 3).Emit(instr.RETURN)
 		})
 		f := translate(t, fn)
-		for _, p := range []pass.Pass[*ssa.Function]{transform.NewPromotePass(), transform.NewHoistPass(), transform.NewDCEPass()} {
+		for _, p := range []pass.Pass[*ssa.Function]{transform.NewPromotePass(), transform.NewLICMPass(), transform.NewDCEPass()} {
 			_, err := p.Run(pass.NewManager(), f)
 			require.NoError(t, err)
 		}
@@ -1384,6 +1396,8 @@ func TestMachine_Lower(t *testing.T) {
 		// consts are the values an OpConst defines, by word.
 		consts map[ssa.Value]uint64
 		op     ssa.Operation
+		// index, when set, is the type index op's bytecode carries.
+		index *int
 		// fuse lowers op through a Site that fuses its result into the
 		// branch right after it.
 		fuse  bool
@@ -1411,6 +1425,45 @@ func TestMachine_Lower(t *testing.T) {
 		target.LDR(target.X17, target.X16, 0),
 	}
 
+	// stringEq is the rows string.eq and string.ne lower to; equal is the
+	// result for equal strings.
+	stringEq := func(equal uint64) []asm.Instruction {
+		const yes, no, done, words, bytes = 2, 3, 4, 5, 6
+		var rows []asm.Instruction
+		for i, addr := range []int{1, 5} {
+			rows = append(rows,
+				target.SBFX(vr(addr), reg(ssa.TypeRef, ssa.Value(i+1)), 0, 32), target.LSLI(vr(addr), vr(addr), 4),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.ADD(vr(addr), target.X16, vr(addr)),
+				target.LDR(target.X16, vr(addr), 0),
+			)
+			rows = append(rows, target.LDI(target.X17, uint64(jit.Itab(types.String(""))))...)
+			rows = append(rows,
+				target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, exit),
+				target.LDR(vr(addr+1), vr(addr), int16(jit.OffsetData)),
+				target.LDR(vr(addr+2), vr(addr+1), int16(jit.OffsetStringLen)),
+				target.LDR(vr(addr+3), vr(addr+1), 0),
+			)
+		}
+		rows = append(rows,
+			target.CMP(vr(3), vr(7)), target.BCondLabel(target.OpBNE, no),
+			target.CMP(vr(4), vr(8)), target.BCondLabel(target.OpBEQ, yes),
+			target.CMPI(vr(3), 8), target.BCondLabel(target.OpBCC, bytes),
+			target.LDR(target.X16, vr(4), 0), target.LDR(target.X17, vr(8), 0),
+			target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, no),
+			target.ADDI(vr(4), vr(4), 8), target.ADDI(vr(8), vr(8), 8),
+			target.SUBI(vr(3), vr(3), 8), target.BLabel(words),
+			target.CBZLabel(vr(3), yes),
+			target.LDRB(target.X16, vr(4), 0), target.LDRB(target.X17, vr(8), 0),
+			target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, no),
+			target.ADDI(vr(4), vr(4), 1), target.ADDI(vr(8), vr(8), 1),
+			target.SUBI(vr(3), vr(3), 1), target.BLabel(bytes),
+		)
+		rows = append(rows, target.LDI(reg(ssa.TypeI1, 3), equal)...)
+		rows = append(rows, target.BLabel(done))
+		return append(rows, target.LDI(reg(ssa.TypeI1, 3), 1-equal)...)
+	}
+	binIndex, farIndex := 3, 5000
 	var tests []test
 	for _, c := range []struct {
 		code instr.Opcode
@@ -1442,6 +1495,7 @@ func TestMachine_Lower(t *testing.T) {
 		typ  ssa.Type
 		cond uint8
 	}{
+		{instr.REF_EQ, ssa.TypeRef, target.CondEQ}, {instr.REF_NE, ssa.TypeRef, target.CondNE},
 		{instr.I32_EQ, i32, target.CondEQ}, {instr.I32_NE, i32, target.CondNE},
 		{instr.I32_LT_S, i32, target.CondLT}, {instr.I32_LT_U, i32, target.CondCC},
 		{instr.I32_GT_S, i32, target.CondGT}, {instr.I32_GT_U, i32, target.CondHI},
@@ -2252,6 +2306,20 @@ func TestMachine_Lower(t *testing.T) {
 			lower: true,
 		},
 		{
+			name:  "string.eq compares lengths, then data pointers, then eight bytes at a time and the tail byte by byte",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: ssa.TypeI1},
+			op:    exec(instr.STRING_EQ, 1, 2),
+			rows:  stringEq(1),
+			lower: true,
+		},
+		{
+			name:  "string.ne is string.eq with the result swapped",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: ssa.TypeI1},
+			op:    exec(instr.STRING_NE, 1, 2),
+			rows:  stringEq(0),
+			lower: true,
+		},
+		{
 			name: "guard.bounds deopts unless its limit is at most the length, signed",
 			regs: regs{1: i32, 2: i32},
 			op:   ssa.Operation{Op: ssa.OpGuardBounds, Args: []ssa.Value{1, 2}},
@@ -2336,6 +2404,100 @@ func TestMachine_Lower(t *testing.T) {
 			name: "declines a container that carries no shape guard",
 			regs: regs{1: ssa.TypeRef, 3: i32, 4: i32},
 			op:   ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{1, 3}, Results: []ssa.Value{4}},
+		},
+		{
+			name:  "struct.new_default takes the last ref of its type's bin or bridges when it is empty",
+			regs:  regs{1: ssa.TypeRef},
+			index: &binIndex,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_NEW_DEFAULT, Results: []ssa.Value{1}},
+			rows: []asm.Instruction{
+				target.LDR(vr(1), target.Ctx, int16(jit.OffsetBins)),
+				target.LDR(vr(2), vr(1), int16(3*int(jit.SizeofBin)+int(jit.OffsetBinN))),
+				target.CBZLabel(vr(2), exit),
+				target.SUBI(vr(2), vr(2), 1),
+				target.STR(vr(2), vr(1), int16(3*int(jit.SizeofBin)+int(jit.OffsetBinN))),
+				target.LDR(vr(3), vr(1), int16(3*int(jit.SizeofBin))),
+				target.LSLI(vr(4), vr(2), 3), target.ADD(vr(4), vr(3), vr(4)),
+				target.LDR(reg(ssa.TypeRef, 1), vr(4), 0),
+			},
+			lower: true,
+		},
+		{
+			name:  "struct.new_default reaches a bin entry past the immediate range through an added offset",
+			regs:  regs{1: ssa.TypeRef},
+			index: &farIndex,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_NEW_DEFAULT, Results: []ssa.Value{1}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{target.LDR(vr(1), target.Ctx, int16(jit.OffsetBins))}
+				rows = append(rows, target.LDI(target.X16, uint64(5000*int(jit.SizeofBin)))...)
+				return append(rows,
+					target.ADD(vr(1), vr(1), target.X16),
+					target.LDR(vr(2), vr(1), int16(jit.OffsetBinN)),
+					target.CBZLabel(vr(2), exit),
+					target.SUBI(vr(2), vr(2), 1),
+					target.STR(vr(2), vr(1), int16(jit.OffsetBinN)),
+					target.LDR(vr(3), vr(1), 0),
+					target.LSLI(vr(4), vr(2), 3), target.ADD(vr(4), vr(3), vr(4)),
+					target.LDR(reg(ssa.TypeRef, 1), vr(4), 0),
+				)
+			}(),
+			lower: true,
+		},
+		{
+			name:  "array.new_default takes the last ref of its type's bin or bridges on an empty bin or another length",
+			regs:  regs{1: ssa.TypeRef, 2: i32},
+			index: &binIndex,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_NEW_DEFAULT, Args: []ssa.Value{2}, Results: []ssa.Value{1}},
+			rows: []asm.Instruction{
+				target.LDR(vr(1), target.Ctx, int16(jit.OffsetBins)),
+				target.LDR(vr(2), vr(1), int16(3*int(jit.SizeofBin)+int(jit.OffsetBinN))),
+				target.CBZLabel(vr(2), exit),
+				target.SXTW(vr(4), reg(i32, 2)),
+				target.LDR(vr(5), vr(1), int16(3*int(jit.SizeofBin)+int(jit.OffsetBinLen))),
+				target.CMP(vr(4), vr(5)),
+				target.BCondLabel(target.OpBNE, exit),
+				target.SUBI(vr(2), vr(2), 1),
+				target.STR(vr(2), vr(1), int16(3*int(jit.SizeofBin)+int(jit.OffsetBinN))),
+				target.LDR(vr(3), vr(1), int16(3*int(jit.SizeofBin))),
+				target.LSLI(vr(6), vr(2), 3), target.ADD(vr(6), vr(3), vr(6)),
+				target.LDR(reg(ssa.TypeRef, 1), vr(6), 0),
+			},
+			lower: true,
+		},
+		{
+			name:  "array.new_default reaches a bin entry past the immediate range through an added offset",
+			regs:  regs{1: ssa.TypeRef, 2: i32},
+			index: &farIndex,
+			op:    ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_NEW_DEFAULT, Args: []ssa.Value{2}, Results: []ssa.Value{1}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{target.LDR(vr(1), target.Ctx, int16(jit.OffsetBins))}
+				rows = append(rows, target.LDI(target.X16, uint64(5000*int(jit.SizeofBin)))...)
+				return append(rows,
+					target.ADD(vr(1), vr(1), target.X16),
+					target.LDR(vr(2), vr(1), int16(jit.OffsetBinN)),
+					target.CBZLabel(vr(2), exit),
+					target.SXTW(vr(4), reg(i32, 2)),
+					target.LDR(vr(5), vr(1), int16(jit.OffsetBinLen)),
+					target.CMP(vr(4), vr(5)),
+					target.BCondLabel(target.OpBNE, exit),
+					target.SUBI(vr(2), vr(2), 1),
+					target.STR(vr(2), vr(1), int16(jit.OffsetBinN)),
+					target.LDR(vr(3), vr(1), 0),
+					target.LSLI(vr(6), vr(2), 3), target.ADD(vr(6), vr(3), vr(6)),
+					target.LDR(reg(ssa.TypeRef, 1), vr(6), 0),
+				)
+			}(),
+			lower: true,
+		},
+		{
+			name: "array.new_default declines an operation whose bytecode operand is unknown",
+			regs: regs{1: ssa.TypeRef, 2: i32},
+			op:   ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_NEW_DEFAULT, Args: []ssa.Value{2}, Results: []ssa.Value{1}},
+		},
+		{
+			name: "struct.new_default declines an operation whose bytecode operand is unknown",
+			regs: regs{1: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_NEW_DEFAULT, Results: []ssa.Value{1}},
 		},
 		{
 			name:  "struct.get loads a 4-byte field with no bounds check",
@@ -2577,6 +2739,9 @@ func TestMachine_Lower(t *testing.T) {
 			}
 			if tt.consts != nil {
 				s = known{tt.regs, tt.consts}
+			}
+			if tt.index != nil {
+				s = typed{tt.regs, *tt.index}
 			}
 			start := len(a.Rows())
 			require.Equal(t, tt.lower, m.Lower(a, tt.op, s))
@@ -3391,7 +3556,7 @@ func lower(t *testing.T, m compile.Machine, f *ssa.Function, fn *types.Function,
 	t.Helper()
 	assembly, err := compile.Lower(f, m, fn, objects, address, osr, !osr)
 	require.NoError(t, err)
-	buffer, err := asm.NewBuffer(len(assembly.Bytes))
+	buffer, err := asm.NewBuffer(target.New(), len(assembly.Bytes))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
 	body, err := buffer.Link(assembly.Bytes)

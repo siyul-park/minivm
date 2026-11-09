@@ -8,13 +8,13 @@ import (
 	"unsafe"
 )
 
-// Store owns published code and the native entry table.
+// Cache owns published code and the native entry table.
 //
-// Retired code is reclaimed by quiescent states: each retire advances the
-// store's epoch and stamps the code with it, and each attached Reader
+// Invalidated code is reclaimed by quiescent states: each invalidation advances the
+// cache's epoch and stamps the code with it, and each attached Reader
 // publishes the epoch it observed at its last quiescent point. A code is
 // freed once every Reader has observed its epoch.
-type Store struct {
+type Cache struct {
 	// natives is the table read by native CALLs.
 	natives []uintptr
 	// codes publishes one atomic pointer per address.
@@ -22,13 +22,13 @@ type Store struct {
 	// osr publishes OSR code per (address, IP): never a call target, so it
 	// is never in natives, and is looked up only through Find or CodeAt.
 	osr map[key]*Code
-	// retired is in retire order, so its epochs ascend.
-	retired []*Code
-	readers []*Reader
-	// epoch counts retires; written under mu.
+	// invalidated is in invalidation order, so its epochs ascend.
+	invalidated []*Code
+	readers     []*Reader
+	// epoch counts invalidations; written under mu.
 	epoch atomic.Uint64
-	// pending is len(retired), readable without mu so Reclaim with nothing
-	// retired — the common case — takes no lock.
+	// pending is len(invalidated), readable without mu so Reclaim with nothing
+	// invalidated — the common case — takes no lock.
 	pending atomic.Int64
 
 	mu sync.Mutex
@@ -37,11 +37,11 @@ type Store struct {
 	freeErr atomic.Pointer[error]
 }
 
-// Reader is one interpreter's registration with a Store: Reclaim frees no
-// code retired after the Reader's last quiescent point.
+// Reader is one interpreter's registration with a Cache: Reclaim frees no
+// code invalidated after the Reader's last quiescent point.
 type Reader struct {
-	store *Store
-	// seen is the store epoch at the Reader's last quiescent point.
+	cache *Cache
+	// seen is the cache epoch at the Reader's last quiescent point.
 	seen atomic.Uint64
 }
 
@@ -50,22 +50,22 @@ type key struct {
 	address, ip int
 }
 
-// NewStore returns a Store serving addresses [0, size).
-func NewStore(size int) *Store {
+// NewCache returns a Cache serving addresses [0, size).
+func NewCache(size int) *Cache {
 	if size < 1 {
-		panic("jit: store size must be positive")
+		panic("jit: cache size must be positive")
 	}
-	return &Store{natives: make([]uintptr, size), codes: make([]atomic.Pointer[Code], size), osr: map[key]*Code{}}
+	return &Cache{natives: make([]uintptr, size), codes: make([]atomic.Pointer[Code], size), osr: map[key]*Code{}}
 }
 
-// Natives returns the address of the natives table, stable for the Store's
+// Natives returns the address of the natives table, stable for the Cache's
 // life: Context.Natives.
-func (s *Store) Natives() uintptr {
+func (s *Cache) Natives() uintptr {
 	return uintptr(unsafe.Pointer(&s.natives[0]))
 }
 
 // Code returns the published code at address, or nil. It never blocks.
-func (s *Store) Code(address int) *Code {
+func (s *Cache) Code(address int) *Code {
 	if address < 0 || address >= len(s.codes) {
 		return nil
 	}
@@ -74,14 +74,14 @@ func (s *Store) Code(address int) *Code {
 
 // CodeAt returns the published OSR code at (address, ip), or nil. Unlike
 // Code, it takes the mutex.
-func (s *Store) CodeAt(address, ip int) *Code {
+func (s *Cache) CodeAt(address, ip int) *Code {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.osr[key{address, ip}]
 }
 
-// Find returns the published or retired code whose range holds pc, or nil.
-func (s *Store) Find(pc uintptr) *Code {
+// Find returns the published or invalidated code whose range holds pc, or nil.
+func (s *Cache) Find(pc uintptr) *Code {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.codes {
@@ -94,7 +94,7 @@ func (s *Store) Find(pc uintptr) *Code {
 			return c
 		}
 	}
-	for _, c := range s.retired {
+	for _, c := range s.invalidated {
 		if c.holds(pc) {
 			return c
 		}
@@ -105,10 +105,10 @@ func (s *Store) Find(pc uintptr) *Code {
 // Publish takes ownership of c. An OSR code (c.OSR) is never a call target:
 // it installs into the (address, IP) map, once, instead of natives[c.Address].
 // Otherwise it installs c — natives[c.Address] = c.Native() — when c.Tier is
-// above the published code's tier (none published counts as zero), retiring
+// above the published code's tier (none published counts as zero), invalidating
 // the code it replaces. Either way it reports whether c installed; a stale c,
 // or one whose address is out of range, is freed instead.
-func (s *Store) Publish(c *Code) bool {
+func (s *Cache) Publish(c *Code) bool {
 	installed := false
 	if c.Address >= 0 && c.Address < len(s.natives) {
 		s.mu.Lock()
@@ -127,7 +127,7 @@ func (s *Store) Publish(c *Code) bool {
 				atomic.StoreUintptr(&s.natives[c.Address], c.Native())
 				s.codes[c.Address].Store(c)
 				if old != nil {
-					s.retire(old)
+					s.invalidate(old)
 				}
 			}
 		}
@@ -141,10 +141,10 @@ func (s *Store) Publish(c *Code) bool {
 	return installed
 }
 
-// Retire clears natives[address] and moves the published code to the
-// retired list; a no-op when nothing is published at address. A retired
+// Invalidate clears natives[address] and moves the published code to the
+// invalidated list; a no-op when nothing is published at address. A invalidated
 // code stays findable until Reclaim: suspended activations still run it.
-func (s *Store) Retire(address int) {
+func (s *Cache) Invalidate(address int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if address < 0 || address >= len(s.codes) {
@@ -156,13 +156,13 @@ func (s *Store) Retire(address int) {
 	}
 	atomic.StoreUintptr(&s.natives[address], 0)
 	s.codes[address].Store(nil)
-	s.retire(c)
+	s.invalidate(c)
 }
 
-// RetireAt moves the published OSR code at (address, ip) to the retired
-// list; a no-op when nothing is published there. A retired code stays
+// InvalidateAt moves the published OSR code at (address, ip) to the invalidated
+// list; a no-op when nothing is published there. A invalidated code stays
 // findable until Reclaim.
-func (s *Store) RetireAt(address, ip int) {
+func (s *Cache) InvalidateAt(address, ip int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k := key{address, ip}
@@ -171,12 +171,12 @@ func (s *Store) RetireAt(address, ip int) {
 		return
 	}
 	delete(s.osr, k)
-	s.retire(c)
+	s.invalidate(c)
 }
 
 // Attach registers a Reader that has observed the current epoch: no code
-// retired so far is reachable to it.
-func (s *Store) Attach() *Reader {
+// invalidated so far is reachable to it.
+func (s *Cache) Attach() *Reader {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := newReader(s, s.currentEpoch())
@@ -184,9 +184,9 @@ func (s *Store) Attach() *Reader {
 	return r
 }
 
-// Reclaim frees every retired code each attached Reader has passed a
-// quiescent point since; with no Reader attached, every retired code.
-func (s *Store) Reclaim() error {
+// Reclaim frees every invalidated code each attached Reader has passed a
+// quiescent point since; with no Reader attached, every invalidated code.
+func (s *Cache) Reclaim() error {
 	if s.pending.Load() == 0 {
 		if p := s.freeErr.Swap(nil); p != nil {
 			return *p
@@ -199,11 +199,11 @@ func (s *Store) Reclaim() error {
 		floor = min(floor, r.seenEpoch())
 	}
 	n := 0
-	for n < len(s.retired) && s.retired[n].retiredAt() <= floor {
+	for n < len(s.invalidated) && s.invalidated[n].invalidatedAt() <= floor {
 		n++
 	}
-	freed := slices.Clone(s.retired[:n])
-	s.retired = slices.Delete(s.retired, 0, n)
+	freed := slices.Clone(s.invalidated[:n])
+	s.invalidated = slices.Delete(s.invalidated, 0, n)
 	s.pending.Add(-int64(n))
 	s.mu.Unlock()
 
@@ -217,12 +217,12 @@ func (s *Store) Reclaim() error {
 	return err
 }
 
-// Close frees every published and retired code; the caller must ensure no
+// Close frees every published and invalidated code; the caller must ensure no
 // interpreter is inside native code first.
-func (s *Store) Close() error {
+func (s *Cache) Close() error {
 	s.mu.Lock()
-	codes, osr, retired := s.codes, s.osr, s.retired
-	s.codes, s.osr, s.retired = nil, nil, nil
+	codes, osr, invalidated := s.codes, s.osr, s.invalidated
+	s.codes, s.osr, s.invalidated = nil, nil, nil
 	s.mu.Unlock()
 
 	var err error
@@ -234,7 +234,7 @@ func (s *Store) Close() error {
 	for _, c := range osr {
 		err = errors.Join(err, c.Free())
 	}
-	for _, c := range retired {
+	for _, c := range invalidated {
 		err = errors.Join(err, c.Free())
 	}
 	if p := s.freeErr.Swap(nil); p != nil {
@@ -245,11 +245,11 @@ func (s *Store) Close() error {
 }
 
 // Quiesce marks a quiescent point: r holds no code it read before, so
-// Reclaim may free every code retired up to now. Entry re-checks a cached
-// code's Retired after it. It stores only when the epoch moved, so a
+// Reclaim may free every code invalidated up to now. Entry re-checks a cached
+// code's Invalidated after it. It stores only when the epoch moved, so a
 // steady quiescent point issues no store.
 func (r *Reader) Quiesce() {
-	e := r.store.currentEpoch()
+	e := r.cache.currentEpoch()
 	if r.seenEpoch() != e {
 		r.seen.Store(e)
 	}
@@ -257,28 +257,28 @@ func (r *Reader) Quiesce() {
 
 // Detach unregisters r; its interpreter must hold no code from then on.
 func (r *Reader) Detach() {
-	r.store.detach(r)
+	r.cache.detach(r)
 }
 
-func newReader(store *Store, epoch uint64) *Reader {
-	r := &Reader{store: store}
+func newReader(cache *Cache, epoch uint64) *Reader {
+	r := &Reader{cache: cache}
 	r.seen.Store(epoch)
 	return r
 }
 
-func (s *Store) retire(c *Code) {
+func (s *Cache) invalidate(c *Code) {
 	e := s.currentEpoch() + 1
-	c.retire(e)
+	c.invalidate(e)
 	s.epoch.Store(e)
-	s.retired = append(s.retired, c)
+	s.invalidated = append(s.invalidated, c)
 	s.pending.Add(1)
 }
 
-func (s *Store) currentEpoch() uint64 {
+func (s *Cache) currentEpoch() uint64 {
 	return s.epoch.Load()
 }
 
-func (s *Store) detach(r *Reader) {
+func (s *Cache) detach(r *Reader) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if k := slices.Index(s.readers, r); k >= 0 {

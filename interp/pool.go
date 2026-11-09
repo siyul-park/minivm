@@ -55,7 +55,8 @@ func NewPool(prog *program.Program, size int, opts ...Option) (*Pool, error) {
 // Get returns an Interpreter ready for use. It reuses an idle one if available,
 // otherwise creates a new one when below the size cap, otherwise blocks until
 // another goroutine calls Put or ctx is canceled. Returns ErrPoolClosed once
-// the pool is closed.
+// the pool is closed, and ErrHeapExhausted when the program's constants do not
+// fit WithHeapLimit.
 func (p *Pool) Get(ctx context.Context) (*Interpreter, error) {
 	p.mu.RLock()
 	if p.closed {
@@ -70,11 +71,11 @@ func (p *Pool) Get(ctx context.Context) (*Interpreter, error) {
 	default:
 	}
 
-	if i := p.grow(); i != nil {
-		p.mu.RUnlock()
-		return i, nil
-	}
+	i, err := p.grow()
 	p.mu.RUnlock()
+	if i != nil || err != nil {
+		return i, err
+	}
 
 	select {
 	case i, ok := <-p.idle:
@@ -143,17 +144,22 @@ func (p *Pool) Close() error {
 }
 
 // grow reserves a slot below the size cap and returns a fresh Interpreter, or
-// nil when the cap is reached so the caller waits.
-func (p *Pool) grow() *Interpreter {
+// nil when the cap is reached so the caller waits. A failed build gives its
+// slot back.
+func (p *Pool) grow() (*Interpreter, error) {
 	for {
 		live := p.live.Load()
 		if live >= int64(p.size) {
-			return nil
+			return nil, nil
 		}
 		if p.live.CompareAndSwap(live, live+1) {
-			i := build(p.prog, p.opts...)
+			i, err := build(p.prog, p.opts...)
+			if err != nil {
+				p.live.Add(-1)
+				return nil, err
+			}
 			p.share(i)
-			return i
+			return i, nil
 		}
 	}
 }
@@ -166,21 +172,21 @@ func (p *Pool) share(i *Interpreter) {
 	if i.attach() != nil {
 		i.spend(dormancy)
 	}
-	if i.native == nil {
+	if i.jit == nil {
 		return
 	}
 	p.sharedMu.Lock()
 	defer p.sharedMu.Unlock()
 
 	if p.shared == nil {
-		p.shared = i.native.shared.retain()
+		p.shared = i.jit.shared.retain()
 		return
 	}
-	if !reflect.DeepEqual(i.native.shared.module, p.shared.module) {
+	if !reflect.DeepEqual(i.jit.shared.module, p.shared.module) {
 		return
 	}
 
-	if err := i.native.join(p.shared.retain()); err != nil && p.closeErr == nil {
+	if err := i.jit.join(p.shared.retain()); err != nil && p.closeErr == nil {
 		p.closeErr = err
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/siyul-park/minivm/internal/graph"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/pass"
+	"github.com/siyul-park/minivm/types"
 )
 
 // FoldPass evaluates pure operations with constant operands.
@@ -445,13 +446,11 @@ func evalF64(code instr.Opcode, a, b float64) (uint64, bool) {
 func word[v bool | int32 | float32](x v) uint64 {
 	switch v := any(x).(type) {
 	case bool:
-		if v {
-			return 1
-		}
+		return types.BoxI1(v).Word()
 	case int32:
-		return uint64(uint32(v))
+		return types.BoxI32(v).Word()
 	case float32:
-		return uint64(math.Float32bits(v))
+		return types.BoxF32(v).Word()
 	}
 	return 0
 }

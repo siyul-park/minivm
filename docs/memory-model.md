@@ -29,6 +29,8 @@ work  []int
 
 Native execution MUST preserve the threaded ownership totals.
 
+While native code runs, the tcache (`jit-internals.md`, Reserve) owns the structs and arrays it built ahead: each is a live slot of count 1 that no program value references. `HeapLen` and `RefCount` can read higher than threaded execution would until the tcache is returned. It is returned at every return to the interpreter at native depth 0, so after `Run` the heap holds only what the program owns, and an array it returns is reused at once, not only at Reset, since no host could have loaded it; a heap limit counts cached slots, and reaching it returns the tcache before it fails.
+
 ## Transfers
 
 | Operation | Result |

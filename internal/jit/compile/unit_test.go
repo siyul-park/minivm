@@ -520,7 +520,7 @@ func context(t *testing.T, stack []types.Boxed, heap []types.Value) *jit.Context
 	return ctx
 }
 
-// run compiles u and every callee with m, publishes them in a Store of
+// run compiles u and every callee with m, publishes them in a Cache of
 // their own natives table, and runs u over stack.
 func run(t *testing.T, u compile.Unit, stack []types.Boxed, callees ...compile.Unit) (*jit.Context, jit.Trap) {
 	t.Helper()
@@ -528,13 +528,13 @@ func run(t *testing.T, u compile.Unit, stack []types.Boxed, callees ...compile.U
 	for _, callee := range callees {
 		size = max(size, callee.Address+1)
 	}
-	store := jit.NewStore(size)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	cache := jit.NewCache(size)
+	t.Cleanup(func() { require.NoError(t, cache.Close()) })
 	var c *jit.Code
 	for _, unit := range append([]compile.Unit{u}, callees...) {
 		code, err := compile.Compile(unit, arm64.New())
 		require.NoError(t, err)
-		require.True(t, store.Publish(code))
+		require.True(t, cache.Publish(code))
 		if c == nil {
 			c = code
 		}
@@ -553,7 +553,7 @@ func run(t *testing.T, u compile.Unit, stack []types.Boxed, callees ...compile.U
 	ctx.Top = ctx.FB + uintptr(len(stack))*unsafe.Sizeof(stack[0])
 	ctx.Limit = uint64(len(ctx.Records))
 	ctx.Budget = 1 << 20
-	ctx.Natives = store.Natives()
+	ctx.Natives = cache.Natives()
 	ctx.RC = address(t, rc)
 	ctx.Entries = address(t, entries)
 

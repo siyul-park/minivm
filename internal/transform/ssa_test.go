@@ -26,7 +26,7 @@ func pipeline() *pass.Pipeline[*ssa.Function] {
 	pipeline.Add(transform.NewPromotePass())
 	pipeline.Add(transform.NewCSEPass())
 	pipeline.Add(transform.NewGuardPass())
-	pipeline.Add(transform.NewHoistPass())
+	pipeline.Add(transform.NewLICMPass())
 	pipeline.Add(transform.NewDCEPass())
 	return pipeline
 }
@@ -465,7 +465,7 @@ func TestSSAPass_Run(t *testing.T) {
 	t.Run("re-emits an array loop whose hoisted guard slices the array", func(t *testing.T) {
 		pipeline := pass.NewPipeline[*ssa.Function]()
 		pipeline.Add(transform.NewPromotePass())
-		pipeline.Add(transform.NewHoistPass())
+		pipeline.Add(transform.NewLICMPass())
 		pipeline.Add(transform.NewDCEPass())
 
 		total := types.NewFunctionBuilder(&types.FunctionType{

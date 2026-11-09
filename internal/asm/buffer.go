@@ -15,6 +15,7 @@ import (
 // be entered.
 type Buffer struct {
 	maps   []memory
+	arch   Arch
 	mem    memory
 	size   int
 	sealed bool
@@ -34,14 +35,14 @@ var (
 	ErrMunmapFailed   = errors.New("munmap failed")
 )
 
-// NewBuffer allocates an executable buffer with the given initial mapping
-// capacity, rounded up to a page boundary.
-func NewBuffer(size int) (*Buffer, error) {
+// NewBuffer allocates an executable buffer for arch's code with the given
+// initial mapping capacity, rounded up to a page boundary.
+func NewBuffer(arch Arch, size int) (*Buffer, error) {
 	mem, err := allocMemory(size)
 	if err != nil {
 		return nil, err
 	}
-	return &Buffer{mem: mem, size: len(mem)}, nil
+	return &Buffer{arch: arch, mem: mem, size: len(mem)}, nil
 }
 
 // Link publishes code into b in an immutable executable mapping and returns
@@ -72,6 +73,7 @@ func (b *Buffer) Link(code []byte) (uintptr, error) {
 	}
 
 	copy(mem, code)
+	b.arch.Flush(mem)
 	if err := executable(mem); err != nil {
 		if replace {
 			if freeErr := freeMemory(mem); freeErr != nil {

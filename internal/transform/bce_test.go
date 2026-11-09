@@ -87,12 +87,12 @@ func (l boundedLoop) build() *ssa.Function {
 	return b.Build()
 }
 
-func TestNewBoundPass(t *testing.T) {
-	var p pass.Pass[*ssa.Function] = transform.NewBoundPass(nil)
+func TestNewBCEPass(t *testing.T) {
+	var p pass.Pass[*ssa.Function] = transform.NewBCEPass(nil)
 	require.NotNil(t, p)
 }
 
-func TestBoundPass_Run(t *testing.T) {
+func TestBCEPass_Run(t *testing.T) {
 	counted := boundedLoop{init: 0, step: 1, limit: 256, test: instr.I32_GE_S}
 	minus := uint64(uint32(math.MaxUint32))
 	tests := []struct {
@@ -122,7 +122,7 @@ func TestBoundPass_Run(t *testing.T) {
 			fn := tt.loop.build()
 			require.NoError(t, ssa.Verify(fn))
 
-			_, err := transform.NewBoundPass(tt.refuted).Run(pass.NewManager(), fn)
+			_, err := transform.NewBCEPass(tt.refuted).Run(pass.NewManager(), fn)
 
 			require.NoError(t, err)
 			require.NoError(t, ssa.Verify(fn))

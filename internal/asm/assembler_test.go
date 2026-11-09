@@ -514,7 +514,7 @@ func TestAssembler_Build(t *testing.T) {
 	})
 	t.Run("runs a value spilled across an exit", func(t *testing.T) {
 		testenv.MustHaveArch(t, "arm64")
-		s, err := asm.NewState(4096)
+		s, err := asm.NewState(arm64.New(), 4096)
 		require.NoError(t, err)
 		exit := []asm.Instruction{
 			arm64.LDR(arm64.X16, arm64.Ctx, int16(asm.OffsetStub)),
@@ -539,16 +539,16 @@ func TestAssembler_Build(t *testing.T) {
 
 		code, err := assembler.Build()
 		require.NoError(t, err)
-		buffer, err := asm.NewBuffer(len(code))
+		buffer, err := asm.NewBuffer(arm64.New(), len(code))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, buffer.Free()) })
 		addr, err := buffer.Link(code)
 		require.NoError(t, err)
 
-		require.True(t, asm.Enter(addr, &s))
-		require.True(t, asm.Resume(&s))
+		require.True(t, arm64.New().Enter(addr, &s))
+		require.True(t, arm64.New().Resume(&s))
 		require.Equal(t, uint64(43), s.Reg(arm64.X0))
-		require.False(t, asm.Resume(&s))
+		require.False(t, arm64.New().Resume(&s))
 	})
 }
 
