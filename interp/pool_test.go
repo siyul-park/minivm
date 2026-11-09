@@ -353,7 +353,7 @@ func TestPool_Get(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32()))
 
-		const threshold = 8
+		const threshold = 64
 		profiler := prof.New()
 		p, err := interp.NewPool(prog, 2, interp.WithThreshold(threshold), interp.WithProfiler(profiler))
 		require.NoError(t, err)
@@ -384,6 +384,11 @@ func TestPool_Get(t *testing.T) {
 			}
 			runErr = run(vm)
 			runs++
+			if runs > threshold {
+				// Past the total that submits, further Runs only wait for
+				// the background compile: give it time instead of Runs.
+				time.Sleep(5 * time.Millisecond)
+			}
 			if runErr != nil {
 				return true
 			}
@@ -394,12 +399,13 @@ func TestPool_Get(t *testing.T) {
 		require.Greater(t, entries, float64(0))
 		// A single, unshared interpreter would need threshold Runs of its
 		// own; two alternating interpreters would need about 2x threshold
-		// total without pool-wide aggregation. The small constant covers
-		// strict alternation's worst case: only the interpreter whose turn
-		// crosses the total submits, so the other's turns are wasted retries
-		// until submission's owner returns to drain the compile (one turn)
-		// and then enter it (one more).
-		require.LessOrEqual(t, runs, threshold+8)
+		// total without pool-wide aggregation. Pool-wide aggregation submits
+		// at about threshold total; the rest is strict alternation (only the
+		// interpreter whose turn crosses the total submits, then drains and
+		// enters on its later turns) and the compile's own latency, which
+		// each Run past threshold waits out. Half a threshold of slack still
+		// separates the two well short of 2x.
+		require.LessOrEqual(t, runs, threshold+threshold/2)
 
 		p.Put(a)
 		p.Put(b2)

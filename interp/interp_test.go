@@ -5344,15 +5344,33 @@ func TestWithThreshold(t *testing.T) {
 		})
 		require.NoError(t, runErr)
 
+		// Compiles finish asynchronously: a round with no served call may
+		// still have one in flight that publishes code making calls again.
+		// Settled is two rounds in a row with no served call and no compile.
+		compiles := func() float64 {
+			var n float64
+			for _, m := range profiler.Metrics() {
+				if m.Name == "vm_jit_compiles_total" {
+					n += m.Value
+				}
+			}
+			return n
+		}
+		quiet := 0
 		poll(t, func() bool {
-			before := calls()
+			before, compiled := calls(), compiles()
 			for range runs {
 				if runErr = vm.Run(context.Background()); runErr != nil {
 					return true
 				}
 				vm.Reset()
 			}
-			return calls() == before
+			if calls() != before || compiles() != compiled {
+				quiet = 0
+				return false
+			}
+			quiet++
+			return quiet == 2
 		})
 		require.NoError(t, runErr)
 
@@ -6618,16 +6636,22 @@ func TestWithThreshold(t *testing.T) {
 		})
 		require.NoError(t, runErr)
 
+		// Tier-up compiles finish asynchronously, so a batch can run some
+		// calls threaded while a new tier publishes. Every Run must match
+		// threaded execution; native code must carry batches*calls entries
+		// eventually, however many Runs that takes.
 		before := entries()
-		for range batches {
-			require.NoError(t, vm.Run(context.Background()))
-			got, err := vm.Pop()
-			require.NoError(t, err)
-			require.Equal(t, want, got)
-			require.Equal(t, wantCounts, counts(vm))
-			vm.Reset()
-		}
-		require.GreaterOrEqual(t, entries()-before, float64(batches*calls))
+		poll(t, func() bool {
+			for range batches {
+				require.NoError(t, vm.Run(context.Background()))
+				got, err := vm.Pop()
+				require.NoError(t, err)
+				require.Equal(t, want, got)
+				require.Equal(t, wantCounts, counts(vm))
+				vm.Reset()
+			}
+			return entries()-before >= float64(batches*calls)
+		})
 
 		require.Zero(t, metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "unsupported"}))
 	})
