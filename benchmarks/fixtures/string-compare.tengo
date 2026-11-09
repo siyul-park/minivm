@@ -1,0 +1,32 @@
+digits := ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+
+number := func(value) {
+    if value == 0 {
+        return digits[0]
+    }
+
+    text := ""
+    for value > 0 {
+        text = digits[value % 10] + text
+        value = value / 10
+    }
+    return text
+}
+
+words := []
+for i := 0; i < 64; i = i + 1 {
+    words = append(words, number((i*2654435761)%997))
+}
+
+count := 0
+
+for r := 0; r < 256; r = r + 1 {
+    key := number((r*31)%997)
+    for i := 0; i < 64; i = i + 1 {
+        if words[i] == key {
+            count = count + i + 1
+        }
+    }
+}
+
+result := count
