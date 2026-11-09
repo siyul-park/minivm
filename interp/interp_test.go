@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"math"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -25,6 +26,9 @@ type trackedValue struct {
 	refs   []types.Ref
 	closed int
 }
+
+// panicCloser is a host value whose Close panics.
+type panicCloser struct{ trackedValue }
 
 type structGetHostFields struct {
 	Count  int32
@@ -1886,6 +1890,10 @@ func (v *trackedValue) Close() error {
 	return nil
 }
 
+func (*panicCloser) Close() error {
+	panic("close")
+}
+
 func (h *structGetHostFields) Bump(n int32) int32 {
 	h.Count += n
 	h.hidden++
@@ -2754,6 +2762,65 @@ func TestWithHeapLimit(t *testing.T) {
 		require.Equal(t, 1, live.closed)
 		require.NoError(t, i.Release(reused))
 	})
+
+	t.Run("fails a native STRUCT_NEW_DEFAULT where threaded fails", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		prog := links(t, 2000, -1, true)
+
+		limit := fits(t, prog)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHeapLimit(limit))
+		defer vm.Close()
+		warm(t, vm, profiler)
+		vm.Flush()
+		deopts, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+		require.NoError(t, vm.Run(context.Background()))
+		vm.Flush()
+		after, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+		require.Equal(t, deopts, after)
+		vm.Reset()
+
+		shortProfiler := prof.New()
+		short := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(shortProfiler), interp.WithHeapLimit(limit-1))
+		defer short.Close()
+		warm(t, short, shortProfiler)
+		require.ErrorIs(t, short.Run(context.Background()), interp.ErrHeapExhausted)
+
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1), interp.WithHeapLimit(limit-1))
+		defer threaded.Close()
+		require.ErrorIs(t, threaded.Run(context.Background()), interp.ErrHeapExhausted)
+		require.Equal(t, liveOf(threaded), liveOf(short))
+	})
+
+	t.Run("fails a native ARRAY_NEW_DEFAULT where threaded fails", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		prog := chains(t, 2000, 0, 1, 1)
+
+		limit := fits(t, prog)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHeapLimit(limit))
+		defer vm.Close()
+		warm(t, vm, profiler)
+		vm.Flush()
+		entered := nativeEntries(profiler)
+		require.NoError(t, vm.Run(context.Background()))
+		vm.Flush()
+		require.Greater(t, nativeEntries(profiler), entered)
+		vm.Reset()
+
+		shortProfiler := prof.New()
+		short := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(shortProfiler), interp.WithHeapLimit(limit-1))
+		defer short.Close()
+		warm(t, short, shortProfiler)
+		require.ErrorIs(t, short.Run(context.Background()), interp.ErrHeapExhausted)
+
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1), interp.WithHeapLimit(limit-1))
+		defer threaded.Close()
+		require.ErrorIs(t, threaded.Run(context.Background()), interp.ErrHeapExhausted)
+		require.Equal(t, liveOf(threaded), liveOf(short))
+	})
 }
 
 func TestWithTick(t *testing.T) {
@@ -2820,13 +2887,15 @@ func TestWithThreshold(t *testing.T) {
 		testenv.MustHaveJIT(t)
 
 		tests := []struct {
-			name     string
-			body     func(b *instr.Builder, target int)
-			good     int32
-			bad      int32
-			null     int
-			limit    int
-			threaded bool // native loses frames here until #278
+			name  string
+			body  func(b *instr.Builder, target int)
+			good  int32
+			bad   int32
+			null  int
+			limit int
+			// boxed defers wide i64 boxes in native code, so a heap limit trips at
+			// another instruction, in the same frames.
+			boxed bool
 		}{
 			{
 				name: "array.get on a null container",
@@ -2892,9 +2961,9 @@ func TestWithThreshold(t *testing.T) {
 					b.Emit(instr.LOCAL_GET, 5).Emit(instr.LOCAL_GET, 5).Emit(instr.I64_ADD).Emit(instr.LOCAL_SET, 6)
 					b.Bind(skip)
 				},
-				good:     1,
-				limit:    7,
-				threaded: true,
+				good:  1,
+				limit: 7,
+				boxed: true,
 			},
 		}
 		for _, tt := range tests {
@@ -2954,10 +3023,6 @@ func TestWithThreshold(t *testing.T) {
 				threaded := interp.MustNew(prog, append(opts, interp.WithThreshold(-1))...)
 				defer threaded.Close()
 				require.EqualError(t, run(threaded, tt.bad), want.Error())
-				if tt.threaded {
-					return
-				}
-
 				profiler := prof.New()
 				native := interp.MustNew(prog, append(opts, interp.WithThreshold(1), interp.WithProfiler(profiler))...)
 				defer native.Close()
@@ -2966,7 +3031,14 @@ func TestWithThreshold(t *testing.T) {
 					native.Flush()
 					return nativeEntries(profiler) > 0
 				})
-				require.EqualError(t, run(native, tt.bad), want.Error())
+				got := run(native, tt.bad)
+				require.Error(t, got)
+				if tt.boxed {
+					ip := regexp.MustCompile(`ip=\d+`)
+					require.Equal(t, ip.ReplaceAllString(want.Error(), "ip"), ip.ReplaceAllString(got.Error(), "ip"))
+					return
+				}
+				require.EqualError(t, got, want.Error())
 			})
 		}
 	})
@@ -3356,7 +3428,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Zero(t, nativeEntries(profiler))
 	})
 
-	t.Run("recompiles a retired function only after more calls than its first compile", func(t *testing.T) {
+	t.Run("recompiles a invalidated function only after more calls than its first compile", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 
 		inc := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
@@ -3693,21 +3765,20 @@ func TestWithThreshold(t *testing.T) {
 		require.Zero(t, deopts)
 	})
 
-	t.Run("retires a loop that only bridges and releases", func(t *testing.T) {
+	t.Run("invalidates a loop that only bridges and releases", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
-		record := node()
 		b := instr.NewBuilder()
 		loop, done := b.Label(), b.Label()
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
 		b.Bind(loop)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 100).Emit(instr.I32_GE_S).BrIf(done)
-		b.Emit(instr.STRUCT_NEW_DEFAULT, 0).Emit(instr.DROP)
+		b.Emit(instr.CONST_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.STRING_CONCAT).Emit(instr.DROP)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
 		b.Br(loop)
 		b.Bind(done).Emit(instr.LOCAL_GET, 0)
 		code, err := b.Assemble()
 		require.NoError(t, err)
-		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithTypes(record))
+		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithConstants(types.String("a")))
 		want := runProgram(t, prog)
 
 		profiler := prof.New()
@@ -4459,7 +4530,7 @@ func TestWithThreshold(t *testing.T) {
 		b.Emit(instr.CONST_GET, 1).Emit(instr.LOCAL_SET, 2)
 		b.Bind(same)
 
-		b.Emit(instr.LOCAL_GET, 2).Emit(instr.CONST_GET, 0).Emit(instr.STRING_EQ).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.CONST_GET, 0).Emit(instr.STRING_LT).Emit(instr.DROP)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
 		b.Bind(done).Emit(instr.LOCAL_GET, 0)
 		code, err := b.Assemble()
@@ -4554,7 +4625,7 @@ func TestWithThreshold(t *testing.T) {
 		defer vm.Close()
 
 		// f(0) runs threaded-entered at most once per Run; enough Runs pass
-		// for its bridges to reach the retirement limit several times over.
+		// for its bridges to reach the invalidation limit several times over.
 		const runs = 16
 		var got types.Value
 		var runErr, popErr error
@@ -4582,6 +4653,243 @@ func TestWithThreshold(t *testing.T) {
 		require.GreaterOrEqual(t, round, runs)
 
 		require.Less(t, entries, float64(n/2))
+	})
+
+	t.Run("compares strings and refs natively as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		const n = 1000
+		// fresh builds a string from constant c through string.new_utf32, so two
+		// builds of equal content are different refs.
+		fresh := func(b *instr.Builder, c, local int) {
+			b.Emit(instr.CONST_GET, uint64(c)).Emit(instr.STRING_ENCODE_UTF32).Emit(instr.STRING_NEW_UTF32).Emit(instr.LOCAL_SET, uint64(local))
+		}
+		long := func(tail string) string { return "0123456789abcdefghij" + tail }
+		type tc struct {
+			name string
+			op   instr.Opcode
+			x, y string
+		}
+		var cases []tc
+		for _, op := range []instr.Opcode{instr.STRING_EQ, instr.STRING_NE} {
+			for _, c := range [][3]string{
+				{"empty and empty", "", ""},
+				{"empty and non-empty", "", "a"},
+				{"equal contents behind different refs", "hello", "hello"},
+				{"different lengths", "hello", "hell"},
+				{"first byte differs", "xello", "hello"},
+				{"middle byte differs", "hexlo", "hello"},
+				{"last byte differs", "hellx", "hello"},
+				{"one word exactly", "abcdefgh", "abcdefgh"},
+				{"one word differing at the end", "abcdefgh", "abcdefgx"},
+				{"two words and a tail equal", long("kl"), long("kl")},
+				{"second word differs", long("kl")[:8] + "X" + long("kl")[9:], long("kl")},
+				{"tail differs after equal words", long("kl"), long("kX")},
+				{"non-ascii contents", "héllo wörld, ünïcode", "héllo wörld, ünïcode"},
+			} {
+				name := "string.eq"
+				if op == instr.STRING_NE {
+					name = "string.ne"
+				}
+				cases = append(cases, tc{name + " " + c[0], op, c[1], c[2]})
+			}
+		}
+		for _, c := range cases {
+			t.Run(c.name, func(t *testing.T) {
+				b := instr.NewBuilder()
+				loop, done, hit, skip := b.Label(), b.Label(), b.Label(), b.Label()
+				fresh(b, 0, 0)
+				fresh(b, 1, 1)
+				b.Bind(loop)
+				b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, n).Emit(instr.I32_GE_S).BrIf(done)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(c.op).BrIf(hit).Br(skip)
+				b.Bind(hit)
+				b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+				b.Bind(skip)
+				b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).Br(loop)
+				b.Bind(done).Emit(instr.LOCAL_GET, 3)
+				code, err := b.Assemble()
+				require.NoError(t, err)
+				prog := program.New(code,
+					program.WithLocals(types.TypeString(), types.TypeString(), types.TypeI32(), types.TypeI32()),
+					program.WithConstants(types.String(c.x), types.String(c.y)))
+				requireNative(t, prog)
+			})
+		}
+
+		{
+			refOps := map[instr.Opcode]string{instr.REF_EQ: "ref.eq", instr.REF_NE: "ref.ne"}
+			for _, op := range []instr.Opcode{instr.REF_EQ, instr.REF_NE} {
+				for _, c := range []struct {
+					name string
+					x, y func(b *instr.Builder)
+				}{
+					{"same ref", func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0) }, func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0) }},
+					{"different refs of equal contents", func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0) }, func(b *instr.Builder) { b.Emit(instr.CONST_GET, 1) }},
+					{"null and null", func(b *instr.Builder) { b.Emit(instr.REF_NULL) }, func(b *instr.Builder) { b.Emit(instr.REF_NULL) }},
+					{"null and non-null", func(b *instr.Builder) { b.Emit(instr.REF_NULL) }, func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0) }},
+					{"non-null and null", func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0) }, func(b *instr.Builder) { b.Emit(instr.REF_NULL) }},
+				} {
+					t.Run(refOps[op]+" "+c.name, func(t *testing.T) {
+						b := instr.NewBuilder()
+						loop, done, hit, skip := b.Label(), b.Label(), b.Label(), b.Label()
+						c.x(b)
+						b.Emit(instr.LOCAL_SET, 0)
+						c.y(b)
+						b.Emit(instr.LOCAL_SET, 1)
+						b.Bind(loop)
+						b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, n).Emit(instr.I32_GE_S).BrIf(done)
+						b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(op).BrIf(hit).Br(skip)
+						b.Bind(hit)
+						b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+						b.Bind(skip)
+						b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2).Br(loop)
+						b.Bind(done).Emit(instr.LOCAL_GET, 3)
+						code, err := b.Assemble()
+						require.NoError(t, err)
+						prog := program.New(code,
+							program.WithLocals(types.TypeAny(), types.TypeAny(), types.TypeI32(), types.TypeI32()),
+							program.WithConstants(types.String("same"), types.String("same")))
+						requireNative(t, prog)
+					})
+				}
+			}
+		}
+
+		{
+			const limit = 10000
+			ops32 := []instr.Opcode{
+				instr.I32_ADD, instr.I32_SUB, instr.I32_EQ, instr.I32_NE,
+				instr.I32_LT_S, instr.I32_GT_S, instr.I32_LE_S, instr.I32_GE_S,
+				instr.I32_LT_U, instr.I32_GT_U, instr.I32_LE_U, instr.I32_GE_U,
+			}
+			ops64 := []instr.Opcode{
+				instr.I64_ADD, instr.I64_SUB, instr.I64_EQ, instr.I64_NE,
+				instr.I64_LT_S, instr.I64_GT_S, instr.I64_LE_S, instr.I64_GE_S,
+				instr.I64_LT_U, instr.I64_GT_U, instr.I64_LE_U, instr.I64_GE_U,
+			}
+			edges := []int64{0, 1, -1, 4095, 4096, -4095, -4096, math.MinInt32, math.MaxInt32}
+			wide := append([]int64{1 << 32, 1<<32 - 1, math.MinInt64, math.MaxInt64}, edges...)
+
+			// Locals: 0 index, 1 fold, 2 i32 operand, 3 i32 operand across the sign
+			// bit, 4 and 5 their i64 extensions. Wide i64 results stay on the
+			// stack and fold to i32 halves, so no box outlives the run.
+			for _, order := range []string{"constant second", "constant first"} {
+				t.Run("folds immediate-range constants as threaded does, "+order, func(t *testing.T) {
+					b := instr.NewBuilder()
+					loop, done := b.Label(), b.Label()
+					b.Bind(loop)
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, limit).Emit(instr.I32_GE_S).BrIf(done)
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(limit/2))).Emit(instr.I32_SUB).Emit(instr.LOCAL_SET, 2)
+					b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 0x80000000).Emit(instr.I32_XOR).Emit(instr.LOCAL_SET, 3)
+					b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_TO_I64_S).Emit(instr.LOCAL_SET, 4)
+					b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_TO_I64_S).Emit(instr.LOCAL_SET, 5)
+					operand := func(c int64, x int, wide bool, op instr.Opcode) {
+						push := func() {
+							if wide {
+								b.Emit(instr.I64_CONST, uint64(c))
+							} else {
+								b.Emit(instr.I32_CONST, uint64(uint32(c)))
+							}
+						}
+						if order == "constant first" {
+							push()
+						}
+						b.Emit(instr.LOCAL_GET, uint64(x))
+						if order == "constant second" {
+							push()
+						}
+						b.Emit(op)
+					}
+					fold := func() {
+						b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 31).Emit(instr.I32_MUL).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+					}
+					for _, op := range ops32 {
+						for _, c := range edges {
+							for _, x := range []int{2, 3} {
+								operand(c, x, false, op)
+								fold()
+							}
+						}
+					}
+					for _, op := range ops64 {
+						for _, c := range wide {
+							for _, x := range []int{4, 5} {
+								operand(c, x, true, op)
+								if op == instr.I64_ADD || op == instr.I64_SUB {
+									b.Emit(instr.DUP).Emit(instr.I64_TO_I32)
+									fold()
+									b.Emit(instr.I64_CONST, 32).Emit(instr.I64_SHR_S).Emit(instr.I64_TO_I32)
+								}
+								fold()
+							}
+						}
+					}
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+					b.Bind(done).Emit(instr.LOCAL_GET, 1)
+					code, err := b.Assemble()
+					require.NoError(t, err)
+					prog := program.New(code, program.WithLocals(
+						types.TypeI32(), types.TypeI32(), types.TypeI32(), types.TypeI32(), types.TypeI64(), types.TypeI64()))
+					requireNative(t, prog)
+				})
+			}
+		}
+
+		{
+			for _, c := range []struct {
+				name string
+				bad  func(vm *interp.Interpreter) types.Boxed
+			}{
+				{"array", func(vm *interp.Interpreter) types.Boxed {
+					addr, err := vm.Alloc(types.TypedArray[int32]{1})
+					require.NoError(t, err)
+					return types.BoxRef(addr)
+				}},
+				{"null", func(*interp.Interpreter) types.Boxed { return types.BoxedNull }},
+			} {
+				t.Run("string.eq traps a "+c.name+" operand as threaded does", func(t *testing.T) {
+					b := instr.NewBuilder()
+					loop, done := b.Label(), b.Label()
+					b.Bind(loop)
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, n).Emit(instr.I32_GE_S).BrIf(done)
+					b.Emit(instr.GLOBAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.STRING_EQ).Emit(instr.DROP)
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+					b.Bind(done)
+					code, err := b.Assemble()
+					require.NoError(t, err)
+					prog := program.New(code,
+						program.WithGlobals(types.TypeAny()),
+						program.WithLocals(types.TypeI32()),
+						program.WithConstants(types.String("abc")))
+
+					run := func(vm *interp.Interpreter, global func(*interp.Interpreter) types.Boxed) error {
+						vm.Reset()
+						require.NoError(t, vm.SetGlobal(0, global(vm)))
+						return vm.Run(context.Background())
+					}
+					threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+					defer threaded.Close()
+					wantErr := run(threaded, c.bad)
+					require.ErrorIs(t, wantErr, interp.ErrTypeMismatch)
+
+					profiler := prof.New()
+					vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+					defer vm.Close()
+					poll(t, func() bool {
+						require.NoError(t, run(vm, func(vm *interp.Interpreter) types.Boxed {
+							addr, err := vm.Alloc(types.String("abc"))
+							require.NoError(t, err)
+							return types.BoxRef(addr)
+						}))
+						vm.Flush()
+						return nativeEntries(profiler) > 0
+					})
+					gotErr := run(vm, c.bad)
+					require.True(t, errorsEqual(gotErr, wantErr), "got %v, want %v", gotErr, wantErr)
+				})
+			}
+		}
 	})
 
 	t.Run("releases a ref slot's old value on store", func(t *testing.T) {
@@ -4929,7 +5237,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Zero(t, metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "baseline"}, prof.Label{Key: "outcome", Value: "unsupported"}))
 	})
 
-	t.Run("retires a caller whose served calls outweigh its work", func(t *testing.T) {
+	t.Run("invalidates a caller whose served calls outweigh its work", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		const runs = 16
 
@@ -7188,7 +7496,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, float64(1), again)
 	})
 
-	t.Run("retires an OSR site whose loop body always bridges", func(t *testing.T) {
+	t.Run("invalidates an OSR site whose loop body always bridges", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		const n = 600
 		b := instr.NewBuilder()
@@ -7211,7 +7519,7 @@ func TestWithThreshold(t *testing.T) {
 		ctx := context.Background()
 
 		// The header's own back edges cross its cadence within the first
-		// Run and it retires (refute deopts) within a handful of Runs. The
+		// Run and it is invalidated (refute deopts) within a handful of Runs. The
 		// ip-0 site's submit waits for the header to resolve (resolved),
 		// then needs its own cadence (interval) of Runs for a submit
 		// window and again for its first lookup to drain and publish the
@@ -7363,7 +7671,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Zero(t, deopts)
 	})
 
-	t.Run("recompiles a unit retired by a later-recorded site", func(t *testing.T) {
+	t.Run("recompiles a unit invalidated by a later-recorded site", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		prog := indirectFibCallsProgram(t, 20, 50)
 		want := runProgram(t, prog)
@@ -7434,7 +7742,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Zero(t, unsupported)
 	})
 
-	t.Run("retires a speculated callee refuted by a second function", func(t *testing.T) {
+	t.Run("invalidates a speculated callee refuted by a second function", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		prog := applyProgram(t, 3000)
 
@@ -8106,6 +8414,492 @@ func TestWithThreshold(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("serves STRUCT_NEW_DEFAULT from the tcache and leaves threaded's heap", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		const n = 2000
+		prog := links(t, n, -1, false)
+
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		wantLen, wantCounts := heapOf(threaded)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		warm(t, vm, profiler)
+
+		vm.Flush()
+		before, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+		entered := nativeEntries(profiler)
+		require.NoError(t, vm.Run(context.Background()))
+		vm.Flush()
+		after, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+
+		got, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Greater(t, nativeEntries(profiler), entered)
+		require.Less(t, after-before, float64(n)/32) // almost every allocation stays native
+		gotLen, gotCounts := heapOf(vm)
+		require.Equal(t, wantLen, gotLen)
+		require.Equal(t, wantCounts, gotCounts)
+	})
+
+	t.Run("returns the tcache when a host value's Close panics in native code", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		record := node()
+		b := instr.NewBuilder()
+		loop, done, keep := b.Label(), b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2000).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1000).Emit(instr.I32_NE).BrIf(keep)
+		b.Emit(instr.REF_NULL).Emit(instr.GLOBAL_SET, 0)
+		b.Bind(keep)
+		b.Emit(instr.STRUCT_NEW_DEFAULT, 0).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.STRUCT_SET)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32(), record, record),
+			program.WithGlobals(types.TypeAny()), program.WithTypes(record))
+
+		// hold stores a value whose Close panics in global 0, which iteration
+		// 1000 releases.
+		hold := func(vm *interp.Interpreter) {
+			addr, err := vm.Alloc(&panicCloser{})
+			require.NoError(t, err)
+			require.NoError(t, vm.SetGlobal(0, types.BoxRef(addr)))
+		}
+
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer threaded.Close()
+		hold(threaded)
+		require.Error(t, threaded.Run(context.Background()))
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		warm(t, vm, profiler)
+		vm.Flush()
+		entered := nativeEntries(profiler)
+		hold(vm)
+		require.Error(t, vm.Run(context.Background()))
+		vm.Flush()
+		require.Greater(t, nativeEntries(profiler), entered)
+		require.Equal(t, liveOf(threaded), liveOf(vm))
+	})
+
+	t.Run("builds no batch for a native call that allocates once", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		record := node()
+		f := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
+			Append(instr.MustNew(instr.STRUCT_NEW_DEFAULT, 0), instr.MustNew(instr.DROP), instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)).
+			MustBuild()
+		b := instr.NewBuilder()
+		loop, done, body := b.Label(), b.Label(), b.Label()
+		// The module never compiles, so f is entered from threaded code, at depth 0, every call.
+		b.Emit(instr.I32_CONST, 1).BrIf(body)
+		b.Emit(instr.REF_NULL).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.DROP)
+		b.Bind(body).Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 200).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithTypes(record), program.WithConstants(f))
+
+		// A heap this small collects whenever a batch outgrows it.
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHeap(8))
+		defer vm.Close()
+		warm(t, vm, profiler)
+
+		// Its ledger retires f's code once the exits outweigh the work, so the
+		// whole warm-up is the window native code ran in.
+		cycles, _ := profiler.Metric("vm_gc_cycles_total")
+		require.Positive(t, nativeEntries(profiler))
+		require.Zero(t, cycles)
+	})
+
+	t.Run("returns the tcache to a callee that allocates at the heap limit", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		record := node()
+		second := types.NewStructType(types.NewStructField(types.TypeI32()))
+		g := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}})
+		refuse(g)
+		g.Append(instr.MustNew(instr.STRUCT_NEW_DEFAULT, 1), instr.MustNew(instr.DROP), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.RETURN))
+
+		// Each pass keeps a node, counts to 64 so its work pays for the call,
+		// and calls g, which never compiles: native code reaches it through
+		// ExitCall while its tcache holds the nodes it built ahead.
+		b := instr.NewBuilder()
+		loop, done, count, counted := b.Label(), b.Label(), b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2000).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.STRUCT_NEW_DEFAULT, 0).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.STRUCT_SET)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
+		b.Bind(count).Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 64).Emit(instr.I32_GE_S).BrIf(counted)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3).Br(count)
+		b.Bind(counted).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32(), record, record, types.TypeI32()),
+			program.WithTypes(record, second), program.WithConstants(g.MustBuild()))
+
+		limit := fits(t, prog)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHeapLimit(limit))
+		defer vm.Close()
+		warm(t, vm, profiler)
+
+		vm.Flush()
+		entered := nativeEntries(profiler)
+		require.NoError(t, vm.Run(context.Background()))
+		vm.Flush()
+		require.Greater(t, nativeEntries(profiler), entered)
+		got, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(2000), got)
+	})
+
+	t.Run("returns the tcache when a trap leaves native code mid-loop", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		prog := links(t, 2000, 1500, false)
+
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer threaded.Close()
+		wantErr := threaded.Run(context.Background())
+		require.Error(t, wantErr)
+		wantLen, wantCounts := heapOf(threaded)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		warm(t, vm, profiler)
+
+		vm.Flush()
+		entered := nativeEntries(profiler)
+		require.EqualError(t, vm.Run(context.Background()), wantErr.Error())
+		vm.Flush()
+		require.Greater(t, nativeEntries(profiler), entered)
+		gotLen, gotCounts := heapOf(vm)
+		require.Equal(t, wantLen, gotLen)
+		require.Equal(t, wantCounts, gotCounts)
+	})
+	t.Run("serves ARRAY_NEW_DEFAULT from the tcache and leaves threaded's heap", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		const n = 2000
+		prog := chains(t, n, 0, 1, 1)
+
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		wantLen, wantCounts := heapOf(threaded)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		warm(t, vm, profiler)
+
+		vm.Flush()
+		before, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+		entered := nativeEntries(profiler)
+		require.NoError(t, vm.Run(context.Background()))
+		vm.Flush()
+		after, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+
+		got, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Greater(t, nativeEntries(profiler), entered)
+		require.Less(t, after-before, float64(n)/32) // almost every allocation stays native
+		gotLen, gotCounts := heapOf(vm)
+		require.Equal(t, wantLen, gotLen)
+		require.Equal(t, wantCounts, gotCounts)
+	})
+
+	t.Run("refills ARRAY_NEW_DEFAULT when the requested length changes mid-loop", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		prog := chains(t, 2000, 1000, 1, 3)
+
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(3), want)
+		wantLen, wantCounts := heapOf(threaded)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		warm(t, vm, profiler)
+
+		vm.Flush()
+		before, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+		entered := nativeEntries(profiler)
+		require.NoError(t, vm.Run(context.Background()))
+		vm.Flush()
+		after, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+
+		got, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Greater(t, nativeEntries(profiler), entered)
+		require.Less(t, after-before, float64(64))
+		gotLen, gotCounts := heapOf(vm)
+		require.Equal(t, wantLen, gotLen)
+		require.Equal(t, wantCounts, gotCounts)
+	})
+
+	t.Run("faults a native ARRAY_NEW_DEFAULT of a negative length as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		prog := chains(t, 2000, 1500, 1, -1)
+
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer threaded.Close()
+		wantErr := threaded.Run(context.Background())
+		require.ErrorIs(t, wantErr, interp.ErrSegmentationFault)
+		wantLen, wantCounts := heapOf(threaded)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		warm(t, vm, profiler)
+
+		vm.Flush()
+		entered := nativeEntries(profiler)
+		require.EqualError(t, vm.Run(context.Background()), wantErr.Error())
+		vm.Flush()
+		require.Greater(t, nativeEntries(profiler), entered)
+		gotLen, gotCounts := heapOf(vm)
+		require.Equal(t, wantLen, gotLen)
+		require.Equal(t, wantCounts, gotCounts)
+	})
+
+	t.Run("stops caching ARRAY_NEW_DEFAULT of a type whose length alternates", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		// Lengths alternate between low and low+1; a low of 0 is a cached length
+		// like any other.
+		for _, low := range []uint64{1, 0} {
+			array := types.NewArrayType(types.TypeAny())
+			b := instr.NewBuilder()
+			loop, done := b.Label(), b.Label()
+			b.Bind(loop)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2000).Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_AND).Emit(instr.I32_CONST, low).Emit(instr.I32_ADD)
+			b.Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.DROP)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+			b.Br(loop)
+			b.Bind(done).Emit(instr.LOCAL_GET, 0)
+			code, err := b.Assemble()
+			require.NoError(t, err)
+			prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithTypes(array))
+
+			threaded := interp.MustNew(prog, interp.WithThreshold(-1), interp.WithHeap(64))
+			defer threaded.Close()
+			require.NoError(t, threaded.Run(context.Background()))
+			want, err := threaded.Pop()
+			require.NoError(t, err)
+
+			profiler := prof.New()
+			vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHeap(64))
+			defer vm.Close()
+			// The alternating lengths make every allocation a callout, so the ledger
+			// retires the loop's code within the warm-up: it is the window native
+			// code ran in.
+			warm(t, vm, profiler)
+			vm.Flush()
+			cycles, _ := profiler.Metric("vm_gc_cycles_total")
+			require.Positive(t, nativeEntries(profiler))
+			require.Zero(t, cycles)
+
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			require.Equal(t, liveOf(threaded), liveOf(vm))
+		}
+	})
+
+	t.Run("reuses the arrays a native entry cached and did not take", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		prog := chains(t, 2000, 0, 1, 1)
+		run := func(vm *interp.Interpreter) float64 {
+			return testing.AllocsPerRun(20, func() {
+				require.NoError(t, vm.Run(context.Background()))
+				vm.Reset()
+			})
+		}
+
+		// Threaded code reuses every array at Reset; what it still allocates is
+		// the collector's closure and the free list regrowing, and the race
+		// detector adds to both.
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer threaded.Close()
+		run(threaded)
+		want := run(threaded)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		warm(t, vm, profiler)
+		run(vm)
+
+		vm.Flush()
+		entered := nativeEntries(profiler)
+		got := run(vm)
+		vm.Flush()
+		require.Greater(t, nativeEntries(profiler), entered)
+		// Native code and its profiler allocate about 35 more than threaded code
+		// does; a cached array rebuilt in Go on every entry adds over 140.
+		require.LessOrEqual(t, got, want+96)
+	})
+
+	t.Run("builds nothing ahead for a typed array the entry allocates twice", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		b := instr.NewBuilder()
+		loop, done, skip := b.Label(), b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 4000).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.I32_GE_S).BrIf(skip)
+		b.Emit(instr.I32_CONST, 128).Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.DROP)
+		b.Bind(skip).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithTypes(types.NewArrayType(types.TypeI32())))
+		run := func(vm *interp.Interpreter) float64 {
+			return testing.AllocsPerRun(20, func() {
+				require.NoError(t, vm.Run(context.Background()))
+				vm.Reset()
+			})
+		}
+
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer threaded.Close()
+		run(threaded)
+		want := run(threaded)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		warm(t, vm, profiler)
+		for range 4 {
+			run(vm)
+		}
+
+		vm.Flush()
+		entered := nativeEntries(profiler)
+		got := run(vm)
+		vm.Flush()
+		require.Greater(t, nativeEntries(profiler), entered)
+		// A typed array is never reused, so a batch built ahead and returned
+		// unused costs a Go allocation each; the entry learned it needs only the
+		// two it served.
+		require.LessOrEqual(t, got, want+8)
+	})
+
+	t.Run("fills no more than the heap holds before a collection", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 500).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithTypes(types.NewArrayType(types.TypeAny())))
+
+		threadedProfiler := prof.New()
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1), interp.WithProfiler(threadedProfiler))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		threaded.Flush()
+		want, _ := threadedProfiler.Metric("vm_gc_cycles_total")
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		warm(t, vm, profiler)
+		for range 4 {
+			require.NoError(t, vm.Run(context.Background()))
+			vm.Reset()
+		}
+
+		vm.Flush()
+		entered := nativeEntries(profiler)
+		before, _ := profiler.Metric("vm_gc_cycles_total")
+		const runs = 4
+		for range runs {
+			require.NoError(t, vm.Run(context.Background()))
+			vm.Reset()
+		}
+		vm.Flush()
+		after, _ := profiler.Metric("vm_gc_cycles_total")
+		require.Greater(t, nativeEntries(profiler), entered)
+		require.LessOrEqual(t, after-before, runs*want)
+	})
+
+	t.Run("fills a bin with as many arrays as the last entry used", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		prog := chains(t, 128, 0, 1, 1)
+		limit := fits(t, prog)
+
+		// At the smallest heap threaded code runs prog in, a fill that builds
+		// more than the loop takes reaches the limit and collects once more than
+		// threaded code does; doubling from 16 overshoots, a fill of what the
+		// last entry used does not.
+		threadedProfiler := prof.New()
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1), interp.WithProfiler(threadedProfiler), interp.WithHeapLimit(limit))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		threaded.Flush()
+		want, _ := threadedProfiler.Metric("vm_gc_cycles_total")
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler), interp.WithHeapLimit(limit))
+		defer vm.Close()
+		warm(t, vm, profiler)
+		for range 4 {
+			require.NoError(t, vm.Run(context.Background()))
+			vm.Reset()
+		}
+
+		vm.Flush()
+		entered := nativeEntries(profiler)
+		before, _ := profiler.Metric("vm_gc_cycles_total")
+		const runs = 4
+		for range runs {
+			require.NoError(t, vm.Run(context.Background()))
+			vm.Reset()
+		}
+		vm.Flush()
+		after, _ := profiler.Metric("vm_gc_cycles_total")
+		require.Greater(t, nativeEntries(profiler), entered)
+		require.Equal(t, runs*want, after-before)
+	})
+
 }
 
 func TestMustNew(t *testing.T) {
@@ -8123,6 +8917,14 @@ func TestMustNew(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
+	t.Run("reports constants past the heap limit", func(t *testing.T) {
+		pb := program.NewBuilder()
+		pb.Const(types.String("constant"))
+		i, err := interp.New(pb.MustBuild(), interp.WithHeapLimit(1))
+		require.ErrorIs(t, err, interp.ErrHeapExhausted)
+		require.Nil(t, i)
+	})
+
 	t.Run("runs a program", func(t *testing.T) {
 		i := interp.MustNew(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 5)}))
 		defer i.Close()

@@ -10,21 +10,21 @@ import (
 	"github.com/siyul-park/minivm/pass"
 )
 
-// HoistPass moves safe loop-invariant operations to preheaders. An array op
+// LICMPass moves safe loop-invariant operations to preheaders. An array op
 // of a quiet loop whose container is a loop-invariant array guard reads it
 // through one OpSlice in the preheader of the outermost such loop: nothing
 // in a quiet loop resizes or replaces a container.
-type HoistPass struct{}
+type LICMPass struct{}
 
-var _ pass.Pass[*ssa.Function] = (*HoistPass)(nil)
+var _ pass.Pass[*ssa.Function] = (*LICMPass)(nil)
 
-// NewHoistPass returns the pass.
-func NewHoistPass() *HoistPass {
-	return &HoistPass{}
+// NewLICMPass returns the pass.
+func NewLICMPass() *LICMPass {
+	return &LICMPass{}
 }
 
 // Run applies the pass to one SSA function.
-func (p *HoistPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
+func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	dominance := graph.NewDominance(function)
 	headers := graph.Headers(function, dominance)
 	if len(headers) == 0 {

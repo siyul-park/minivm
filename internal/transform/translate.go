@@ -91,7 +91,7 @@ type members []activation
 // spans were reached, the tail call targets it proved, and, per tail span
 // whose call loops, the member span it jumps to.
 type reach struct {
-	states []frame
+	states []facts
 	seen   []bool
 	proofs []proof
 	jumps  map[int]int
@@ -134,7 +134,7 @@ func Translate(module Module, profiles Profiles, address int, function *types.Fu
 	if !ok {
 		return nil, nil, nil
 	}
-	reached, ok := t.analyze(0, frame{closures: make([]int, len(t.acts[0].slots))})
+	reached, ok := t.analyze(0, facts{closures: make([]int, len(t.acts[0].slots))})
 	if !ok {
 		return nil, nil, nil
 	}
@@ -243,7 +243,7 @@ func rotate(f *ssa.Function) *ssa.Function {
 func newTranslation(m Module, root activation, spans []span, profiles Profiles) (*translation, bool) {
 	t := &translation{module: m}
 	t.add(root, spans)
-	reached, ok := t.analyze(0, frame{closures: make([]int, len(root.slots))})
+	reached, ok := t.analyze(0, facts{closures: make([]int, len(root.slots))})
 	if !ok {
 		return nil, false
 	}
@@ -264,7 +264,7 @@ func newTranslation(m Module, root activation, spans []span, profiles Profiles) 
 		act := activation{function: target.function, address: target.address, slots: target.function.Declared(), profile: profiles.Of(target.address)}
 		alone := &translation{module: m}
 		alone.add(act, spans)
-		reached, ok := alone.analyze(0, frame{closures: make([]int, len(act.slots))})
+		reached, ok := alone.analyze(0, facts{closures: make([]int, len(act.slots))})
 		if !ok {
 			continue
 		}
@@ -306,8 +306,8 @@ func (t *translation) add(act activation, spans []span) {
 // header): seen is what tells reached apart from never visited. A tail
 // call's span continues into the first span of the member it loops to,
 // found as it is translated.
-func (t *translation) analyze(root int, in frame) (reach, bool) {
-	r := reach{states: make([]frame, len(t.spans)), seen: make([]bool, len(t.spans)), jumps: map[int]int{}}
+func (t *translation) analyze(root int, in facts) (reach, bool) {
+	r := reach{states: make([]facts, len(t.spans)), seen: make([]bool, len(t.spans)), jumps: map[int]int{}}
 	r.seen[root] = true
 	r.states[root] = in
 	work := []int{root}
@@ -327,14 +327,14 @@ func (t *translation) analyze(root int, in frame) (reach, bool) {
 		if term.Op == ssa.OpExit {
 			continue
 		}
-		exit := frame{stack: make([]fact, len(w.stack)), closures: w.closures}
+		exit := facts{stack: make([]fact, len(w.stack)), closures: w.closures}
 		for i, o := range w.stack {
 			exit.stack[i] = o.fact
 		}
 		for _, succ := range r.flow(t.spans[id], id) {
 			if !r.seen[succ] {
 				r.seen[succ] = true
-				r.states[succ] = frame{stack: slices.Clone(exit.stack), closures: slices.Clone(exit.closures)}
+				r.states[succ] = facts{stack: slices.Clone(exit.stack), closures: slices.Clone(exit.closures)}
 				work = append(work, succ)
 				continue
 			}
@@ -353,7 +353,7 @@ func (t *translation) analyze(root int, in frame) (reach, bool) {
 // transfer walks s from in and returns the walker, which holds the facts at
 // s's end, the span a tail call there looped to and the target it proved,
 // and the terminator of s.
-func (t *translation) transfer(s span, in frame) (*walker, ssa.Terminator, bool) {
+func (t *translation) transfer(s span, in facts) (*walker, ssa.Terminator, bool) {
 	b := ssa.New("")
 	block := b.Block()
 	w, ok := newWalker(t, b, block, s, in)

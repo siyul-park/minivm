@@ -79,7 +79,7 @@ For each task type, the agent `MUST` read the listed owners before implementing 
 |---|---|---|---|
 | Opcode | `instruction-set.md`, `guides/add-opcode.md` | `instr/`, `internal/codegen/` | `go test ./instr ./internal/codegen ./interp` |
 | Runtime / memory | `architecture.md`, `memory-model.md` | `interp/`, `types/` | `go test ./interp ./types` |
-| Native / ARM64 | `jit-internals.md`, `jit-lessons.md`, `value-representation.md` | `internal/asm/`, `internal/jit/`, `internal/transform/`, `interp/native.go` | `go test ./internal/... ./interp` |
+| Native / ARM64 | `jit-internals.md`, `jit-lessons.md`, `value-representation.md` | `internal/asm/`, `internal/jit/`, `internal/transform/`, `interp/jit.go`, `interp/policy.go`, `interp/feedback.go` | `go test ./internal/... ./interp` |
 | Optimization | `pass-system.md` | `analysis/`, `internal/transform/`, `optimize/`, `pass/` | package tests |
 | Verification | `verification.md` | `program/verify.go`, `instr/type.go` | `go test ./program ./interp` |
 | Debug / profile | `debugging.md`, `profile.md` | `debug/`, `interp/`, `prof/` | package tests |

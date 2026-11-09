@@ -12,7 +12,7 @@ Supported platforms, native-tier availability, and the stability of each public 
 | Darwin / x86-64 | ✅ | ✅ | — |
 | Linux / x86-64 | ✅ | ✅ | — |
 
-ARM64 is the native target. `internal/asm` owns build-tagged entry/icache paths; `internal/jit/arm64` owns lowering. AMD64 has no encoder or native tier.
+ARM64 is the native target. `internal/asm/arm64` owns encoding and the build-tagged entry/icache paths; `internal/jit/arm64` owns lowering. AMD64 has no encoder or native tier.
 
 The minimum Go version is the version declared in `go.mod`.
 

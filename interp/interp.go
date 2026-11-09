@@ -37,7 +37,7 @@ type Interpreter struct {
 	codec    Codec
 	profiler *prof.Profiler
 	samples  *prof.Collector
-	native   *native
+	jit      *engine
 	// threshold is the JIT's WithThreshold setting, or -1 where the JIT
 	// cannot run; attach builds native from it.
 	threshold int
@@ -80,8 +80,8 @@ type Interpreter struct {
 	trial   []int
 	work    []int
 	refbuf  []types.Ref
-	arrays  recycler[*types.Array]
-	structs recycler[*types.Struct]
+	arrays  freelist[*types.Array]
+	structs freelist[*types.Struct]
 
 	// enc and dec are the scratch a host value converts through. A conversion
 	// takes a pointer, so building one per field access would allocate on every
@@ -100,7 +100,7 @@ type Interpreter struct {
 	fp int
 	sp int
 	// floor is the frame count below which frames stand for native
-	// activations suspended under a call they made (native.nest): no handler
+	// activations suspended under a call they made (engine.reenter): no handler
 	// search crosses it, and a panic it does not catch above it unwinds to
 	// their owner.
 	floor int
@@ -231,15 +231,15 @@ func MustNew(prog *program.Program, opts ...Option) *Interpreter {
 // New builds an interpreter for prog. It runs program.Snapshot(prog), a
 // verified copy, so mutating prog afterward, including the bytecode of
 // its function constants, does not change execution. A malformed program
-// returns the *program.VerifyError and a nil prog returns
-// program.ErrNil. The snapshot shares type objects with prog, such as
+// returns the *program.VerifyError, a nil prog returns program.ErrNil, and
+// constants that do not fit WithHeapLimit return ErrHeapExhausted. The snapshot shares type objects with prog, such as
 // Types and function signatures; they must not be mutated.
 func New(prog *program.Program, opts ...Option) (*Interpreter, error) {
 	snap, err := program.Snapshot(prog)
 	if err != nil {
 		return nil, err
 	}
-	return build(snap, opts...), nil
+	return build(snap, opts...)
 }
 
 // Run executes the program until it returns or exits.
@@ -260,8 +260,13 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 		}
 		i.ctx = nil
 		i.done = nil
-		if i.native != nil {
-			i.native.quiesce()
+		if i.jit != nil {
+			// A panic out of native code skips the return that releases
+			// the tcache; dispatch recovered it, so return it here.
+			if i.jit.tcache.dirty {
+				i.jit.tcache.flush(i)
+			}
+			i.jit.quiesce()
 		}
 		return err
 	}
@@ -591,30 +596,17 @@ func (i *Interpreter) Flush() {
 
 // Reset restores the initial interpreter state.
 func (i *Interpreter) Reset() {
-
+	// Keep what the ending run peaked at.
 	dynamic := len(i.heap) - i.base
-	keepStructs := i.structs.trim(dynamic)
-	keepArrays := i.arrays.trim(dynamic)
+	i.structs.trim(dynamic)
+	i.arrays.trim(dynamic)
 	for addr := i.base; addr < len(i.heap); addr++ {
 		value := i.heap[addr]
 		if i.rc[addr] <= 0 {
 			continue
 		}
 		i.finalize(addr, value)
-		switch value := value.(type) {
-		case *types.Struct:
-			if len(value.Typ.Fields) <= 4 && len(i.structs.values) < keepStructs {
-				*value = types.Struct{}
-				i.structs.put(value)
-			}
-		case *types.Array:
-			if len(i.arrays.values) < keepArrays {
-				clear(value.Elems[:cap(value.Elems)])
-				value.Typ = nil
-				value.Elems = value.Elems[:0]
-				i.arrays.put(value)
-			}
-		}
+		i.recycle(value, false)
 	}
 	i.structs.reset()
 	i.arrays.reset()
@@ -683,15 +675,15 @@ func (i *Interpreter) Close() error {
 	i.arrays.clear()
 	i.structs.clear()
 	i.closed = true
-	if i.native == nil {
+	if i.jit == nil {
 		return nil
 	}
-	return i.native.close()
+	return i.jit.close()
 }
 
 // build constructs an interpreter that owns prog, which the caller has
 // verified and no one else mutates.
-func build(prog *program.Program, opts ...Option) *Interpreter {
+func build(prog *program.Program, opts ...Option) (*Interpreter, error) {
 	opt := option{
 		frame: 128,
 		stack: 1024,
@@ -747,7 +739,9 @@ func build(prog *program.Program, opts ...Option) *Interpreter {
 		gas:         fuel,
 		limit:       opt.maxHeap,
 	}
-	i.load(prog.Constants)
+	if err := i.preload(prog.Constants); err != nil {
+		return nil, err
+	}
 	i.target = max(cap(i.heap), i.base+heapRunway)
 	if i.limit > 0 {
 		i.target = max(min(i.target, i.limit), i.base)
@@ -789,7 +783,7 @@ func build(prog *program.Program, opts ...Option) *Interpreter {
 		}
 	}
 
-	return i
+	return i, nil
 }
 
 func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []types.Boxed) (returns []types.Boxed, err error) {
@@ -1099,6 +1093,14 @@ func (i *Interpreter) decoder(r *Registry) *Decoder {
 	return d
 }
 
+// preload loads constants, reporting a full heap as an error: an embedder sets
+// the limit that a program's constants can exceed.
+func (i *Interpreter) preload(constants []types.Value) (err error) {
+	defer i.guard(&err)
+	i.load(constants)
+	return nil
+}
+
 // load fills an empty heap with the null slot and the constants, then takes
 // the constant region as the baseline. Mutable constants are copied so the
 // interpreter owns every object it mutates.
@@ -1296,7 +1298,7 @@ func (i *Interpreter) yields(code []byte) bool {
 
 // compile builds fn's threaded code: fused unless exact, which every
 // materialized native frame needs because a fusion leaves no handler at the
-// IPs it absorbs (interp/native.go's deopt resumes exactly there). The second
+// IPs it absorbs (interp/jit.go's deopt resumes exactly there). The second
 // result is the fused handlers' trap offsets, indexed by ip; see trapped.
 func (i *Interpreter) compile(fn *types.Function, exact bool) ([]func(*Interpreter), []uint8) {
 	c := &threader{
@@ -1369,29 +1371,13 @@ func (i *Interpreter) newArrayDefault(typ *types.ArrayType, size types.Boxed) ty
 	case types.KindF64:
 		return make(types.TypedArray[float64], n)
 	default:
-		val := i.newArraySized(typ, int(n))
+		val := i.newArray(typ, int(n))
 		for j := range val.Elems {
 			val.Elems[j] = types.BoxedNull
 		}
 		i.retains(0, int(n))
 		return val
 	}
-}
-
-// newArraySized reuses a header invalidated by Reset, with its retained
-// backing storage when it fits size.
-func (i *Interpreter) newArraySized(typ *types.ArrayType, size int) *types.Array {
-	array, ok := i.arrays.get()
-	if !ok {
-		return &types.Array{Typ: typ, Elems: make([]types.Boxed, size)}
-	}
-	if cap(array.Elems) < size {
-		array.Elems = make([]types.Boxed, size)
-	} else {
-		array.Elems = array.Elems[:size]
-	}
-	array.Typ = typ
-	return array
 }
 
 // arrayGet is the generic ARRAY_GET path for all container representations.
@@ -1496,18 +1482,6 @@ func (i *Interpreter) arraySet(addr, at int, val types.Boxed) {
 	default:
 		panic(ErrTypeMismatch)
 	}
-}
-
-// newStruct reuses small struct objects retained by Reset. The pool is only
-// for interpreter-owned heap values; larger structs keep their normal path.
-func (i *Interpreter) newStruct(typ *types.StructType) *types.Struct {
-	if len(typ.Fields) <= 4 {
-		if s, ok := i.structs.get(); ok {
-			s.Reset(typ)
-			return s
-		}
-	}
-	return types.NewStruct(typ)
 }
 
 // structGet is the generic STRUCT_GET path for VM and host structs. Ref fields
@@ -1759,8 +1733,7 @@ func (i *Interpreter) box(val types.Value) types.Boxed {
 	}
 }
 
-// clone returns val, copying a mutable constant so that the interpreter, not
-// the program, owns the object it mutates. Immutable values are returned as is.
+// boxI64 boxes val inline when it fits and on the heap when it does not.
 func (i *Interpreter) boxI64(val int64) types.Boxed {
 	if types.IsBoxable(val) {
 		return types.BoxI64(val)
@@ -1778,6 +1751,8 @@ func (i *Interpreter) unbox(val types.Boxed) types.Value {
 	return v
 }
 
+// unboxI64 does not use unboxRef: its generic assertion costs threaded wide i64
+// kernels 5%.
 func (i *Interpreter) unboxI64(val types.Boxed) int64 {
 	if val.Kind() != types.KindRef {
 		return val.I64()
@@ -1898,6 +1873,9 @@ func (i *Interpreter) alloc(val types.Value) int {
 		}
 	}
 	if limited {
+		if i.jit != nil && i.jit.tcache.flush(i) {
+			return i.alloc(val)
+		}
 		panic(ErrHeapExhausted)
 	}
 
@@ -1921,6 +1899,18 @@ func (i *Interpreter) alloc(val types.Value) int {
 	return len(i.heap) - 1
 }
 
+// shrink drops from the heap the slots free[mark:] hold that end it, which only
+// grew to hold them.
+func (i *Interpreter) shrink(mark int) {
+	tail := i.free[mark:]
+	slices.Sort(tail)
+	for len(tail) > 0 && tail[len(tail)-1] == len(i.heap)-1 {
+		i.heap, i.rc = i.heap[:len(i.heap)-1], i.rc[:len(i.rc)-1]
+		tail = tail[:len(tail)-1]
+	}
+	i.free = i.free[:mark+len(tail)]
+}
+
 func (i *Interpreter) reuse(val types.Value) (int, bool) {
 	if len(i.free) == 0 {
 		return 0, false
@@ -1932,6 +1922,35 @@ func (i *Interpreter) reuse(val types.Value) (int, bool) {
 	return addr, true
 }
 
+// newStruct reuses a small struct a reclaim or Reset kept. Larger structs keep
+// their normal path.
+func (i *Interpreter) newStruct(typ *types.StructType) *types.Struct {
+	if len(typ.Fields) <= 4 {
+		if s, ok := i.structs.get(); ok {
+			s.Reset(typ)
+			return s
+		}
+	}
+	return types.NewStruct(typ)
+}
+
+// newArray reuses a header Reset kept, with its retained backing storage when
+// it fits size.
+func (i *Interpreter) newArray(typ *types.ArrayType, size int) *types.Array {
+	array, ok := i.arrays.get()
+	if !ok {
+		return &types.Array{Typ: typ, Elems: make([]types.Boxed, size)}
+	}
+	if cap(array.Elems) < size {
+		array.Elems = make([]types.Boxed, size)
+	} else {
+		array.Elems = array.Elems[:size]
+	}
+	array.Typ = typ
+	return array
+}
+
+// track counts a newly allocated value the free lists may later keep.
 func (i *Interpreter) track(v types.Value) {
 	switch v := v.(type) {
 	case *types.Struct:
@@ -2079,11 +2098,11 @@ func (i *Interpreter) deref(val types.Value) (types.Value, error) {
 
 // attach returns i's JIT runtime, nil when the JIT is off, building it on
 // first use: an interpreter that never runs pays nothing for it.
-func (i *Interpreter) attach() *native {
-	if i.native == nil && i.threshold >= 0 {
-		i.native = newNative(i, i.threshold)
+func (i *Interpreter) attach() *engine {
+	if i.jit == nil && i.threshold >= 0 {
+		i.jit = newEngine(i, i.threshold)
 	}
-	return i.native
+	return i.jit
 }
 
 // spend charges work against a dormant JIT's heat and wakes it once heat runs
@@ -2110,11 +2129,11 @@ func (i *Interpreter) unpark() bool {
 }
 
 // wake makes the dormant JIT live, or turns it off for a program none of
-// whose code can repay a Go entry (native.wake).
+// whose code can repay a Go entry (engine.wake).
 func (i *Interpreter) wake() {
 	i.heat = 0
-	if !i.native.wake(i) {
-		i.native, i.threshold = nil, -1
+	if !i.jit.wake(i) {
+		i.jit, i.threshold = nil, -1
 	}
 }
 
@@ -2152,17 +2171,53 @@ func (i *Interpreter) release(addr int) {
 // address to the free list. The caller has already settled its referents.
 func (i *Interpreter) reclaim(addr int, v types.Value) {
 	i.finalize(addr, v)
+	i.recycle(v, true)
+	i.heap[addr] = nil
+	i.free = append(i.free, addr)
+}
+
+// undo returns the allocation at addr that no one ever published: a value
+// alloc made and nothing yet took. It owns the only reference, so the slot is
+// freed without finalize or a walk of its refs, and recycle keeps the value
+// whole, an array included, for the next allocation. A generic array holds only
+// the nulls newArrayDefault gave it, whose references go with it.
+func (i *Interpreter) undo(addr int) {
+	v := i.heap[addr]
+	if array, ok := v.(*types.Array); ok {
+		i.rc[0] -= len(array.Elems)
+	}
+	i.recycle(v, false)
+	i.heap[addr] = nil
+	i.rc[addr] = 0
+	i.free = append(i.free, addr)
+}
+
+// recycle keeps a freed value for reuse. A struct of up to four fields is
+// kept whenever it is freed; an array only once no one can hold it, because a
+// host may hold an *Array it loaded. escaped reports that someone may still
+// hold v, which Reset and an allocation that was never published know not.
+func (i *Interpreter) recycle(v types.Value, escaped bool) {
 	switch v := v.(type) {
 	case *types.Struct:
-		if len(v.Typ.Fields) <= 4 {
-			i.structs.remove()
+		if len(v.Typ.Fields) > 4 {
+			return
+		}
+		i.structs.remove()
+		if escaped {
+			i.structs.put(v)
+		} else if i.structs.room() {
+			*v = types.Struct{}
 			i.structs.put(v)
 		}
 	case *types.Array:
 		i.arrays.remove()
+		if !escaped && i.arrays.room() {
+			clear(v.Elems[:cap(v.Elems)])
+			v.Typ = nil
+			v.Elems = v.Elems[:0]
+			i.arrays.put(v)
+		}
 	}
-	i.heap[addr] = nil
-	i.free = append(i.free, addr)
 }
 
 func (i *Interpreter) finalize(addr int, v types.Value) {

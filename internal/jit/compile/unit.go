@@ -90,19 +90,14 @@ func completion(f *ssa.Function) int {
 	return 0
 }
 
-// passes is the tier's pipeline: Baseline folds and eliminates dead code;
-// Optimized drops the bounds checks no refuted guard keeps (profiles
-// Profile.Refuted).
+// passes is the tier's pipeline. Optimized also drops the bounds checks no
+// refuted guard keeps (profiles Profile.Refuted).
 func passes(tier jit.Tier, profiles transform.Profiles) []pass.Pass[*ssa.Function] {
 	switch tier {
 	case jit.Baseline:
-		return []pass.Pass[*ssa.Function]{transform.NewFoldPass(), transform.NewDCEPass()}
+		return transform.O1()
 	case jit.Optimized:
-		return []pass.Pass[*ssa.Function]{
-			transform.NewFoldPass(), transform.NewForwardPass(), transform.NewCSEPass(),
-			transform.NewGuardPass(), transform.NewDCEPass(), transform.NewPromotePass(),
-			transform.NewHoistPass(), transform.NewBoundPass(profiles), transform.NewDCEPass(),
-		}
+		return transform.O3(transform.NewBCEPass(profiles))
 	default:
 		return nil
 	}

@@ -26,7 +26,7 @@ Semantics originate in bytecode; SSA and machine forms refine representation, no
 | `internal/transform` | bytecode↔SSA conversion, SSA transforms, JIT feedback model |
 | `internal/asm` | machine IR, register allocation, encoding, linking, executable memory, native stack and trampoline |
 | `internal/asm/arm64` | ARM64 encoding |
-| `internal/jit` | native runtime contract shared by the interpreter and the compiler; publishes and retires native code (`Code`, `Store`) |
+| `internal/jit` | native runtime contract shared by the interpreter and the compiler; publishes and invalidates native code (`Code`, `Cache`) |
 | `internal/jit/compile` | SSA to machine rows: block layout, value registers, edge moves, loop budget; compiles a unit by tier and queues compiles (`Compile`, `Queue`) |
 | `internal/jit/arm64` | ARM64 lowering of SSA operations |
 | `pass` | pass API, lifecycle, pipelines, analysis cache |

@@ -23,12 +23,12 @@ func Targets(code []byte, ip int) []int {
 	next := ip + inst.Width()
 	switch inst.Opcode() {
 	case BR, BR_IF:
-		return []int{next + ReadI16(inst.Operand(0))}
+		return []int{next + relative(inst.Operand(0))}
 	case BR_TABLE:
 		operands := inst.Operands()
 		targets := make([]int, 0, len(operands)-1)
 		for j := 1; j < len(operands); j++ {
-			targets = append(targets, next+ReadI16(operands[j]))
+			targets = append(targets, next+relative(operands[j]))
 		}
 		return targets
 	default:
@@ -116,7 +116,7 @@ func branchLabelNames(code []byte, instrs []Instruction) map[int]string {
 func formatBranch(inst Instruction, ip int, labelAt map[int]string) string {
 	next := ip + inst.Width()
 	target := func(rel uint64) string {
-		if name, ok := labelAt[next+ReadI16(rel)]; ok {
+		if name, ok := labelAt[next+relative(rel)]; ok {
 			return name
 		}
 		return fmt.Sprintf("0x%04X", rel)
@@ -139,4 +139,9 @@ func formatBranch(inst Instruction, ip int, labelAt map[int]string) string {
 	default:
 		return inst.String()
 	}
+}
+
+// relative returns a branch operand as its signed offset.
+func relative(v uint64) int {
+	return int(int16(uint16(v)))
 }

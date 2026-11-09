@@ -12,12 +12,12 @@ import (
 
 func TestNewState(t *testing.T) {
 	t.Run("rejects an empty stack", func(t *testing.T) {
-		_, err := asm.NewState(0)
+		_, err := asm.NewState(arm64.New(), 0)
 		require.ErrorIs(t, err, asm.ErrInvalidArgs)
 	})
 
 	t.Run("starts with an empty register file", func(t *testing.T) {
-		s, err := asm.NewState(4096)
+		s, err := asm.NewState(arm64.New(), 4096)
 		require.NoError(t, err)
 		require.Zero(t, s.Reg(asm.NewPReg(0, asm.RegTypeInt, asm.Width64)))
 	})
@@ -25,11 +25,11 @@ func TestNewState(t *testing.T) {
 
 func TestState_PC(t *testing.T) {
 	testenv.MustHaveArch(t, "arm64")
-	s, err := asm.NewState(4096)
+	s, err := asm.NewState(arm64.New(), 4096)
 	require.NoError(t, err)
 	address, size := linkExit(t)
 
-	require.True(t, asm.Enter(address, &s))
+	require.True(t, arm64.New().Enter(address, &s))
 
 	pc := s.PC()
 	require.GreaterOrEqual(t, pc, address)
@@ -38,37 +38,37 @@ func TestState_PC(t *testing.T) {
 
 func TestState_Exited(t *testing.T) {
 	testenv.MustHaveArch(t, "arm64")
-	s, err := asm.NewState(4096)
+	s, err := asm.NewState(arm64.New(), 4096)
 	require.NoError(t, err)
 	require.False(t, s.Exited())
 
 	address, _ := linkExit(t)
-	require.True(t, asm.Enter(address, &s))
+	require.True(t, arm64.New().Enter(address, &s))
 	require.True(t, s.Exited())
 
-	require.False(t, asm.Resume(&s))
+	require.False(t, arm64.New().Resume(&s))
 	require.False(t, s.Exited())
 }
 
 func TestState_Abandon(t *testing.T) {
 	testenv.MustHaveArch(t, "arm64")
-	s, err := asm.NewState(4096)
+	s, err := asm.NewState(arm64.New(), 4096)
 	require.NoError(t, err)
 	probe, _ := linkExit(t, arm64.ADDI(arm64.X0, arm64.SP, 16))
 
-	require.True(t, asm.Enter(probe, &s))
+	require.True(t, arm64.New().Enter(probe, &s))
 	first := s.Reg(arm64.X0)
 
 	s.Abandon()
 
-	require.True(t, asm.Enter(probe, &s))
+	require.True(t, arm64.New().Enter(probe, &s))
 	second := s.Reg(arm64.X0)
 
 	require.Equal(t, first, second)
 }
 
 func TestState_Reg(t *testing.T) {
-	s, err := asm.NewState(4096)
+	s, err := asm.NewState(arm64.New(), 4096)
 	require.NoError(t, err)
 
 	intReg := asm.NewPReg(3, asm.RegTypeInt, asm.Width64)
@@ -81,7 +81,7 @@ func TestState_Reg(t *testing.T) {
 }
 
 func TestState_SetReg(t *testing.T) {
-	s, err := asm.NewState(4096)
+	s, err := asm.NewState(arm64.New(), 4096)
 	require.NoError(t, err)
 
 	reg := asm.NewPReg(3, asm.RegTypeInt, asm.Width64)
@@ -92,7 +92,7 @@ func TestState_SetReg(t *testing.T) {
 
 func TestState_Slot(t *testing.T) {
 	testenv.MustHaveArch(t, "arm64")
-	s, err := asm.NewState(4096)
+	s, err := asm.NewState(arm64.New(), 4096)
 	require.NoError(t, err)
 	a := asm.New(arm64.New())
 	a.Emit(
@@ -103,21 +103,21 @@ func TestState_Slot(t *testing.T) {
 	)
 	code, err := a.Build()
 	require.NoError(t, err)
-	buffer, err := asm.NewBuffer(len(code))
+	buffer, err := asm.NewBuffer(arm64.New(), len(code))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
 	address, err := buffer.Link(code)
 	require.NoError(t, err)
 	s.SetReg(arm64.X0, 42)
 
-	require.True(t, asm.Enter(address, &s))
+	require.True(t, arm64.New().Enter(address, &s))
 	require.Equal(t, uint64(42), s.Slot(0))
 }
 
 func TestState_Word(t *testing.T) {
 	t.Run("reads a word of the native stack by address", func(t *testing.T) {
 		testenv.MustHaveArch(t, "arm64")
-		s, err := asm.NewState(4096)
+		s, err := asm.NewState(arm64.New(), 4096)
 		require.NoError(t, err)
 		address, _ := linkExit(t,
 			arm64.MOVI(arm64.X1, 42),
@@ -125,12 +125,12 @@ func TestState_Word(t *testing.T) {
 			arm64.ADDI(arm64.X0, arm64.SP, 0),
 		)
 
-		require.True(t, asm.Enter(address, &s))
+		require.True(t, arm64.New().Enter(address, &s))
 		require.Equal(t, uint64(42), s.Word(uintptr(s.Reg(arm64.X0))))
 	})
 
 	t.Run("rejects an address outside the native stack", func(t *testing.T) {
-		s, err := asm.NewState(4096)
+		s, err := asm.NewState(arm64.New(), 4096)
 		require.NoError(t, err)
 		require.Panics(t, func() { s.Word(8) })
 	})
@@ -157,7 +157,7 @@ func linkExit(t *testing.T, body ...asm.Instruction) (uintptr, int) {
 	a.Emit(insts...)
 	code, err := a.Build()
 	require.NoError(t, err)
-	buffer, err := asm.NewBuffer(len(code))
+	buffer, err := asm.NewBuffer(arm64.New(), len(code))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
 	address, err := buffer.Link(code)
