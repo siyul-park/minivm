@@ -66,6 +66,30 @@ func (a Arch) Writes(inst asm.Instruction) [4]bool {
 	}
 }
 
+// Copy reports the registers of a MOV or FMOV between registers of one bank
+// and width, or of a MOVW, which narrows an X register into a W register: the
+// W register takes the low word and its high half is unspecified. A move that
+// widens or changes bank converts, and is not a copy.
+func (a Arch) Copy(inst asm.Instruction) (dst, src asm.Reg, ok bool) {
+	op := Op(inst.Op)
+	if op != OpMOV && op != OpMOVW && op != OpFMOV {
+		return nil, nil, false
+	}
+	dst, src = operandReg(inst.Dst), operandReg(inst.Src1)
+	if dst == nil || src == nil || dst.Type() != src.Type() {
+		return nil, nil, false
+	}
+	if op == OpMOVW {
+		ok = dst.Width() == asm.Width32 && src.Width() == asm.Width64
+	} else {
+		ok = dst.Width() == src.Width()
+	}
+	if !ok {
+		return nil, nil, false
+	}
+	return dst, src, true
+}
+
 // Flow reports how control leaves an instruction.
 func (a Arch) Flow(inst asm.Instruction) asm.Flow {
 	switch Op(inst.Op) {
@@ -136,4 +160,16 @@ func (a Arch) Relax(inst asm.Instruction, disp int64) ([]asm.Instruction, bool) 
 		skip.Src1 = inst.Src1
 	}
 	return []asm.Instruction{skip, BLabel(lbl.ID)}, true
+}
+
+// operandReg returns the register an operand names, or nil.
+func operandReg(op asm.Operand) asm.Reg {
+	switch op := op.(type) {
+	case asm.VRegOperand:
+		return op.Reg
+	case asm.PRegOperand:
+		return op.Reg
+	default:
+		return nil
+	}
 }

@@ -60,6 +60,37 @@ func TestArch_Writes(t *testing.T) {
 	}
 }
 
+func TestArch_Copy(t *testing.T) {
+	frame := arm64.Arch{}
+	v := func(id int32, typ asm.RegType, width asm.RegWidth) asm.VReg { return asm.NewVReg(id, typ, width) }
+	tests := []struct {
+		name     string
+		inst     asm.Instruction
+		dst, src asm.Reg
+		ok       bool
+	}{
+		{"MOV", arm64.MOV(arm64.X0, arm64.X1), arm64.X0, arm64.X1, true},
+		{"MOV 32-bit", arm64.MOV(arm64.W0, arm64.W1), arm64.W0, arm64.W1, true},
+		{"MOV virtual", arm64.MOV(v(0, asm.RegTypeInt, asm.Width64), arm64.X1), v(0, asm.RegTypeInt, asm.Width64), arm64.X1, true},
+		{"FMOV", arm64.FMOV(arm64.D0, arm64.D1), arm64.D0, arm64.D1, true},
+		{"MOV across widths", arm64.MOV(arm64.X0, arm64.W1), nil, nil, false},
+		{"MOVW", arm64.MOVW(arm64.W0, arm64.X1), arm64.W0, arm64.X1, true},
+		{"MOVW widening", arm64.MOVW(arm64.X0, arm64.W1), nil, nil, false},
+		{"FMOV into int", arm64.FMOV(arm64.X0, arm64.D1), nil, nil, false},
+		{"FMOV from int", arm64.FMOV(arm64.D0, arm64.X1), nil, nil, false},
+		{"MOVI", arm64.MOVI(arm64.X0, 1), nil, nil, false},
+		{"ADD", arm64.ADD(arm64.X0, arm64.X1, arm64.X2), nil, nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dst, src, ok := frame.Copy(tt.inst)
+			require.Equal(t, tt.ok, ok)
+			require.Equal(t, tt.dst, dst)
+			require.Equal(t, tt.src, src)
+		})
+	}
+}
+
 func TestArch_Flow(t *testing.T) {
 	frame := arm64.Arch{}
 	tests := []struct {

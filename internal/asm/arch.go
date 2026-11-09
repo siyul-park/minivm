@@ -35,6 +35,12 @@ type Frame interface {
 	// writes that operand rather than reads it. A MemOperand is always read,
 	// whatever slot it sits in: its base register is a use.
 	Writes(inst Instruction) [4]bool
+	// Copy reports the destination and source of inst when it is a plain
+	// register-to-register copy within one bank: dst takes src's value,
+	// narrowed to dst's width, and bits of dst above its width are
+	// unspecified, so dropping the copy when both land in one register
+	// changes nothing.
+	Copy(inst Instruction) (dst, src Reg, ok bool)
 	// Registers lists the allocatable registers of one bank in preference
 	// order, each at Width64; Build narrows the width to the value's own.
 	Registers(typ RegType) []PReg

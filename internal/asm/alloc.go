@@ -2,6 +2,7 @@ package asm
 
 import (
 	"fmt"
+	"math"
 	"slices"
 )
 
@@ -45,6 +46,12 @@ type interval struct {
 	start, end int
 	ranges     [][2]int
 	call       bool
+}
+
+// partner is the value on the other side of a copy at row.
+type partner struct {
+	value value
+	row   int
 }
 
 func newAllocator(frame Frame, insts []Instruction, labels map[Label]int, reserved map[PReg]bool, slots int) *allocator {
@@ -270,7 +277,9 @@ func (a *allocator) access(row int) (reads, writes []value) {
 func (a *allocator) scan(ivs []interval) (map[value]PReg, []value, error) {
 	var spilled []value
 	fixed := map[value][]interval{}
+	by := map[value]interval{}
 	for _, iv := range ivs {
+		by[iv.value] = iv
 		if iv.value.virtual && iv.call {
 			spilled = append(spilled, iv.value)
 		}
@@ -290,7 +299,7 @@ func (a *allocator) scan(ivs []interval) (map[value]PReg, []value, error) {
 		}
 		active = slices.DeleteFunc(active, func(o interval) bool { return o.end < iv.start })
 		for {
-			r, ok := a.free(iv, active, assigned, fixed)
+			r, ok := a.free(iv, active, assigned, fixed, by)
 			if ok {
 				assigned[iv.value] = r
 				active = append(active, iv)
@@ -311,29 +320,90 @@ func (a *allocator) scan(ivs []interval) (map[value]PReg, []value, error) {
 	return assigned, spilled, nil
 }
 
-// free returns the first register of iv's bank that no active interval live
-// at one of iv's rows holds and no fixed interval occupies anywhere within
-// iv.
-func (a *allocator) free(iv interval, active []interval, assigned map[value]PReg, fixed map[value][]interval) (PReg, bool) {
-	held := map[uint8]bool{}
-	for _, o := range active {
-		if r, ok := assigned[o.value]; ok && o.value.typ == iv.value.typ && iv.overlaps(o) {
-			held[r.ID()] = true
+// free returns the register for iv: one that the value on the other side of
+// a copy at iv's first or last row holds, when iv can share it there, else
+// the first register of iv's bank that fits.
+func (a *allocator) free(iv interval, active []interval, assigned map[value]PReg, fixed map[value][]interval, by map[value]interval) (PReg, bool) {
+	for _, p := range a.partners(iv, by) {
+		id, ok := int32(0), false
+		if p.value.virtual {
+			var r PReg
+			if r, ok = assigned[p.value]; ok {
+				id = int32(r.ID())
+			}
+		} else {
+			id, ok = p.value.id, true
 		}
-	}
-next:
-	for _, r := range a.registers[iv.value.typ] {
-		if held[r.ID()] {
+		if !ok {
 			continue
 		}
-		for _, f := range fixed[physical(r)] {
-			if f.start <= iv.end && iv.start <= f.end {
-				continue next
+		for _, r := range a.registers[iv.value.typ] {
+			if int32(r.ID()) == id && a.fits(r, iv.without(p.row), active, assigned, fixed, p.value) {
+				return r, true
 			}
 		}
-		return r, true
+	}
+	for _, r := range a.registers[iv.value.typ] {
+		if a.fits(r, iv, active, assigned, fixed, value{}) {
+			return r, true
+		}
 	}
 	return 0, false
+}
+
+// fits reports whether no active interval live at one of span's rows holds r
+// and no fixed interval occupies r anywhere within span. A fixed interval of
+// partner, the copy's other side, conflicts only where its live rows meet
+// span's.
+func (a *allocator) fits(r PReg, span interval, active []interval, assigned map[value]PReg, fixed map[value][]interval, partner value) bool {
+	for _, o := range active {
+		if h, ok := assigned[o.value]; ok && h.ID() == r.ID() && o.value.typ == span.value.typ && span.overlaps(o) {
+			return false
+		}
+	}
+	for _, f := range fixed[physical(r)] {
+		if f.value == partner {
+			if span.overlaps(f) {
+				return false
+			}
+		} else if f.start <= span.end && span.start <= f.end {
+			return false
+		}
+	}
+	return true
+}
+
+// partners lists the values iv may share a register with at a copy: the
+// source of the copy that defines iv, when a live range of it ends there, and
+// the destination of the copy that reads iv last, when a live range of it
+// starts there.
+func (a *allocator) partners(iv interval, by map[value]interval) []partner {
+	var out []partner
+	if dst, src, ok := a.copy(iv.start); ok && dst == iv.value && src != dst {
+		if o, found := by[src]; found && o.endsAt(iv.start) {
+			out = append(out, partner{src, iv.start})
+		}
+	}
+	if dst, src, ok := a.copy(iv.end); ok && src == iv.value && src != dst {
+		if o, found := by[dst]; found && o.startsAt(iv.end) {
+			out = append(out, partner{dst, iv.end})
+		}
+	}
+	return out
+}
+
+// copy reports the values a copy row moves between.
+func (a *allocator) copy(row int) (dst, src value, ok bool) {
+	d, s, ok := a.frame.Copy(a.insts[row])
+	if !ok {
+		return value{}, value{}, false
+	}
+	dst, ok = a.value(d)
+	if !ok {
+		return value{}, value{}, false
+	}
+	src, ok = a.value(s)
+	return dst, src, ok
 }
 
 // victim picks the non-tiny interval among iv and the actives of its bank
@@ -438,6 +508,7 @@ func (a *allocator) assign(assigned map[value]PReg) {
 			a.locs[vreg(v)] = Loc{Reg: NewPReg(r.ID(), v.typ, v.width)}
 		}
 	}
+	drop := a.redundant(assigned)
 	for row, inst := range a.insts {
 		for _, op := range inst.operands() {
 			v, ok := register(*op).(VReg)
@@ -448,6 +519,39 @@ func (a *allocator) assign(assigned map[value]PReg) {
 			*op = replace(*op, NewPReg(r.ID(), v.Type(), v.Width()))
 		}
 		a.insts[row] = inst
+	}
+	repl := make([][]Instruction, len(drop))
+	a.insts, a.labels = splice(a.insts, a.labels, drop, repl)
+}
+
+// redundant lists the rows of copies the allocator introduced whose source
+// and destination received one register.
+func (a *allocator) redundant(assigned map[value]PReg) []int {
+	var rows []int
+	for row, inst := range a.insts {
+		dst, src, ok := a.frame.Copy(inst)
+		if !ok || !(isVirtual(dst) || isVirtual(src)) {
+			continue
+		}
+		x, okx := a.register(dst, assigned)
+		y, oky := a.register(src, assigned)
+		if okx && oky && x == y {
+			rows = append(rows, row)
+		}
+	}
+	return rows
+}
+
+// register returns the id of the register r holds once assigned allocates.
+func (a *allocator) register(r Reg, assigned map[value]PReg) (uint8, bool) {
+	switch r := r.(type) {
+	case VReg:
+		p, ok := assigned[virtual(r)]
+		return p.ID(), ok
+	case PReg:
+		return r.ID(), true
+	default:
+		return 0, false
 	}
 }
 
@@ -467,6 +571,39 @@ func (v value) compare(o value) int {
 	default:
 		return int(v.width) - int(o.width)
 	}
+}
+
+// endsAt reports whether one of iv's live ranges ends at row.
+func (iv interval) endsAt(row int) bool {
+	return slices.ContainsFunc(iv.ranges, func(r [2]int) bool { return r[1] == row })
+}
+
+// startsAt reports whether one of iv's live ranges starts at row.
+func (iv interval) startsAt(row int) bool {
+	return slices.ContainsFunc(iv.ranges, func(r [2]int) bool { return r[0] == row })
+}
+
+// without returns iv with row left out of its live rows.
+func (iv interval) without(row int) interval {
+	out := iv
+	out.ranges = nil
+	for _, r := range iv.ranges {
+		if row < r[0] || row > r[1] {
+			out.ranges = append(out.ranges, r)
+			continue
+		}
+		if r[0] < row {
+			out.ranges = append(out.ranges, [2]int{r[0], row - 1})
+		}
+		if row < r[1] {
+			out.ranges = append(out.ranges, [2]int{row + 1, r[1]})
+		}
+	}
+	out.start, out.end = math.MaxInt, -1
+	if n := len(out.ranges); n > 0 {
+		out.start, out.end = out.ranges[0][0], out.ranges[n-1][1]
+	}
+	return out
 }
 
 // overlaps reports whether iv and o are live at a common row.
@@ -499,6 +636,11 @@ func replace(op Operand, r Reg) Operand {
 		return Mem(wrapped, mem.Offset)
 	}
 	return wrapped
+}
+
+func isVirtual(r Reg) bool {
+	_, ok := r.(VReg)
+	return ok
 }
 
 func virtual(r VReg) value {
