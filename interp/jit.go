@@ -598,8 +598,13 @@ func (e *engine) materialize(i *Interpreter, exit jit.Exit, start, ref int, rele
 	maps[depth-floor-1] = exit.Frame
 	refs[0], owns[0] = ref, release
 	for k := depth - 2; k >= floor; k-- {
-		code := e.cache.Find(ctx.Records[k+1].PC)
-		call := code.Exits[ctx.Records[k].Exit]
+		pc := ctx.Records[k+1].PC
+		code := e.cache.Find(pc)
+		id, ok := code.Site(pc)
+		if !ok {
+			panic("interp: native return address with no call site")
+		}
+		call := code.Exits[id]
 		maps[k-floor] = call.Frame
 		refs[k-floor+1] = e.callee(k, call)
 		owns[k-floor+1] = call.Owned

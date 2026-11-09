@@ -35,6 +35,8 @@ type Code struct {
 	// i64 parameter inline (SBFX), never through the heap.
 	Arguments []types.Kind
 	Exits     []Exit
+	// Sites are the native call sites by ascending return offset.
+	Sites []Site
 	// Deps are the profiles c was compiled from: its root's and each
 	// member's. c is stale once any of them moved.
 	Deps []Dep
@@ -57,7 +59,17 @@ type Code struct {
 type Assembly struct {
 	Bytes []byte
 	Exits []Exit
+	// Sites are the native call sites by ascending Offset.
+	Sites []Site
 	Entry int
+}
+
+// Site is one native call: Offset is its return address as a byte offset
+// into the code, and Exit the id of the exit map of the caller's state after
+// the call.
+type Site struct {
+	Offset int
+	Exit   int
 }
 
 // Dep names the generation of one function's profile compiled code read.
@@ -91,7 +103,7 @@ func NewCode(address, ip int, osr bool, tier Tier, results int, registers, argum
 	}
 	return &Code{
 		Address: address, IP: ip, OSR: osr, Tier: tier, Results: results,
-		Registers: slices.Clone(registers), Arguments: slices.Clone(arguments), Exits: slices.Clone(a.Exits),
+		Registers: slices.Clone(registers), Arguments: slices.Clone(arguments), Exits: slices.Clone(a.Exits), Sites: slices.Clone(a.Sites),
 		native: native, entry: native + uintptr(a.Entry), size: len(a.Bytes), buffer: buffer,
 	}, nil
 }
@@ -106,6 +118,20 @@ func (c *Code) Native() uintptr {
 // OSR entry, crosses into native code.
 func (c *Code) Entry() uintptr {
 	return c.entry
+}
+
+// Site returns the exit id of the native call that returns to pc, and false
+// when no call of c does.
+func (c *Code) Site(pc uintptr) (int, bool) {
+	if !c.holds(pc) {
+		return 0, false
+	}
+	offset := int(pc - c.native)
+	i, ok := slices.BinarySearchFunc(c.Sites, offset, func(s Site, offset int) int { return s.Offset - offset })
+	if !ok {
+		return 0, false
+	}
+	return c.Sites[i].Exit, true
 }
 
 // Invalidated reports whether Cache has invalidated c: an interpreter that cached c

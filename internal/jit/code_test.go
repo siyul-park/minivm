@@ -1,6 +1,7 @@
 package jit_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -78,6 +79,37 @@ func TestNewCode(t *testing.T) {
 	t.Run("rejects an entry stub offset outside the code", func(t *testing.T) {
 		_, err := jit.NewCode(0, 0, false, jit.Baseline, 0, nil, nil, jit.Assembly{Bytes: ret(), Entry: len(ret()) + 1})
 		require.Error(t, err)
+	})
+}
+
+func TestCode_Site(t *testing.T) {
+	code := slices.Concat(ret(), ret(), ret(), ret())
+	sites := []jit.Site{{Offset: 4, Exit: 7}, {Offset: 12, Exit: 2}}
+	c, err := jit.NewCode(3, 0, false, jit.Baseline, 0, nil, nil, jit.Assembly{Bytes: code, Sites: sites})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, c.Free()) })
+
+	t.Run("maps a return address to its call's exit", func(t *testing.T) {
+		id, ok := c.Site(c.Native() + 4)
+		require.True(t, ok)
+		require.Equal(t, 7, id)
+
+		id, ok = c.Site(c.Native() + 12)
+		require.True(t, ok)
+		require.Equal(t, 2, id)
+	})
+
+	t.Run("rejects an address that is not a return address of c", func(t *testing.T) {
+		for _, pc := range []uintptr{c.Native() - 4, c.Native(), c.Native() + 8, c.Native() + 16} {
+			_, ok := c.Site(pc)
+			require.False(t, ok)
+		}
+	})
+
+	t.Run("keeps its own copy of the sites", func(t *testing.T) {
+		sites[0].Exit = 9
+		id, _ := c.Site(c.Native() + 4)
+		require.Equal(t, 7, id)
 	})
 }
 
