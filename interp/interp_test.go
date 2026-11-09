@@ -8788,7 +8788,9 @@ func TestWithThreshold(t *testing.T) {
 
 		vm.Flush()
 		entered := nativeEntries(profiler)
-		got := run(vm)
+		// AllocsPerRun counts every goroutine, so a background compile only
+		// adds: the least of three runs is the entry's own cost.
+		got := min(run(vm), run(vm), run(vm))
 		vm.Flush()
 		require.Greater(t, nativeEntries(profiler), entered)
 		// Native code and its profiler allocate about 35 more than threaded code
