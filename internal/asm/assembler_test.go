@@ -120,6 +120,214 @@ func TestAssembler_Build(t *testing.T) {
 		), code)
 	})
 
+	t.Run("drops a copy whose source dies", func(t *testing.T) {
+		a := asm.New(arm64.New())
+		a.Emit(
+			arm64.MOVI(vint(0), 1),
+			arm64.MOV(vint(1), vint(0)),
+			arm64.STR(vint(1), arm64.Ctx, 0),
+			arm64.RET(),
+		)
+
+		code, err := a.Build()
+		require.NoError(t, err)
+		require.Equal(t, encode(t,
+			arm64.MOVI(arm64.X0, 1),
+			arm64.STR(arm64.X0, arm64.Ctx, 0),
+			arm64.RET(),
+		), code)
+	})
+
+	t.Run("drops a chain of copies", func(t *testing.T) {
+		a := asm.New(arm64.New())
+		a.Emit(
+			arm64.MOVI(vint(0), 1),
+			arm64.MOV(vint(1), vint(0)),
+			arm64.MOV(vint(2), vint(1)),
+			arm64.STR(vint(2), arm64.Ctx, 0),
+			arm64.RET(),
+		)
+
+		code, err := a.Build()
+		require.NoError(t, err)
+		require.Equal(t, encode(t,
+			arm64.MOVI(arm64.X0, 1),
+			arm64.STR(arm64.X0, arm64.Ctx, 0),
+			arm64.RET(),
+		), code)
+	})
+
+	t.Run("drops a float copy whose source dies", func(t *testing.T) {
+		a := asm.New(arm64.New())
+		a.Emit(
+			arm64.LDR(vfloat(0), arm64.Ctx, 0),
+			arm64.FMOV(vfloat(1), vfloat(0)),
+			arm64.STR(vfloat(1), arm64.Ctx, 8),
+			arm64.RET(),
+		)
+
+		code, err := a.Build()
+		require.NoError(t, err)
+		require.Equal(t, encode(t,
+			arm64.LDR(arm64.D0, arm64.Ctx, 0),
+			arm64.STR(arm64.D0, arm64.Ctx, 8),
+			arm64.RET(),
+		), code)
+	})
+
+	t.Run("keeps a copy whose source stays live", func(t *testing.T) {
+		a := asm.New(arm64.New())
+		a.Emit(
+			arm64.MOVI(vint(0), 1),
+			arm64.MOV(vint(1), vint(0)),
+			arm64.STR(vint(1), arm64.Ctx, 0),
+			arm64.STR(vint(0), arm64.Ctx, 8),
+			arm64.RET(),
+		)
+
+		code, err := a.Build()
+		require.NoError(t, err)
+		require.Equal(t, encode(t,
+			arm64.MOVI(arm64.X0, 1),
+			arm64.MOV(arm64.X1, arm64.X0),
+			arm64.STR(arm64.X1, arm64.Ctx, 0),
+			arm64.STR(arm64.X0, arm64.Ctx, 8),
+			arm64.RET(),
+		), code)
+	})
+
+	t.Run("drops a narrowing move whose source dies", func(t *testing.T) {
+		a := asm.New(arm64.New())
+		a.Emit(
+			arm64.MOVI(vint(0), 1),
+			arm64.MOVW(asm.NewVReg(1, asm.RegTypeInt, asm.Width32), vint(0)),
+			arm64.STRW(asm.NewVReg(1, asm.RegTypeInt, asm.Width32), arm64.Ctx, 0),
+			arm64.RET(),
+		)
+
+		code, err := a.Build()
+		require.NoError(t, err)
+		require.Equal(t, encode(t,
+			arm64.MOVI(arm64.X0, 1),
+			arm64.STRW(arm64.W0, arm64.Ctx, 0),
+			arm64.RET(),
+		), code)
+	})
+
+	t.Run("keeps a move between banks", func(t *testing.T) {
+		a := asm.New(arm64.New())
+		a.Emit(
+			arm64.MOVI(vint(0), 1),
+			arm64.FMOV(vfloat(1), vint(0)),
+			arm64.STR(vfloat(1), arm64.Ctx, 0),
+			arm64.RET(),
+		)
+
+		code, err := a.Build()
+		require.NoError(t, err)
+		require.Equal(t, encode(t,
+			arm64.MOVI(arm64.X0, 1),
+			arm64.FMOV(arm64.D0, arm64.X0),
+			arm64.STR(arm64.D0, arm64.Ctx, 0),
+			arm64.RET(),
+		), code)
+	})
+
+	t.Run("takes a fixed source's register", func(t *testing.T) {
+		a := asm.New(arm64.New())
+		a.Emit(
+			arm64.MOV(vint(0), arm64.X0),
+			arm64.STR(vint(0), arm64.Ctx, 0),
+			arm64.RET(),
+		)
+
+		code, err := a.Build()
+		require.NoError(t, err)
+		require.Equal(t, encode(t,
+			arm64.STR(arm64.X0, arm64.Ctx, 0),
+			arm64.RET(),
+		), code)
+	})
+
+	t.Run("takes a fixed destination's register", func(t *testing.T) {
+		a := asm.New(arm64.New())
+		a.Emit(
+			arm64.MOVI(vint(0), 1),
+			arm64.MOV(arm64.X0, vint(0)),
+			arm64.USE(arm64.X0),
+			arm64.RET(),
+		)
+
+		code, err := a.Build()
+		require.NoError(t, err)
+		require.Equal(t, encode(t,
+			arm64.MOVI(arm64.X0, 1),
+			arm64.USE(arm64.X0),
+			arm64.RET(),
+		), code)
+	})
+
+	t.Run("keeps a copy whose hinted register a fixed value occupies", func(t *testing.T) {
+		a := asm.New(arm64.New())
+		a.Emit(
+			arm64.MOVI(vint(0), 1),
+			arm64.MOV(vint(1), vint(0)),
+			arm64.MOVI(arm64.X0, 5),
+			arm64.USE(arm64.X0),
+			arm64.STR(vint(1), arm64.Ctx, 0),
+			arm64.RET(),
+		)
+
+		code, err := a.Build()
+		require.NoError(t, err)
+		require.Equal(t, encode(t,
+			arm64.MOVI(arm64.X0, 1),
+			arm64.MOV(arm64.X1, arm64.X0),
+			arm64.MOVI(arm64.X0, 5),
+			arm64.USE(arm64.X0),
+			arm64.STR(arm64.X1, arm64.Ctx, 0),
+			arm64.RET(),
+		), code)
+	})
+
+	t.Run("rebases labels past a dropped copy", func(t *testing.T) {
+		a := asm.New(arm64.New())
+		target := a.Label()
+		a.Emit(
+			arm64.MOVI(vint(0), 1),
+			arm64.MOV(vint(1), vint(0)),
+			arm64.BLabel(target),
+			arm64.NOP(),
+		)
+		a.Bind(target)
+		a.Emit(
+			arm64.STR(vint(1), arm64.Ctx, 0),
+			arm64.RET(),
+		)
+
+		code, err := a.Build()
+		require.NoError(t, err)
+		offset, ok := a.Offset(target)
+		require.True(t, ok)
+		require.Equal(t, 12, offset)
+
+		want := asm.New(arm64.New())
+		skip := want.Label()
+		want.Emit(
+			arm64.MOVI(arm64.X0, 1),
+			arm64.BLabel(skip),
+			arm64.NOP(),
+		)
+		want.Bind(skip)
+		want.Emit(
+			arm64.STR(arm64.X0, arm64.Ctx, 0),
+			arm64.RET(),
+		)
+		expected, err := want.Build()
+		require.NoError(t, err)
+		require.Equal(t, expected, code)
+	})
+
 	t.Run("spills the value that lives longest under pressure in one arm", func(t *testing.T) {
 		regs := arm64.New().Registers(asm.RegTypeInt)
 		a := asm.New(arm64.New())
