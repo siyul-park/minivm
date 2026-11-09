@@ -71,7 +71,7 @@ Fixture loading, compilation, module construction, function lookup, and correctn
 
 Use one shared workload stem and one Go registry entry. Add every runtime fixture that can express the same deterministic algorithm and input without changing its computation. Keep expected-result calculation owned by the Go registration.
 
-CI regenerates the result document on each code push to `main` and commits it. Do not commit a table measured locally.
+CI regenerates the result document on each same-repository pull request and commits it to the PR branch, so it lands with the PR's squash merge. Do not commit a table measured locally.
 
 ## Ownership
 
