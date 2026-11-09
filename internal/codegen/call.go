@@ -178,7 +178,7 @@ func enterFrame(callee target, typ, locals jen.Code, advance int, native bool) [
 func pushFrame(callee target, targetSlots int, releaseTarget, native bool, advance int, coroutine jen.Code) []jen.Code {
 	body := []jen.Code{}
 	if targetSlots == 0 {
-		body = append(body, overflow())
+		body = append(body, overflowAt(0))
 	}
 	if targetSlots == 0 {
 		body = append(body, frameOverflow())
@@ -198,7 +198,7 @@ func pushFrame(callee target, targetSlots int, releaseTarget, native bool, advan
 	}
 	if native {
 		body = append(body, jen.If(
-			jen.Id("i").Dot("native").Op("!=").Nil().Op("&&").Id("i").Dot("native").Dot("call").Call(
+			jen.Id("i").Dot("jit").Op("!=").Nil().Op("&&").Id("i").Dot("jit").Dot("call").Call(
 				jen.Id("i"), jen.Add(callee.addr), jen.Id("fn"), jen.Lit(releaseTarget), jen.Lit(advance),
 			),
 		).Block(jen.Return()))
@@ -293,7 +293,7 @@ func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance in
 		return body
 	}
 
-	body := []jen.Code{overflow()}
+	body := []jen.Code{overflowAt(0)}
 	body = append(body,
 		jen.If(jen.Id("i").Dot("sp").Op("<").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 		jen.If(jen.Id("i").Dot("fp").Op("==").Lit(1)).Block(
@@ -354,7 +354,7 @@ func callHost(tail bool, advance int) []jen.Code {
 func invoke(targetSlots, advance int, tail bool) []jen.Code {
 	body := []jen.Code{}
 	if targetSlots == 0 {
-		body = append(body, overflow())
+		body = append(body, overflowAt(0))
 	}
 	if targetSlots == 1 {
 		body = append(body, jen.If(jen.Id("i").Dot("sp").Op("<=").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))))
@@ -403,7 +403,7 @@ func closureNew(label string, advance int) jen.Code {
 func allocClosure(targetSlots int, borrowed bool, advance int) []jen.Code {
 	body := []jen.Code{}
 	if targetSlots == 0 {
-		body = append(body, overflow())
+		body = append(body, overflowAt(0))
 	}
 	body = append(body,
 		jen.If(jen.Id("i").Dot("sp").Op("<").Add(adjust(jen.Id("captures"), targetSlots))).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),

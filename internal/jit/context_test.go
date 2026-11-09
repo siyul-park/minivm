@@ -137,13 +137,13 @@ func TestContext_Read(t *testing.T) {
 		)
 		code, err := a.Build()
 		require.NoError(t, err)
-		buffer, err := asm.NewBuffer(len(code))
+		buffer, err := asm.NewBuffer(arm64.New(), len(code))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, buffer.Free()) })
 		address, err := buffer.Link(code)
 		require.NoError(t, err)
 
-		require.True(t, asm.Enter(address, &ctx.State))
+		require.True(t, arm64.New().Enter(address, &ctx.State))
 		ctx.Depth = 2
 		ctx.Records[0].SP = uintptr(ctx.Reg(arm64.X0))
 
@@ -172,14 +172,14 @@ func TestContext_Read(t *testing.T) {
 		)
 		code, err := a.Build()
 		require.NoError(t, err)
-		buffer, err := asm.NewBuffer(len(code))
+		buffer, err := asm.NewBuffer(arm64.New(), len(code))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, buffer.Free()) })
 		address, err := buffer.Link(code)
 		require.NoError(t, err)
 		ctx.Depth = 1
 
-		require.True(t, asm.Enter(address, &ctx.State))
+		require.True(t, arm64.New().Enter(address, &ctx.State))
 
 		got := ctx.Read(0, jit.Value{Loc: asm.Loc{Spilled: true, Slot: 0}})
 		require.Equal(t, uint64(7), got)
@@ -220,7 +220,7 @@ func link(t *testing.T, body ...asm.Instruction) uintptr {
 	a.Emit(insts...)
 	code, err := a.Build()
 	require.NoError(t, err)
-	buffer, err := asm.NewBuffer(len(code))
+	buffer, err := asm.NewBuffer(arm64.New(), len(code))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, buffer.Free()) })
 	addr, err := buffer.Link(code)

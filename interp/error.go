@@ -29,6 +29,16 @@ type escape struct {
 	err error
 }
 
+// trapped is the panic of a trap raised ahead of a fused handler's trapping
+// consumer: at is the offset from the handler's first instruction to the
+// instruction that faulted, the ip a trace names. dispatch's recover applies at
+// once and rethrows the cause behind a trapped of at zero, which leaves a
+// frame's ip alone when an outer dispatch recovers the same panic.
+type trapped struct {
+	err error
+	at  int
+}
+
 // TrapCode values are the types.ErrorCode a guest handler sees for the
 // matching Err sentinel; TrapCodeHostError covers every other Go error.
 const (
@@ -149,4 +159,12 @@ func (e *RuntimeError) Unwrap() error {
 		return nil
 	}
 	return e.Err
+}
+
+func (t trapped) Error() string {
+	return t.err.Error()
+}
+
+func (t trapped) Unwrap() error {
+	return t.err
 }

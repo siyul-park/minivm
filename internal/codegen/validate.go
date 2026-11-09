@@ -43,7 +43,7 @@ func validateCatalog(patterns []pattern) error {
 				return fmt.Errorf("ambiguous fusion patterns %s and %s", otherKey, key)
 			}
 		}
-		if _, err := compose(pattern, pattern.width(), ""); err != nil {
+		if _, _, err := compose(pattern, pattern.width(), ""); err != nil {
 			return fmt.Errorf("unsupported fusion %s: %w", key, err)
 		}
 		seen[key] = pattern

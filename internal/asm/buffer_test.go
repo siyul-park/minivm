@@ -3,19 +3,21 @@ package asm_test
 import (
 	"testing"
 
+	"github.com/siyul-park/minivm/internal/asm/arm64"
+
 	asm "github.com/siyul-park/minivm/internal/asm"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNewBuffer(t *testing.T) {
 	t.Run("allocates a mapping", func(t *testing.T) {
-		buffer, err := asm.NewBuffer(1)
+		buffer, err := asm.NewBuffer(arm64.New(), 1)
 		require.NoError(t, err)
 		require.NoError(t, buffer.Free())
 	})
 
 	t.Run("rejects a non-positive size", func(t *testing.T) {
-		_, err := asm.NewBuffer(0)
+		_, err := asm.NewBuffer(arm64.New(), 0)
 		require.ErrorIs(t, err, asm.ErrInvalidSize)
 	})
 }
@@ -27,7 +29,7 @@ func TestBuffer_Link(t *testing.T) {
 	})
 
 	t.Run("empty code", func(t *testing.T) {
-		buffer, err := asm.NewBuffer(1)
+		buffer, err := asm.NewBuffer(arm64.New(), 1)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, buffer.Free()) })
 
@@ -36,7 +38,7 @@ func TestBuffer_Link(t *testing.T) {
 	})
 
 	t.Run("publishes executable address", func(t *testing.T) {
-		buffer, err := asm.NewBuffer(1)
+		buffer, err := asm.NewBuffer(arm64.New(), 1)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, buffer.Free()) })
 
@@ -47,7 +49,7 @@ func TestBuffer_Link(t *testing.T) {
 }
 
 func TestBuffer_Free(t *testing.T) {
-	buffer, err := asm.NewBuffer(1)
+	buffer, err := asm.NewBuffer(arm64.New(), 1)
 	require.NoError(t, err)
 	require.NoError(t, buffer.Free())
 	require.NoError(t, buffer.Free())

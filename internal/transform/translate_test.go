@@ -281,6 +281,32 @@ blk1: (v5:i32) <-- (blk0)
 		require.Nil(t, out)
 	})
 
+	t.Run("declines what bytecode alone cannot resolve/a default struct of no declared struct type", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{Returns: []types.Type{types.TypeAny()}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.STRUCT_NEW_DEFAULT, 1).Emit(instr.RETURN)
+			})}
+		m := transform.Module{Types: []types.Type{types.NewStructType()}}
+		out, _, err := transform.Translate(m, nil, 1, fn, 0)
+		require.NoError(t, err)
+		require.Nil(t, out)
+	})
+
+	t.Run("declines what bytecode alone cannot resolve/a default array of no declared array type", func(t *testing.T) {
+		for name, index := range map[string]uint64{"a struct type": 0, "an index past the types": 1} {
+			fn := &types.Function{
+				Typ: &types.FunctionType{Returns: []types.Type{types.TypeAny()}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, index).Emit(instr.RETURN)
+				})}
+			m := transform.Module{Types: []types.Type{types.NewStructType()}}
+			out, _, err := transform.Translate(m, nil, 1, fn, 0)
+			require.NoError(t, err, name)
+			require.Nil(t, out, name)
+		}
+	})
+
 	t.Run("declines a function holding a suspension", func(t *testing.T) {
 		fn := &types.Function{
 			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32()}},

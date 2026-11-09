@@ -53,7 +53,7 @@ func (l *Ledger) Spend(work int64) {
 }
 
 // Charge debits one exit of class c and reports whether native code still
-// pays for its exits; once it does not, the code should retire.
+// pays for its exits; once it does not, the code should be invalidated.
 func (l *Ledger) Charge(c Class) bool {
 	if int(c) < len(prices) {
 		l.debt += prices[c]

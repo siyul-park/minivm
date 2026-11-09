@@ -68,6 +68,20 @@ func TestNewPool(t *testing.T) {
 }
 
 func TestPool_Get(t *testing.T) {
+	t.Run("reports constants past the heap limit and keeps its slot", func(t *testing.T) {
+		pb := program.NewBuilder()
+		pb.Const(types.String("constant"))
+		p, err := interp.NewPool(pb.MustBuild(), 1, interp.WithHeapLimit(1))
+		require.NoError(t, err)
+		defer p.Close()
+
+		for range 2 {
+			i, err := p.Get(context.Background())
+			require.ErrorIs(t, err, interp.ErrHeapExhausted)
+			require.Nil(t, i)
+		}
+	})
+
 	t.Run("reuses an idle interpreter", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})
 		p, err := interp.NewPool(prog, 1)
@@ -213,11 +227,11 @@ func TestPool_Get(t *testing.T) {
 			require.Equal(t, types.I32(wantDec), values[2*r+1], "round %d", r+1)
 		}
 
-		// Retired sites stop deopting long before every round does.
+		// Invalidated sites stop deopting long before every round does.
 		require.Less(t, deopts(), float64(2*round))
 	})
 
-	t.Run("pooled interpreters entering and retiring shared code concurrently match threaded", func(t *testing.T) {
+	t.Run("pooled interpreters entering and invalidating shared code concurrently match threaded", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		const calls = 200
 		const rounds = 300
@@ -234,7 +248,7 @@ func TestPool_Get(t *testing.T) {
 		defer p.Close()
 
 		// a always calls inc and b always dec, through one dynamic CALL site:
-		// each refutes and retires code the other may be running.
+		// each refutes and invalidates code the other may be running.
 		a, err := p.Get(context.Background())
 		require.NoError(t, err)
 		b, err := p.Get(context.Background())

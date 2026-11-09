@@ -98,6 +98,13 @@ type Site interface {
 	// Trap is Deopt for a check the operation itself raises in threaded
 	// code (a zero divisor, an index out of bounds).
 	Trap() asm.Label
+	// Bridge returns the label of an exit that has the interpreter serve the
+	// operation, whose results native code loads on resume, and the label the
+	// machine binds where native code resumes.
+	Bridge() (exit, resume asm.Label)
+	// Operand returns the first immediate operand of the operation, and
+	// false when it cannot be read.
+	Operand() (int, bool)
 	// Release returns the label of an exit that hands the interpreter ref,
 	// whose last reference native code drops, and the label the machine
 	// binds where native code resumes.
