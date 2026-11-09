@@ -43,6 +43,9 @@ type lowering struct {
 	// outlets hold one build state per exit, in exit id order; exit ids
 	// index it instead of parallel slices.
 	outlets []outlet
+	// returns holds the label after each native call's branch with the exit id
+	// of the caller's state there, resolved to Sites after Build.
+	returns []returned
 	// deopts holds the deopt stubs placed since the last terminator that
 	// does not fall through, where deopt emits them.
 	deopts []stub
@@ -113,6 +116,12 @@ type stub struct {
 	resume asm.Label
 }
 
+// returned is a native call's return label and its exit id.
+type returned struct {
+	label asm.Label
+	exit  int
+}
+
 type save struct {
 	reg  asm.VReg
 	slot int
@@ -146,6 +155,15 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 	if !ok {
 		return jit.Assembly{}, fmt.Errorf("%w: unresolved entry stub", ErrUnsupported)
 	}
+	sites := make([]jit.Site, len(l.returns))
+	for i, r := range l.returns {
+		offset, ok := l.a.Offset(r.label)
+		if !ok {
+			return jit.Assembly{}, fmt.Errorf("%w: unresolved return of exit %d", ErrUnsupported, r.exit)
+		}
+		sites[i] = jit.Site{Offset: offset, Exit: r.exit}
+	}
+	slices.SortFunc(sites, func(a, b jit.Site) int { return a.Offset - b.Offset })
 	exits := make([]jit.Exit, len(l.outlets))
 	for id, o := range l.outlets {
 		for _, p := range o.places {
@@ -157,7 +175,7 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 		}
 		exits[id] = *o.exit
 	}
-	return jit.Assembly{Bytes: code, Exits: exits, Entry: entry}, nil
+	return jit.Assembly{Bytes: code, Exits: exits, Sites: sites, Entry: entry}, nil
 }
 
 // Reg is v's virtual register, typed by its static representation; for a
@@ -729,6 +747,8 @@ func (l *lowering) call(op ssa.Operation) error {
 	} else {
 		sid := l.exit(jit.ExitSafepoint)
 		site.Safepoint, site.Resume = l.stub(sid)
+		site.Return = l.a.Label()
+		l.returns = append(l.returns, returned{site.Return, id})
 		site.Size = max(len(target.Slots()), len(target.Typ.Returns))
 		site.Self = !l.osr && ref == l.address
 		site.Upvals = closure && len(target.Captures) > 0

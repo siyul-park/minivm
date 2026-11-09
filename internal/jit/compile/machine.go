@@ -142,6 +142,9 @@ type Call struct {
 	Safepoint asm.Label
 	// Resume is the call site after the safepoint check.
 	Resume asm.Label
+	// Return is bound right after the branch to a native callee, so the
+	// callee's return address names Exit; unset when Generic.
+	Return asm.Label
 	// Join is where Stub resumes: past the callee's release, where slot
 	// results are read, or past the moves of register results, which Stub
 	// loads itself.

@@ -45,14 +45,18 @@ type Context struct {
 	Records [256]Record
 }
 
-// Record identifies one native activation.
+// Record identifies one native activation. Its prologue writes every field,
+// so a caller stores nothing for a native call.
 type Record struct {
 	FB uintptr
-	// SP is the spill base used by values live across a native call.
+	// SP is the caller's spill base at the call: the stack pointer the
+	// activation found on entry, where its caller's spilled values live.
 	SP uintptr
 	// PC is the caller return address.
-	PC   uintptr
-	Exit uint64
+	PC uintptr
+	// The record is padded to a power of two, so the activation depth turns
+	// into a Records offset by a shift.
+	_ uintptr
 }
 
 // Bin is one type's default objects built ahead of native code: Refs is
@@ -111,10 +115,9 @@ const (
 	OffsetBinN   = unsafe.Offsetof(Bin{}.N)
 	OffsetBinLen = unsafe.Offsetof(Bin{}.Len)
 
-	RecordFB   = unsafe.Offsetof(Record{}.FB)
-	RecordSP   = unsafe.Offsetof(Record{}.SP)
-	RecordPC   = unsafe.Offsetof(Record{}.PC)
-	RecordExit = unsafe.Offsetof(Record{}.Exit)
+	RecordFB = unsafe.Offsetof(Record{}.FB)
+	RecordSP = unsafe.Offsetof(Record{}.SP)
+	RecordPC = unsafe.Offsetof(Record{}.PC)
 )
 
 // The pinned register names the Context and, through asm.OffsetStub, its
@@ -159,8 +162,9 @@ func (c *Context) Trap() Trap {
 	return c.trap
 }
 
-// Read returns the raw value named by v. Outer activations use their saved
-// spill base because registers are clobbered across calls.
+// Read returns the raw value named by v. An outer activation's spill base is
+// the one its callee recorded, in the next record, because registers are
+// clobbered across calls.
 func (c *Context) Read(record int, v Value) uint64 {
 	if record == int(c.Depth)-1 {
 		if v.Loc.Spilled {
@@ -171,7 +175,7 @@ func (c *Context) Read(record int, v Value) uint64 {
 	if !v.Loc.Spilled {
 		panic("jit: an outer activation's value must be spilled")
 	}
-	return c.Word(c.Records[record].SP + uintptr(8*v.Loc.Slot))
+	return c.Word(c.Records[record+1].SP + uintptr(8*v.Loc.Slot))
 }
 
 // String returns the trap name.

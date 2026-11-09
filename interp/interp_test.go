@@ -7248,6 +7248,30 @@ func TestWithThreshold(t *testing.T) {
 		})
 	})
 
+	t.Run("restores spilled operands of every outer activation when a callee deopts five activations deep", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		const warm = 2000
+		want := runProgram(t, descent(t, warm))
+		prog := descent(t, warm)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		// Compiles finish asynchronously, so rerun until optimized code has
+		// both compiled and left through an exit below the entry.
+		poll(t, func() bool {
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			vm.Reset()
+			vm.Flush()
+			compiles, _ := profiler.Metric("vm_jit_compiles_total", prof.Label{Key: "tier", Value: "optimized"}, prof.Label{Key: "outcome", Value: "ok"})
+			deopts, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			return compiles > 0 && deopts > 0
+		})
+	})
+
 	t.Run("tiers up a callee reached only from native code", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		const n = 200_000

@@ -956,6 +956,43 @@ func deopt(t *testing.T, n, k int) *program.Program {
 		program.WithConstants(f, types.String("abc")))
 }
 
+// descent calls g(0, f) warm times through f = inc, then warm times through
+// f = dec. g(i, f) is (i+7) + g(i+1, f) below depth 4 and f(i) at it, so the
+// refuted dynamic CALL deopts five native activations deep, each holding a
+// spilled operand. Constants are [g, inc, dec]. Module locals [0] the counter
+// and [1] the running sum, left on the stack.
+func descent(t *testing.T, warm int) *program.Program {
+	t.Helper()
+	g := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeAny()}, Returns: []types.Type{types.TypeI32()}})
+	deeper := g.Label()
+	g.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 4), instr.MustNew(instr.I32_NE)).BrIf(deeper)
+	g.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.CALL), instr.MustNew(instr.RETURN))
+	g.Bind(deeper).Append(
+		instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.I32_ADD),
+		instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD),
+		instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
+		instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN),
+	)
+
+	b := instr.NewBuilder()
+	for _, callee := range []uint64{1, 2} {
+		loop, done := b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(warm)).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, callee).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done)
+	}
+	b.Emit(instr.LOCAL_GET, 1)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	return program.New(code, program.WithLocals(types.TypeI32(), types.TypeI32()),
+		program.WithConstants(g.MustBuild(), incFunction(), decFunction()))
+}
+
 // counterProgram builds one closure over an i32 counter and a string, calls
 // it 64 times from loop-free module code, and leaves the last call's
 // results: the ClosureCounter shape.

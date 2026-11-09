@@ -35,7 +35,6 @@ func TestContext_Layout(t *testing.T) {
 		{"record fb", jit.RecordFB, 0},
 		{"record sp", jit.RecordSP, 8},
 		{"record pc", jit.RecordPC, 16},
-		{"record exit", jit.RecordExit, 24},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -122,7 +121,7 @@ func TestContext_Read(t *testing.T) {
 		require.Equal(t, uint64(42), got)
 	})
 
-	t.Run("outer activation reads the spill slot at the record's SP", func(t *testing.T) {
+	t.Run("outer activation reads the spill slot at the next record's SP", func(t *testing.T) {
 		testenv.MustHaveArch(t, "arm64")
 		ctx, err := jit.NewContext(4096)
 		require.NoError(t, err)
@@ -145,7 +144,7 @@ func TestContext_Read(t *testing.T) {
 
 		require.True(t, arm64.New().Enter(address, &ctx.State))
 		ctx.Depth = 2
-		ctx.Records[0].SP = uintptr(ctx.Reg(arm64.X0))
+		ctx.Records[1].SP = uintptr(ctx.Reg(arm64.X0))
 
 		got := ctx.Read(0, jit.Value{Loc: asm.Loc{Spilled: true, Slot: 2}})
 		require.Equal(t, uint64(99), got)

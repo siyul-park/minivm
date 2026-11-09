@@ -150,6 +150,7 @@ func (m *machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	}
 	a.Emit(arm64.BLabel(c.Stub))
 	if !c.Generic {
+		a.Bind(c.Return)
 		a.Bind(c.Resume)
 	}
 	for _, v := range c.Results {
@@ -545,11 +546,15 @@ func TestLower(t *testing.T) {
 		assembly, err := compile.Lower(b.Build(), m, caller, transform.Objects{2: {Function: function(1, 2)}}, 0, false, true)
 		require.NoError(t, err)
 		exits := assembly.Exits
+		require.Len(t, assembly.Sites, 1)
+		require.Equal(t, 0, assembly.Sites[0].Exit)
+		require.Positive(t, assembly.Sites[0].Offset)
 		require.Equal(t, []string{"prologue", "const", "call", "return", "exit 0 4", "results", "jump", "const", "const", "const", "exit 1 2", "jump", "epilogue", "enter"}, m.calls)
 		site := m.sites[0]
 		site.Stub = 0
 		site.Safepoint = 0
 		site.Resume = 0
+		site.Return = 0
 		site.Join = 0
 		require.Equal(t, compile.Call{
 			Callee: 2, Target: callee, Args: []ssa.Value{arg}, Results: []ssa.Value{got},
