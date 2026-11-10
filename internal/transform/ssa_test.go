@@ -22,6 +22,17 @@ import (
 
 type run[U, R any] func(*pass.Manager, U) (R, error)
 
+// sliceFunction returns a function that slices its array param and stores the
+// slice to a global of bytes.
+func sliceFunction(array types.Type) *types.Function {
+	return types.NewFunctionBuilder(&types.FunctionType{
+		Params:  []types.Type{array, types.TypeI32()},
+		Returns: []types.Type{types.TypeI32()}}).Append(
+		instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_SLICE),
+		instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.SWAP),
+		instr.MustNew(instr.GLOBAL_SET, 0), instr.MustNew(instr.RETURN)).MustBuild()
+}
+
 func pipeline() *pass.Pipeline[*ssa.Function] {
 	pipeline := pass.NewPipeline[*ssa.Function]()
 	pipeline.Add(transform.NewFoldPass())
@@ -1078,7 +1089,7 @@ func TestSSAPass_Run(t *testing.T) {
 				Returns: []types.Type{types.TypeI32()}}).Locals(arrayType, types.TypeAny(), types.TypeI32())
 			head, done := fn.Label(), fn.Label()
 			fn.Append(
-				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_SLICE),
+				instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.CALL),
 				instr.MustNew(instr.DUP), instr.MustNew(instr.LOCAL_SET, 2), instr.MustNew(instr.DUP), instr.MustNew(instr.LOCAL_SET, 3),
 				instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 4))
 			fn.Bind(head).Append(instr.MustNew(instr.LOCAL_GET, 4), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_GE_S))
@@ -1090,9 +1101,12 @@ func TestSSAPass_Run(t *testing.T) {
 			fn.Bind(done).Append(instr.MustNew(instr.ARRAY_LEN), instr.MustNew(instr.RETURN))
 
 			f := fn.MustBuild()
+			// The reference comes from a call, whose result type emit does not know.
+			helper := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{arrayType}}).Append(
+				instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.RETURN)).MustBuild()
 			prog := program.New([]instr.Instruction{
 				instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
-				program.WithConstants(f, types.TypedArray[int32]{1, 2, 3}), program.WithTypes(arrayType))
+				program.WithConstants(f, types.TypedArray[int32]{1, 2, 3}, helper), program.WithTypes(arrayType))
 			require.NoError(t, program.Verify(prog))
 			want := run(prog)
 
@@ -1354,6 +1368,52 @@ func TestSSAPass_Run(t *testing.T) {
 		})
 	})
 
+	t.Run("emits only code that verifies", func(t *testing.T) {
+		optimized := pass.NewPipeline[*ssa.Function]()
+		for _, p := range transform.O3() {
+			optimized.Add(p)
+		}
+		bytes := types.NewArrayType(types.TypeI8())
+		// The slice is checked by kind alone, so the original verifies whatever the array's type.
+		build := func(array types.Type) *program.Program {
+			fn := sliceFunction(array)
+			return program.New([]instr.Instruction{
+				instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+				program.WithConstants(fn, types.TypedArray[int8]{1, 2, 3, 4}), program.WithGlobals(bytes), program.WithTypes(bytes))
+		}
+
+		for name, tc := range map[string]struct {
+			array   types.Type
+			changed bool
+		}{
+			"a slice of a typed array":    {array: bytes, changed: true},
+			"a slice of an untyped array": {array: types.TypeAny()},
+		} {
+			for pipelineName, pipeline := range map[string]*pass.Pipeline[*ssa.Function]{"identity": pass.NewPipeline[*ssa.Function](), "optimized": optimized} {
+				prog := build(tc.array)
+				require.NoError(t, program.Verify(prog), name)
+				want, wantErr := executionResult(t, prog, interp.WithThreshold(-1))
+				before := prog.Constants[0].(*types.Function).Code
+
+				got := duplicateConstants(prog)
+				_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
+				require.NoError(t, err, name)
+				require.NoError(t, program.Verify(got), name+" "+pipelineName)
+				if tc.changed {
+					require.NotEqual(t, before, got.Constants[0].(*types.Function).Code, name+" "+pipelineName)
+				} else {
+					// Nothing the typing rule knows makes the home verify, so the function is left as it was.
+					require.Equal(t, before, got.Constants[0].(*types.Function).Code, name+" "+pipelineName)
+				}
+				for _, opts := range [][]interp.Option{{interp.WithThreshold(-1)}, nil} {
+					values, message := executionResult(t, got, opts...)
+					require.Equal(t, wantErr, message)
+					require.Equal(t, want, values)
+				}
+			}
+		}
+	})
+
 	t.Run("leaves a function it cannot express unchanged", func(t *testing.T) {
 		body := func(is ...instr.Instruction) *types.Function {
 			return types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
@@ -1388,6 +1448,193 @@ func TestSSAPass_Run(t *testing.T) {
 			require.True(t, preserved, name)
 			require.Equal(t, before, input.String(), name)
 		}
+	})
+
+	t.Run("restores a function whose fault is reported at a literal holding it", func(t *testing.T) {
+		fn := sliceFunction(types.TypeAny())
+		literal := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeAny()), Elems: []types.Value{fn}}
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL)},
+			program.WithConstants(literal, fn, types.TypedArray[int8]{1, 2, 3, 4}), program.WithGlobals(types.NewArrayType(types.TypeI8())))
+		require.NoError(t, program.Verify(prog))
+		before := fn.Code
+
+		_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), prog)
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+		require.Equal(t, before, fn.Code)
+	})
+
+	t.Run("keeps the functions that verify and restores the ones that do not", func(t *testing.T) {
+		bytes := types.NewArrayType(types.TypeI8())
+		good, first, second := sliceFunction(bytes), sliceFunction(types.TypeAny()), sliceFunction(types.TypeAny())
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.CONST_GET, 3), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
+			instr.MustNew(instr.CONST_GET, 3), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL),
+			instr.MustNew(instr.CONST_GET, 3), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.CALL)},
+			program.WithConstants(good, first, second, types.TypedArray[int8]{1, 2, 3, 4}), program.WithGlobals(bytes))
+		require.NoError(t, program.Verify(prog))
+		goodBefore, firstBefore, secondBefore := good.Code, first.Code, second.Code
+
+		preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), prog)
+		require.NoError(t, err)
+		require.False(t, preserved)
+		require.NoError(t, program.Verify(prog))
+		require.NotEqual(t, goodBefore, good.Code)
+		require.Equal(t, firstBefore, first.Code)
+		require.Equal(t, secondBefore, second.Code)
+	})
+
+	t.Run("returns an invalid program unchanged", func(t *testing.T) {
+		bytes := types.NewArrayType(types.TypeI8())
+		invalid := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.F64_CONST, 0), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN)).MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL)},
+			program.WithConstants(invalid, sliceFunction(types.TypeAny()), types.TypedArray[int8]{1, 2, 3, 4}), program.WithGlobals(bytes))
+		require.Error(t, program.Verify(prog))
+		before := prog.String()
+
+		preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), prog)
+		require.NoError(t, err)
+		require.True(t, preserved)
+		require.Equal(t, before, prog.String())
+	})
+
+	t.Run("round-trips a function held at two constant slots once", func(t *testing.T) {
+		optimized := pass.NewPipeline[*ssa.Function]()
+		for _, p := range transform.O3() {
+			optimized.Add(p)
+		}
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeAny(), types.TypeI32()},
+			Returns: []types.Type{types.TypeI32(), types.TypeI32()}}).Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_SLICE),
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.SWAP),
+			instr.MustNew(instr.GLOBAL_SET, 0), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_ADD),
+			instr.MustNew(instr.RETURN)).MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+			program.WithConstants(fn, fn, types.TypedArray[int8]{1, 2, 3, 4}), program.WithGlobals(types.NewArrayType(types.TypeI8())))
+		require.NoError(t, program.Verify(prog))
+		before := fn.Code
+
+		// Only the third call optimizes, so a second round trip of the same function would start from the first one's output.
+		calls := 0
+		counted := pass.NewPipeline[*ssa.Function]()
+		counted.Add(run[*ssa.Function, bool](func(manager *pass.Manager, f *ssa.Function) (bool, error) {
+			calls++
+			if calls == 3 {
+				_, err := optimized.Run(manager, f)
+				return false, err
+			}
+			return true, nil
+		}))
+		preserved, err := transform.NewSSAPass(counted).Run(pass.NewManager(), prog)
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+		require.Equal(t, 2, calls)
+		require.True(t, preserved)
+		require.Equal(t, before, fn.Code)
+	})
+
+	t.Run("drops the constants a declined function added", func(t *testing.T) {
+		optimized := pass.NewPipeline[*ssa.Function]()
+		for _, p := range transform.O3() {
+			optimized.Add(p)
+		}
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeAny(), types.TypeI32()},
+			Returns: []types.Type{types.TypeI32(), types.TypeI1()}}).Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_SLICE),
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.SWAP),
+			instr.MustNew(instr.GLOBAL_SET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_LT_S),
+			instr.MustNew(instr.RETURN)).MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+			program.WithConstants(fn, types.TypedArray[int8]{1, 2, 3, 4}), program.WithGlobals(types.NewArrayType(types.TypeI8())))
+		require.NoError(t, program.Verify(prog))
+		before := prog.String()
+
+		preserved, err := transform.NewSSAPass(optimized).Run(pass.NewManager(), prog)
+		require.NoError(t, err)
+		require.True(t, preserved)
+		require.Equal(t, before, prog.String())
+	})
+
+	t.Run("does not type a loop param after a slice whose array has no type", func(t *testing.T) {
+		bytes, ints := types.NewArrayType(types.TypeI8()), types.NewArrayType(types.TypeI32())
+		helper := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny()}}).Append(
+			instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.RETURN)).MustBuild()
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params: []types.Type{types.TypeI32(), bytes}, Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32())
+		head, done := fn.Label(), fn.Label()
+		fn.Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 2))
+		fn.Bind(head).Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_GE_S))
+		fn.BrIf(done)
+		fn.Append(
+			instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.SWAP), instr.MustNew(instr.ARRAY_LEN), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2),
+			instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_SLICE))
+		fn.Br(head)
+		fn.Bind(done).Append(instr.MustNew(instr.DUP), instr.MustNew(instr.GLOBAL_SET, 0), instr.MustNew(instr.ARRAY_LEN), instr.MustNew(instr.RETURN))
+		loop := fn.MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, 300), instr.MustNew(instr.CONST_GET, 3), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+			program.WithConstants(loop, helper, types.TypedArray[int32]{300, 2000, 3}, types.TypedArray[int8]{1, 2}),
+			program.WithGlobals(bytes), program.WithTypes(bytes, ints))
+		require.NoError(t, program.Verify(prog))
+		want, wantErr := executionResult(t, prog, interp.WithThreshold(-1), interp.WithFuel(1<<24))
+
+		got := duplicateConstants(prog)
+		_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), got)
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(got))
+		for _, local := range got.Constants[0].(*types.Function).Locals[len(loop.Locals):] {
+			require.False(t, local.Equals(bytes), "a local declared as bytes may hold the other array")
+		}
+		values, message := executionResult(t, got, interp.WithThreshold(-1), interp.WithFuel(1<<24))
+		require.Equal(t, wantErr, message)
+		require.Equal(t, want, values)
+	})
+
+	t.Run("emits the same code whatever order the types of a loop param are met in", func(t *testing.T) {
+		bytes, ints := types.NewArrayType(types.TypeI8()), types.NewArrayType(types.TypeI32())
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params: []types.Type{types.TypeI32(), bytes, ints, types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32())
+		second, third, merge, head, done, mid := fn.Label(), fn.Label(), fn.Label(), fn.Label(), fn.Label(), fn.Label()
+		fn.Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 4), instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.I32_EQZ))
+		fn.BrIf(second)
+		fn.Append(instr.MustNew(instr.LOCAL_GET, 1))
+		fn.Br(head)
+		fn.Bind(second).Append(instr.MustNew(instr.LOCAL_GET, 4), instr.MustNew(instr.I32_EQZ))
+		fn.BrIf(third)
+		fn.Append(instr.MustNew(instr.LOCAL_GET, 2))
+		fn.Br(merge)
+		fn.Bind(third).Append(instr.MustNew(instr.LOCAL_GET, 2))
+		fn.Bind(merge)
+		fn.Br(head)
+		fn.Bind(head).Append(instr.MustNew(instr.LOCAL_GET, 4), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_GE_S))
+		fn.BrIf(done)
+		fn.Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_SLICE), instr.MustNew(instr.DUP),
+			instr.MustNew(instr.LOCAL_GET, 4), instr.MustNew(instr.I32_EQZ))
+		fn.BrIf(mid)
+		fn.Bind(mid).Append(instr.MustNew(instr.ARRAY_LEN), instr.MustNew(instr.LOCAL_GET, 4), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 4))
+		fn.Br(head)
+		fn.Bind(done).Append(instr.MustNew(instr.ARRAY_LEN), instr.MustNew(instr.RETURN))
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+			program.WithConstants(fn.MustBuild(), types.TypedArray[int8]{1, 2, 3}, types.TypedArray[int32]{1, 2, 3}), program.WithTypes(bytes, ints))
+		require.NoError(t, program.Verify(prog))
+
+		results := map[string]bool{}
+		for range 200 {
+			got := duplicateConstants(prog)
+			_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), got)
+			require.NoError(t, err)
+			require.NoError(t, program.Verify(got))
+			results[got.String()] = true
+		}
+		require.Len(t, results, 1)
 	})
 }
 
