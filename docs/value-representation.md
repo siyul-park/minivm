@@ -8,7 +8,7 @@ Runtime stack/global values use one 64-bit `types.Boxed` word. Native code may u
 |---|---|
 | Boxed layout | `types/boxed.go` |
 | Kinds | `instr/kind.go` |
-| Runtime types | `types/type.go` |
+| Runtime types | `types/value.go` (`Type`) |
 | Host conversion | `interp/codec.go`, `encode.go`, `decode.go` |
 | Native representation: type to register class | `internal/jit/compile` (`vreg`) |
 | Native word of a boxed value | `types/boxed.go` (`Boxed.Word`, `BoxWord`) |
