@@ -90,7 +90,7 @@ func (p *SSAPass) roundtrip(manager *pass.Manager, constants *pool, address int,
 	if _, err := p.pipeline.Run(manager, f); err != nil {
 		return false, err
 	}
-	code, locals, ok := emit(f, constants, address == 0, function.Declared())
+	code, locals, ok := emit(f, constants, address == 0, function)
 	if !ok || (len(locals) == 0 && slices.Equal(code, function.Code)) {
 		return false, nil
 	}
@@ -107,6 +107,25 @@ func (p *pool) module() Module {
 		Globals:   types.Kinds(p.prog.Globals),
 		Objects:   p.objects,
 		Types:     p.prog.Types,
+	}
+}
+
+// typeOf returns the type of the object the ref cell c names, or nil when the
+// pool knows none.
+func (p *pool) typeOf(c types.Boxed) types.Type {
+	if c == types.BoxedNull || c.Kind() != types.KindRef {
+		return nil
+	}
+	object := p.objects[c.Ref()]
+	switch {
+	case object.Array != nil:
+		return object.Array
+	case object.Struct != nil:
+		return object.Struct
+	case object.Function != nil && object.Function.Typ != nil:
+		return object.Function.Typ
+	default:
+		return nil
 	}
 }
 

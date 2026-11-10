@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1009,6 +1010,348 @@ func TestSSAPass_Run(t *testing.T) {
 		values, message := executionResult(t, got, interp.WithThreshold(-1))
 		require.Equal(t, wantErr, message)
 		require.Equal(t, want, values)
+	})
+
+	t.Run("types a homed reference by what its definitions guarantee", func(t *testing.T) {
+		optimized := pass.NewPipeline[*ssa.Function]()
+		for _, p := range transform.O3() {
+			optimized.Add(p)
+		}
+		arrayType := types.NewArrayType(types.TypeI32())
+		run := func(prog *program.Program) []types.Value {
+			threaded, message := executionResult(t, prog, interp.WithThreshold(-1), interp.WithFuel(1<<24))
+			require.Empty(t, message)
+			native, message := executionResult(t, prog, interp.WithFuel(1<<24))
+			require.Empty(t, message)
+			require.Equal(t, threaded, native)
+			return threaded
+		}
+		optimize := func(prog *program.Program) *types.Function {
+			require.NoError(t, program.Verify(prog))
+			want := run(prog)
+			got := duplicateConstants(prog)
+			_, err := transform.NewSSAPass(optimized).Run(pass.NewManager(), got)
+			require.NoError(t, err)
+			require.NoError(t, program.Verify(got))
+			require.Equal(t, want, run(got))
+			return got.Constants[0].(*types.Function)
+		}
+
+		t.Run("a slice kept across blocks stays in an array local", func(t *testing.T) {
+			// A loop reads and writes a slice of the argument, which it keeps in a local.
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{arrayType},
+				Returns: []types.Type{types.TypeI32()}}).Locals(arrayType, types.TypeI32(), types.TypeI32())
+			head, done := fn.Label(), fn.Label()
+			fn.Append(
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 4), instr.MustNew(instr.ARRAY_SLICE),
+				instr.MustNew(instr.LOCAL_SET, 1), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 2),
+				instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.LOCAL_SET, 3))
+			fn.Bind(head).Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 4), instr.MustNew(instr.I32_GE_S))
+			fn.BrIf(done)
+			fn.Append(
+				instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.ARRAY_GET),
+				instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 3),
+				instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.ARRAY_SET),
+				instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2))
+			fn.Br(head)
+			fn.Bind(done).Append(instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.RETURN))
+
+			f := fn.MustBuild()
+			got := optimize(program.New([]instr.Instruction{
+				instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+				program.WithConstants(f, types.TypedArray[int32]{1, 2, 3, 4}), program.WithTypes(arrayType)))
+			require.NotEqual(t, f.Code, got.Code)
+			for _, local := range got.Locals {
+				require.False(t, local.Equals(types.TypeAny()), local.String())
+			}
+			// A tee would leave the slice's own, untyped value on the stack where a reload has the local's type.
+			for _, inst := range instr.Unmarshal(got.Code) {
+				require.NotEqual(t, instr.LOCAL_TEE, inst.Opcode())
+			}
+		})
+
+		t.Run("a reference stored to slots of different types is typed any", func(t *testing.T) {
+			// The slice goes to an []i32 slot and an any slot, then stays on the stack around a loop.
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{arrayType, types.TypeI32()},
+				Returns: []types.Type{types.TypeI32()}}).Locals(arrayType, types.TypeAny(), types.TypeI32())
+			head, done := fn.Label(), fn.Label()
+			fn.Append(
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_SLICE),
+				instr.MustNew(instr.DUP), instr.MustNew(instr.LOCAL_SET, 2), instr.MustNew(instr.DUP), instr.MustNew(instr.LOCAL_SET, 3),
+				instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 4))
+			fn.Bind(head).Append(instr.MustNew(instr.LOCAL_GET, 4), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_GE_S))
+			fn.BrIf(done)
+			fn.Append(
+				instr.MustNew(instr.DUP), instr.MustNew(instr.ARRAY_LEN), instr.MustNew(instr.DROP),
+				instr.MustNew(instr.LOCAL_GET, 4), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 4))
+			fn.Br(head)
+			fn.Bind(done).Append(instr.MustNew(instr.ARRAY_LEN), instr.MustNew(instr.RETURN))
+
+			f := fn.MustBuild()
+			prog := program.New([]instr.Instruction{
+				instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+				program.WithConstants(f, types.TypedArray[int32]{1, 2, 3}), program.WithTypes(arrayType))
+			require.NoError(t, program.Verify(prog))
+			want := run(prog)
+
+			got := duplicateConstants(prog)
+			_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), got)
+			require.NoError(t, err)
+			require.NoError(t, program.Verify(got))
+			require.Equal(t, want, run(got))
+
+			added := got.Constants[0].(*types.Function).Locals[len(f.Locals):]
+			require.True(t, slices.ContainsFunc(added, func(local types.Type) bool { return local.Equals(types.TypeAny()) }))
+			for _, local := range added {
+				require.False(t, local.Equals(arrayType), local.String())
+			}
+		})
+
+		t.Run("a load keeps the type of what it reads whatever slot its value is stored to", func(t *testing.T) {
+			first := types.NewStructType(types.NewStructField(types.TypeI32()))
+			second := types.NewStructType(types.NewStructField(types.TypeF64()))
+			// The capture is read twice and stored only on one branch, to a slot of another struct type.
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32()},
+				Returns: []types.Type{types.TypeI32()}}).Captures(first).Locals(second)
+			narrow := fn.Label()
+			fn.Append(instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.DROP), instr.MustNew(instr.LOCAL_GET, 0))
+			fn.BrIf(narrow)
+			fn.Append(instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.STRUCT_GET), instr.MustNew(instr.RETURN))
+			fn.Bind(narrow).Append(instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.LOCAL_SET, 1), instr.MustNew(instr.I32_CONST, 9), instr.MustNew(instr.RETURN))
+			f := fn.MustBuild()
+
+			for flag, want := range map[uint64]types.Value{0: types.I32(41), 1: types.I32(9)} {
+				prog := program.New([]instr.Instruction{
+					instr.MustNew(instr.I32_CONST, flag), instr.MustNew(instr.I32_CONST, 41), instr.MustNew(instr.STRUCT_NEW, 0),
+					instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CLOSURE_NEW), instr.MustNew(instr.CALL)},
+					program.WithConstants(f), program.WithTypes(first, second))
+				require.Equal(t, []types.Value{want}, run(prog))
+				got := optimize(prog)
+				for _, local := range got.Locals[len(f.Locals):] {
+					require.False(t, local.Equals(second), local.String())
+				}
+			}
+		})
+
+		t.Run("a store on one branch does not type a value the other branch uses", func(t *testing.T) {
+			// A slice lives in an any slot; only one branch stores it to an []i32 slot.
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{arrayType, types.TypeI32()},
+				Returns: []types.Type{types.TypeI32()}}).Locals(arrayType, types.TypeAny())
+			narrow := fn.Label()
+			fn.Append(
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_SLICE),
+				instr.MustNew(instr.LOCAL_SET, 3), instr.MustNew(instr.LOCAL_GET, 1))
+			fn.BrIf(narrow)
+			fn.Append(instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.ARRAY_LEN), instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.ARRAY_LEN), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN))
+			fn.Bind(narrow).Append(instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.LOCAL_SET, 2), instr.MustNew(instr.I32_CONST, 9), instr.MustNew(instr.RETURN))
+			f := fn.MustBuild()
+
+			for _, flag := range []uint64{0, 1} {
+				got := optimize(program.New([]instr.Instruction{
+					instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.I32_CONST, flag), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+					program.WithConstants(f, types.TypedArray[int32]{1, 2, 3}), program.WithTypes(arrayType)))
+				for _, local := range got.Locals[len(f.Locals):] {
+					require.False(t, local.Equals(arrayType), local.String())
+				}
+			}
+		})
+
+		t.Run("a global read once and stored to another global on both paths verifies", func(t *testing.T) {
+			wide := types.NewArrayType(types.TypeI64())
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32()},
+				Returns: []types.Type{types.TypeI32()}})
+			other, next := fn.Label(), fn.Label()
+			fn.Append(instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.DROP), instr.MustNew(instr.LOCAL_GET, 0))
+			fn.BrIf(other)
+			fn.Append(instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.GLOBAL_SET, 1))
+			fn.Br(next)
+			fn.Bind(other).Append(instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.GLOBAL_SET, 1))
+			fn.Bind(next).Append(instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN))
+			f := fn.MustBuild()
+
+			for _, flag := range []uint64{0, 1} {
+				optimize(program.New([]instr.Instruction{
+					instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.GLOBAL_SET, 0),
+					instr.MustNew(instr.I32_CONST, flag), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+					program.WithConstants(f, types.TypedArray[int64]{5, 6}), program.WithGlobals(wide, wide), program.WithTypes(wide)))
+			}
+		})
+
+		t.Run("a join of different reference types stays any", func(t *testing.T) {
+			// A flag picks one of two references, and the join counts it twice, with the types in both orders.
+			for _, order := range [][2]uint64{{1, 2}, {2, 1}} {
+				fn := types.NewFunctionBuilder(&types.FunctionType{
+					Params:  []types.Type{types.TypeI32(), arrayType, types.TypeAny()},
+					Returns: []types.Type{types.TypeI32()}})
+				other, join := fn.Label(), fn.Label()
+				fn.Append(instr.MustNew(instr.LOCAL_GET, 0))
+				fn.BrIf(other)
+				fn.Append(instr.MustNew(instr.LOCAL_GET, order[0]))
+				fn.Br(join)
+				fn.Bind(other).Append(instr.MustNew(instr.LOCAL_GET, order[1]))
+				fn.Bind(join).Append(instr.MustNew(instr.DUP), instr.MustNew(instr.ARRAY_LEN), instr.MustNew(instr.SWAP), instr.MustNew(instr.ARRAY_LEN),
+					instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN))
+
+				f := fn.MustBuild()
+				for _, flag := range []uint64{0, 1} {
+					got := optimize(program.New([]instr.Instruction{
+						instr.MustNew(instr.I32_CONST, flag), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CONST_GET, 1),
+						instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+						program.WithConstants(f, types.TypedArray[int32]{1, 2, 3}), program.WithTypes(arrayType)))
+					require.NotEmpty(t, got.Locals)
+					for _, local := range got.Locals {
+						require.True(t, local.Equals(types.TypeAny()), local.String())
+					}
+				}
+			}
+		})
+	})
+
+	t.Run("duplicates a value its uses consume in turn instead of homing it", func(t *testing.T) {
+		optimized := pass.NewPipeline[*ssa.Function]()
+		for _, p := range transform.O3() {
+			optimized.Add(p)
+		}
+		arrayType := types.NewArrayType(types.TypeI32())
+		// outcome runs prog and returns what it leaves with the live reference total.
+		outcome := func(prog *program.Program, opts ...interp.Option) ([]types.Value, int) {
+			vm := interp.MustNew(prog, opts...)
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			refs := 0
+			for addr := 0; addr < vm.HeapLen(); addr++ {
+				if n, err := vm.RefCount(addr); err == nil {
+					refs += n
+				}
+			}
+			var values []types.Value
+			for vm.Len() > 0 {
+				value, err := vm.Pop()
+				require.NoError(t, err)
+				values = append(values, value)
+			}
+			return values, refs
+		}
+		// check optimizes prog and requires what it does, references included, to match.
+		check := func(t *testing.T, prog *program.Program) *types.Function {
+			require.NoError(t, program.Verify(prog))
+			got := duplicateConstants(prog)
+			_, err := transform.NewSSAPass(optimized).Run(pass.NewManager(), got)
+			require.NoError(t, err)
+			require.NoError(t, program.Verify(got))
+			for _, opts := range [][]interp.Option{{interp.WithThreshold(-1)}, nil} {
+				want, wantRefs := outcome(prog, opts...)
+				values, refs := outcome(got, opts...)
+				require.Equal(t, want, values)
+				require.Equal(t, wantRefs, refs)
+			}
+			return got.Constants[0].(*types.Function)
+		}
+		opcodes := func(f *types.Function) []instr.Opcode {
+			var ops []instr.Opcode
+			for _, inst := range instr.Unmarshal(f.Code) {
+				ops = append(ops, inst.Opcode())
+			}
+			return ops
+		}
+
+		t.Run("a counter bumps a capture and returns the new count", func(t *testing.T) {
+			counter := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Captures(types.TypeI32()).Locals(types.TypeI32()).Append(
+				instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 0),
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.UPVAL_SET, 0), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.RETURN)).MustBuild()
+			prog := program.New([]instr.Instruction{
+				instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CLOSURE_NEW), instr.MustNew(instr.LOCAL_SET, 0),
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CALL)},
+				program.WithConstants(counter), program.WithLocals(types.TypeAny()))
+
+			f := check(t, prog)
+			require.NotEqual(t, counter.Code, f.Code)
+			require.Len(t, f.Locals, len(counter.Locals))
+			require.Contains(t, opcodes(f), instr.DUP)
+			require.NotContains(t, opcodes(f), instr.LOCAL_TEE)
+		})
+
+		t.Run("a slice is stored to a global and returned", func(t *testing.T) {
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{arrayType},
+				Returns: []types.Type{arrayType}}).Locals(arrayType).Append(
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_SLICE),
+				instr.MustNew(instr.LOCAL_SET, 1), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.GLOBAL_SET, 0),
+				instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.RETURN)).MustBuild()
+			prog := program.New([]instr.Instruction{
+				instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+				program.WithConstants(fn, types.TypedArray[int32]{1, 2, 3}), program.WithGlobals(arrayType), program.WithTypes(arrayType))
+
+			f := check(t, prog)
+			require.Len(t, f.Locals, len(fn.Locals))
+			require.Contains(t, opcodes(f), instr.DUP)
+		})
+
+		t.Run("a value stored through a wider operation is homed", func(t *testing.T) {
+			// The stored value is the operation's last of three operands: a dup would bury the others.
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{arrayType, types.TypeI32(), types.TypeI32()},
+				Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32()).Append(
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.ARRAY_SLICE),
+				instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD),
+				instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_TEE, 3),
+				instr.MustNew(instr.ARRAY_SET), instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.RETURN)).MustBuild()
+			prog := program.New([]instr.Instruction{
+				instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 5),
+				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+				program.WithConstants(fn, types.TypedArray[int32]{1, 2, 3, 4}), program.WithTypes(arrayType))
+
+			f := check(t, prog)
+			require.NotContains(t, opcodes(f), instr.DUP)
+		})
+
+		t.Run("a value stored twice in a row is duplicated once", func(t *testing.T) {
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32(), types.TypeI32()},
+				Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32()).Append(
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2),
+				instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.GLOBAL_SET, 0), instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.GLOBAL_SET, 1),
+				instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.RETURN)).MustBuild()
+			f := check(t, program.New([]instr.Instruction{
+				instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 3),
+				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+				program.WithConstants(fn), program.WithGlobals(types.TypeI32(), types.TypeI32())))
+			require.Equal(t, []instr.Opcode{
+				instr.LOCAL_GET, instr.LOCAL_GET, instr.I32_ADD, instr.DUP, instr.GLOBAL_SET, instr.GLOBAL_SET, instr.I32_CONST, instr.RETURN}, opcodes(f))
+		})
+
+		t.Run("a closure called three times is not duplicated into its calls", func(t *testing.T) {
+			// A call can trap, and a trap exposes the stack the caller left.
+			bump := types.NewFunctionBuilder(&types.FunctionType{}).Captures(types.TypeI32()).Append(
+				instr.MustNew(instr.UPVAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.UPVAL_SET, 0),
+				instr.MustNew(instr.RETURN)).MustBuild()
+			outer := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeAny()).Append(
+				instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CLOSURE_NEW),
+				instr.MustNew(instr.DUP), instr.MustNew(instr.DUP), instr.MustNew(instr.CALL), instr.MustNew(instr.CALL), instr.MustNew(instr.CALL),
+				instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.RETURN)).MustBuild()
+			f := check(t, program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(outer, bump)))
+			require.NotContains(t, opcodes(f), instr.DUP)
+		})
+
+		t.Run("a value used again after another operand is pushed", func(t *testing.T) {
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32(), types.TypeI32()},
+				Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32()).Append(
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2),
+				instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.GLOBAL_SET, 0),
+				instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_SUB), instr.MustNew(instr.RETURN)).MustBuild()
+			f := check(t, program.New([]instr.Instruction{
+				instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 3),
+				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+				program.WithConstants(fn), program.WithGlobals(types.TypeI32())))
+			require.Equal(t, []instr.Opcode{
+				instr.LOCAL_GET, instr.LOCAL_GET, instr.I32_ADD, instr.LOCAL_TEE, instr.GLOBAL_SET, instr.I32_CONST, instr.LOCAL_GET, instr.I32_SUB, instr.RETURN}, opcodes(f))
+		})
 	})
 
 	t.Run("leaves a function it cannot express unchanged", func(t *testing.T) {
