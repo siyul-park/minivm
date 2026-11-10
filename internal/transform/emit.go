@@ -13,7 +13,7 @@ type emitter struct {
 	function  *ssa.Function
 	constants *pool
 	module    bool
-	base      int
+	declared  []types.Type
 
 	subst   map[ssa.Value]ssa.Value
 	ops     [][]ssa.Operation
@@ -24,6 +24,9 @@ type emitter struct {
 	home    map[ssa.Value]int
 	source  map[ssa.Value]ssa.Operation
 	remat   map[ssa.Value]bool
+	loops   map[int]bool
+	liveIn  []map[ssa.Value]bool
+	placed  bool
 
 	locals []types.Type
 	code   []instr.Instruction
@@ -62,14 +65,15 @@ var spaceOps = [...]struct{ read, write instr.Opcode }{
 	ssa.SpaceUpval:  {instr.UPVAL_GET, instr.UPVAL_SET},
 }
 
-func emit(function *ssa.Function, constants *pool, module bool, base int) ([]byte, []types.Type, bool) {
-	e := &emitter{function: function, constants: constants, module: module, base: base}
+func emit(function *ssa.Function, constants *pool, module bool, declared []types.Type) ([]byte, []types.Type, bool) {
+	e := &emitter{function: function, constants: constants, module: module, declared: declared}
 	if !e.collect() {
 		return nil, nil, false
 	}
+	e.liveness()
 	for range len(e.uses) + 1 {
 		e.params()
-		if !e.assign() {
+		if !e.provision() {
 			return nil, nil, false
 		}
 		walked := e.walk()
@@ -77,6 +81,9 @@ func emit(function *ssa.Function, constants *pool, module bool, base int) ([]byt
 			return nil, nil, false
 		}
 		if walked {
+			if !e.assign() || !e.walk() || e.failed {
+				return nil, nil, false
+			}
 			code, ok := e.link()
 			return code, e.locals, ok
 		}
@@ -137,6 +144,7 @@ func (e *emitter) collect() bool {
 			e.count(id, edge.Args)
 		}
 	}
+	e.headers()
 	for v, n := range e.uses {
 		if _, ok := e.source[v]; ok && n > 1 {
 			e.remat[v] = true
@@ -145,6 +153,29 @@ func (e *emitter) collect() bool {
 		}
 	}
 	return true
+}
+
+// headers marks the blocks that only jumps reach and a later block jumps back
+// to. Their params live in locals, written by each jump that enters them, so
+// no value travels on the operand stack across a back edge.
+func (e *emitter) headers() {
+	e.loops = map[int]bool{}
+	reached, back := map[int]bool{}, map[int]bool{}
+	for id, term := range e.terms {
+		for _, edge := range term.Edges {
+			if term.Op != ssa.OpJump {
+				reached[edge.Block] = true
+			}
+			if edge.Block <= id {
+				back[edge.Block] = true
+			}
+		}
+	}
+	for id := range back {
+		if !reached[id] && len(e.function.Block(id).Params) > 0 {
+			e.loops[id] = true
+		}
+	}
 }
 
 // stored reports the local slots some operation may write, or nil when an
@@ -208,7 +239,7 @@ func (e *emitter) count(id int, values []ssa.Value) {
 func (e *emitter) params() {
 	for id := range e.function.Len() {
 		params := e.function.Block(id).Params
-		homed := false
+		homed := e.loops[id]
 		for _, p := range params {
 			homed = homed || e.homed[p]
 		}
@@ -221,6 +252,23 @@ func (e *emitter) params() {
 	}
 }
 
+// provision gives every homed value a placeholder local: whether a walk
+// finds a value out of stack order does not depend on which local it has, so
+// the retries that discover the homed set skip the costly assignment. The
+// placeholders say nothing about which values share a local, so a walk before
+// assign skips only moves that cannot change.
+func (e *emitter) provision() bool {
+	if e.module && len(e.homed) > 0 {
+		return false
+	}
+	e.placed = false
+	e.home = make(map[ssa.Value]int, len(e.homed))
+	for v := range e.homed {
+		e.home[v] = 0
+	}
+	return true
+}
+
 func (e *emitter) assign() bool {
 	e.home, e.locals = map[ssa.Value]int{}, nil
 	values := make([]ssa.Value, 0, len(e.homed))
@@ -231,19 +279,183 @@ func (e *emitter) assign() bool {
 		return false
 	}
 	slices.Sort(values)
+
+	conflicts, hints := e.conflicts(), e.hints()
+	slots := e.free()
+	holders := map[int][]ssa.Value{}
 	for _, v := range values {
 		t, ok := local(e.function.Type(v))
 		if !ok {
 			return false
 		}
-		slot := e.base + len(e.locals)
-		if slot > math.MaxUint8 {
-			return false
+		fits := func(s int) bool {
+			return e.slot(s).Equals(t) && !slices.ContainsFunc(holders[s], func(w ssa.Value) bool { return conflicts[v][w] })
 		}
+		slot := slices.IndexFunc(slots, func(s int) bool {
+			home, ok := e.home[hints[v]]
+			return ok && s == home && fits(s)
+		})
+		if slot < 0 {
+			slot = slices.IndexFunc(slots, fits)
+		}
+		if slot < 0 {
+			slots = append(slots, len(e.declared)+len(e.locals))
+			slot = len(slots) - 1
+			if slots[slot] > math.MaxUint8 {
+				return false
+			}
+			e.locals = append(e.locals, t)
+		}
+		slot = slots[slot]
 		e.home[v] = slot
-		e.locals = append(e.locals, t)
+		holders[slot] = append(holders[slot], v)
 	}
+	e.placed = true
 	return true
+}
+
+// hints maps each value a jump passes to a loop header to the param it
+// becomes: sharing the param's local makes the move a no-op.
+func (e *emitter) hints() map[ssa.Value]ssa.Value {
+	hints := map[ssa.Value]ssa.Value{}
+	for _, term := range e.terms {
+		if term.Op != ssa.OpJump || !e.loops[term.Edges[0].Block] {
+			continue
+		}
+		for i, param := range e.function.Block(term.Edges[0].Block).Params {
+			if _, ok := hints[term.Edges[0].Args[i]]; !ok {
+				hints[term.Edges[0].Args[i]] = param
+			}
+		}
+	}
+	return hints
+}
+
+// slot returns the type of local slot, declared or new.
+func (e *emitter) slot(slot int) types.Type {
+	if slot < len(e.declared) {
+		return e.declared[slot]
+	}
+	return e.locals[slot-len(e.declared)]
+}
+
+// free returns the declared local slots no emitted operation reads or writes:
+// promotion left them unused, so a homed value may take one.
+func (e *emitter) free() []int {
+	touched := map[int]bool{}
+	for _, ops := range e.ops {
+		for _, operation := range ops {
+			switch {
+			case operation.Op == ssa.OpExec && (operation.Code.Reads(instr.Local) || operation.Code.Writes(instr.Local)):
+				return nil
+			case operation.Op == ssa.OpStore && operation.Slot.Space == ssa.SpaceLocal,
+				operation.Op == ssa.OpLoad && operation.Slot.Space == ssa.SpaceLocal && e.uses[operation.Results[0]] > 0:
+				touched[operation.Slot.Index] = true
+			}
+		}
+	}
+	var slots []int
+	for slot := range e.declared {
+		if !touched[slot] {
+			slots = append(slots, slot)
+		}
+	}
+	return slots
+}
+
+// conflicts returns, for each homed value, the homed values that are live
+// where it is written; two such values cannot share a local.
+func (e *emitter) conflicts() map[ssa.Value]map[ssa.Value]bool {
+	conflicts := map[ssa.Value]map[ssa.Value]bool{}
+	link := func(a, b ssa.Value) {
+		if a == b {
+			return
+		}
+		for _, v := range [2][2]ssa.Value{{a, b}, {b, a}} {
+			if conflicts[v[0]] == nil {
+				conflicts[v[0]] = map[ssa.Value]bool{}
+			}
+			conflicts[v[0]][v[1]] = true
+		}
+	}
+	for id := range e.liveIn {
+		e.live(id, func(v ssa.Value) bool { return e.homed[v] }, link)
+	}
+	return conflicts
+}
+
+// liveness computes, once, the values live on entering each block: every
+// value a homing can ever name, which is every one but the rematerialized.
+func (e *emitter) liveness() {
+	e.liveIn = make([]map[ssa.Value]bool, e.function.Len())
+	for id := range e.liveIn {
+		e.liveIn[id] = map[ssa.Value]bool{}
+	}
+	tracked := func(v ssa.Value) bool {
+		_, ok := e.source[v]
+		return !ok
+	}
+	for changed := true; changed; {
+		changed = false
+		for id := len(e.liveIn) - 1; id >= 0; id-- {
+			live := e.live(id, tracked, nil)
+			if len(live) != len(e.liveIn[id]) {
+				e.liveIn[id], changed = live, true
+			}
+		}
+	}
+}
+
+// live returns the values keep admits that are live on entering block id,
+// and links every such value written in the block to the values live as it is
+// written.
+func (e *emitter) live(id int, keep func(ssa.Value) bool, link func(a, b ssa.Value)) map[ssa.Value]bool {
+	live := map[ssa.Value]bool{}
+	use := func(values []ssa.Value) {
+		for _, v := range values {
+			if keep(v) {
+				live[v] = true
+			}
+		}
+	}
+	define := func(values []ssa.Value) {
+		for _, v := range values {
+			if link == nil || !keep(v) {
+				continue
+			}
+			for w := range live {
+				link(v, w)
+			}
+			for _, w := range values {
+				if keep(w) {
+					link(v, w)
+				}
+			}
+		}
+		for _, v := range values {
+			delete(live, v)
+		}
+	}
+
+	term := e.terms[id]
+	for _, edge := range term.Edges {
+		for v := range e.liveIn[edge.Block] {
+			if keep(v) {
+				live[v] = true
+			}
+		}
+	}
+	use(term.Args)
+	for _, edge := range term.Edges {
+		use(edge.Args)
+	}
+	for i := len(e.ops[id]) - 1; i >= 0; i-- {
+		operation := e.ops[id][i]
+		define(operation.Results)
+		use(operation.Args)
+	}
+	define(e.function.Block(id).Params)
+	return live
 }
 
 func (e *emitter) walk() bool {
@@ -255,7 +467,7 @@ func (e *emitter) walk() bool {
 			return false
 		}
 		for _, operation := range e.ops[id] {
-			if operation.Op != ssa.OpStore && operation.Op != ssa.OpExec && e.remat[operation.Results[0]] {
+			if operation.Op != ssa.OpStore && operation.Op != ssa.OpExec && (e.remat[operation.Results[0]] || e.uses[operation.Results[0]] == 0) {
 				continue
 			}
 			if !e.perform(operation) {
@@ -275,7 +487,7 @@ func (e *emitter) open(id int) bool {
 	if id == 0 {
 		return len(params) == 0
 	}
-	if len(params) == 0 {
+	if len(params) == 0 || e.loops[id] {
 		return true
 	}
 	if !e.homed[params[0]] {
@@ -304,10 +516,26 @@ func (e *emitter) close(id int) bool {
 			e.branch(instr.BR, e.function.Len())
 		}
 	case ssa.OpJump:
-		if !e.carry(term.Edges[0].Args) {
+		edge := term.Edges[0]
+		args, moves := edge.Args, []int(nil)
+		if e.loops[edge.Block] {
+			args = nil
+			for i, param := range e.function.Block(edge.Block).Params {
+				// An argument already in its param's local needs no move.
+				if home, ok := e.home[edge.Args[i]]; ok && (edge.Args[i] == param || e.placed && home == e.home[param]) {
+					continue
+				}
+				args, moves = append(args, edge.Args[i]), append(moves, e.home[param])
+			}
+		}
+		if !e.carry(args) {
 			return false
 		}
-		e.leave(id, term.Edges[0].Block)
+		for i := len(moves) - 1; i >= 0; i-- {
+			e.write(instr.LOCAL_SET, uint64(moves[i]))
+		}
+		e.stack = e.stack[:len(e.stack)-len(moves)]
+		e.leave(id, edge.Block)
 	case ssa.OpBranch, ssa.OpTable:
 		if !uniform(term.Edges) || !e.carry(append(slices.Clone(term.Edges[0].Args), term.Args[0])) {
 			return false

@@ -90,7 +90,7 @@ func (p *SSAPass) roundtrip(manager *pass.Manager, constants *pool, address int,
 	if _, err := p.pipeline.Run(manager, f); err != nil {
 		return false, err
 	}
-	code, locals, ok := emit(f, constants, address == 0, len(function.Declared()))
+	code, locals, ok := emit(f, constants, address == 0, function.Declared())
 	if !ok || (len(locals) == 0 && slices.Equal(code, function.Code)) {
 		return false, nil
 	}
