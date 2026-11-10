@@ -39,7 +39,7 @@ func benchmarkExternal(b *testing.B, spec registry.Spec, result types.Value) {
 		}
 		want, ok := result.(types.I32)
 		require.True(b, ok)
-		benchmarkScripts(b, spec.Name, spec.Source, int32(want))
+		benchmarkScripts(b, spec, int32(want))
 		benchmarkYaegi(b, spec.Name, spec.Source, result)
 	case types.KindI64:
 		benchmarkScripts64(b, spec.Source, int64(result.(types.I64)))
@@ -68,30 +68,34 @@ func benchmarkScripts64(b *testing.B, source registry.Source, want int64) {
 	}
 }
 
-func benchmarkScripts(b *testing.B, name string, source registry.Source, want int32) {
+func benchmarkScripts(b *testing.B, spec registry.Spec, want int32) {
+	source := spec.Source
 	if source.Tengo != "" {
 		b.Run("tengo", func(b *testing.B) {
-			benchmarkTengo(b, source.Tengo, want)
+			benchmarkTengo(b, source.Tengo, spec.Host, want)
 		})
 	}
 	if source.Lua != "" {
 		b.Run("gopher_lua", func(b *testing.B) {
-			benchmarkGopherLua(b, source.Lua, want)
+			benchmarkGopherLua(b, source.Lua, spec.Host, want)
 		})
 	}
 	if source.JS != "" {
 		b.Run("goja", func(b *testing.B) {
-			benchmarkGoja(b, source.JS, want)
+			benchmarkGoja(b, source.JS, spec.Host, want)
 		})
 	}
 	if source.Python != "" {
 		b.Run("gpython", func(b *testing.B) {
-			if name == "map-ops" {
+			if spec.Name == "map-ops" {
 				b.Skip("gpython dicts accept only string keys")
 			}
-			benchmarkGpython(b, source.Python, want)
+			benchmarkGpython(b, source.Python, spec.Host, want)
 		})
 		b.Run("cpython", func(b *testing.B) {
+			if spec.Host != nil {
+				b.Skip("CPython runs out of process and cannot call a Go host function")
+			}
 			benchmarkCPython(b, source.Python, want)
 		})
 	}
@@ -118,8 +122,21 @@ func benchmarkTengo64(b *testing.B, source string, want int64) {
 	require.Equal(b, want, compiled.Get("result").Int64())
 }
 
-func benchmarkTengo(b *testing.B, source string, want int32) {
+func benchmarkTengo(b *testing.B, source string, host *registry.Host, want int32) {
 	script := tengo.NewScript([]byte(source))
+	if host != nil {
+		require.NoError(b, script.Add(host.Name, &tengo.UserFunction{
+			Name: host.Name,
+			Value: func(args ...tengo.Object) (tengo.Object, error) {
+				if len(args) != 2 {
+					return nil, tengo.ErrWrongNumArguments
+				}
+				a, _ := tengo.ToInt64(args[0])
+				c, _ := tengo.ToInt64(args[1])
+				return &tengo.Int{Value: int64(host.I32(int32(a), int32(c)))}, nil
+			},
+		}))
+	}
 	script.SetImports(tengoStdlib.GetModuleMap("math"))
 	compiled, err := script.Compile()
 	require.NoError(b, err)
@@ -139,9 +156,15 @@ func benchmarkTengo(b *testing.B, source string, want int32) {
 	require.Equal(b, int64(want), compiled.Get("result").Int64())
 }
 
-func benchmarkGopherLua(b *testing.B, source string, want int32) {
+func benchmarkGopherLua(b *testing.B, source string, host *registry.Host, want int32) {
 	state := lua.NewState()
 	defer state.Close()
+	if host != nil {
+		state.SetGlobal(host.Name, state.NewFunction(func(state *lua.LState) int {
+			state.Push(lua.LNumber(host.I32(int32(state.CheckInt(1)), int32(state.CheckInt(2)))))
+			return 1
+		}))
+	}
 	require.NoError(b, state.DoString(source))
 	function := state.GetGlobal("run")
 
@@ -216,8 +239,11 @@ func benchmarkGoja64(b *testing.B, source string, want int64) {
 	require.Equal(b, want, value)
 }
 
-func benchmarkGoja(b *testing.B, source string, want int32) {
+func benchmarkGoja(b *testing.B, source string, host *registry.Host, want int32) {
 	vm := goja.New()
+	if host != nil {
+		require.NoError(b, vm.Set(host.Name, host.I32))
+	}
 	prog, err := goja.Compile("fixture.js", strings.TrimSpace(source), true)
 	require.NoError(b, err)
 	_, err = vm.RunProgram(prog)
@@ -284,12 +310,21 @@ func benchmarkGpython64(b *testing.B, source string, want int64) {
 	require.NoError(b, err)
 }
 
-func benchmarkGpython(b *testing.B, source string, want int32) {
+func benchmarkGpython(b *testing.B, source string, host *registry.Host, want int32) {
 	code, err := compile.Compile(strings.TrimSpace(source), "fixture.py", py.ExecMode, 0, true)
 	require.NoError(b, err)
 	ctx := py.NewContext(py.DefaultContextOpts())
 	defer ctx.Close()
-	module, err := py.RunCode(ctx, code, "fixture.py", nil)
+	impl := &py.ModuleImpl{Info: py.ModuleInfo{Name: "fixture"}}
+	if host != nil {
+		impl.Globals = py.StringDict{host.Name: py.MustNewMethod(host.Name, func(_ py.Object, args py.Tuple) (py.Object, error) {
+			a, b := args[0].(py.Int), args[1].(py.Int)
+			return py.Int(host.I32(int32(a), int32(b))), nil
+		}, 0, "")}
+	}
+	module, err := ctx.ModuleInit(impl)
+	require.NoError(b, err)
+	_, err = py.RunCode(ctx, code, "fixture.py", module)
 	require.NoError(b, err)
 
 	call := func() error {
@@ -510,6 +545,7 @@ func interpExports(register func(registry.Spec)) yaegi.Exports {
 			"Spec":     reflect.Zero(reflect.TypeOf((*registry.Spec)(nil))),
 			"Native":   reflect.Zero(reflect.TypeOf((*registry.Native)(nil))),
 			"Wazero":   reflect.Zero(reflect.TypeOf((*registry.Wazero)(nil))),
+			"Host":     reflect.Zero(reflect.TypeOf((*registry.Host)(nil))),
 		},
 		"github.com/siyul-park/minivm/types/types": {
 			"Value":      reflect.Zero(reflect.TypeOf((*types.Value)(nil))),

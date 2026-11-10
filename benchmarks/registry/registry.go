@@ -15,12 +15,22 @@ type Spec struct {
 	Source Source
 	Native Native
 	Wazero *Wazero
+	Host   *Host
 }
 
 // Native contains the direct Go implementation of a benchmark.
 type Native struct {
 	I32 func() int32
 	I64 func() int64
+}
+
+// Host is a Go function a guest workload calls on every iteration.
+// The script runtimes bind it as the global function Name; minivm binds it to
+// global 0, which the fixture's .mvm declares as its type. Native and Yaegi
+// run the fixture's Go source, which calls it directly.
+type Host struct {
+	Name string
+	I32  func(a, b int32) int32
 }
 
 // Wazero describes a benchmark exported by a WebAssembly module.
