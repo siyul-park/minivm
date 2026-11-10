@@ -10,27 +10,30 @@ import (
 
 // tcache is the default structs and arrays of each type the interpreter built
 // ahead of native code, which takes them without leaving it: the fast path. An
-// array type's bin holds arrays of one length. Each cached ref is an object of
+// array type has jit.Classes bins: class c below the last holds arrays of
+// length c, and the last holds arrays of one exact length at or past it. A
+// struct type uses class 0. Each cached ref is an object of
 // count 1 that no one but native code may take, so until it does the tcache
 // owns it: flush returns every ref still unused. A miss takes the slow path,
 // which allocates in Go and fills the bin.
 type tcache struct {
-	// table is what native code reads, one jit.Bin per type index; refs
+	// table is what native code reads, one jit.Bin per bin; refs
 	// are the arrays the table's pointers address, kept here so they
 	// outlive native code's uintptr views of them.
 	table []jit.Bin
 	refs  [][]types.Boxed
-	// batch is how many objects each type's next fill builds; zero until
-	// the type's first miss, which only arms it.
+	// batch is how many objects each bin's next fill builds; zero until
+	// the bin's first miss, which only arms it.
 	batch []int
-	// built and left are how many objects each type's fills built in an
+	// built and left are how many objects each bin's fills built in an
 	// entry and how many of them the entry did not take; missed is how many
 	// misses it served. Their sum, built - left + missed, is how many objects
 	// the entry used, and learned is that sum for the last entry that built
-	// any, which sizes the type's next first fill.
+	// any, which sizes the bin's next first fill.
 	built, left, missed, learned []int
-	// changes is how many times each type's bin length changed in an
-	// entry; a second change stops the type's caching until flush.
+	// changes is how many times each bin's length changed in an
+	// entry, which only the last class of an array type can; a second change
+	// stops the bin's caching until flush.
 	changes []int8
 	// dirty reports that a miss armed a batch or a fill cached something,
 	// which flush has not yet reset or returned; held, that a fill cached.
@@ -57,61 +60,63 @@ const (
 
 // newTcache returns an empty tcache for n types.
 func newTcache(n int) tcache {
+	n *= jit.Classes
 	c := tcache{table: make([]jit.Bin, n), refs: make([][]types.Boxed, n), batch: make([]int, n), built: make([]int, n), left: make([]int, n), missed: make([]int, n), learned: make([]int, n), changes: make([]int8, n)}
-	for t := range c.table {
-		c.table[t].Len = unset
+	for b := range c.table {
+		c.table[b].Len = unset
 	}
 	return c
 }
 
 // fill serves type t's slow path: a miss of an object of the given length,
-// which a struct has none of. The first miss of an entry only arms the type,
-// so a call that allocates once builds nothing ahead; the next builds what the
+// which a struct has none of, in the bin of its class. The first miss of an
+// entry only arms the bin, so a call that allocates once builds nothing ahead; the next builds what the
 // last entry needed beyond the two misses served so far, at least minBatch, and
 // each later miss in the entry doubles that. A fill stops early, without
 // failing, when the heap is exhausted, after returning a bin of arrays of
-// another length. A type whose length changes a second time in an entry
+// another length. A bin whose length changes a second time in an entry
 // alternates, and builds nothing more until flush, so each of its allocations
 // costs the callout alone. Native code takes the batch's lowest address first,
 // so a batch is stored last first.
 func (c *tcache) fill(i *Interpreter, t, length int) {
+	b := t*jit.Classes + min(length, jit.Classes-1)
 	c.dirty = true
-	c.missed[t]++
-	if c.batch[t] == 0 {
+	c.missed[b]++
+	if c.batch[b] == 0 {
 		// Two misses are served before the first fill, the arming one and
 		// the one that fills. An entry that learned it needs no more than
 		// those two builds nothing.
-		switch want := c.learned[t] - 2; {
-		case c.learned[t] == 0:
-			c.batch[t] = minBatch
+		switch want := c.learned[b] - 2; {
+		case c.learned[b] == 0:
+			c.batch[b] = minBatch
 		case want <= 0:
-			c.batch[t] = covered
+			c.batch[b] = covered
 		default:
-			c.batch[t] = min(want, maxBatch)
+			c.batch[b] = min(want, maxBatch)
 		}
 		return
 	}
-	if c.batch[t] == covered {
+	if c.batch[b] == covered {
 		// The entry needs more than it learned: fall back to doubling.
-		c.batch[t] = minBatch
+		c.batch[b] = minBatch
 		return
 	}
-	if length > wide || c.changes[t] > 1 {
+	if length > wide || c.changes[b] > 1 {
 		return
 	}
-	if was := c.table[t].Len; int64(length) != was {
+	if was := c.table[b].Len; int64(length) != was {
 		if was != unset {
-			c.changes[t]++
+			c.changes[b]++
 		}
 		mark := len(i.free)
-		c.drop(i, t)
+		c.drop(i, b)
 		i.shrink(mark)
-		if c.changes[t] > 1 {
+		if c.changes[b] > 1 {
 			return
 		}
 	}
-	size := c.batch[t]
-	c.batch[t] = min(2*size, maxBatch)
+	size := c.batch[b]
+	c.batch[b] = min(2*size, maxBatch)
 	// A fill must not collect: it builds at most half of what the heap holds
 	// before the collection threaded code would run at this live count, and
 	// leaves the rest to the program's own allocations.
@@ -122,8 +127,8 @@ func (c *tcache) fill(i *Interpreter, t, length int) {
 		return
 	}
 
-	n := int(c.table[t].N)
-	refs := c.refs[t][:n]
+	n := int(c.table[b].N)
+	refs := c.refs[b][:n]
 	c.filling = true
 	defer func() {
 		c.filling = false
@@ -133,9 +138,9 @@ func (c *tcache) fill(i *Interpreter, t, length int) {
 			}
 		}
 		slices.Reverse(refs[n:])
-		c.built[t] += len(refs) - n
-		c.refs[t] = refs
-		c.table[t] = jit.Bin{Refs: base(refs), N: int64(len(refs)), Len: int64(length)}
+		c.built[b] += len(refs) - n
+		c.refs[b] = refs
+		c.table[b] = jit.Bin{Refs: base(refs), N: int64(len(refs)), Len: int64(length)}
 		c.held = c.held || len(refs) > 0
 	}()
 	array, _ := i.types[t].(*types.ArrayType)
@@ -161,23 +166,23 @@ func (c *tcache) flush(i *Interpreter) bool {
 	returned := c.held
 	c.dirty, c.held = false, false
 	mark := len(i.free)
-	for t := range c.table {
-		c.drop(i, t)
-		if c.built[t] > 0 {
-			c.learned[t] = c.built[t] - c.left[t] + c.missed[t]
+	for b := range c.table {
+		c.drop(i, b)
+		if c.built[b] > 0 {
+			c.learned[b] = c.built[b] - c.left[b] + c.missed[b]
 		}
-		c.batch[t], c.built[t], c.left[t], c.missed[t], c.changes[t], c.table[t].Len = 0, 0, 0, 0, 0, unset
+		c.batch[b], c.built[b], c.left[b], c.missed[b], c.changes[b], c.table[b].Len = 0, 0, 0, 0, 0, unset
 	}
 	i.shrink(mark)
 	return returned
 }
 
-// drop returns every ref type t still has cached, leaving the slots it
+// drop returns every ref bin b still has cached, leaving the slots it
 // frees to the caller to shrink.
-func (c *tcache) drop(i *Interpreter, t int) {
-	c.left[t] += int(c.table[t].N)
-	for e := &c.table[t]; e.N > 0; {
+func (c *tcache) drop(i *Interpreter, b int) {
+	c.left[b] += int(c.table[b].N)
+	for e := &c.table[b]; e.N > 0; {
 		e.N--
-		i.undo(c.refs[t][e.N].Ref())
+		i.undo(c.refs[b][e.N].Ref())
 	}
 }

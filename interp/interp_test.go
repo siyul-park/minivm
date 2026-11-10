@@ -8738,7 +8738,7 @@ func TestWithThreshold(t *testing.T) {
 		want, err := threaded.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(3), want)
-		wantLen, wantCounts := heapOf(threaded)
+		wantLive := liveOf(threaded)
 
 		profiler := prof.New()
 		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
@@ -8757,9 +8757,55 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, want, got)
 		require.Greater(t, nativeEntries(profiler), entered)
 		require.Less(t, after-before, float64(64))
-		gotLen, gotCounts := heapOf(vm)
-		require.Equal(t, wantLen, gotLen)
-		require.Equal(t, wantCounts, gotCounts)
+		// Bins of other lengths may leave free slots below a live one, so the heap
+		// can be longer than threaded's; what it holds live is the same.
+		require.Equal(t, wantLive, liveOf(vm))
+	})
+
+	t.Run("serves ARRAY_NEW_DEFAULT of lengths cycling through the size classes natively", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		const n = 2000
+		array := types.NewArrayType(types.TypeAny())
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, n).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 5).Emit(instr.I32_REM_S).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD)
+		b.Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithTypes(array))
+
+		threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		wantLive := liveOf(threaded)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		warm(t, vm, profiler)
+
+		vm.Flush()
+		before, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+		entered := nativeEntries(profiler)
+		require.NoError(t, vm.Run(context.Background()))
+		vm.Flush()
+		after, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+
+		got, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Greater(t, nativeEntries(profiler), entered)
+		require.Less(t, after-before, float64(n)/8) // each length keeps its own bin
+		// Bins of other lengths may leave free slots below a live one, so the heap
+		// can be longer than threaded's; what it holds live is the same.
+		require.Equal(t, wantLive, liveOf(vm))
 	})
 
 	t.Run("faults a native ARRAY_NEW_DEFAULT of a negative length as threaded does", func(t *testing.T) {
@@ -8789,9 +8835,9 @@ func TestWithThreshold(t *testing.T) {
 
 	t.Run("stops caching ARRAY_NEW_DEFAULT of a type whose length alternates", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
-		// Lengths alternate between low and low+1; a low of 0 is a cached length
-		// like any other.
-		for _, low := range []uint64{1, 0} {
+		// Lengths alternate between low and low+1, both at or past the last size
+		// class, which holds one length.
+		for _, low := range []uint64{7, 8} {
 			array := types.NewArrayType(types.TypeAny())
 			b := instr.NewBuilder()
 			loop, done := b.Label(), b.Label()
