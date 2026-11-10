@@ -173,13 +173,21 @@ func (e *emitter) collect() bool {
 
 // refTypes returns the static type of each ref value whose definition
 // guarantees one, which a local holding it can then declare; a ref left out is
-// any. A load has its slot's declared type, a constant its cell's type, and a
-// block param the type all its incoming values share. A value with none of
-// these takes the type of the local slots it is stored to when every store
-// sits in its defining block ahead of every other use, so each use reads the
-// value as the slot narrowed it; a store on another path never types it.
+// any. A load has its slot's declared type, a constant its cell's type, a
+// block param the type all its incoming values share, and an array slice the
+// type of the array it slices. A value with none of these takes the type of
+// the local slots it is stored to when every store sits in its defining block
+// ahead of every other use, so each use reads the value as the slot narrowed
+// it; a store on another path never types it.
+//
+// Params and slices are solved together as a lattice: unknown below every
+// type, a type below any. A value is the join of its sources, a param of its
+// incoming values and a slice of its array, and a source that is not a load,
+// constant, stored value, param or slice is any. Values only rise, so the
+// least fixpoint is the answer whatever order they are visited in, and a value
+// still unknown at the end is any.
 func (e *emitter) refTypes() map[ssa.Value]types.Type {
-	refs := map[ssa.Value]types.Type{}
+	fixed, sources := map[ssa.Value]types.Type{}, map[ssa.Value][]ssa.Value{}
 	type store struct {
 		at int
 		t  types.Type
@@ -188,13 +196,15 @@ func (e *emitter) refTypes() map[ssa.Value]types.Type {
 	for id, ops := range e.ops {
 		for i, operation := range ops {
 			switch {
+			case operation.Op == ssa.OpExec && operation.Code == instr.ARRAY_SLICE:
+				sources[operation.Results[0]] = []ssa.Value{operation.Args[0]}
 			case operation.Op == ssa.OpLoad && e.function.Type(operation.Results[0]) == ssa.TypeRef:
 				if t := e.slotType(operation.Slot); t != nil {
-					refs[operation.Results[0]] = t
+					fixed[operation.Results[0]] = t
 				}
 			case operation.Op == ssa.OpConst && e.function.Type(operation.Results[0]) == ssa.TypeRef:
 				if t := e.constants.typeOf(types.Boxed(operation.Const)); t != nil {
-					refs[operation.Results[0]] = t
+					fixed[operation.Results[0]] = t
 				}
 			case operation.Op == ssa.OpStore && operation.Slot.Space == ssa.SpaceLocal && operation.Slot.Index < len(e.declared):
 				if v := operation.Args[0]; e.produced[v] && e.function.Type(v) == ssa.TypeRef && e.defined[v] == id {
@@ -205,8 +215,17 @@ func (e *emitter) refTypes() map[ssa.Value]types.Type {
 			}
 		}
 	}
+	for _, term := range e.terms {
+		for _, edge := range term.Edges {
+			for i, param := range e.function.Block(edge.Block).Params {
+				if e.function.Type(param) == ssa.TypeRef {
+					sources[param] = append(sources[param], edge.Args[i])
+				}
+			}
+		}
+	}
 	for v, list := range stores {
-		if _, ok := refs[v]; ok || other[v] {
+		if _, ok := fixed[v]; ok || other[v] || sources[v] != nil {
 			continue
 		}
 		last, t := 0, list[0].t
@@ -223,46 +242,41 @@ func (e *emitter) refTypes() map[ssa.Value]types.Type {
 			}
 		}
 		if !early {
-			refs[v] = t
+			fixed[v] = t
 		}
 	}
 
-	incoming := map[ssa.Value][]ssa.Value{}
-	for _, term := range e.terms {
-		for _, edge := range term.Edges {
-			for i, param := range e.function.Block(edge.Block).Params {
-				if e.function.Type(param) == ssa.TypeRef {
-					incoming[param] = append(incoming[param], edge.Args[i])
+	solved := map[ssa.Value]types.Type{}
+	for changed := true; changed; {
+		changed = false
+		for v, args := range sources {
+			var joined types.Type
+			for _, arg := range args {
+				t := types.TypeAny()
+				if _, ok := sources[arg]; ok {
+					t = solved[arg]
+				} else if f, ok := fixed[arg]; ok {
+					t = f
 				}
+				switch {
+				case t == nil:
+				case joined == nil:
+					joined = t
+				case !joined.Equals(t):
+					joined = types.TypeAny()
+				}
+			}
+			if joined != nil && (solved[v] == nil || !solved[v].Equals(joined)) {
+				solved[v], changed = joined, true
 			}
 		}
 	}
-	for changed := true; changed; {
-		changed = false
-		for param, args := range incoming {
-			var meet types.Type
-			for _, arg := range args {
-				t, ok := refs[arg]
-				if _, pending := incoming[arg]; !ok && pending {
-					continue
-				}
-				switch {
-				case !ok:
-					meet = types.TypeAny()
-				case meet == nil:
-					meet = t
-				case !meet.Equals(t):
-					meet = types.TypeAny()
-				}
-			}
-			prev, known := refs[param]
-			switch {
-			case meet == nil, known && prev.Equals(meet):
-			case !known:
-				refs[param], changed = meet, true
-			case !prev.Equals(types.TypeAny()):
-				refs[param], changed = types.TypeAny(), true
-			}
+
+	refs := fixed
+	for v := range sources {
+		refs[v] = types.TypeAny()
+		if t := solved[v]; t != nil {
+			refs[v] = t
 		}
 	}
 	return refs

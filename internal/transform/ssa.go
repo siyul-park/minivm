@@ -22,6 +22,19 @@ type pool struct {
 	at      map[types.Boxed]int
 }
 
+// change is a function rewritten by a round trip; a nil function is the
+// module body.
+type change struct {
+	function      *types.Function
+	before, after original
+}
+
+// original is the code and locals of a function before a round trip.
+type original struct {
+	code   []byte
+	locals []types.Type
+}
+
 var _ pass.Pass[*program.Program] = (*SSAPass)(nil)
 
 // NewSSAPass returns an SSA round-trip pass.
@@ -29,33 +42,76 @@ func NewSSAPass(pipeline *pass.Pipeline[*ssa.Function]) *SSAPass {
 	return &SSAPass{pipeline: pipeline}
 }
 
-// Run applies the SSA round trip.
+// Run applies the SSA round trip. The program is verified once afterwards.
+// On a fault every changed function is restored and the program verified
+// again: if it still fails the input was invalid and comes back unchanged.
+// Otherwise each changed function is reapplied alone and kept only if the
+// program still verifies, so a function whose emitted code would fail
+// verification is left as it was.
 func (p *SSAPass) Run(_ *pass.Manager, prog *program.Program) (bool, error) {
 	constants := newPool(prog)
+	size := len(prog.Constants)
 
 	manager := pass.NewManager()
 
+	var changes []change
 	root := &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
+	before := original{root.Code, root.Locals}
 	changed, err := p.roundtrip(manager, constants, 0, root)
 	if err != nil {
 		return false, err
 	}
 	if changed {
 		prog.Code, prog.Locals = root.Code, root.Locals
+		changes = append(changes, change{before: before, after: original{root.Code, root.Locals}})
 	}
+	seen := map[*types.Function]bool{}
 	for i, v := range prog.Constants {
 		function, ok := v.(*types.Function)
-		if !ok {
+		if !ok || seen[function] {
 			continue
 		}
+		seen[function] = true
+		before := original{function.Code, function.Locals}
 		done, err := p.roundtrip(manager, constants, i+1, function)
 		if err != nil {
 			return false, err
 		}
-		changed = changed || done
+		if done {
+			changes = append(changes, change{function: function, before: before, after: original{function.Code, function.Locals}})
+		}
 	}
 
-	return !changed, nil
+	kept := len(changes)
+	if kept > 0 && program.Verify(prog) != nil {
+		for _, c := range changes {
+			c.use(prog, c.before)
+		}
+		kept = 0
+		if program.Verify(prog) == nil {
+			for _, c := range changes {
+				c.use(prog, c.after)
+				if program.Verify(prog) != nil {
+					c.use(prog, c.before)
+					continue
+				}
+				kept++
+			}
+		}
+	}
+	if kept == 0 {
+		prog.Constants = prog.Constants[:size]
+	}
+	return kept == 0, nil
+}
+
+// use sets the code and locals of the changed function.
+func (c change) use(prog *program.Program, o original) {
+	if c.function == nil {
+		prog.Code, prog.Locals = o.code, o.locals
+		return
+	}
+	c.function.Code, c.function.Locals = o.code, o.locals
 }
 
 func newPool(prog *program.Program) *pool {
