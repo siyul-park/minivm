@@ -26,7 +26,7 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 
 ## Policy
 
-`interp.native` owns the policy; the interpreter builds it at its first Run (a `Pool` member when it joins the pool), never in `New`.
+The interpreter's `engine` owns the policy (`policy`); the interpreter builds it at its first Run (a `Pool` member when it joins the pool), never in `New`.
 
 | Setting | Lifecycle | Thresholds |
 |---|---|---|
@@ -58,7 +58,7 @@ One wake (analysis, the first compiles, their garbage) costs ~0.3–0.6 ms of in
 | `asm.State` | Same struct on every architecture. Native stack, saved Go registers, native SP/PC/register file at the last exit. No Go pointer on the native stack but a slice's element pointer (below). |
 | `Arch.Enter` / `Arch.Resume` | Run code on the native stack / continue a suspended activation. Report whether it stopped at an exit. |
 | exit stub | Native code `BLR`s `asm.OffsetStub`; the stub saves registers and returns to Go. `Resume` returns from that call. |
-| `jit.Context` | Built at the interpreter's first native entry. `asm.State` first, then `Trap`, exit id, then `Heap`, `Globals`, `RC`, `Natives`, `Entries`, `Top`, `FB`, `Bins`, `Upvals`, `Next`, `Edge`, `Budget`, `Results`, `Records`. `Results` stages a bridge or box exit's result words for native code to reload on resume. The interpreter writes every base before `Enter`; only `Heap` and `RC` are rewritten before each `Resume`, since serving an exit can only relocate those two append-grown slices. |
+| `jit.Context` | Built at the interpreter's first native entry. `asm.State` first, then `Trap`, exit id, then `Heap`, `Globals`, `RC`, `Natives`, `Entries`, `Top`, `FB`, `Bins`, `Upvals`, `Next`, `Edge`, `Budget`, `Results`, `Records`. `Results` stages the result words of a bridge, callout, box, or served `ExitCall` with register results, for native code to reload on resume. The interpreter writes every base before `Enter`; only `Heap` and `RC` are rewritten before each `Resume`, since serving an exit can only relocate those two append-grown slices. |
 | `Context.Bins` | The base of the `jit.Bin` table, `jit.Classes` `{Refs, N, Len}` entries per type index, built with the context and fixed for its life (Reserve). |
 | `Context.Upvals` | The entering activation's upvals base. Written by the interpreter before an OSR `Enter` and by a native closure call before its branch; read once by a prologue into an ordinary register. |
 | `jit.Trap` | `TrapReturn`, `TrapDeopt`, `TrapBridge`. |
@@ -150,7 +150,7 @@ A reference parameter its function never writes (`transform.Borrows`) is borrowe
 
 | Kind | Taken at | Resumes native |
 |---|---|---|
-| `ExitDeopt` | failed check, `OpExit`; `Exit.Trap` marks a check the operation itself raises (`Site.Trap`: zero divisor, index bounds) | no |
+| `ExitDeopt` | failed check, `OpExit`; `Exit.Trap` marks a check the operation itself raises (zero divisor, index bounds) | no |
 | `ExitBridge` | unlowered `OpExec` | yes, unless denied or its handler traps |
 | `ExitSafepoint` | loop header or native call when `Budget` is spent | yes, unless its tick runs threaded (Ticks) |
 | `ExitRelease` | dropping a last reference | yes |
@@ -217,8 +217,8 @@ A batch is stored so native code takes its lowest address first, so a single-typ
 |---|---|
 | Frames | The caller's activations keep frame slots from the run's start; a stand-in frame for the innermost runs only its exact-code `CALL` (code cut past it), so `Interpreter.dispatch` stops when the callee returns to it. |
 | Handlers | `Interpreter.floor` hides the suspended slots from every handler search; a panic not caught above it re-panics from `dispatch` to `reenter`. |
-| Native entries | Start at `Context.Depth` = the suspended depth (`engine.depth`), on the same native stack below the suspended frames. A nested activation that deopts abandons the stack only back to where its entry started (`asm.State.Abandon`), so later nested entries never overwrite the suspended frames; `Records` bounds the total depth, and no entry starts once they are full. `Limit` counts the suspended activations. A Go entry above depth 0 releases its borrowed parameters itself after it returns, since `OpReturn` releases them only at depth 1. |
-| State | `asm.State`, `Limit`, and `Depth` are saved before and restored after; the nested run spends the caller's `Budget`. |
+| Native entries | Start at `Context.Level` = the suspended depth (`engine.depth`), on the same native stack below the suspended frames. A nested activation that deopts abandons the stack only back to where its entry started (`asm.State.Abandon`), so later nested entries never overwrite the suspended frames; `Records` bounds the total depth, and no entry starts once they are full. `Context.Edge` caps native calls at the lesser of `Records` and the interpreter frames left. A Go entry above depth 0 releases its borrowed parameters itself after it returns, since `OpReturn` releases them only at depth 1. |
+| State | `asm.State`, `Context.Edge`, `engine.depth`, and `Interpreter.floor` are saved before and restored before native code resumes (a failed call restores `asm.State`, `engine.depth`, and `Interpreter.floor`; the next entry sets `Edge` again); the nested run spends the caller's `Budget`. |
 | Hook | Under `WithHook` no call is served: the suspended callers' frame slots stay unmaterialized below the floor, where a hook would read them. The `ExitCall` deopts and replays the call. |
 | Callee | A generic call has `Exit.Callee` 0: the interpreter resolves its `Target` value to a function or closure whose parameter count is `Exit.Args` and whose return kinds are `Exit.Returns`; any other callee deopts and replays the call. |
 | Results | Register results are unboxed into `Context.Results`; slot results stay at the callee frame base. |
@@ -258,7 +258,7 @@ Module code with loops reaches a safepoint at each header, so its ip-0 site does
 
 `compile.Lower` rejects an OSR unit rooted at ip 0 of code with loops when a bridge or box exit lies outside every loop: its only gain is the prefix's dispatch, which a Go round trip outweighs. The rejected unit's site is disabled; its header sites keep entering.
 
-Entry reuses the current frame (`FB = bp`, `Depth = 0`); exits rewrite it in place. Materialized frames finish threaded execution without observers.
+Entry reuses the current frame (`FB = bp`, `Context.Level` = `engine.depth`); exits rewrite it in place. Materialized frames finish threaded execution without observers.
 
 ## Limits
 

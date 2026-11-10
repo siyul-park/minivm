@@ -253,18 +253,18 @@ One opcode per row, in opcode-value order.
 | Floating point | `F64_TO_I64_U` | `f64.to_i64_u` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_TO_F32` | `f64.to_f32` | ✅ | 🔲 | lowered on ARM64 |
 | Floating point | `F64_REINTERPRET_I64` | `f64.reinterpret_i64` | ✅ | 🔲 | lowered on ARM64 |
-| Strings | `STRING_NEW_UTF32` | `string.new_utf32` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Strings | `STRING_NEW_UTF32` | `string.new_utf32` | ⬜ | 🔲 | served as a callout and resumes native code on ARM64 (`jit-internals.md`, Exits) |
 | Strings | `STRING_LEN` | `string.len` | ✅ | 🔲 | lowered on ARM64; a non-string deoptimizes as the operation's own trap |
-| Strings | `STRING_CONCAT` | `string.concat` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Strings | `STRING_CONCAT` | `string.concat` | ⬜ | 🔲 | served as a callout and resumes native code on ARM64 (`jit-internals.md`, Exits) |
 | Strings | `STRING_EQ` | `string.eq` | ✅ | 🔲 | lowered on ARM64; compares bytes; a non-string deoptimizes as the operation's own trap |
 | Strings | `STRING_NE` | `string.ne` | ✅ | 🔲 | lowered on ARM64; compares bytes; a non-string deoptimizes as the operation's own trap |
 | Strings | `STRING_LT` | `string.lt` | ✅ | 🔲 | lowered on ARM64; compares bytes; a non-string deoptimizes as the operation's own trap |
 | Strings | `STRING_GT` | `string.gt` | ✅ | 🔲 | lowered on ARM64; compares bytes; a non-string deoptimizes as the operation's own trap |
 | Strings | `STRING_LE` | `string.le` | ✅ | 🔲 | lowered on ARM64; compares bytes; a non-string deoptimizes as the operation's own trap |
 | Strings | `STRING_GE` | `string.ge` | ✅ | 🔲 | lowered on ARM64; compares bytes; a non-string deoptimizes as the operation's own trap |
-| Strings | `STRING_ENCODE_UTF32` | `string.encode_utf32` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Strings | `STRING_ENCODE_UTF32` | `string.encode_utf32` | ⬜ | 🔲 | served as a callout and resumes native code on ARM64 (`jit-internals.md`, Exits) |
 | Arrays | `ARRAY_NEW` | `array.new` | ⬜ | 🔲 | deoptimizes on ARM64: its declared two-operand arity does not cover the `1+count` it pops |
-| Arrays | `ARRAY_NEW_DEFAULT` | `array.new_default` | ⬜ | 🔲 | takes a prebuilt default array of the requested length from the type's tcache on ARM64 (fast path), else takes the slow path and resumes native code and resumes native code (`jit-internals.md`, Reserve) |
+| Arrays | `ARRAY_NEW_DEFAULT` | `array.new_default` | ⬜ | 🔲 | takes a prebuilt default array of the requested length from the type's tcache on ARM64 (fast path), else takes the slow path, a callout, and resumes native code (`jit-internals.md`, Reserve) |
 | Arrays | `ARRAY_LEN` | `array.len` | ✅ | 🔲 | guarded, else bridges and resumes native code |
 | Arrays | `ARRAY_GET` | `array.get` | ✅ | 🔲 | guarded, else bridges and resumes native code |
 | Arrays | `ARRAY_SET` | `array.set` | ✅ | 🔲 | guarded, else bridges and resumes native code |
@@ -272,9 +272,9 @@ One opcode per row, in opcode-value order.
 | Arrays | `ARRAY_COPY` | `array.copy` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Arrays | `ARRAY_APPEND` | `array.append` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Arrays | `ARRAY_DELETE` | `array.delete` | ⬜ | 🔲 | bridges and resumes native code on ARM64; an array of unknown element type makes the translator decline the whole unit |
-| Arrays | `ARRAY_SLICE` | `array.slice` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Arrays | `ARRAY_SLICE` | `array.slice` | ⬜ | 🔲 | served as a callout and resumes native code on ARM64 (`jit-internals.md`, Exits) |
 | Structs | `STRUCT_NEW` | `struct.new` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
-| Structs | `STRUCT_NEW_DEFAULT` | `struct.new_default` | ⬜ | 🔲 | takes a prebuilt default struct from the type's tcache on ARM64 (fast path), else takes the slow path and resumes native code and resumes native code (`jit-internals.md`, Reserve) |
+| Structs | `STRUCT_NEW_DEFAULT` | `struct.new_default` | ⬜ | 🔲 | takes a prebuilt default struct from the type's tcache on ARM64 (fast path), else takes the slow path, a callout, and resumes native code (`jit-internals.md`, Reserve) |
 | Structs | `STRUCT_GET` | `struct.get` | ✅ | 🔲 | guarded, else bridges and resumes native code |
 | Structs | `STRUCT_SET` | `struct.set` | ✅ | 🔲 | guarded, else bridges and resumes native code |
 | Maps | `MAP_NEW` | `map.new` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
