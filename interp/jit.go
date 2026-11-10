@@ -390,7 +390,7 @@ func (e *engine) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 		start := i.fp
 		ok, invalidate, fault := e.settle(i, code, trap, &e.ledgers[addr], mark, start,
 
-			func(exit jit.Exit) { i.fr.ip += advance; e.materialize(i, exit, start, addr, release) },
+			func(exit *jit.Exit) { i.fr.ip += advance; e.materialize(i, exit, start, addr, release) },
 			func() bool { return e.refute(addr, code.Tier) },
 		)
 		if e.depth == 0 && e.tcache.dirty {
@@ -548,7 +548,7 @@ func (e *engine) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 		start := i.fp - 1
 		f := i.fr
 		ok, invalidate, fault = e.settle(i, c, trap, &s.ledger, mark, start,
-			func(exit jit.Exit) { e.materialize(i, exit, start, f.ref, f.release) },
+			func(exit *jit.Exit) { e.materialize(i, exit, start, f.ref, f.release) },
 			func() bool {
 				if e.stale(s.built) {
 					return true
@@ -592,7 +592,7 @@ func (e *engine) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 // depth upward, as frames from start and positions the interpreter at the
 // innermost one. The run's first activation was entered through ref, and
 // release reports whether it owns that reference.
-func (e *engine) materialize(i *Interpreter, exit jit.Exit, start, ref int, release bool) {
+func (e *engine) materialize(i *Interpreter, exit *jit.Exit, start, ref int, release bool) {
 	ctx := e.ctx
 	floor, depth := int(e.depth), ctx.Level()
 
@@ -610,7 +610,7 @@ func (e *engine) materialize(i *Interpreter, exit jit.Exit, start, ref int, rele
 		if !ok {
 			panic("interp: native return address with no call site")
 		}
-		call := code.Exits[id]
+		call := &code.Exits[id]
 		maps[k-floor] = call.Frame
 		refs[k-floor+1] = e.callee(k, call)
 		owns[k-floor+1] = call.Owned
@@ -720,7 +720,7 @@ func (e *engine) quiesce() {
 // Each exit costs the code by its class (jit.Class): a trap nothing; a guard
 // its refutation (judge); a bridge or call its price, charged to ledger before it is
 // served, which invalidates the code once its work no longer pays.
-func (e *engine) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *jit.Ledger, mark int64, start int, deopt func(jit.Exit), refute func() bool) (ok, invalidate bool, fault any) {
+func (e *engine) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *jit.Ledger, mark int64, start int, deopt func(*jit.Exit), refute func() bool) (ok, invalidate bool, fault any) {
 	ctx := e.ctx
 	for {
 		ledger.Spend(mark - ctx.Budget)
@@ -733,8 +733,10 @@ func (e *engine) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 		if ctx.Level() != int(e.depth)+1 {
 			entered = e.cache.Find(ctx.PC())
 		}
-		exit := entered.Exits[ctx.Exit()]
-		metric(i, metricExits, 1, prof.Label{Key: "kind", Value: exit.Kind.String()})
+		exit := &entered.Exits[ctx.Exit()]
+		if i.profiler != nil {
+			metric(i, metricExits, 1, prof.Label{Key: "kind", Value: exit.Kind.String()})
+		}
 		switch exit.Kind {
 		case jit.ExitSafepoint:
 			if cancelled(i) {
@@ -881,7 +883,7 @@ func (e *engine) sync(i *Interpreter) {
 
 // box heap-boxes exit.Word, a wide i64, into Context.Results[0] as
 // threaded boxI64 does; a panic (heap exhaustion) declines.
-func (e *engine) box(i *Interpreter, exit jit.Exit) (ok bool) {
+func (e *engine) box(i *Interpreter, exit *jit.Exit) (ok bool) {
 	defer func() {
 		if recover() != nil {
 			ok = false
@@ -909,7 +911,7 @@ func (e *engine) box(i *Interpreter, exit jit.Exit) (ok bool) {
 // retains anything but its operands before its last panic point. An operand
 // that is a host view declines before the handler runs, since its
 // conversions are host code.
-func (e *engine) bridge(i *Interpreter, exit jit.Exit) jit.Class {
+func (e *engine) bridge(i *Interpreter, exit *jit.Exit) jit.Class {
 	if !bridgeable[exit.Code] {
 
 		if exit.Code.Writes(instr.Branch) {
@@ -986,7 +988,7 @@ func (e *engine) bridge(i *Interpreter, exit jit.Exit) jit.Class {
 // exhaustion, or the operation's own fault) happens before anything is
 // published and leaves every operand's reference count as it was; threaded code runs
 // the operation again and reports it.
-func (e *engine) callout(i *Interpreter, exit jit.Exit, serve callout) (ok bool) {
+func (e *engine) callout(i *Interpreter, exit *jit.Exit, serve callout) (ok bool) {
 	defer func() {
 		if recover() != nil {
 			ok = false
@@ -1016,7 +1018,7 @@ func (e *engine) callout(i *Interpreter, exit jit.Exit, serve callout) (ok bool)
 // nests reports whether exit's call to the function at addr can run while its
 // caller stays suspended: not a coroutine, whose CALL returns a handle instead
 // of the results native code expects, and with room to push the callee.
-func (e *engine) nests(i *Interpreter, exit jit.Exit, addr int) bool {
+func (e *engine) nests(i *Interpreter, exit *jit.Exit, addr int) bool {
 	if addr < len(i.coros) && i.coros[addr] {
 		return false
 	}
@@ -1035,7 +1037,7 @@ func (e *engine) nests(i *Interpreter, exit jit.Exit, addr int) bool {
 // callee materializes the caller under the callee's live frames: a
 // cancellation continues threaded, a THROW whose search the floor stopped
 // runs again over the materialized frames, and any other panic is fault.
-func (e *engine) reenter(i *Interpreter, exit jit.Exit, ref, start int, deopt func(jit.Exit)) (fault any, ok bool) {
+func (e *engine) reenter(i *Interpreter, exit *jit.Exit, ref, start int, deopt func(*jit.Exit)) (fault any, ok bool) {
 	ctx := e.ctx
 	k := ctx.Level() - 1
 	m := exit.Frame
@@ -1109,7 +1111,7 @@ func (e *engine) frameBase(i *Interpreter, k int) int {
 // since the CALL adopts both. A closure callee is counted and recorded here,
 // since the threaded closure CALL has no native hook; so is trivial code, whose
 // hook is gated.
-func (e *engine) replay(i *Interpreter, exit jit.Exit, ref int) {
+func (e *engine) replay(i *Interpreter, exit *jit.Exit, ref int) {
 	for _, p := range exit.Lent {
 		i.retainBox(i.stack[i.sp+p])
 	}
@@ -1140,7 +1142,7 @@ func (e *engine) replay(i *Interpreter, exit jit.Exit, ref int) {
 
 // callee is the reference activation k's ExitCall call goes through: the
 // closure it maps, or else its function.
-func (e *engine) callee(k int, call jit.Exit) int {
+func (e *engine) callee(k int, call *jit.Exit) int {
 	if call.Target == nil {
 		return call.Callee
 	}
@@ -1343,7 +1345,7 @@ func boxRegisters(i *Interpreter, code *jit.Code, bp int) {
 // function or closure that takes the call's arguments and returns the kinds
 // it reads back; any other callee ok reports false and the caller deoptimizes
 // to run its own CALL.
-func target(i *Interpreter, exit jit.Exit, ref int) (addr int, ok bool) {
+func target(i *Interpreter, exit *jit.Exit, ref int) (addr int, ok bool) {
 	if exit.Callee != 0 {
 		return exit.Callee, true
 	}
