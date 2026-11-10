@@ -3158,6 +3158,136 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, wantCounts, counts)
 	})
 
+	t.Run("serves array.slice as a callout with threaded's results and counts", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		// slicer sums the lengths of n slices of an eight-element array of
+		// elem; refs fills two of its elements, so a ref slice copies them.
+		slicer := func(elem types.Type, refs bool, n uint64, from, to func(b *instr.Builder)) *program.Program {
+			b := instr.NewBuilder()
+			loop, done := b.Label(), b.Label()
+			b.Emit(instr.I32_CONST, 8).Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.LOCAL_SET, 0)
+			if refs {
+				for _, at := range []uint64{0, 3} {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, at).Emit(instr.CONST_GET, 0).Emit(instr.ARRAY_SET)
+				}
+			}
+			b.Bind(loop)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, n).Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.LOCAL_GET, 0)
+			from(b)
+			to(b)
+			b.Emit(instr.ARRAY_SLICE).Emit(instr.ARRAY_LEN)
+			b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).Br(loop)
+			b.Bind(done).Emit(instr.LOCAL_GET, 2)
+			code, err := b.Assemble()
+			require.NoError(t, err)
+			return program.New(code,
+				program.WithLocals(types.TypeAny(), types.TypeI32(), types.TypeI32()),
+				program.WithTypes(types.NewArrayType(elem)),
+				program.WithConstants(types.String("ref")))
+		}
+		konst := func(v int32) func(b *instr.Builder) {
+			return func(b *instr.Builder) { b.Emit(instr.I32_CONST, uint64(uint32(v))) }
+		}
+		counter := func(b *instr.Builder) { b.Emit(instr.LOCAL_GET, 1) }
+
+		for _, tt := range []struct {
+			name     string
+			elem     types.Type
+			refs     bool
+			from, to func(b *instr.Builder)
+		}{
+			{"typed range", types.TypeI32(), false, konst(1), konst(5)},
+			{"typed empty", types.TypeI32(), false, konst(3), konst(3)},
+			{"typed full", types.TypeI32(), false, konst(0), konst(8)},
+			{"ref range", types.TypeAny(), true, konst(1), konst(5)},
+			{"ref full", types.TypeAny(), true, konst(0), konst(8)},
+			{"ref empty", types.TypeAny(), true, konst(2), konst(2)},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				prog := slicer(tt.elem, tt.refs, 500, tt.from, tt.to)
+				threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+				defer threaded.Close()
+				require.NoError(t, threaded.Run(context.Background()))
+				want, err := threaded.Pop()
+				require.NoError(t, err)
+				wantCounts := make([]int, threaded.HeapLen()-1)
+				for j := range wantCounts {
+					wantCounts[j], _ = threaded.RefCount(j + 1)
+				}
+
+				// Callouts count as bridge exits, so native entries stand in for
+				// the exit: the loop ran native and matched threaded.
+				profiler := prof.New()
+				vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+				defer vm.Close()
+				var got types.Value
+				var counts []int
+				poll(t, func() bool {
+					require.NoError(t, vm.Run(context.Background()))
+					got, err = vm.Pop()
+					require.NoError(t, err)
+					counts = make([]int, vm.HeapLen()-1)
+					for j := range counts {
+						counts[j], _ = vm.RefCount(j + 1)
+					}
+					vm.Reset()
+					vm.Flush()
+					return nativeEntries(profiler) > 0
+				})
+				require.Equal(t, want, got)
+				require.Equal(t, wantCounts, counts)
+			})
+		}
+
+		for _, tt := range []struct {
+			name     string
+			elem     types.Type
+			refs     bool
+			from, to func(b *instr.Builder)
+		}{
+			{"end past the length", types.TypeI32(), false, konst(0), counter},
+			{"ref end past the length", types.TypeAny(), true, konst(0), counter},
+			{"negative start", types.TypeI32(), false, konst(-1), konst(4)},
+			{"start past end", types.TypeAny(), true, konst(5), konst(2)},
+		} {
+			t.Run("traps "+tt.name+" as threaded", func(t *testing.T) {
+				prog := slicer(tt.elem, tt.refs, 12, tt.from, tt.to)
+				ip := regexp.MustCompile(`ip=\d+`)
+
+				threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+				defer threaded.Close()
+				want := threaded.Run(context.Background())
+				require.ErrorIs(t, want, interp.ErrIndexOutOfRange)
+				wantCounts := make([]int, threaded.HeapLen()-1)
+				for j := range wantCounts {
+					wantCounts[j], _ = threaded.RefCount(j + 1)
+				}
+
+				profiler := prof.New()
+				vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+				defer vm.Close()
+				var got error
+				var counts []int
+				poll(t, func() bool {
+					got = vm.Run(context.Background())
+					counts = make([]int, vm.HeapLen()-1)
+					for j := range counts {
+						counts[j], _ = vm.RefCount(j + 1)
+					}
+					vm.Reset()
+					vm.Flush()
+					return nativeEntries(profiler) > 0
+				})
+				require.Error(t, got)
+				require.Equal(t, ip.ReplaceAllString(want.Error(), "ip"), ip.ReplaceAllString(got.Error(), "ip"))
+				require.Equal(t, wantCounts, counts)
+			})
+		}
+	})
+
 	t.Run("enters a hot recursive function's native code", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		prog := fibCallsProgram(t, 20)
