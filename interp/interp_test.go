@@ -4600,7 +4600,7 @@ func TestWithThreshold(t *testing.T) {
 		b.Emit(instr.CONST_GET, 1).Emit(instr.LOCAL_SET, 2)
 		b.Bind(same)
 
-		b.Emit(instr.LOCAL_GET, 2).Emit(instr.CONST_GET, 0).Emit(instr.STRING_LT).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.CONST_GET, 0).Emit(instr.STRING_CONCAT).Emit(instr.DROP)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
 		b.Bind(done).Emit(instr.LOCAL_GET, 0)
 		code, err := b.Assemble()
@@ -4644,6 +4644,51 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, arrayErr)
 		require.Equal(t, wantX, gotX)
 		require.Equal(t, wantArray, gotArray)
+	})
+
+	t.Run("traps a non-string operand of a lowered string relation as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		const warm = 4000
+		for _, op := range []instr.Opcode{instr.STRING_LT, instr.STRING_GT, instr.STRING_LE, instr.STRING_GE} {
+			b := instr.NewBuilder()
+			loop, done, same := b.Label(), b.Label(), b.Label()
+			b.Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_SET, 1)
+			b.Bind(loop)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2*warm).Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, warm).Emit(instr.I32_NE).BrIf(same)
+			b.Emit(instr.CONST_GET, 1).Emit(instr.LOCAL_SET, 1)
+			b.Bind(same)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.CONST_GET, 0).Emit(op).Emit(instr.DROP)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+			b.Bind(done).Emit(instr.LOCAL_GET, 0)
+			code, err := b.Assemble()
+			require.NoError(t, err)
+			prog := program.New(code,
+				program.WithLocals(types.TypeI32(), types.TypeAny()),
+				program.WithConstants(types.String("x"), types.TypedArray[int32]{1}))
+
+			threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+			wantErr := threaded.Run(context.Background())
+			require.ErrorIs(t, wantErr, interp.ErrTypeMismatch)
+			require.NoError(t, threaded.Close())
+
+			var gotErr error
+			var entries float64
+			profiler := prof.New()
+			vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+			poll(t, func() bool {
+				gotErr = vm.Run(context.Background())
+				vm.Reset()
+				vm.Flush()
+				entries = nativeEntries(profiler)
+				return entries > 0
+			})
+			bridges, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "bridge"})
+			require.NoError(t, vm.Close())
+
+			require.True(t, errorsEqual(gotErr, wantErr), "got %v, want %v", gotErr, wantErr)
+			require.Zero(t, bridges)
+		}
 	})
 
 	t.Run("keeps a callee native while its native calls amortize bridges", func(t *testing.T) {
@@ -4741,7 +4786,11 @@ func TestWithThreshold(t *testing.T) {
 			x, y string
 		}
 		var cases []tc
-		for _, op := range []instr.Opcode{instr.STRING_EQ, instr.STRING_NE} {
+		names := map[instr.Opcode]string{
+			instr.STRING_EQ: "string.eq", instr.STRING_NE: "string.ne", instr.STRING_LT: "string.lt",
+			instr.STRING_GT: "string.gt", instr.STRING_LE: "string.le", instr.STRING_GE: "string.ge",
+		}
+		for _, op := range []instr.Opcode{instr.STRING_EQ, instr.STRING_NE, instr.STRING_LT, instr.STRING_GT, instr.STRING_LE, instr.STRING_GE} {
 			for _, c := range [][3]string{
 				{"empty and empty", "", ""},
 				{"empty and non-empty", "", "a"},
@@ -4756,12 +4805,22 @@ func TestWithThreshold(t *testing.T) {
 				{"second word differs", long("kl")[:8] + "X" + long("kl")[9:], long("kl")},
 				{"tail differs after equal words", long("kl"), long("kX")},
 				{"non-ascii contents", "héllo wörld, ünïcode", "héllo wörld, ünïcode"},
+				{"left a proper prefix", "hell", "hello"},
+				{"right a proper prefix", "hello", "hell"},
+				{"left a word-long prefix", long("")[:16], long("kl")},
+				{"right a word-long prefix", long("kl"), long("")[:16]},
+				{"difference inside the first word", "abcxefgh", "abcdefgh"},
+				{"difference inside the first word, reversed", "abcdefgh", "abcxefgh"},
+				{"difference after the first word", long("kl")[:12] + "x" + long("kl")[13:], long("kl")},
+				{"difference after the first word, reversed", long("kl"), long("kl")[:12] + "x" + long("kl")[13:]},
+				{"tail byte greater", long("kz"), long("kl")},
+				{"tail byte lesser", long("kl"), long("kz")},
+				{"bytes at or above 0x80 order unsigned", "é", "z"},
+				{"bytes at or above 0x80 order unsigned, reversed", "z", "é"},
+				{"high bytes in a word", "abcdefgé", "abcdefgz"},
+				{"empty and non-empty, reversed", "a", ""},
 			} {
-				name := "string.eq"
-				if op == instr.STRING_NE {
-					name = "string.ne"
-				}
-				cases = append(cases, tc{name + " " + c[0], op, c[1], c[2]})
+				cases = append(cases, tc{names[op] + " " + c[0], op, c[1], c[2]})
 			}
 		}
 		for _, c := range cases {

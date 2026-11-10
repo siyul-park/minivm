@@ -258,10 +258,10 @@ One opcode per row, in opcode-value order.
 | Strings | `STRING_CONCAT` | `string.concat` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Strings | `STRING_EQ` | `string.eq` | ✅ | 🔲 | lowered on ARM64; compares bytes; a non-string deoptimizes as the operation's own trap |
 | Strings | `STRING_NE` | `string.ne` | ✅ | 🔲 | lowered on ARM64; compares bytes; a non-string deoptimizes as the operation's own trap |
-| Strings | `STRING_LT` | `string.lt` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
-| Strings | `STRING_GT` | `string.gt` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
-| Strings | `STRING_LE` | `string.le` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
-| Strings | `STRING_GE` | `string.ge` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Strings | `STRING_LT` | `string.lt` | ✅ | 🔲 | lowered on ARM64; compares bytes; a non-string deoptimizes as the operation's own trap |
+| Strings | `STRING_GT` | `string.gt` | ✅ | 🔲 | lowered on ARM64; compares bytes; a non-string deoptimizes as the operation's own trap |
+| Strings | `STRING_LE` | `string.le` | ✅ | 🔲 | lowered on ARM64; compares bytes; a non-string deoptimizes as the operation's own trap |
+| Strings | `STRING_GE` | `string.ge` | ✅ | 🔲 | lowered on ARM64; compares bytes; a non-string deoptimizes as the operation's own trap |
 | Strings | `STRING_ENCODE_UTF32` | `string.encode_utf32` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Arrays | `ARRAY_NEW` | `array.new` | ⬜ | 🔲 | deoptimizes on ARM64: its declared two-operand arity does not cover the `1+count` it pops |
 | Arrays | `ARRAY_NEW_DEFAULT` | `array.new_default` | ⬜ | 🔲 | takes a prebuilt default array of the requested length from the type's tcache on ARM64 (fast path), else takes the slow path and resumes native code and resumes native code (`jit-internals.md`, Reserve) |
@@ -312,7 +312,11 @@ Branch offsets are relative to instruction end. Function bodies `MUST` terminate
 
 ### Strings
 
-All string comparisons are by content and require string operands. Mismatches `MUST` trap `ErrTypeMismatch`; `REF_EQ`/`REF_NE` test identity.
+All string comparisons are by content and require string operands. Mismatches `MUST` trap `ErrTypeMismatch`; `REF_EQ`/`REF_NE` test identity. Ordering compares bytes as unsigned values, lexicographically.
+
+`string.len` is the UTF-8 byte length, not the code point count.
+
+`string.new_utf32` takes an `i32` array of code points, and `string.encode_utf32` yields one.
 
 `string.concat` allocates a fresh ref and `MAY` reuse append-only storage without mutating published strings.
 

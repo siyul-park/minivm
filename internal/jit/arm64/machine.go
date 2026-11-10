@@ -747,9 +747,17 @@ func (m *Machine) exec(a *asm.Assembler, op ssa.Operation, s compile.Site) bool 
 	case instr.STRING_LEN:
 		return m.stringLen(a, op, s)
 	case instr.STRING_EQ:
-		return m.stringEq(a, op, s, true)
+		return m.stringCompare(a, op, s, target.CondEQ)
 	case instr.STRING_NE:
-		return m.stringEq(a, op, s, false)
+		return m.stringCompare(a, op, s, target.CondNE)
+	case instr.STRING_LT:
+		return m.stringCompare(a, op, s, target.CondCC)
+	case instr.STRING_GT:
+		return m.stringCompare(a, op, s, target.CondHI)
+	case instr.STRING_LE:
+		return m.stringCompare(a, op, s, target.CondLS)
+	case instr.STRING_GE:
+		return m.stringCompare(a, op, s, target.CondCS)
 	case instr.REF_EQ:
 		return m.compare(a, op, s, target.CondEQ, asm.Width64)
 	case instr.REF_NE:
@@ -888,16 +896,6 @@ func (m *Machine) compare(a *asm.Assembler, op ssa.Operation, s compile.Site, co
 	}
 	m.set(a, s, op.Results[0], dst, cond)
 	return true
-}
-
-// set materializes cond into dst, v's register, unless v is fused into the
-// branch right after it: then the flags carry cond to Branch.
-func (m *Machine) set(a *asm.Assembler, s compile.Site, v ssa.Value, dst asm.VReg, cond uint8) {
-	if s.Fuse(v) {
-		m.flag, m.cond = v, cond
-		return
-	}
-	a.Emit(target.CSET(dst, cond))
 }
 
 // guard unboxes an i64 operand as threaded borrowI64 does: a word tagged
@@ -1063,14 +1061,17 @@ func (m *Machine) stringLen(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 	return true
 }
 
-// stringEq compares two strings' bytes, as threaded STRING_EQ and STRING_NE
-// do: a slot holding anything else, null included, is the operation's own
-// type mismatch, a trap. Interning is gone, so equal contents may sit behind
-// different refs: unequal lengths differ, one shared data pointer is equal,
-// and otherwise a word loop compares 8 bytes while that many remain and a
-// byte loop the tail. It only loads, so no Go pointer is written. want is the
-// result for equal strings: true for STRING_EQ, false for STRING_NE.
-func (m *Machine) stringEq(a *asm.Assembler, op ssa.Operation, s compile.Site, want bool) bool {
+// stringCompare orders two strings' bytes, as threaded STRING_EQ through
+// STRING_GE do: a slot holding anything else, null included, is the
+// operation's own type mismatch, a trap. Interning is gone, so equal contents
+// may sit behind different refs: a shared data pointer skips the bytes, and
+// otherwise a word loop compares 8 bytes while that many of the shorter
+// length remain and a byte loop the tail. The first differing word, byte-
+// reversed to big-endian, or byte leaves the flags of left against right; no
+// difference leaves those of the lengths, and cond reads them unsigned. Equality
+// relations leave early on unequal lengths. It only loads, so no Go pointer
+// is written.
+func (m *Machine) stringCompare(a *asm.Assembler, op ssa.Operation, s compile.Site, cond uint8) bool {
 	if !has(op, 2, 1) {
 		return false
 	}
@@ -1086,41 +1087,52 @@ func (m *Machine) stringEq(a *asm.Assembler, op ssa.Operation, s compile.Site, w
 			target.LDR(ptr[i], data[i], 0),
 		)
 	}
-	yes, no, done, words, bytes := a.Label(), a.Label(), a.Label(), a.Label(), a.Label()
+	out, tail, step, words, bytes := a.Label(), a.Label(), a.Label(), a.Label(), a.Label()
+	rest := m.vreg()
+	a.Emit(target.CMP(size[0], size[1]))
+	if cond == target.CondEQ || cond == target.CondNE {
+		a.Emit(target.BCondLabel(target.OpBNE, out))
+	}
 	a.Emit(
-		target.CMP(size[0], size[1]), target.BCondLabel(target.OpBNE, no),
-		target.CMP(ptr[0], ptr[1]), target.BCondLabel(target.OpBEQ, yes),
+		target.CSEL(rest, size[0], size[1], target.CondCC),
+		target.CMP(ptr[0], ptr[1]), target.BCondLabel(target.OpBEQ, tail),
 	)
 	a.Bind(words)
 	a.Emit(
-		target.CMPI(size[0], 8), target.BCondLabel(target.OpBCC, bytes),
+		target.CMPI(rest, 8), target.BCondLabel(target.OpBCC, bytes),
 		target.LDR(target.X16, ptr[0], 0), target.LDR(target.X17, ptr[1], 0),
-		target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, no),
+		target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBEQ, step),
+		target.REV(target.X16, target.X16), target.REV(target.X17, target.X17),
+		target.CMP(target.X16, target.X17), target.BLabel(out),
+	)
+	a.Bind(step)
+	a.Emit(
 		target.ADDI(ptr[0], ptr[0], 8), target.ADDI(ptr[1], ptr[1], 8),
-		target.SUBI(size[0], size[0], 8), target.BLabel(words),
+		target.SUBI(rest, rest, 8), target.BLabel(words),
 	)
 	a.Bind(bytes)
 	a.Emit(
-		target.CBZLabel(size[0], yes),
+		target.CBZLabel(rest, tail),
 		target.LDRB(target.X16, ptr[0], 0), target.LDRB(target.X17, ptr[1], 0),
-		target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, no),
+		target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, out),
 		target.ADDI(ptr[0], ptr[0], 1), target.ADDI(ptr[1], ptr[1], 1),
-		target.SUBI(size[0], size[0], 1), target.BLabel(bytes),
+		target.SUBI(rest, rest, 1), target.BLabel(bytes),
 	)
-	dst := s.Reg(op.Results[0])
-	flag := func(equal bool) uint64 {
-		if equal == want {
-			return 1
-		}
-		return 0
-	}
-	a.Bind(yes)
-	a.Emit(target.LDI(dst, flag(true))...)
-	a.Emit(target.BLabel(done))
-	a.Bind(no)
-	a.Emit(target.LDI(dst, flag(false))...)
-	a.Bind(done)
+	a.Bind(tail)
+	a.Emit(target.CMP(size[0], size[1]))
+	a.Bind(out)
+	m.set(a, s, op.Results[0], s.Reg(op.Results[0]), cond)
 	return true
+}
+
+// set materializes cond into dst, v's register, unless v is fused into the
+// branch right after it: then the flags carry cond to Branch.
+func (m *Machine) set(a *asm.Assembler, s compile.Site, v ssa.Value, dst asm.VReg, cond uint8) {
+	if s.Fuse(v) {
+		m.flag, m.cond = v, cond
+		return
+	}
+	a.Emit(target.CSET(dst, cond))
 }
 
 // arrayGet loads the element at a bounds-checked index off a guarded array.
