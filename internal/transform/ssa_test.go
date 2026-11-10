@@ -508,8 +508,8 @@ func TestSSAPass_Run(t *testing.T) {
 			pad     int
 			expects bool
 		}{
-			{name: "within reach", pad: 32748, expects: false},
-			{name: "out of reach", pad: 32751, expects: true}} {
+			{name: "within reach", pad: 32745, expects: false},
+			{name: "out of reach", pad: 32748, expects: true}} {
 			require.Zero(t, tc.pad%3)
 
 			fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32())
@@ -567,6 +567,253 @@ func TestSSAPass_Run(t *testing.T) {
 		require.Equal(t, 1, calls)
 	})
 
+	t.Run("rematerializes constants and unstored loads and falls through a branch", func(t *testing.T) {
+		optimized := pass.NewPipeline[*ssa.Function]()
+		for _, p := range transform.O3() {
+			optimized.Add(p)
+		}
+		run := func(prog *program.Program, opts ...interp.Option) types.Value {
+			vm := interp.MustNew(prog, opts...)
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			value, err := vm.Pop()
+			require.NoError(t, err)
+			return value
+		}
+
+		fib := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32()},
+			Returns: []types.Type{types.TypeI32()}})
+		base := fib.Label()
+		fib.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_LT_S))
+		fib.BrIf(base)
+		fib.Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_SUB),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_SUB),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
+			instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN))
+		fib.Bind(base).Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.RETURN))
+
+		// n counts down inside the loop: its load must not be reused after the store.
+		countdown := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32()},
+			Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32())
+		header, done := countdown.Label(), countdown.Label()
+		countdown.Bind(header).Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_LE_S))
+		countdown.BrIf(done)
+		countdown.Append(
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 1),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_SUB), instr.MustNew(instr.LOCAL_SET, 0))
+		countdown.Br(header)
+		countdown.Bind(done).Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.RETURN))
+
+		call := func(arg int32, f *types.Function) *program.Program {
+			return program.New([]instr.Instruction{
+				instr.MustNew(instr.I32_CONST, uint64(arg)), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(f))
+		}
+
+		t.Run("a recursive call keeps its constant callee and no value is homed", func(t *testing.T) {
+			f := fib.MustBuild()
+			prog := call(20, f)
+			_, err := transform.NewSSAPass(optimized).Run(pass.NewManager(), prog)
+			require.NoError(t, err)
+			require.NoError(t, program.Verify(prog))
+
+			got := prog.Constants[0].(*types.Function)
+			require.Empty(t, got.Locals)
+			var ops []instr.Opcode
+			for _, inst := range instr.Unmarshal(got.Code) {
+				ops = append(ops, inst.Opcode())
+			}
+			require.NotContains(t, ops, instr.LOCAL_TEE)
+			require.NotContains(t, ops, instr.LOCAL_SET)
+			calls := 0
+			for i, op := range ops {
+				if op == instr.CALL {
+					calls++
+					require.Equal(t, instr.CONST_GET, ops[i-1])
+				}
+				if op == instr.BR_IF {
+					require.NotEqual(t, instr.BR, ops[i+1])
+				}
+			}
+			require.Equal(t, 2, calls)
+			require.Equal(t, types.I32(6765), run(prog, interp.WithThreshold(-1)))
+			require.Equal(t, types.I32(6765), run(prog))
+		})
+
+		t.Run("a load a loop store can reach stays homed", func(t *testing.T) {
+			for name, pipeline := range map[string]*pass.Pipeline[*ssa.Function]{
+				"identity":  pass.NewPipeline[*ssa.Function](),
+				"optimized": optimized,
+			} {
+				prog := call(10, countdown.MustBuild())
+				_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), prog)
+				require.NoError(t, err, name)
+				require.NoError(t, program.Verify(prog), name)
+				require.Equal(t, types.I32(55), run(prog, interp.WithThreshold(-1)), name)
+				require.Equal(t, types.I32(55), run(prog), name)
+			}
+		})
+	})
+
+	t.Run("keeps a load homed when a store reaches it before a later use", func(t *testing.T) {
+		optimized := pass.NewPipeline[*ssa.Function]()
+		for _, p := range transform.O3() {
+			optimized.Add(p)
+		}
+		params := &types.FunctionType{
+			Params:  []types.Type{types.TypeI32(), types.TypeI32()},
+			Returns: []types.Type{types.TypeI32()}}
+
+		sameBlock := types.NewFunctionBuilder(params).Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN)).MustBuild()
+
+		crossBlock := types.NewFunctionBuilder(params)
+		taken := crossBlock.Label()
+		crossBlock.Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 1))
+		crossBlock.BrIf(taken)
+		crossBlock.Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN))
+		crossBlock.Bind(taken).Append(instr.MustNew(instr.I32_CONST, 100), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN))
+
+		for _, tc := range []struct {
+			name string
+			f    *types.Function
+			flag uint64
+			want types.Value
+		}{
+			{name: "the same block", f: sameBlock, flag: 0, want: types.I32(6)},
+			{name: "a later block", f: crossBlock.MustBuild(), flag: 1, want: types.I32(103)},
+			{name: "a fallthrough block", f: crossBlock.MustBuild(), flag: 0, want: types.I32(3)},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				for name, pipeline := range map[string]*pass.Pipeline[*ssa.Function]{"identity": pass.NewPipeline[*ssa.Function](), "optimized": optimized} {
+					prog := program.New([]instr.Instruction{
+						instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_CONST, tc.flag),
+						instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(tc.f))
+					_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), prog)
+					require.NoError(t, err)
+					require.NoError(t, program.Verify(prog))
+					for _, opts := range [][]interp.Option{{interp.WithThreshold(-1)}, nil} {
+						values, message := executionResult(t, prog, opts...)
+						require.Empty(t, message, tc.name+" "+name)
+						require.Equal(t, []types.Value{tc.want}, values, tc.name+" "+name)
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("inverts a branch only through an exact comparison inverse", func(t *testing.T) {
+		kinds := map[instr.Kind]struct {
+			typ   types.Type
+			konst instr.Opcode
+			words []uint64
+		}{
+			instr.KindI32: {types.TypeI32(), instr.I32_CONST, []uint64{
+				1 << 31, 0xFFFFFFFE, 0xFFFFFFFF, 0, 1, 2, math.MaxInt32}},
+			instr.KindI64: {types.TypeI64(), instr.I64_CONST, []uint64{
+				1 << 63, math.MaxUint64 - 1, math.MaxUint64, 0, 1, 2, math.MaxInt64}},
+			instr.KindF32: {types.TypeF32(), instr.F32_CONST, []uint64{
+				uint64(math.Float32bits(-1)), uint64(math.Float32bits(0)), uint64(math.Float32bits(1)), uint64(math.Float32bits(float32(math.NaN())))}},
+			instr.KindF64: {types.TypeF64(), instr.F64_CONST, []uint64{
+				math.Float64bits(-1), math.Float64bits(0), math.Float64bits(1), math.Float64bits(math.NaN())}},
+		}
+		inverses := map[instr.Opcode]instr.Opcode{}
+		for _, pair := range [][2]instr.Opcode{
+			{instr.I32_EQ, instr.I32_NE}, {instr.I32_LT_S, instr.I32_GE_S}, {instr.I32_GT_S, instr.I32_LE_S},
+			{instr.I32_LT_U, instr.I32_GE_U}, {instr.I32_GT_U, instr.I32_LE_U},
+			{instr.I64_EQ, instr.I64_NE}, {instr.I64_LT_S, instr.I64_GE_S}, {instr.I64_GT_S, instr.I64_LE_S},
+			{instr.I64_LT_U, instr.I64_GE_U}, {instr.I64_GT_U, instr.I64_LE_U},
+			{instr.F32_EQ, instr.F32_NE}, {instr.F64_EQ, instr.F64_NE}} {
+			inverses[pair[0]], inverses[pair[1]] = pair[1], pair[0]
+		}
+		// Ordered float comparisons are false for NaN, so their complement is no inverse.
+		ops := []instr.Opcode{instr.F32_LT, instr.F32_GE, instr.F64_LT, instr.F64_LE, instr.F64_GT, instr.F64_GE}
+		for op := range inverses {
+			ops = append(ops, op)
+		}
+		for _, op := range ops {
+			kind := kinds[instr.TypeOf(op).Pop[0]]
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{kind.typ, kind.typ},
+				Returns: []types.Type{types.TypeI32()}})
+			taken := fn.Label()
+			fn.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(op))
+			fn.BrIf(taken)
+			fn.Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.RETURN))
+			fn.Bind(taken).Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.RETURN))
+			f := fn.MustBuild()
+
+			rewritten := duplicateConstants(program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.DROP)}, program.WithConstants(f)))
+			_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), rewritten)
+			require.NoError(t, err)
+			var got []instr.Opcode
+			for _, inst := range instr.Unmarshal(rewritten.Constants[0].(*types.Function).Code) {
+				got = append(got, inst.Opcode())
+			}
+			if inverse, ok := inverses[op]; ok {
+				require.Contains(t, got, inverse, instr.TypeOf(op).Mnemonic)
+				require.NotContains(t, got, op, instr.TypeOf(op).Mnemonic)
+			} else {
+				require.Contains(t, got, op, instr.TypeOf(op).Mnemonic)
+			}
+
+			for _, a := range kind.words {
+				for _, b := range kind.words {
+					call := program.New([]instr.Instruction{
+						instr.MustNew(kind.konst, a), instr.MustNew(kind.konst, b),
+						instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(f))
+					want, wantErr := executionResult(t, call, interp.WithThreshold(-1))
+					call.Constants[0] = rewritten.Constants[0]
+					values, message := executionResult(t, call, interp.WithThreshold(-1))
+					require.Equal(t, wantErr, message)
+					require.Equal(t, want, values, fmt.Sprintf("%s %#x %#x", instr.TypeOf(op).Mnemonic, a, b))
+				}
+			}
+		}
+	})
+
+	t.Run("leaves the comparison of an earlier block alone", func(t *testing.T) {
+		// The branch tests a value two paths join with: only one of them is a comparison.
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32(), types.TypeI32(), types.TypeI32()},
+			Returns: []types.Type{types.TypeI32()}})
+		join, compare, taken := fn.Label(), fn.Label(), fn.Label()
+		fn.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_EQ), instr.MustNew(instr.LOCAL_GET, 2))
+		fn.BrIf(compare)
+		fn.Bind(join)
+		fn.BrIf(taken)
+		fn.Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.RETURN))
+		fn.Bind(compare).Append(instr.MustNew(instr.DROP), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_LT_S))
+		fn.Br(join)
+		fn.Bind(taken).Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.RETURN))
+		f := fn.MustBuild()
+
+		for _, args := range [][3]uint64{{1, 2, 0}, {2, 1, 0}, {1, 2, 1}, {2, 1, 1}, {1, 2, 0}, {1, 1, 0}} {
+			input := func(f *types.Function) *program.Program {
+				return program.New([]instr.Instruction{
+					instr.MustNew(instr.I32_CONST, args[0]), instr.MustNew(instr.I32_CONST, args[1]), instr.MustNew(instr.I32_CONST, args[2]),
+					instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(f))
+			}
+			prog := input(f)
+			require.NoError(t, program.Verify(prog))
+			want, wantErr := executionResult(t, prog, interp.WithThreshold(-1))
+
+			got := duplicateConstants(prog)
+			_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), got)
+			require.NoError(t, err)
+			require.NoError(t, program.Verify(got))
+			values, message := executionResult(t, got, interp.WithThreshold(-1))
+			require.Equal(t, wantErr, message)
+			require.Equal(t, want, values, args)
+		}
+	})
+
 	t.Run("leaves a function it cannot express unchanged", func(t *testing.T) {
 		body := func(is ...instr.Instruction) *types.Function {
 			return types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
@@ -592,7 +839,7 @@ func TestSSAPass_Run(t *testing.T) {
 			"an exception handler": program.New([]instr.Instruction{
 				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(guarded.MustBuild())),
 			"a module value needing a local": program.New([]instr.Instruction{
-				instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.DUP), instr.MustNew(instr.I32_ADD)})} {
+				instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.DUP), instr.MustNew(instr.I32_ADD)}, program.WithGlobals(types.TypeI32()))} {
 			require.NoError(t, program.Verify(input))
 			before := input.String()
 
@@ -720,10 +967,10 @@ func generatedProgram(t *testing.T, random *rand.Rand) *program.Program {
 		program.WithTypes(types.NewArrayType(types.TypeI32())))
 }
 
-func executionResult(t *testing.T, input *program.Program) ([]types.Value, string) {
+func executionResult(t *testing.T, input *program.Program, opts ...interp.Option) ([]types.Value, string) {
 	t.Helper()
 
-	vm := interp.MustNew(input)
+	vm := interp.MustNew(input, opts...)
 	defer vm.Close()
 
 	message := ""
