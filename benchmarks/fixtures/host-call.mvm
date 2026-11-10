@@ -1,0 +1,27 @@
+.code
+0000:	i32.const 0x00000000
+0005:	local.set 0x00
+0007:	i32.const 0x00000000
+0012:	local.set 0x01
+L0014:
+0014:	local.get 0x01
+0016:	i32.const 0x00000400
+0021:	i32.ge_s
+0022:	br_if L0050
+0025:	local.get 0x00
+0027:	local.get 0x01
+0029:	global.get 0x0000
+0032:	call
+0033:	local.set 0x00
+0035:	local.get 0x01
+0037:	i32.const 0x00000001
+0042:	i32.add
+0043:	local.set 0x01
+0045:	br L0014
+L0050:
+0050:	local.get 0x00
+.locals
+0000:	i32
+0001:	i32
+.globals
+0000:	func(i32, i32) i32

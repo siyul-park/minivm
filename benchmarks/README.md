@@ -36,22 +36,22 @@ Yaegi supplies the compiled `registry.Register` and dependency symbols, evaluate
 
 ## Runtimes
 
-The corpus contains 28 workloads.
+The corpus contains 29 workloads.
 
 | Runtime | Coverage | Notes |
 |---|---:|---|
-| Threaded | 28 | minivm interpreter with JIT disabled |
-| JIT | 28 | minivm default execution |
-| Native Go | 28 | direct compiled Go implementation |
+| Threaded | 29 | minivm interpreter with JIT disabled |
+| JIT | 29 | minivm default execution |
+| Native Go | 29 | direct compiled Go implementation |
 | Wazero | 7 | exact WebAssembly implementations |
-| Tengo | 26 | string-keyed maps only; `map-ops` and `coroutine-gen` have no Tengo equivalent |
-| GopherLua | 25 | I32 workloads; exact I64 values are outside Lua's numeric model |
-| Goja | 28 | I32 plus BigInt-based I64 fixtures |
-| gpython | 28 | Python fixture; one case is intentionally unmeasured |
-| CPython | 28 | same Python fixture through `python3.13` |
-| Yaegi | 28 | Go fixture; three cases are intentionally unmeasured |
+| Tengo | 27 | string-keyed maps only; `map-ops` and `coroutine-gen` have no Tengo equivalent |
+| GopherLua | 26 | I32 workloads; exact I64 values are outside Lua's numeric model |
+| Goja | 29 | I32 plus BigInt-based I64 fixtures |
+| gpython | 29 | Python fixture; one case is intentionally unmeasured |
+| CPython | 29 | same Python fixture through `python3.13`; one case is intentionally unmeasured |
+| Yaegi | 29 | Go fixture; three cases are intentionally unmeasured |
 
-A runtime cell is `—` only when no meaningful implementation exists or the benchmark is intentionally inapplicable. Yaegi skips `typed-array-sum` because its generic typed-array program is outside Yaegi's supported syntax, `recursive-fib-35` because the interpreted workload is impractical, and `coroutine-gen` because Yaegi's standard library has no `iter` package. gpython skips `map-ops` because its dicts accept only string keys.
+A runtime cell is `—` only when no meaningful implementation exists or the benchmark is intentionally inapplicable. Yaegi skips `typed-array-sum` because its generic typed-array program is outside Yaegi's supported syntax, `recursive-fib-35` because the interpreted workload is impractical, and `coroutine-gen` because Yaegi's standard library has no `iter` package. gpython skips `map-ops` because its dicts accept only string keys. CPython skips `host-call` because it runs out of process and cannot call a Go function.
 
 ## Measurement
 
@@ -64,6 +64,8 @@ A runtime cell is `—` only when no meaningful implementation exists or the ben
 | `quick` | 100 ms |
 | `standard` | 300 ms |
 | `deep` | 1 s |
+
+`host-call` binds its Go function `mix` (`Spec.Host`) outside the timed loop: minivm wires it through `Interpreter.Marshal`, `Alloc`, and `SetGlobal` (the codec default path) into global 0, again after each `Reset`, which reseeds globals; every other in-process runtime uses its native function binding, and Yaegi calls `mix` as Go source.
 
 Fixture loading, compilation, module construction, function lookup, and correctness checks stay outside the timed loop where the runtime permits it. CPython measures the repeated workload inside `perf_counter()` so process startup is excluded.
 
