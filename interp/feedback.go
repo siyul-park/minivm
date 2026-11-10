@@ -62,7 +62,7 @@ func (f *feedback) see(i *Interpreter, callee transform.Callee) {
 // function translates the site generic (transform.Profile.Refuted). The
 // site belongs to the function of the exit's frame, which is a member of the
 // code that took the exit when it is not the code's root.
-func (f *feedback) record(exit jit.Exit) {
+func (f *feedback) record(exit *jit.Exit) {
 	addr, ip := exit.Frame.Address, exit.Frame.IP
 	if addr >= len(f.profiles) || f.current(addr).Refuted[ip] {
 		return
