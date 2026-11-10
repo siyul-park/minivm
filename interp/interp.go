@@ -32,7 +32,10 @@ type Interpreter struct {
 	// ctx is non-nil only while Run is executing and is cleared before Run returns.
 	ctx context.Context
 	// done is the current Run context's cancellation channel and has the same lifetime.
-	done     <-chan struct{}
+	done <-chan struct{}
+	// hosts counts the HostFunction calls running; a call that panicked skips
+	// its decrement, so Run clears the count when it returns.
+	hosts    int
 	hook     func(*Interpreter) error
 	codec    Codec
 	profiler *prof.Profiler
@@ -260,6 +263,7 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 		}
 		i.ctx = nil
 		i.done = nil
+		i.hosts = 0
 		if i.jit != nil {
 			// A panic out of native code skips the return that releases
 			// the tcache; dispatch recovered it, so return it here.
@@ -786,9 +790,16 @@ func build(prog *program.Program, opts ...Option) (*Interpreter, error) {
 	return i, nil
 }
 
+// invoke calls val with params. Outside Run it runs val as the root of a Run;
+// inside a running host function it runs val nested on the same interpreter.
+// Any other call during Run is ErrInterpreterBusy.
 func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []types.Boxed) (returns []types.Boxed, err error) {
-	if i.ctx != nil || i.fp != 1 {
+	nested := i.ctx != nil
+	if nested && i.hosts == 0 || !nested && i.fp != 1 {
 		return nil, ErrInterpreterBusy
+	}
+	if nested && i.fp == len(i.frames) {
+		return nil, ErrFrameOverflow
 	}
 	target, ok := i.callable(val)
 	if !ok {
@@ -816,6 +827,11 @@ func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []type
 	i.stack[i.sp] = types.BoxRef(addr)
 	i.sp++
 
+	call := []func(*Interpreter){threaded[instr.CALL](&threader{})}
+	if nested {
+		return i.nest(ctx, base, call)
+	}
+
 	saved := *i.fr
 	defer func() {
 		if err != nil {
@@ -835,13 +851,46 @@ func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []type
 		*i.fr = saved
 	}()
 
-	i.fr.code = []func(*Interpreter){threaded[instr.CALL](&threader{})}
+	i.fr.code = call
 	i.fr.ip = 0
 	if err = i.Run(ctx); err != nil {
 		return nil, err
 	}
 	returns = append([]types.Boxed(nil), i.stack[base:i.sp]...)
 	return returns, nil
+}
+
+// nest runs the CALL over the callee and params pushed at base on a synthetic
+// frame above the running one. The floor keeps handler search and the
+// dispatch recover inside the call, so a fault comes back as err and the
+// interpreter returns to the state the host function saw.
+func (i *Interpreter) nest(ctx context.Context, base int, call []func(*Interpreter)) (returns []types.Boxed, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	fr, fp, floor, hosts, outer, done, saved := i.fr, i.fp, i.floor, i.hosts, i.ctx, i.done, i.frames[i.fp]
+	i.frames[fp] = frame{addr: fr.addr, code: call, bp: base}
+	i.fr, i.fp, i.floor, i.hosts = &i.frames[fp], fp+1, fp+1, 0
+	i.ctx, i.done = ctx, ctx.Done()
+
+	fault, err := dispatch(i)
+	if fault != nil {
+		err = i.fault(fault)
+	}
+	if err != nil {
+		for i.fp > fp+1 {
+			i.discard(&i.frames[i.fp-1])
+			i.fp--
+		}
+		for _, value := range i.stack[base:i.sp] {
+			i.releaseBox(value)
+		}
+	} else {
+		returns = append([]types.Boxed(nil), i.stack[base:i.sp]...)
+	}
+	i.sp = base
+	i.fr, i.fp, i.floor, i.hosts, i.ctx, i.done, i.frames[fp] = fr, fp, floor, hosts, outer, done, saved
+	return returns, err
 }
 
 func (i *Interpreter) callable(val types.Value) (types.Value, bool) {

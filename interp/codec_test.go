@@ -1034,6 +1034,158 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		require.ErrorIs(t, err, interp.ErrDivideByZero)
 	})
 
+	t.Run("VM function called from a host function runs nested", func(t *testing.T) {
+		add := types.NewFunctionBuilder(&types.FunctionType{
+			Params: []types.Type{types.TypeI32(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN)).MustBuild()
+		for _, tt := range []struct {
+			name string
+			opts []interp.Option
+		}{
+			{name: "threaded", opts: []interp.Option{interp.WithThreshold(-1)}},
+			{name: "jit", opts: []interp.Option{interp.WithThreshold(1)}},
+		} {
+			r := interp.NewRegistry()
+			host := interp.NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeAny(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
+				func(vm *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error) {
+					var call func(int32, int32) (int32, error)
+					if err := r.Unmarshal(vm, params[0], &call); err != nil {
+						return nil, err
+					}
+					sum := int32(0)
+					for n := int32(0); n < 100; n++ {
+						got, err := call(n, params[1].I32())
+						if err != nil {
+							return nil, err
+						}
+						sum += got
+					}
+					return []types.Boxed{types.BoxI32(sum)}, nil
+				})
+			prog := program.New([]instr.Instruction{
+				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I32_CONST, 5),
+				instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL),
+			}, program.WithConstants(add, host))
+			i := interp.MustNew(prog, tt.opts...)
+			live := func() (n int) {
+				for addr := 0; addr < i.HeapLen(); addr++ {
+					if count, err := i.RefCount(addr); err == nil {
+						n += count
+					}
+				}
+				return n
+			}
+			before := live()
+
+			require.NoError(t, i.Run(context.Background()), tt.name)
+			got, err := i.Pop()
+			require.NoError(t, err, tt.name)
+			require.Equal(t, types.I32(5450), got, tt.name)
+			require.Equal(t, before, live(), tt.name)
+			require.NoError(t, i.Close(), tt.name)
+		}
+	})
+
+	t.Run("VM function trap inside a host function reaches the host and the guest", func(t *testing.T) {
+		div := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_DIV_S), instr.MustNew(instr.RETURN)).MustBuild()
+		r := interp.NewRegistry()
+		var hostErr error
+		host := interp.NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeAny(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
+			func(vm *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error) {
+				var call func(int32) (int32, error)
+				if err := r.Unmarshal(vm, params[0], &call); err != nil {
+					return nil, err
+				}
+				got, err := call(params[1].I32())
+				hostErr = err
+				return []types.Boxed{types.BoxI32(got)}, err
+			})
+
+		t.Run("uncaught", func(t *testing.T) {
+			prog := program.New([]instr.Instruction{
+				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I32_CONST, 0),
+				instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL),
+			}, program.WithConstants(div, host))
+			i := interp.MustNew(prog)
+			live := func() (n int) {
+				for addr := 0; addr < i.HeapLen(); addr++ {
+					if count, err := i.RefCount(addr); err == nil {
+						n += count
+					}
+				}
+				return n
+			}
+			i.Reset()
+			before := live()
+
+			err := i.Run(context.Background())
+			require.ErrorIs(t, err, interp.ErrDivideByZero)
+			require.ErrorIs(t, hostErr, interp.ErrDivideByZero)
+			i.Reset()
+			require.Equal(t, before, live())
+			require.NoError(t, i.Close())
+		})
+
+		t.Run("caught", func(t *testing.T) {
+			b := instr.NewBuilder()
+			start, end, catch := b.Label(), b.Label(), b.Label()
+			b.Bind(start).Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 1).Emit(instr.CALL)
+			b.Bind(end)
+			b.Bind(catch).Emit(instr.ERROR_CODE)
+			b.Try(start, end, catch, 0)
+			code, err := b.Assemble()
+			require.NoError(t, err)
+			i := interp.MustNew(program.New(code, program.WithConstants(div, host), program.WithHandlers(b.Handlers()...)))
+			defer i.Close()
+
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(int32(interp.TrapCodeDivideByZero)), got)
+		})
+	})
+
+	t.Run("VM function in a host function honors its context", func(t *testing.T) {
+		spin := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.NOP), instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)).MustBuild()
+		r := interp.NewRegistry()
+		host := interp.NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeAny()}, Returns: []types.Type{types.TypeI32()}},
+			func(vm *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error) {
+				var call func(context.Context) (int32, error)
+				if err := r.Unmarshal(vm, params[0], &call); err != nil {
+					return nil, err
+				}
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				got, err := call(ctx)
+				return []types.Boxed{types.BoxI32(got)}, err
+			})
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL)},
+			program.WithConstants(spin, host))
+		i := interp.MustNew(prog, interp.WithTick(1))
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), context.Canceled)
+	})
+
+	t.Run("VM function while Run is active outside a host function is busy", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)).MustBuild()
+		r := interp.NewRegistry()
+		var call func() (int32, error)
+		var busy error
+		i := interp.MustNew(program.New([]instr.Instruction{instr.MustNew(instr.NOP)}), interp.WithTick(1), interp.WithHook(func(*interp.Interpreter) error {
+			_, busy = call()
+			return nil
+		}))
+		defer i.Close()
+		require.NoError(t, r.Unmarshal(i, fn, &call))
+
+		require.NoError(t, i.Run(context.Background()))
+		require.ErrorIs(t, busy, interp.ErrInterpreterBusy)
+	})
+
 	t.Run("signature mismatch", func(t *testing.T) {
 		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry()
