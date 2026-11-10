@@ -1424,10 +1424,11 @@ func TestMachine_Lower(t *testing.T) {
 		target.LDR(target.X17, target.X16, 0),
 	}
 
-	// stringEq is the rows string.eq and string.ne lower to; equal is the
-	// result for equal strings.
-	stringEq := func(equal uint64) []asm.Instruction {
-		const yes, no, done, words, bytes = 2, 3, 4, 5, 6
+	// stringCompare is the rows the six string relations lower to: equality
+	// relations leave early on unequal sizes; cond reads the flags of the
+	// first differing word or byte, else of the sizes.
+	stringCompare := func(cond uint8, eq bool) []asm.Instruction {
+		const out, tail, step, words, bytes = 2, 3, 4, 5, 6
 		var rows []asm.Instruction
 		for i, addr := range []int{1, 5} {
 			rows = append(rows,
@@ -1444,23 +1445,29 @@ func TestMachine_Lower(t *testing.T) {
 				target.LDR(vr(addr+3), vr(addr+1), 0),
 			)
 		}
+		rows = append(rows, target.CMP(vr(3), vr(7)))
+		if eq {
+			rows = append(rows, target.BCondLabel(target.OpBNE, out))
+		}
 		rows = append(rows,
-			target.CMP(vr(3), vr(7)), target.BCondLabel(target.OpBNE, no),
-			target.CMP(vr(4), vr(8)), target.BCondLabel(target.OpBEQ, yes),
-			target.CMPI(vr(3), 8), target.BCondLabel(target.OpBCC, bytes),
+			target.CSEL(vr(9), vr(3), vr(7), target.CondCC),
+			target.CMP(vr(4), vr(8)), target.BCondLabel(target.OpBEQ, tail),
+			target.CMPI(vr(9), 8), target.BCondLabel(target.OpBCC, bytes),
 			target.LDR(target.X16, vr(4), 0), target.LDR(target.X17, vr(8), 0),
-			target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, no),
+			target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBEQ, step),
+			target.REV(target.X16, target.X16), target.REV(target.X17, target.X17),
+			target.CMP(target.X16, target.X17), target.BLabel(out),
 			target.ADDI(vr(4), vr(4), 8), target.ADDI(vr(8), vr(8), 8),
-			target.SUBI(vr(3), vr(3), 8), target.BLabel(words),
-			target.CBZLabel(vr(3), yes),
+			target.SUBI(vr(9), vr(9), 8), target.BLabel(words),
+			target.CBZLabel(vr(9), tail),
 			target.LDRB(target.X16, vr(4), 0), target.LDRB(target.X17, vr(8), 0),
-			target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, no),
+			target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, out),
 			target.ADDI(vr(4), vr(4), 1), target.ADDI(vr(8), vr(8), 1),
-			target.SUBI(vr(3), vr(3), 1), target.BLabel(bytes),
+			target.SUBI(vr(9), vr(9), 1), target.BLabel(bytes),
+			target.CMP(vr(3), vr(7)),
+			target.CSET(reg(ssa.TypeI1, 3), cond),
 		)
-		rows = append(rows, target.LDI(reg(ssa.TypeI1, 3), equal)...)
-		rows = append(rows, target.BLabel(done))
-		return append(rows, target.LDI(reg(ssa.TypeI1, 3), 1-equal)...)
+		return rows
 	}
 	binIndex, farIndex := 3, 5000
 	var tests []test
@@ -2424,14 +2431,42 @@ func TestMachine_Lower(t *testing.T) {
 			name:  "string.eq compares lengths, then data pointers, then eight bytes at a time and the tail byte by byte",
 			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: ssa.TypeI1},
 			op:    exec(instr.STRING_EQ, 1, 2),
-			rows:  stringEq(1),
+			rows:  stringCompare(target.CondEQ, true),
 			lower: true,
 		},
 		{
-			name:  "string.ne is string.eq with the result swapped",
+			name:  "string.ne reads the flags string.eq does, for not equal",
 			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: ssa.TypeI1},
 			op:    exec(instr.STRING_NE, 1, 2),
-			rows:  stringEq(0),
+			rows:  stringCompare(target.CondNE, true),
+			lower: true,
+		},
+		{
+			name:  "string.lt reads the first differing byte unsigned, else the lengths",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: ssa.TypeI1},
+			op:    exec(instr.STRING_LT, 1, 2),
+			rows:  stringCompare(target.CondCC, false),
+			lower: true,
+		},
+		{
+			name:  "string.gt is string.lt with the greater condition",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: ssa.TypeI1},
+			op:    exec(instr.STRING_GT, 1, 2),
+			rows:  stringCompare(target.CondHI, false),
+			lower: true,
+		},
+		{
+			name:  "string.le is string.lt with the lower-or-same condition",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: ssa.TypeI1},
+			op:    exec(instr.STRING_LE, 1, 2),
+			rows:  stringCompare(target.CondLS, false),
+			lower: true,
+		},
+		{
+			name:  "string.ge is string.lt with the higher-or-same condition",
+			regs:  regs{1: ssa.TypeRef, 2: ssa.TypeRef, 3: ssa.TypeI1},
+			op:    exec(instr.STRING_GE, 1, 2),
+			rows:  stringCompare(target.CondCS, false),
 			lower: true,
 		},
 		{

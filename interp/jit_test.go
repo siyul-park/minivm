@@ -919,8 +919,8 @@ func concat(t *testing.T, n int) *program.Program {
 }
 
 // deopt loops at module level over n calls of f(i) = i, except f(k), which
-// adds string.eq of a constant with itself: an operation native code neither
-// lowers nor resumes, so f's native code deoptimizes there while the loop's
+// adds the length of a constant concatenated with itself: an operation native
+// code bridges, so f's native code leaves there while the loop's
 // promoted locals live in the caller's native frame.
 func deopt(t *testing.T, n, k int) *program.Program {
 	t.Helper()
@@ -928,7 +928,7 @@ func deopt(t *testing.T, n, k int) *program.Program {
 	slow := fb.Label()
 	fb.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(k)).Emit(instr.I32_EQ).BrIf(slow)
 	fb.Emit(instr.LOCAL_GET, 0).Emit(instr.RETURN)
-	fb.Bind(slow).Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 1).Emit(instr.CONST_GET, 1).Emit(instr.STRING_LT).Emit(instr.I32_ADD).Emit(instr.RETURN)
+	fb.Bind(slow).Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 1).Emit(instr.CONST_GET, 1).Emit(instr.STRING_CONCAT).Emit(instr.STRING_LEN).Emit(instr.I32_ADD).Emit(instr.RETURN)
 	fcode, err := fb.Assemble()
 	require.NoError(t, err)
 	f := &types.Function{

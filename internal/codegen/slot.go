@@ -371,16 +371,7 @@ func (l loader) finish(result value, current step, ok bool) (value, error) {
 	}
 	result.push = append(result.push, result.check...)
 	result.push = append(result.push, result.body...)
-	if current.op == instr.CONST_GET && current.kind == instr.KindAny {
-		result.push = append(result.push,
-			jen.If(jen.Id(l.boxed).Dot("Kind").Call().Op("==").Qual(typesPkg, "KindRef")).Block(
-				jen.Id("addr").Op(":=").Id(l.boxed).Dot("Ref").Call(),
-				jen.If(jen.List(jen.Id("str"), jen.Id("ok")).Op(":=").Id("c").Dot("heap").Index(jen.Id("addr")).Assert(jen.Qual(typesPkg, "String")), jen.Id("ok")).Block(
-					jen.Id(l.boxed).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Int().Call(jen.Id("i").Dot("intern").Call(jen.String().Call(jen.Id("str"))))),
-				).Else().Block(jen.Id("i").Dot("retain").Call(jen.Id("addr"))),
-			),
-		)
-	} else if current.op == instr.CONST_GET {
+	if current.op == instr.CONST_GET {
 		result.push = append(result.push, jen.Id("i").Dot("retainBox").Call(result.boxed))
 	}
 	result.push = append(result.push,
