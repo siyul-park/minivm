@@ -55,6 +55,10 @@ Typed-array stores cover `bool`, `int8`, `int32`, `int64`, `float32`, `float64`;
 
 Specialized-type misses `MUST` use the same interpreter methods as standalone handlers.
 
+## Declared types
+
+Container fusion selects on the slot's **declared** type: a typed-array or concrete `StructType` local, global, upvalue, or constant. A slot declared `TypeRef` (or `any`) never fuses, however consistently it holds one representation at runtime. Threading does not speculate on observed types: runtime speculation belongs to the native tier, whose container lowering guards the observed representation (`guard.shape`) and deopts on a miss (`jit-internals.md`). A front end `SHOULD` therefore declare the concrete slot type wherever it can prove one; a `TypeRef` slot opts out of container fusion and runs the generic handlers.
+
 ## Compilation
 
 Threading checks the opcode-indexed table with a local cursor. A miss `MUST` mutate nothing. A match installs one direct handler and advances compile-time IP by the first opcode width; absorbed offsets remain separately threaded.
