@@ -13,7 +13,11 @@ import (
 // SSAPass translates, optimizes, and re-emits expressible functions.
 type SSAPass struct {
 	pipeline *pass.Pipeline[*ssa.Function]
+	inline   bool
 }
+
+// SSAOption configures an SSAPass.
+type SSAOption func(*SSAPass)
 
 type pool struct {
 	prog    *program.Program
@@ -37,9 +41,20 @@ type original struct {
 
 var _ pass.Pass[*program.Program] = (*SSAPass)(nil)
 
-// NewSSAPass returns an SSA round-trip pass.
-func NewSSAPass(pipeline *pass.Pipeline[*ssa.Function]) *SSAPass {
-	return &SSAPass{pipeline: pipeline}
+// WithInline inlines, ahead of the states' removal, each call of a pure
+// scalar leaf that cannot trap (see InlinePass).
+func WithInline() SSAOption {
+	return func(p *SSAPass) { p.inline = true }
+}
+
+// NewSSAPass returns an SSA round-trip pass. Each function first has its deopt
+// states stripped, which emission never reads, then runs pipeline.
+func NewSSAPass(pipeline *pass.Pipeline[*ssa.Function], opts ...SSAOption) *SSAPass {
+	p := &SSAPass{pipeline: pipeline}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
 }
 
 // Run applies the SSA round trip. The program is verified once afterwards.
@@ -141,6 +156,14 @@ func (p *SSAPass) roundtrip(manager *pass.Manager, constants *pool, address int,
 	}
 	f, _, err := Translate(constants.module(), nil, address, function, 0)
 	if err != nil || f == nil {
+		return false, err
+	}
+	if p.inline {
+		if _, err := (&InlinePass{module: constants.module(), quiet: true}).Run(manager, f); err != nil {
+			return false, err
+		}
+	}
+	if _, err := NewStripPass().Run(manager, f); err != nil {
 		return false, err
 	}
 	if _, err := p.pipeline.Run(manager, f); err != nil {

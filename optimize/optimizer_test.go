@@ -2,6 +2,7 @@ package optimize_test
 
 import (
 	"context"
+	"math"
 	"strings"
 	"testing"
 
@@ -145,7 +146,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 		require.NoError(t, vm.Run(context.Background()))
 	})
 
-	t.Run("O3 eliminates a common subexpression and preserves semantics", func(t *testing.T) {
+	t.Run("O3 eliminates a common subexpression in a callee that may trap and preserves semantics", func(t *testing.T) {
 		build := func() *program.Program {
 			return program.New(
 				[]instr.Instruction{
@@ -157,6 +158,10 @@ func TestOptimizer_Optimize(t *testing.T) {
 					types.NewFunctionBuilder(&types.FunctionType{
 						Params:  []types.Type{types.TypeI32(), types.TypeI32()},
 						Returns: []types.Type{types.TypeI32()}}).Append(
+						instr.MustNew(instr.LOCAL_GET, 0),
+						instr.MustNew(instr.LOCAL_GET, 1),
+						instr.MustNew(instr.I32_DIV_S),
+						instr.MustNew(instr.DROP),
 						instr.MustNew(instr.LOCAL_GET, 0),
 						instr.MustNew(instr.LOCAL_GET, 1),
 						instr.MustNew(instr.I32_ADD),
@@ -187,6 +192,54 @@ func TestOptimizer_Optimize(t *testing.T) {
 		optimizedValue, err := optimizedVM.Pop()
 		require.NoError(t, err)
 		require.Equal(t, beforeValue, optimizedValue)
+	})
+
+	t.Run("O3 inlines a pure scalar leaf in a loop; O1 and O2 keep the call", func(t *testing.T) {
+		build := func() *program.Program {
+			leaf := types.NewFunctionBuilder(&types.FunctionType{
+				Params: []types.Type{types.TypeI32(), types.TypeI32()}, Returns: []types.Type{types.TypeF64()}}).Append(
+				instr.MustNew(instr.F64_CONST, math.Float64bits(1)),
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_ADD),
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD),
+				instr.MustNew(instr.I32_MUL), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_DIV_S),
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.I32_ADD),
+				instr.MustNew(instr.I32_TO_F64_S), instr.MustNew(instr.F64_DIV), instr.MustNew(instr.RETURN)).MustBuild()
+			sum := types.NewFunctionBuilder(&types.FunctionType{
+				Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeF64()}}).Locals(types.TypeI32(), types.TypeF64())
+			head, done := sum.Label(), sum.Label()
+			sum.Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 1))
+			sum.Bind(head).Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_GE_S))
+			sum.BrIf(done)
+			sum.Append(
+				instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL),
+				instr.MustNew(instr.F64_ADD), instr.MustNew(instr.LOCAL_SET, 2),
+				instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 1))
+			sum.Br(head)
+			sum.Bind(done).Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.RETURN))
+			return program.New([]instr.Instruction{
+				instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+				program.WithConstants(sum.MustBuild(), leaf))
+		}
+		calls := func(prog *program.Program) int {
+			return strings.Count(instr.Format(prog.Constants[0].(*types.Function).Code), "call")
+		}
+		run := func(prog *program.Program) types.Value {
+			vm := interp.MustNew(prog)
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			value, err := vm.Pop()
+			require.NoError(t, err)
+			return value
+		}
+		want := run(build())
+
+		for level, calls0 := range map[optimize.Level]int{optimize.O1: 1, optimize.O2: 1, optimize.O3: 0} {
+			optimized, err := optimize.New(level).Optimize(build())
+			require.NoError(t, err)
+			require.NoError(t, program.Verify(optimized))
+			require.Equal(t, calls0, calls(optimized), level)
+			require.Equal(t, want, run(optimized), level)
+		}
 	})
 
 	t.Run("O3 repairs branch offsets after shrinking", func(t *testing.T) {
@@ -245,6 +298,8 @@ func TestOptimizer_Optimize(t *testing.T) {
 				Params:  []types.Type{types.TypeI32(), types.TypeI32()},
 				Returns: []types.Type{types.TypeI32()}})
 			then, merge := fb.Label(), fb.Label()
+			// The division may trap, so the callee is not inlined away.
+			fb.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_DIV_S), instr.MustNew(instr.DROP))
 			fb.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_GT_S))
 			fb.BrIf(then)
 			fb.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.DROP))
