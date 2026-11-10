@@ -39,7 +39,7 @@ func benchmarkExternal(b *testing.B, spec registry.Spec, result types.Value) {
 		}
 		want, ok := result.(types.I32)
 		require.True(b, ok)
-		benchmarkScripts(b, spec.Source, int32(want))
+		benchmarkScripts(b, spec.Name, spec.Source, int32(want))
 		benchmarkYaegi(b, spec.Name, spec.Source, result)
 	case types.KindI64:
 		benchmarkScripts64(b, spec.Source, int64(result.(types.I64)))
@@ -68,7 +68,7 @@ func benchmarkScripts64(b *testing.B, source registry.Source, want int64) {
 	}
 }
 
-func benchmarkScripts(b *testing.B, source registry.Source, want int32) {
+func benchmarkScripts(b *testing.B, name string, source registry.Source, want int32) {
 	if source.Tengo != "" {
 		b.Run("tengo", func(b *testing.B) {
 			benchmarkTengo(b, source.Tengo, want)
@@ -86,6 +86,9 @@ func benchmarkScripts(b *testing.B, source registry.Source, want int32) {
 	}
 	if source.Python != "" {
 		b.Run("gpython", func(b *testing.B) {
+			if name == "map-ops" {
+				b.Skip("gpython dicts accept only string keys")
+			}
 			benchmarkGpython(b, source.Python, want)
 		})
 		b.Run("cpython", func(b *testing.B) {
@@ -440,6 +443,8 @@ func benchmarkYaegi(b *testing.B, name string, source registry.Source, result ty
 			b.Skip("Yaegi does not support generic type instantiation in this fixture")
 		case "recursive-fib-35":
 			b.Skip("Yaegi execution is impractical for this recursive workload")
+		case "coroutine-gen":
+			b.Skip("Yaegi does not provide the iter package")
 		}
 
 		var captured registry.Spec

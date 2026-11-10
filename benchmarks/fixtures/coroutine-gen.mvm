@@ -1,0 +1,59 @@
+.code
+0000:	const.get 0x0000
+0003:	call
+0004:	local.set 0x00
+0006:	i32.const 0x00000000
+0011:	local.set 0x01
+L0013:
+0013:	local.get 0x00
+0015:	coro.done
+0016:	br_if L0048
+0019:	local.get 0x01
+0021:	local.get 0x00
+0023:	coro.value
+0024:	ref.cast 0x0000
+0027:	i32.add
+0028:	i32.const 0x0000FFF1
+0033:	i32.rem_s
+0034:	local.set 0x01
+0036:	local.get 0x00
+0038:	i32.const 0x00000000
+0043:	resume
+0044:	drop
+0045:	br L0013
+L0048:
+0048:	local.get 0x01
+.locals
+0000:	any
+0001:	i32
+.constants
+0000:	func() any
+	i32
+	0000:	i32.const 0x00000000
+	0005:	local.set 0x00
+	L0007:
+	0007:	local.get 0x00
+	0009:	i32.const 0x00000200
+	0014:	i32.ge_s
+	0015:	br_if L0053
+	0018:	local.get 0x00
+	0020:	local.get 0x00
+	0022:	i32.mul
+	0023:	i32.const 0x00000007
+	0028:	local.get 0x00
+	0030:	i32.mul
+	0031:	i32.add
+	0032:	i32.const 0x000003F1
+	0037:	i32.rem_s
+	0038:	yield
+	0039:	drop
+	0040:	local.get 0x00
+	0042:	i32.const 0x00000001
+	0047:	i32.add
+	0048:	local.set 0x00
+	0050:	br L0007
+	L0053:
+	0053:	i32.const 0x00000000
+	0058:	return
+.types
+0000:	i32
