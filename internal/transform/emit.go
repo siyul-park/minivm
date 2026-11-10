@@ -14,19 +14,24 @@ type emitter struct {
 	constants *pool
 	module    bool
 	declared  []types.Type
+	captures  []types.Type
 
-	subst   map[ssa.Value]ssa.Value
-	ops     [][]ssa.Operation
-	terms   []ssa.Terminator
-	uses    map[ssa.Value]int
-	defined map[ssa.Value]int
-	homed   map[ssa.Value]bool
-	home    map[ssa.Value]int
-	source  map[ssa.Value]ssa.Operation
-	remat   map[ssa.Value]bool
-	loops   map[int]bool
-	liveIn  []map[ssa.Value]bool
-	placed  bool
+	subst    map[ssa.Value]ssa.Value
+	ops      [][]ssa.Operation
+	terms    []ssa.Terminator
+	uses     map[ssa.Value]int
+	defined  map[ssa.Value]int
+	homed    map[ssa.Value]bool
+	home     map[ssa.Value]int
+	source   map[ssa.Value]ssa.Operation
+	remat    map[ssa.Value]bool
+	loops    map[int]bool
+	liveIn   []map[ssa.Value]bool
+	placed   bool
+	spare    map[ssa.Value]bool
+	produced map[ssa.Value]bool
+	used     map[ssa.Value]int
+	refs     map[ssa.Value]types.Type
 
 	locals []types.Type
 	code   []instr.Instruction
@@ -65,8 +70,8 @@ var spaceOps = [...]struct{ read, write instr.Opcode }{
 	ssa.SpaceUpval:  {instr.UPVAL_GET, instr.UPVAL_SET},
 }
 
-func emit(function *ssa.Function, constants *pool, module bool, declared []types.Type) ([]byte, []types.Type, bool) {
-	e := &emitter{function: function, constants: constants, module: module, declared: declared}
+func emit(function *ssa.Function, constants *pool, module bool, source *types.Function) ([]byte, []types.Type, bool) {
+	e := &emitter{function: function, constants: constants, module: module, declared: source.Declared(), captures: source.Captures}
 	if !e.collect() {
 		return nil, nil, false
 	}
@@ -87,6 +92,11 @@ func emit(function *ssa.Function, constants *pool, module bool, declared []types
 			code, ok := e.link()
 			return code, e.locals, ok
 		}
+		if e.spare[e.needed] {
+			delete(e.spare, e.needed)
+			e.homed[e.needed] = true
+			continue
+		}
 		if _, ok := e.source[e.needed]; ok {
 			if e.remat[e.needed] {
 				return nil, nil, false
@@ -105,6 +115,7 @@ func emit(function *ssa.Function, constants *pool, module bool, declared []types
 func (e *emitter) collect() bool {
 	e.subst, e.uses, e.defined, e.homed = map[ssa.Value]ssa.Value{}, map[ssa.Value]int{}, map[ssa.Value]int{}, map[ssa.Value]bool{}
 	e.source, e.remat = map[ssa.Value]ssa.Operation{}, map[ssa.Value]bool{}
+	e.spare, e.produced = map[ssa.Value]bool{}, map[ssa.Value]bool{}
 	stored := e.stored()
 	e.ops, e.terms = make([][]ssa.Operation, e.function.Len()), make([]ssa.Terminator, e.function.Len())
 
@@ -145,14 +156,133 @@ func (e *emitter) collect() bool {
 		}
 	}
 	e.headers()
+	e.refs = e.refTypes()
 	for v, n := range e.uses {
-		if _, ok := e.source[v]; ok && n > 1 {
+		switch _, ok := e.source[v]; {
+		case n <= 1:
+		case ok:
 			e.remat[v] = true
-		} else if n > 1 {
+		case e.produced[v] && !e.homed[v]:
+			e.spare[v] = true
+		default:
 			e.homed[v] = true
 		}
 	}
 	return true
+}
+
+// refTypes returns the static type of each ref value whose definition
+// guarantees one, which a local holding it can then declare; a ref left out is
+// any. A load has its slot's declared type, a constant its cell's type, and a
+// block param the type all its incoming values share. A value with none of
+// these takes the type of the local slots it is stored to when every store
+// sits in its defining block ahead of every other use, so each use reads the
+// value as the slot narrowed it; a store on another path never types it.
+func (e *emitter) refTypes() map[ssa.Value]types.Type {
+	refs := map[ssa.Value]types.Type{}
+	type store struct {
+		at int
+		t  types.Type
+	}
+	stores, other := map[ssa.Value][]store{}, map[ssa.Value]bool{}
+	for id, ops := range e.ops {
+		for i, operation := range ops {
+			switch {
+			case operation.Op == ssa.OpLoad && e.function.Type(operation.Results[0]) == ssa.TypeRef:
+				if t := e.slotType(operation.Slot); t != nil {
+					refs[operation.Results[0]] = t
+				}
+			case operation.Op == ssa.OpConst && e.function.Type(operation.Results[0]) == ssa.TypeRef:
+				if t := e.constants.typeOf(types.Boxed(operation.Const)); t != nil {
+					refs[operation.Results[0]] = t
+				}
+			case operation.Op == ssa.OpStore && operation.Slot.Space == ssa.SpaceLocal && operation.Slot.Index < len(e.declared):
+				if v := operation.Args[0]; e.produced[v] && e.function.Type(v) == ssa.TypeRef && e.defined[v] == id {
+					stores[v] = append(stores[v], store{i, e.declared[operation.Slot.Index]})
+				} else {
+					other[v] = true
+				}
+			}
+		}
+	}
+	for v, list := range stores {
+		if _, ok := refs[v]; ok || other[v] {
+			continue
+		}
+		last, t := 0, list[0].t
+		for _, s := range list {
+			last = max(last, s.at)
+			if !s.t.Equals(t) {
+				t = types.TypeAny()
+			}
+		}
+		early := false
+		for _, operation := range e.ops[e.defined[v]][:last] {
+			if operation.Op != ssa.OpStore && slices.Contains(operation.Args, v) {
+				early = true
+			}
+		}
+		if !early {
+			refs[v] = t
+		}
+	}
+
+	incoming := map[ssa.Value][]ssa.Value{}
+	for _, term := range e.terms {
+		for _, edge := range term.Edges {
+			for i, param := range e.function.Block(edge.Block).Params {
+				if e.function.Type(param) == ssa.TypeRef {
+					incoming[param] = append(incoming[param], edge.Args[i])
+				}
+			}
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for param, args := range incoming {
+			var meet types.Type
+			for _, arg := range args {
+				t, ok := refs[arg]
+				if _, pending := incoming[arg]; !ok && pending {
+					continue
+				}
+				switch {
+				case !ok:
+					meet = types.TypeAny()
+				case meet == nil:
+					meet = t
+				case !meet.Equals(t):
+					meet = types.TypeAny()
+				}
+			}
+			prev, known := refs[param]
+			switch {
+			case meet == nil, known && prev.Equals(meet):
+			case !known:
+				refs[param], changed = meet, true
+			case !prev.Equals(types.TypeAny()):
+				refs[param], changed = types.TypeAny(), true
+			}
+		}
+	}
+	return refs
+}
+
+// slotType returns the declared type of slot, or nil when none is known.
+func (e *emitter) slotType(slot ssa.Slot) types.Type {
+	var declared []types.Type
+	switch slot.Space {
+	case ssa.SpaceLocal:
+		declared = e.declared
+	case ssa.SpaceGlobal:
+		declared = e.constants.prog.Globals
+	case ssa.SpaceUpval:
+		declared = e.captures
+	}
+	if slot.Index < 0 || slot.Index >= len(declared) {
+		return nil
+	}
+	return declared[slot.Index]
 }
 
 // headers marks the blocks that only jumps reach and a later block jumps back
@@ -217,6 +347,7 @@ func (e *emitter) accept(id int, operation ssa.Operation) bool {
 	operation.Args = e.values(operation.Args)
 	for _, v := range operation.Results {
 		e.defined[v] = id
+		e.produced[v] = true
 	}
 	e.ops[id] = append(e.ops[id], operation)
 	return true
@@ -288,6 +419,9 @@ func (e *emitter) assign() bool {
 		if !ok {
 			return false
 		}
+		if ref, ok := e.refs[v]; ok {
+			t = ref
+		}
 		fits := func(s int) bool {
 			return e.slot(s).Equals(t) && !slices.ContainsFunc(holders[s], func(w ssa.Value) bool { return conflicts[v][w] })
 		}
@@ -329,14 +463,6 @@ func (e *emitter) hints() map[ssa.Value]ssa.Value {
 		}
 	}
 	return hints
-}
-
-// slot returns the type of local slot, declared or new.
-func (e *emitter) slot(slot int) types.Type {
-	if slot < len(e.declared) {
-		return e.declared[slot]
-	}
-	return e.locals[slot-len(e.declared)]
 }
 
 // free returns the declared local slots no emitted operation reads or writes:
@@ -460,6 +586,7 @@ func (e *emitter) live(id int, keep func(ssa.Value) bool, link func(a, b ssa.Val
 
 func (e *emitter) walk() bool {
 	e.code, e.fixes, e.needed = nil, nil, ssa.NoValue
+	e.used = map[ssa.Value]int{}
 	e.starts = make([]int, e.function.Len())
 	for id := range e.function.Len() {
 		e.starts[id], e.floor = len(e.code), len(e.code)
@@ -573,6 +700,9 @@ func (e *emitter) carry(args []ssa.Value) bool {
 }
 
 func (e *emitter) load(args []ssa.Value) bool {
+	for _, v := range args {
+		e.used[v]++
+	}
 	at := 0
 	for n := min(len(args), len(e.stack)); n > 0; n-- {
 		if slices.Equal(e.stack[len(e.stack)-n:], args[:n]) {
@@ -601,6 +731,14 @@ func (e *emitter) load(args []ssa.Value) bool {
 func (e *emitter) perform(operation ssa.Operation) bool {
 	if !e.load(operation.Args) {
 		return false
+	}
+	// A value this operation alone consumes off the stack, with a use to
+	// come, is duplicated rather than homed; a later use that is not next on
+	// the stack makes the walk fail and homes it. An operation that can trap
+	// or enter a frame keeps the stack its caller left, which a trap exposes.
+	if len(operation.Args) == 1 && len(operation.Results) == 0 && (operation.Op != ssa.OpExec || !operation.Code.Traps() && !operation.Code.Writes(instr.Frame)) && e.spare[operation.Args[0]] && e.used[operation.Args[0]] < e.uses[operation.Args[0]] {
+		e.write(instr.DUP)
+		e.stack = append(e.stack, operation.Args[0])
 	}
 	switch operation.Op {
 	case ssa.OpConst:
@@ -720,7 +858,11 @@ func (e *emitter) link() ([]byte, bool) {
 
 func (e *emitter) write(op instr.Opcode, operands ...uint64) {
 	if op == instr.LOCAL_GET && len(e.code) > e.floor {
-		if last := e.code[len(e.code)-1]; last.Opcode() == instr.LOCAL_SET && last.Operand(0) == operands[0] {
+		// A reload of a typed ref recovers the type the local declares; a tee
+		// would keep the value's own, which the analysis may not know.
+		t := e.slot(int(operands[0]))
+		typed := t.Kind() == types.KindRef && !t.Equals(types.TypeAny())
+		if last := e.code[len(e.code)-1]; last.Opcode() == instr.LOCAL_SET && last.Operand(0) == operands[0] && !typed {
 			e.code = e.code[:len(e.code)-1]
 			op = instr.LOCAL_TEE
 		}
@@ -731,6 +873,17 @@ func (e *emitter) write(op instr.Opcode, operands ...uint64) {
 		return
 	}
 	e.code = append(e.code, inst)
+}
+
+// slot returns the type of local slot, declared or new.
+func (e *emitter) slot(slot int) types.Type {
+	if slot < len(e.declared) {
+		return e.declared[slot]
+	}
+	if slot-len(e.declared) < len(e.locals) {
+		return e.locals[slot-len(e.declared)]
+	}
+	return types.TypeAny()
 }
 
 func (e *emitter) values(vals []ssa.Value) []ssa.Value {
