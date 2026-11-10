@@ -43,7 +43,7 @@ A size-changing transform `MUST` repair position-sensitive metadata or leave the
 
 Passes `SHOULD` stay local, reuse existing analyses, and keep target policy out of target-independent code.
 
-`transform.SSAPass` emits each constant, and each load of a local slot no operation stores, again at every use; it never homes them. It gives every other value that crosses a block or leaves stack order a local of its exact kind. It emits a branch whose taken edge falls through with the inverted comparison when the comparison has an exact inverse; float ordered comparisons have none, because NaN makes both false.
+`transform.SSAPass` emits each constant, and each load of a local slot no operation stores, again at every use; it never homes them. It homes every other value that crosses a block or leaves stack order. A homed value takes a declared local that no emitted operation touches, or another homed value's local, when their live ranges do not overlap, and only a value left over gets a new local; the local has the value's exact kind. A constant or load nothing reads is not emitted. A block that only jumps reach, and that a later block jumps back to, keeps its params in locals: each jump into it writes them, so no value is on the operand stack across a back edge. It emits a branch whose taken edge falls through with the inverted comparison when the comparison has an exact inverse; float ordered comparisons have none, because NaN makes both false.
 
 ## Related
 

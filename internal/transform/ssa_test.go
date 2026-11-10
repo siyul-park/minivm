@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
@@ -321,7 +322,7 @@ func TestSSAPass_Run(t *testing.T) {
 		pipeline := pass.NewPipeline[*ssa.Function]()
 
 		wide := int64(-3750763034362895579)
-		got := program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.DROP)},
+		got := program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I64_EQZ), instr.MustNew(instr.DROP)},
 			program.WithConstants(types.I64(wide)))
 		require.NoError(t, program.Verify(got))
 		_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
@@ -508,16 +509,16 @@ func TestSSAPass_Run(t *testing.T) {
 			pad     int
 			expects bool
 		}{
-			{name: "within reach", pad: 32745, expects: false},
+			{name: "within reach", pad: 32736, expects: false},
 			{name: "out of reach", pad: 32748, expects: true}} {
-			require.Zero(t, tc.pad%3)
+			require.Zero(t, tc.pad%6)
 
 			fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32())
 			done := fn.Label()
 			fn.Append(instr.MustNew(instr.I32_CONST, 1))
 			fn.BrIf(done)
-			for range tc.pad / 3 {
-				fn.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.DROP))
+			for range tc.pad / 6 {
+				fn.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.DROP))
 			}
 			fn.Append(instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.DUP), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.DROP))
 			fn.Bind(done).Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.RETURN))
@@ -812,6 +813,199 @@ func TestSSAPass_Run(t *testing.T) {
 			require.Equal(t, wantErr, message)
 			require.Equal(t, want, values, args)
 		}
+	})
+
+	t.Run("homes loop-carried values in the locals the loop already had", func(t *testing.T) {
+		optimized := pass.NewPipeline[*ssa.Function]()
+		for _, p := range transform.O3() {
+			optimized.Add(p)
+		}
+		run := func(prog *program.Program) []types.Value {
+			threaded, message := executionResult(t, prog, interp.WithThreshold(-1), interp.WithFuel(1<<24))
+			require.Empty(t, message)
+			native, message := executionResult(t, prog, interp.WithFuel(1<<24))
+			require.Empty(t, message)
+			require.Equal(t, threaded, native)
+			return threaded
+		}
+
+		fnv := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32()},
+			Returns: []types.Type{types.TypeI64()}}).Locals(types.TypeI64(), types.TypeI32())
+		header, done := fnv.Label(), fnv.Label()
+		fnv.Append(instr.MustNew(instr.I64_CONST, 0xCBF29CE484222325), instr.MustNew(instr.LOCAL_SET, 1),
+			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 2))
+		fnv.Bind(header).Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_GE_S))
+		fnv.BrIf(done)
+		fnv.Append(
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 255),
+			instr.MustNew(instr.I32_AND), instr.MustNew(instr.I32_TO_I64_S), instr.MustNew(instr.I64_XOR),
+			instr.MustNew(instr.I64_CONST, 0x00000100000001B3), instr.MustNew(instr.I64_MUL), instr.MustNew(instr.LOCAL_SET, 1),
+			instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2))
+		fnv.Br(header)
+		fnv.Bind(done).Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.RETURN))
+
+		// Three i32 values travel around the loop at once: any two sharing a local would corrupt the sequence.
+		fib := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32()},
+			Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32(), types.TypeI32(), types.TypeI32())
+		loop, end := fib.Label(), fib.Label()
+		fib.Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.LOCAL_SET, 2),
+			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 3))
+		fib.Bind(loop).Append(instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_GE_S))
+		fib.BrIf(end)
+		fib.Append(
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_ADD),
+			instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.LOCAL_SET, 1), instr.MustNew(instr.LOCAL_SET, 2),
+			instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 3))
+		fib.Br(loop)
+		fib.Bind(end).Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.RETURN))
+
+		// The emitter declines a loop a branch closes; the case pins that it still runs the same.
+		sum := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32()},
+			Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32(), types.TypeI32())
+		again := sum.Label()
+		sum.Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 1), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 2))
+		sum.Bind(again).Append(
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 1),
+			instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2),
+			instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_LT_S))
+		sum.BrIf(again)
+		sum.Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.RETURN))
+
+		// Values that trade places each iteration: the back edge moves them in parallel.
+		trade := func(count int, order ...int) *types.Function {
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32()},
+				Returns: []types.Type{types.TypeI32()}})
+			slots := make([]types.Type, count+2)
+			for i := range slots {
+				slots[i] = types.TypeI32()
+			}
+			fn.Locals(slots...)
+			counter := uint64(count + 2)
+			head, exit := fn.Label(), fn.Label()
+			for i := range count {
+				fn.Append(instr.MustNew(instr.I32_CONST, uint64(i+1)), instr.MustNew(instr.LOCAL_SET, uint64(i+1)))
+			}
+			fn.Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, uint64(count+1)), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, counter))
+			fn.Bind(head).Append(instr.MustNew(instr.LOCAL_GET, counter), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_GE_S))
+			fn.BrIf(exit)
+			// order lists the slots to copy as scratch <- first, then each into the one before it, last <- scratch.
+			scratch := uint64(count + 1)
+			fn.Append(instr.MustNew(instr.LOCAL_GET, uint64(order[0])), instr.MustNew(instr.LOCAL_SET, scratch))
+			for i := 1; i < len(order); i++ {
+				fn.Append(instr.MustNew(instr.LOCAL_GET, uint64(order[i])), instr.MustNew(instr.LOCAL_SET, uint64(order[i-1])))
+			}
+			fn.Append(instr.MustNew(instr.LOCAL_GET, scratch), instr.MustNew(instr.LOCAL_SET, uint64(order[len(order)-1])),
+				instr.MustNew(instr.LOCAL_GET, counter), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, counter))
+			fn.Br(head)
+			fn.Bind(exit).Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 100), instr.MustNew(instr.I32_MUL),
+				instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_MUL), instr.MustNew(instr.I32_ADD),
+				instr.MustNew(instr.LOCAL_GET, uint64(count)), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN))
+			return fn.MustBuild()
+		}
+
+		for _, tc := range []struct {
+			name   string
+			f      *types.Function
+			arg    uint64
+			extras int
+			kept   bool
+		}{
+			{name: "a loop closed by a branch", f: sum.MustBuild(), arg: 10, kept: true},
+			{name: "a swap", f: trade(2, 1, 2), arg: 5, extras: 1},
+			{name: "a rotation", f: trade(3, 1, 2, 3), arg: 5, extras: 1},
+			{name: "an fnv hash", f: fnv.MustBuild(), arg: 1024, extras: 1},
+			{name: "a fibonacci recurrence", f: fib.MustBuild(), arg: 10},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				prog := program.New([]instr.Instruction{
+					instr.MustNew(instr.I32_CONST, tc.arg), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(tc.f))
+				require.NoError(t, program.Verify(prog))
+				want := run(prog)
+
+				got := duplicateConstants(prog)
+				_, err := transform.NewSSAPass(optimized).Run(pass.NewManager(), got)
+				require.NoError(t, err)
+				require.NoError(t, program.Verify(got))
+				require.Equal(t, want, run(got))
+
+				f := got.Constants[0].(*types.Function)
+				if tc.kept {
+					require.Equal(t, tc.f.Code, f.Code)
+				} else {
+					require.NotEqual(t, tc.f.Code, f.Code)
+				}
+				require.LessOrEqual(t, len(f.Locals), len(tc.f.Locals)+tc.extras)
+				insts := instr.Unmarshal(f.Code)
+				at := make([]int, len(insts)+1)
+				for i, inst := range insts {
+					at[i+1] = at[i] + inst.Width()
+					if i > 0 {
+						require.False(t, insts[i-1].Opcode() == instr.LOCAL_GET && inst.Opcode() == instr.DROP)
+					}
+					if inst.Opcode() == instr.BR && int(int16(inst.Operand(0))) < 0 {
+						require.Equal(t, instr.LOCAL_SET, insts[i-1].Opcode())
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("round-trips a large function with many loops and locals in bounded time", func(t *testing.T) {
+		// Performance guard: coalescing once rebuilt block liveness on every retry, 2s for this function.
+		const locals, inner = 100, 12
+		optimized := pass.NewPipeline[*ssa.Function]()
+		for _, p := range transform.O3() {
+			optimized.Add(p)
+		}
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32()},
+			Returns: []types.Type{types.TypeI32()}})
+		slots := make([]types.Type, locals)
+		for i := range slots {
+			slots[i] = types.TypeI32()
+		}
+		fn.Locals(slots...)
+		outer, outerDone := fn.Label(), fn.Label()
+		fn.Bind(outer).Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_GE_S))
+		fn.BrIf(outerDone)
+		for k := range inner {
+			loop, done := fn.Label(), fn.Label()
+			counter := uint64(2 + k)
+			fn.Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, counter))
+			fn.Bind(loop).Append(instr.MustNew(instr.LOCAL_GET, counter), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_GE_S))
+			fn.BrIf(done)
+			for j := range 8 {
+				acc := uint64(2 + inner + (k*8+j)%(locals-inner-2))
+				fn.Append(instr.MustNew(instr.LOCAL_GET, acc), instr.MustNew(instr.LOCAL_GET, counter), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, acc))
+			}
+			fn.Append(instr.MustNew(instr.LOCAL_GET, counter), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, counter))
+			fn.Br(loop)
+			fn.Bind(done)
+		}
+		fn.Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 1))
+		fn.Br(outer)
+		fn.Bind(outerDone).Append(instr.MustNew(instr.LOCAL_GET, uint64(2+inner)), instr.MustNew(instr.RETURN))
+
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(fn.MustBuild()))
+		require.NoError(t, program.Verify(prog))
+		want, wantErr := executionResult(t, prog, interp.WithThreshold(-1))
+
+		got := duplicateConstants(prog)
+		start := time.Now()
+		_, err := transform.NewSSAPass(optimized).Run(pass.NewManager(), got)
+		elapsed := time.Since(start)
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(got))
+		require.Less(t, elapsed, 200*time.Millisecond)
+
+		values, message := executionResult(t, got, interp.WithThreshold(-1))
+		require.Equal(t, wantErr, message)
+		require.Equal(t, want, values)
 	})
 
 	t.Run("leaves a function it cannot express unchanged", func(t *testing.T) {
