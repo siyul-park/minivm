@@ -60,7 +60,7 @@ type hold struct {
 // args holding the deepest first, from code, the operation's bytecode. It is
 // the interpreter's own helper for the operation, which writes no reference
 // count of an operand (native code owns and releases each).
-type callout func(i *Interpreter, code []byte, args [2]types.Boxed) types.Value
+type callout func(i *Interpreter, code []byte, args [3]types.Boxed) types.Value
 
 // shared contains the pool-shareable native runtime: Cache, Queue, and Module.
 // refs closes it after the last interpreter releases it.
@@ -187,20 +187,26 @@ var bridgeable = func() (out [256]bool) {
 // callouts serve the bridges of allocating operations without a scratch
 // frame, operand retains, or a handler run.
 var callouts = [256]callout{
-	instr.STRING_CONCAT: func(i *Interpreter, _ []byte, args [2]types.Boxed) types.Value {
+	instr.STRING_CONCAT: func(i *Interpreter, _ []byte, args [3]types.Boxed) types.Value {
 		return i.concat(args[0], args[1])
 	},
-	instr.STRING_NEW_UTF32: func(i *Interpreter, _ []byte, args [2]types.Boxed) types.Value {
+	instr.STRING_NEW_UTF32: func(i *Interpreter, _ []byte, args [3]types.Boxed) types.Value {
 		return i.text(args[0])
 	},
-	instr.STRING_ENCODE_UTF32: func(i *Interpreter, _ []byte, args [2]types.Boxed) types.Value {
+	instr.STRING_ENCODE_UTF32: func(i *Interpreter, _ []byte, args [3]types.Boxed) types.Value {
 		return i.runes(args[0])
 	},
-	instr.ARRAY_NEW_DEFAULT: func(i *Interpreter, code []byte, args [2]types.Boxed) types.Value {
+	instr.ARRAY_NEW_DEFAULT: func(i *Interpreter, code []byte, args [3]types.Boxed) types.Value {
 		return i.newArrayDefault(i.types[index(code)].(*types.ArrayType), args[0])
 	},
-	instr.STRUCT_NEW_DEFAULT: func(i *Interpreter, code []byte, _ [2]types.Boxed) types.Value {
+	instr.STRUCT_NEW_DEFAULT: func(i *Interpreter, code []byte, _ [3]types.Boxed) types.Value {
 		return i.newStruct(i.types[index(code)].(*types.StructType))
+	},
+	instr.ARRAY_SLICE: func(i *Interpreter, _ []byte, args [3]types.Boxed) types.Value {
+		if hosted(i.heap[args[0].Ref()]) {
+			panic(ErrTypeMismatch)
+		}
+		return i.slice(args[0], int(args[1].I32()), int(args[2].I32()))
 	},
 }
 
@@ -989,7 +995,7 @@ func (e *engine) callout(i *Interpreter, exit jit.Exit, serve callout) (ok bool)
 	ctx := e.ctx
 	k := ctx.Level() - 1
 	m := exit.Frame
-	var args [2]types.Boxed
+	var args [3]types.Boxed
 	for j, o := range m.Stack[len(m.Stack)-exit.Pops:] {
 		args[j] = fromWord(i, o.Value.Kind, ctx.Read(k, o.Value))
 	}
@@ -1001,6 +1007,8 @@ func (e *engine) callout(i *Interpreter, exit jit.Exit, serve callout) (ok bool)
 		e.tcache.fill(i, index(code), 0)
 	case instr.ARRAY_NEW_DEFAULT:
 		e.tcache.fill(i, index(code), int(args[0].I32()))
+	case instr.ARRAY_SLICE:
+		i.share(v)
 	}
 	return true
 }

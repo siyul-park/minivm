@@ -1394,6 +1394,56 @@ func (i *Interpreter) concat(left, right types.Boxed) types.String {
 	return types.String(unsafe.String(unsafe.SliceData(i.tail), len(i.tail)))
 }
 
+// slice is a new array of the elements start through end of the array array
+// refers to, in the array's own representation. It retains nothing: the caller
+// allocates the result and then shares it.
+func (i *Interpreter) slice(array types.Boxed, start, end int) types.Value {
+	if array.Kind() != types.KindRef {
+		panic(ErrTypeMismatch)
+	}
+	source := i.heap[array.Ref()]
+	if view, ok := source.(*HostArray); ok {
+		value, err := view.Array(i)
+		if err != nil {
+			panic(err)
+		}
+		source = value
+	}
+	switch source := source.(type) {
+	case types.TypedArray[bool]:
+		return cut(source, start, end)
+	case types.TypedArray[int8]:
+		return cut(source, start, end)
+	case types.TypedArray[int32]:
+		return cut(source, start, end)
+	case types.TypedArray[int64]:
+		return cut(source, start, end)
+	case types.TypedArray[float32]:
+		return cut(source, start, end)
+	case types.TypedArray[float64]:
+		return cut(source, start, end)
+	case *types.Array:
+		if start < 0 || end > len(source.Elems) || start > end {
+			panic(ErrIndexOutOfRange)
+		}
+		out := i.newArray(source.Typ, end-start)
+		copy(out.Elems, source.Elems[start:end])
+		return out
+	default:
+		panic(ErrTypeMismatch)
+	}
+}
+
+// share retains each reference an array value holds once more, for the new
+// owner an allocation gave it.
+func (i *Interpreter) share(value types.Value) {
+	if array, ok := value.(*types.Array); ok {
+		for _, v := range array.Elems {
+			i.retainBox(v)
+		}
+	}
+}
+
 // runes is a string's UTF-32 array.
 func (i *Interpreter) runes(text types.Boxed) types.TypedArray[int32] {
 	return types.TypedArray[int32](deref[types.String](i, text))
@@ -2321,4 +2371,14 @@ func deref[T types.Value](i *Interpreter, val types.Boxed) T {
 		panic(ErrTypeMismatch)
 	}
 	return v
+}
+
+// cut is a copy of the elements start through end of array.
+func cut[T int8 | int32 | int64 | float32 | float64 | bool](array types.TypedArray[T], start, end int) types.TypedArray[T] {
+	if start < 0 || end > len(array) || start > end {
+		panic(ErrIndexOutOfRange)
+	}
+	out := make(types.TypedArray[T], end-start)
+	copy(out, array[start:end])
+	return out
 }

@@ -412,32 +412,10 @@ func arrayDelete() jen.Code {
 
 func arraySlice() jen.Code {
 	return handler(underflow(3),
-		jen.Id("end").Op(":=").Id("int").Call(top(1).Dot("I32").Call()),
-		jen.Id("start").Op(":=").Id("int").Call(top(2).Dot("I32").Call()),
-		container(3),
-		jen.Var().Id("out").Qual(typesPkg, "Value"),
-		jen.Id("source").Op(":=").Id("i").Dot("heap").Index(jen.Id("addr")),
-		view("HostArray", "Array"),
-		arraySwitch(jen.Id("arr").Op(":=").Id("source").Assert(jen.Type()),
-			func(e typedElem) []jen.Code {
-				return []jen.Code{
-					sliceGuard(jen.Id("arr")),
-					jen.Id("dst").Op(":=").Id("make").Call(e.array(), jen.Id("end").Op("-").Id("start")),
-					jen.Id("copy").Call(jen.Id("dst"), jen.Id("arr").Index(jen.Id("start").Op(":").Id("end"))),
-					jen.Id("out").Op("=").Id("dst"),
-				}
-			},
-			genericArrayCase(
-				sliceGuard(elems("arr")),
-				jen.Id("dst").Op(":=").Id("i").Dot("newArray").Call(jen.Id("arr").Dot("Typ"), jen.Id("end").Op("-").Id("start")),
-				jen.Id("copy").Call(elems("dst"), elems("arr").Index(jen.Id("start").Op(":").Id("end"))),
-				jen.Id("out").Op("=").Id("dst"),
-			),
-		),
+		jen.Id("out").Op(":=").Id("i").Dot("slice").Call(top(3), jen.Id("int").Call(top(2).Dot("I32").Call()), jen.Id("int").Call(top(1).Dot("I32").Call())),
 		jen.Id("newAddr").Op(":=").Id("i").Dot("alloc").Call(jen.Id("out")),
-		jen.If(jen.List(jen.Id("array"), jen.Id("ok")).Op(":=").Id("out").Assert(jen.Op("*").Qual(typesPkg, "Array")), jen.Id("ok")).Block(
-			jen.For(jen.List(jen.Id("_"), jen.Id("v")).Op(":=").Range().Add(elems("array"))).Block(jen.Id("i").Dot("retainBox").Call(jen.Id("v"))),
-		),
+		jen.Id("i").Dot("share").Call(jen.Id("out")),
+		jen.Id("addr").Op(":=").Add(top(3)).Dot("Ref").Call(),
 		jen.Id("i").Dot("release").Call(jen.Id("addr")),
 		jen.Id("i").Dot("sp").Op("-=").Lit(2),
 		top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("newAddr")),
@@ -577,9 +555,4 @@ func elems(name string) *jen.Statement {
 // window is the n-element subslice of slice from offset.
 func window(slice jen.Code, offset, n string) *jen.Statement {
 	return jen.Add(slice).Index(jen.Id(offset).Op(":").Id(offset).Op("+").Id(n))
-}
-
-// sliceGuard traps unless start..end is a valid range of slice.
-func sliceGuard(slice jen.Code) jen.Code {
-	return jen.If(jen.Id("start").Op("<").Lit(0).Op("||").Id("end").Op(">").Id("len").Call(slice).Op("||").Id("start").Op(">").Id("end")).Block(jen.Panic(jen.Id("ErrIndexOutOfRange")))
 }

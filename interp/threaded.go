@@ -3957,84 +3957,13 @@ var (
 				if i.sp < 3 {
 					panic(ErrStackUnderflow)
 				}
-				v0 := int(i.stack[i.sp-1].I32())
-				v1 := int(i.stack[i.sp-2].I32())
-				v2 := i.stack[i.sp-3]
-				if v2.Kind() != types.KindRef {
-					panic(ErrTypeMismatch)
-				}
-				v3 := v2.Ref()
-				var v4 types.Value
-				v5 := i.heap[v3]
-				if v0, v1 := v5.(*HostArray); v1 {
-					v1, v2 := v0.Array(i)
-					if v2 != nil {
-						panic(v2)
-					}
-					v5 = v1
-				}
-				switch v2 := v5.(type) {
-				case types.TypedArray[bool]:
-					if v1 < 0 || v0 > len(v2) || v1 > v0 {
-						panic(ErrIndexOutOfRange)
-					}
-					v3 := make(types.TypedArray[bool], v0-v1)
-					copy(v3, v2[v1:v0])
-					v4 = v3
-				case types.TypedArray[int8]:
-					if v1 < 0 || v0 > len(v2) || v1 > v0 {
-						panic(ErrIndexOutOfRange)
-					}
-					v3 := make(types.TypedArray[int8], v0-v1)
-					copy(v3, v2[v1:v0])
-					v4 = v3
-				case types.TypedArray[int32]:
-					if v1 < 0 || v0 > len(v2) || v1 > v0 {
-						panic(ErrIndexOutOfRange)
-					}
-					v3 := make(types.TypedArray[int32], v0-v1)
-					copy(v3, v2[v1:v0])
-					v4 = v3
-				case types.TypedArray[int64]:
-					if v1 < 0 || v0 > len(v2) || v1 > v0 {
-						panic(ErrIndexOutOfRange)
-					}
-					v3 := make(types.TypedArray[int64], v0-v1)
-					copy(v3, v2[v1:v0])
-					v4 = v3
-				case types.TypedArray[float32]:
-					if v1 < 0 || v0 > len(v2) || v1 > v0 {
-						panic(ErrIndexOutOfRange)
-					}
-					v3 := make(types.TypedArray[float32], v0-v1)
-					copy(v3, v2[v1:v0])
-					v4 = v3
-				case types.TypedArray[float64]:
-					if v1 < 0 || v0 > len(v2) || v1 > v0 {
-						panic(ErrIndexOutOfRange)
-					}
-					v3 := make(types.TypedArray[float64], v0-v1)
-					copy(v3, v2[v1:v0])
-					v4 = v3
-				case *types.Array:
-					if v1 < 0 || v0 > len(v2.Elems) || v1 > v0 {
-						panic(ErrIndexOutOfRange)
-					}
-					v3 := i.newArray(v2.Typ, v0-v1)
-					copy(v3.Elems, v2.Elems[v1:v0])
-					v4 = v3
-				default:
-					panic(ErrTypeMismatch)
-				}
-				v6 := i.alloc(v4)
-				if v0, v1 := v4.(*types.Array); v1 {
-					for _, v1 := range v0.Elems {
-						i.retainBox(v1)
-					}
-				}
-				i.release(v3)
+				v0 := i.slice(i.stack[i.sp-3], int(i.stack[i.sp-2].I32()), int(i.stack[i.sp-1].I32()))
+				v1 := i.alloc(v0)
+				i.share(v0)
+				v2 := i.stack[i.sp-3].Ref()
+				i.release(v2)
 				i.sp -= 2
-				i.stack[i.sp-1] = types.BoxRef(v6)
+				i.stack[i.sp-1] = types.BoxRef(v1)
 				i.fr.ip++
 			}
 		},
