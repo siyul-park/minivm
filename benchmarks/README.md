@@ -36,22 +36,22 @@ Yaegi supplies the compiled `registry.Register` and dependency symbols, evaluate
 
 ## Runtimes
 
-The corpus contains 26 workloads.
+The corpus contains 28 workloads.
 
 | Runtime | Coverage | Notes |
 |---|---:|---|
-| Threaded | 26 | minivm interpreter with JIT disabled |
-| JIT | 26 | minivm default execution |
-| Native Go | 26 | direct compiled Go implementation |
+| Threaded | 28 | minivm interpreter with JIT disabled |
+| JIT | 28 | minivm default execution |
+| Native Go | 28 | direct compiled Go implementation |
 | Wazero | 7 | exact WebAssembly implementations |
-| Tengo | 26 | all workloads |
-| GopherLua | 23 | I32 workloads; exact I64 values are outside Lua's numeric model |
-| Goja | 26 | I32 plus BigInt-based I64 fixtures |
-| gpython | 26 | Python fixture |
-| CPython | 26 | same Python fixture through `python3.13` |
-| Yaegi | 26 | Go fixture; two cases are intentionally unmeasured |
+| Tengo | 26 | string-keyed maps only; `map-ops` and `coroutine-gen` have no Tengo equivalent |
+| GopherLua | 25 | I32 workloads; exact I64 values are outside Lua's numeric model |
+| Goja | 28 | I32 plus BigInt-based I64 fixtures |
+| gpython | 28 | Python fixture; one case is intentionally unmeasured |
+| CPython | 28 | same Python fixture through `python3.13` |
+| Yaegi | 28 | Go fixture; three cases are intentionally unmeasured |
 
-A runtime cell is `—` only when no meaningful implementation exists or the benchmark is intentionally inapplicable. Yaegi skips `typed-array-sum` because its generic typed-array program is outside Yaegi's supported syntax and `recursive-fib-35` because the interpreted workload is impractical.
+A runtime cell is `—` only when no meaningful implementation exists or the benchmark is intentionally inapplicable. Yaegi skips `typed-array-sum` because its generic typed-array program is outside Yaegi's supported syntax, `recursive-fib-35` because the interpreted workload is impractical, and `coroutine-gen` because Yaegi's standard library has no `iter` package. gpython skips `map-ops` because its dicts accept only string keys.
 
 ## Measurement
 
