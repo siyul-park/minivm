@@ -22,6 +22,8 @@ type emitter struct {
 	defined map[ssa.Value]int
 	homed   map[ssa.Value]bool
 	home    map[ssa.Value]int
+	source  map[ssa.Value]ssa.Operation
+	remat   map[ssa.Value]bool
 
 	locals []types.Type
 	code   []instr.Instruction
@@ -37,6 +39,21 @@ type fix struct {
 	at      int
 	operand int
 	block   int
+}
+
+var inverses = map[instr.Opcode]instr.Opcode{
+	instr.I32_EQ: instr.I32_NE, instr.I32_NE: instr.I32_EQ,
+	instr.I32_LT_S: instr.I32_GE_S, instr.I32_GE_S: instr.I32_LT_S,
+	instr.I32_GT_S: instr.I32_LE_S, instr.I32_LE_S: instr.I32_GT_S,
+	instr.I32_LT_U: instr.I32_GE_U, instr.I32_GE_U: instr.I32_LT_U,
+	instr.I32_GT_U: instr.I32_LE_U, instr.I32_LE_U: instr.I32_GT_U,
+	instr.I64_EQ: instr.I64_NE, instr.I64_NE: instr.I64_EQ,
+	instr.I64_LT_S: instr.I64_GE_S, instr.I64_GE_S: instr.I64_LT_S,
+	instr.I64_GT_S: instr.I64_LE_S, instr.I64_LE_S: instr.I64_GT_S,
+	instr.I64_LT_U: instr.I64_GE_U, instr.I64_GE_U: instr.I64_LT_U,
+	instr.I64_GT_U: instr.I64_LE_U, instr.I64_LE_U: instr.I64_GT_U,
+	instr.F32_EQ: instr.F32_NE, instr.F32_NE: instr.F32_EQ,
+	instr.F64_EQ: instr.F64_NE, instr.F64_NE: instr.F64_EQ,
 }
 
 var spaceOps = [...]struct{ read, write instr.Opcode }{
@@ -63,6 +80,13 @@ func emit(function *ssa.Function, constants *pool, module bool, base int) ([]byt
 			code, ok := e.link()
 			return code, e.locals, ok
 		}
+		if _, ok := e.source[e.needed]; ok {
+			if e.remat[e.needed] {
+				return nil, nil, false
+			}
+			e.remat[e.needed] = true
+			continue
+		}
 		if e.needed == ssa.NoValue || e.homed[e.needed] {
 			return nil, nil, false
 		}
@@ -73,6 +97,8 @@ func emit(function *ssa.Function, constants *pool, module bool, base int) ([]byt
 
 func (e *emitter) collect() bool {
 	e.subst, e.uses, e.defined, e.homed = map[ssa.Value]ssa.Value{}, map[ssa.Value]int{}, map[ssa.Value]int{}, map[ssa.Value]bool{}
+	e.source, e.remat = map[ssa.Value]ssa.Operation{}, map[ssa.Value]bool{}
+	stored := e.stored()
 	e.ops, e.terms = make([][]ssa.Operation, e.function.Len()), make([]ssa.Terminator, e.function.Len())
 
 	for id := range e.function.Len() {
@@ -83,6 +109,9 @@ func (e *emitter) collect() bool {
 		for _, operation := range currentBlock.Operations {
 			if !e.accept(id, operation) {
 				return false
+			}
+			if operation.Op == ssa.OpConst || (operation.Op == ssa.OpLoad && operation.Slot.Space == ssa.SpaceLocal && stored != nil && !stored[operation.Slot.Index]) {
+				e.source[operation.Results[0]] = operation
 			}
 		}
 		term := currentBlock.Terminator
@@ -109,11 +138,30 @@ func (e *emitter) collect() bool {
 		}
 	}
 	for v, n := range e.uses {
-		if n > 1 {
+		if _, ok := e.source[v]; ok && n > 1 {
+			e.remat[v] = true
+		} else if n > 1 {
 			e.homed[v] = true
 		}
 	}
 	return true
+}
+
+// stored reports the local slots some operation may write, or nil when an
+// opcode writes locals the IR does not name.
+func (e *emitter) stored() map[int]bool {
+	stored := map[int]bool{}
+	for id := range e.function.Len() {
+		for _, operation := range e.function.Block(id).Operations {
+			switch {
+			case operation.Op == ssa.OpStore && operation.Slot.Space == ssa.SpaceLocal:
+				stored[operation.Slot.Index] = true
+			case operation.Op == ssa.OpExec && operation.Code.Writes(instr.Local):
+				return nil
+			}
+		}
+	}
+	return stored
 }
 
 func (e *emitter) accept(id int, operation ssa.Operation) bool {
@@ -146,7 +194,12 @@ func (e *emitter) accept(id int, operation ssa.Operation) bool {
 func (e *emitter) count(id int, values []ssa.Value) {
 	for _, v := range values {
 		e.uses[v]++
-		if e.defined[v] != id {
+		if e.defined[v] == id {
+			continue
+		}
+		if _, ok := e.source[v]; ok {
+			e.remat[v] = true
+		} else {
 			e.homed[v] = true
 		}
 	}
@@ -202,6 +255,9 @@ func (e *emitter) walk() bool {
 			return false
 		}
 		for _, operation := range e.ops[id] {
+			if operation.Op != ssa.OpStore && operation.Op != ssa.OpExec && e.remat[operation.Results[0]] {
+				continue
+			}
 			if !e.perform(operation) {
 				return false
 			}
@@ -230,26 +286,6 @@ func (e *emitter) open(id int) bool {
 		e.write(instr.LOCAL_SET, uint64(e.home[params[i]]))
 	}
 	return true
-}
-
-func (e *emitter) perform(operation ssa.Operation) bool {
-	if !e.load(operation.Args) {
-		return false
-	}
-	switch operation.Op {
-	case ssa.OpConst:
-		if !e.constant(e.function.Type(operation.Results[0]), operation.Const) {
-			return false
-		}
-	case ssa.OpLoad:
-		e.write(spaceOps[operation.Slot.Space].read, uint64(operation.Slot.Index))
-	case ssa.OpStore:
-		e.write(spaceOps[operation.Slot.Space].write, uint64(operation.Slot.Index))
-	default:
-		e.write(operation.Code)
-	}
-	e.stack = e.stack[:len(e.stack)-len(operation.Args)]
-	return e.results(operation.Results)
 }
 
 func (e *emitter) close(id int) bool {
@@ -281,6 +317,14 @@ func (e *emitter) close(id int) bool {
 			e.table(term.Edges)
 			return true
 		}
+		last := len(e.code) - 1
+		if last >= e.floor && term.Edges[0].Block == id+1 {
+			if inverse, ok := inverses[e.code[last].Opcode()]; ok {
+				e.code[last] = instr.MustNew(inverse)
+				e.branch(instr.BR_IF, term.Edges[1].Block)
+				return true
+			}
+		}
 		e.branch(instr.BR_IF, term.Edges[0].Block)
 		e.leave(id, term.Edges[1].Block)
 	default:
@@ -309,6 +353,12 @@ func (e *emitter) load(args []ssa.Value) bool {
 		}
 	}
 	for _, v := range args[at:] {
+		if e.remat[v] {
+			if !e.perform(e.source[v]) {
+				return false
+			}
+			continue
+		}
 		slot, ok := e.home[v]
 		if !ok {
 			e.needed = v
@@ -318,6 +368,26 @@ func (e *emitter) load(args []ssa.Value) bool {
 		e.stack = append(e.stack, v)
 	}
 	return true
+}
+
+func (e *emitter) perform(operation ssa.Operation) bool {
+	if !e.load(operation.Args) {
+		return false
+	}
+	switch operation.Op {
+	case ssa.OpConst:
+		if !e.constant(e.function.Type(operation.Results[0]), operation.Const) {
+			return false
+		}
+	case ssa.OpLoad:
+		e.write(spaceOps[operation.Slot.Space].read, uint64(operation.Slot.Index))
+	case ssa.OpStore:
+		e.write(spaceOps[operation.Slot.Space].write, uint64(operation.Slot.Index))
+	default:
+		e.write(operation.Code)
+	}
+	e.stack = e.stack[:len(e.stack)-len(operation.Args)]
+	return e.results(operation.Results)
 }
 
 func (e *emitter) results(results []ssa.Value) bool {
