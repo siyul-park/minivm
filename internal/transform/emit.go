@@ -627,12 +627,11 @@ func (e *emitter) walk() bool {
 	return true
 }
 
-// layout orders the blocks for emission: block 0 first, then, after a branch,
-// the successor the code falls through to, else the lowest block not yet
-// placed. Of a branch's two successors, the one with the nearer path back to
-// the branch's own block follows it, so a loop's body does not sit behind an
-// exit; the taken edge qualifies only when the comparison has an exact
-// inverse. A block that ends the module goes last.
+// layout orders the blocks for emission: block 0 first, then, after a branch
+// no inverse comparison can flip, its fall-through successor, else the lowest
+// block not yet placed. A branch an inverse can flip keeps that order, since
+// the flip already puts a following exit behind it. A block that ends the
+// module goes last.
 func (e *emitter) layout() {
 	n := e.function.Len()
 	placed := make([]bool, n)
@@ -664,45 +663,21 @@ func (e *emitter) layout() {
 }
 
 // following returns the block to place after id, or -1 when id does not end
-// in a branch with such a successor.
+// in a branch that needs its fall-through successor next.
 func (e *emitter) following(id int, placed []bool) int {
 	term := e.terms[id]
 	if term.Op != ssa.OpBranch || len(term.Edges) != 2 {
 		return -1
 	}
-	candidates := []int{term.Edges[1].Block}
 	if last := len(e.ops[id]) - 1; last >= 0 && len(term.Args) == 1 && len(e.ops[id][last].Results) == 1 && e.ops[id][last].Results[0] == term.Args[0] {
 		if _, ok := inverses[e.ops[id][last].Code]; ok && e.ops[id][last].Op == ssa.OpExec {
-			candidates = append(candidates, term.Edges[0].Block)
+			return -1
 		}
 	}
-	best, nearest := -1, 0
-	for _, c := range candidates {
-		if placed[c] || e.terms[c].Op == ssa.OpComplete {
-			continue
-		}
-		// The distance from c back to id, in blocks, or 0 when none leads back.
-		distance, seen, frontier := 0, map[int]bool{c: true}, []int{c}
-		for depth := 1; len(frontier) > 0 && distance == 0; depth++ {
-			var next []int
-			for _, b := range frontier {
-				for _, edge := range e.terms[b].Edges {
-					if edge.Block == id {
-						distance = depth
-					}
-					if !seen[edge.Block] {
-						seen[edge.Block] = true
-						next = append(next, edge.Block)
-					}
-				}
-			}
-			frontier = next
-		}
-		if best < 0 || distance > 0 && (nearest == 0 || distance < nearest) || distance == nearest && c < best {
-			best, nearest = c, distance
-		}
+	if next := term.Edges[1].Block; !placed[next] && e.terms[next].Op != ssa.OpComplete {
+		return next
 	}
-	return best
+	return -1
 }
 
 func (e *emitter) open(id int) bool {
@@ -747,11 +722,6 @@ func (e *emitter) settle(id, index int) {
 		source, ok := e.source[w]
 		return e.home[w] == dest && e.homed[w] ||
 			ok && e.remat[w] && source.Op == ssa.OpLoad && source.Slot.Space == ssa.SpaceLocal && source.Slot.Index == dest
-	}
-	for _, w := range edge.Args {
-		if w != v && !e.settled[w] && reads(w) {
-			return
-		}
 	}
 	for _, later := range e.ops[id][index+1:] {
 		if later.Slot.Space == ssa.SpaceLocal && later.Slot.Index == dest && (later.Op == ssa.OpLoad || later.Op == ssa.OpStore) || slices.ContainsFunc(later.Args, reads) {

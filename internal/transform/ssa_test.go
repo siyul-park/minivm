@@ -469,8 +469,7 @@ func TestSSAPass_Run(t *testing.T) {
 		require.NoError(t, program.Verify(got))
 
 		counted := got.Constants[0].(*types.Function)
-		// The loop is laid out as written: no extra move carries the counter around.
-		require.Equal(t, instr.Format(fn.Code), instr.Format(counted.Code))
+		require.NotEqual(t, instr.Format(fn.Code), instr.Format(counted.Code))
 
 		values, message := executionResult(t, got)
 		require.Equal(t, wantErr, message)
@@ -1836,6 +1835,8 @@ func TestSSAPass_Run(t *testing.T) {
 			}
 		}
 		require.Equal(t, 1, jumps, instr.Format(got.Constants[0].(*types.Function).Code))
+		// The counter's test has an inverse, so it keeps its exit behind it.
+		require.Regexp(t, `i32\.lt_s\n\d+:\tbr_if`, instr.Format(got.Constants[0].(*types.Function).Code))
 		for _, opts := range [][]interp.Option{{interp.WithThreshold(-1)}, nil} {
 			values, message := executionResult(t, got, opts...)
 			require.Equal(t, wantErr, message)
@@ -1883,6 +1884,13 @@ func TestSSAPass_Run(t *testing.T) {
 					instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 1),
 					instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.I32_SUB), instr.MustNew(instr.LOCAL_SET, 2)},
 				early: true,
+			},
+			{
+				name: "the jump passes the first one's old value on",
+				update: []instr.Instruction{
+					instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_ADD),
+					instr.MustNew(instr.LOCAL_GET, 1),
+					instr.MustNew(instr.LOCAL_SET, 2), instr.MustNew(instr.LOCAL_SET, 1)},
 			},
 			{
 				name: "a later value reads the first one's old value",
