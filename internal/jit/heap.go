@@ -38,23 +38,29 @@ const (
 	OffsetClosureTyp       = unsafe.Offsetof(types.Closure{}.Typ)
 	OffsetClosureFn        = unsafe.Offsetof(types.Closure{}.Fn)
 	OffsetClosureUpvals    = unsafe.Offsetof(types.Closure{}.Upvals)
+
+	// OffsetMapTyp is a TypedMap's declared *types.MapType, whose element kind
+	// the map guard compares at OffsetMapTypeElemKind. A key kind alone does
+	// not fix the element: one TypedMap[int32] serves map[i32]string and
+	// map[i32]i32 alike.
+	OffsetMapTyp          = unsafe.Offsetof(types.TypedMap[int64]{}.Typ)
+	OffsetMapTypeElemKind = unsafe.Offsetof(types.MapType{}.ElemKind)
+	// OffsetMapZero is the Boxed word MAP_GET returns for an absent key.
+	OffsetMapZero = unsafe.Offsetof(types.TypedMap[int64]{}.Zero)
 )
 
 // Slot states a table's control byte holds, and the home slot's multiplier.
 const (
-	SlotEmpty = 0
-	SlotFull  = 1
-	SlotDead  = 2
-	MapHash   = 0x9E3779B97F4A7C15
+	SlotFull = 1
+	SlotDead = 2
+	MapHash  = 0x9E3779B97F4A7C15
 )
 
 // Offsets native code reads and writes in a numeric-keyed *types.TypedMap: the
 // words of its pointer-free table (types/map.go owns the layout). They are
-// taken from reflection, since the table is unexported, and TestMap_Layout pins
+// taken from reflection, since the table is unexported, and TestHeap_Layout pins
 // every value. Every key kind shares one layout: only the methods differ.
 var (
-	// OffsetMapZero is the Boxed word MAP_GET returns for an absent key.
-	OffsetMapZero = unsafe.Offsetof(types.TypedMap[int64]{}.Zero)
 	// OffsetMapCtrl and OffsetMapSlots are the data words of the control bytes
 	// and of the key and value words: slot i has its state at ctrl[i], its key
 	// word at slots[2i], and its value word at slots[2i+1].

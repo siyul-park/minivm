@@ -44,10 +44,6 @@ func itab(shape ssa.Shape) uintptr {
 			return jit.Itab((*types.TypedMap[int32])(nil))
 		case types.KindI64:
 			return jit.Itab((*types.TypedMap[int64])(nil))
-		case types.KindF32:
-			return jit.Itab((*types.TypedMap[float32])(nil))
-		case types.KindF64:
-			return jit.Itab((*types.TypedMap[float64])(nil))
 		default:
 			return 0
 		}

@@ -2108,6 +2108,29 @@ func TestMachine_Lower(t *testing.T) {
 			lower: true,
 		},
 		{
+			name: "admits a map of the exact key and additionally checks the declared element kind",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Map: true, Kind: types.KindI32, Elem: types.KindRef}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{
+					target.SBFX(vr(1), reg(ssa.TypeRef, 1), 0, 32), target.LSLI(vr(1), vr(1), 4),
+					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.ADD(vr(1), target.X16, vr(1)),
+					target.LDR(target.X16, vr(1), 0),
+				}
+				rows = append(rows, target.LDI(target.X17, uint64(jit.Itab((*types.TypedMap[int32])(nil))))...)
+				rows = append(rows, target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, exit))
+				return append(rows,
+					target.LDR(target.X16, vr(1), int16(jit.OffsetData)),
+					target.LDR(target.X16, target.X16, int16(jit.OffsetMapTyp)),
+					target.LDRB(target.X16, target.X16, int16(jit.OffsetMapTypeElemKind)),
+					target.CMPI(target.X16, uint16(types.KindRef)), target.BCondLabel(target.OpBNE, exit),
+					target.MOV(reg(ssa.TypeRef, 2), reg(ssa.TypeRef, 1)),
+				)
+			}(),
+			lower: true,
+		},
+		{
 			name: "admits a struct of the exact type and additionally checks Typ",
 			regs: regs{1: ssa.TypeRef, 2: ssa.TypeRef},
 			op:   ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Struct: true, Type: 0x2a}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
@@ -3177,11 +3200,6 @@ func TestMachine_Lower(t *testing.T) {
 		{
 			name: "map.get declines an i64 element, which is not a raw word",
 			regs: regs{1: ref, 2: ref, 3: i32, 4: i64}, guard: intMap(types.KindI32, types.KindI64),
-			op: mapped(instr.MAP_GET, 1, 2, 3),
-		},
-		{
-			name: "map.get declines a float key, which the table compares by value",
-			regs: regs{1: ref, 2: ref, 3: f64, 4: i32}, guard: intMap(types.KindF64, types.KindI32),
 			op: mapped(instr.MAP_GET, 1, 2, 3),
 		},
 		{

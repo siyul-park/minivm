@@ -56,9 +56,8 @@ func mapNew() jen.Code {
 func mapNewDefault() jen.Code {
 	return assertType("MapType",
 		jen.Return(closure(underflow(1),
-			jen.Id("capacity").Op(":=").Id("int").Call(top(1).Dot("I32").Call()),
-			jen.If(jen.Id("capacity").Op("<").Lit(0)).Block(jen.Panic(jen.Id("ErrIndexOutOfRange"))),
-			top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Qual(typesPkg, "NewMapForType").Call(jen.Id("typ"), jen.Id("capacity")))),
+			jen.Id("val").Op(":=").Id("i").Dot("newMapDefault").Call(jen.Id("typ"), top(1)),
+			top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("val"))),
 			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(3),
 		)),
 	)

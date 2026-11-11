@@ -259,7 +259,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		if m == nil {
 			return false
 		}
-		w.guardMap(len(w.stack)-2, m)
+		w.guardMap(operation, m, 2)
 		results := []fact{{kind: m.ElemKind}}
 		if operation == instr.MAP_LOOKUP {
 			results = append(results, fact{kind: types.KindI1})
@@ -271,7 +271,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 			return false
 		}
 		if m := w.stack[len(w.stack)-pops].mapType; m != nil {
-			w.guardMap(len(w.stack)-pops, m)
+			w.guardMap(operation, m, pops)
 		}
 	case instr.MAP_NEW_DEFAULT:
 		if len(w.stack) == 0 {
@@ -371,13 +371,21 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 	return w.emit(operation, len(effect.Pop), results)
 }
 
-// guardMap guards the map at stack position at when its declared key is an
-// integer: native code reads such a map's table, and any other key kind keeps
-// the interpreter's map operation.
-func (w *walker) guardMap(at int, m *types.MapType) {
-	switch m.KeyKind {
-	case types.KindI1, types.KindI8, types.KindI32, types.KindI64:
-		w.guard(at, ssa.Shape{Map: true, Kind: m.KeyKind, Elem: m.ElemKind})
+// guardMap guards the map of operation, which pops pops operands, when native
+// code lowers the operation on it (ssa.Shape.Serves): any other operation keeps
+// the interpreter's, and a guard it never uses would only cost a deopt.
+func (w *walker) guardMap(operation instr.Opcode, m *types.MapType, pops int) {
+	top := len(w.stack)
+	var key, value types.Kind
+	if pops > 1 {
+		key = w.stack[top-pops+1].kind
+	}
+	if pops > 2 {
+		value = w.stack[top-1].kind
+	}
+	shape := ssa.Shape{Map: true, Kind: m.KeyKind, Elem: m.ElemKind}
+	if shape.Serves(operation, key, value) {
+		w.guard(top-pops, shape)
 	}
 }
 

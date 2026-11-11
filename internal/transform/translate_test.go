@@ -1242,15 +1242,27 @@ blk0: ()
 			return got
 		}
 
-		out, _, err := transform.Translate(transform.Module{}, nil, 1, mapped(types.TypeI32(), types.TypeI64()), 0)
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, mapped(types.TypeI32(), types.TypeI32()), 0)
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, []string{
+			"guard map key i32 elem i32", "map.len",
+			"guard map key i32 elem i32", "map.set",
+			"guard map key i32 elem i32", "map.delete",
+			"guard map key i32 elem i32", "map.get",
+			"guard map key i32 elem i32", "map.lookup",
+		}, sequence(out))
+
+		// An i64 element is read through a bridge, so a get or lookup of it gets no
+		// guard; the length, the delete, and a set of an i32 value are lowered.
+		out, _, err = transform.Translate(transform.Module{}, nil, 1, mapped(types.TypeI32(), types.TypeI64()), 0)
+		require.NoError(t, err)
 		require.Equal(t, []string{
 			"guard map key i32 elem i64", "map.len",
 			"guard map key i32 elem i64", "map.set",
 			"guard map key i32 elem i64", "map.delete",
-			"guard map key i32 elem i64", "map.get",
-			"guard map key i32 elem i64", "map.lookup",
+			"map.get",
+			"map.lookup",
 		}, sequence(out))
 
 		for _, key := range []types.Type{types.TypeI1(), types.TypeI8(), types.TypeI64()} {
@@ -1263,6 +1275,21 @@ blk0: ()
 			out, _, err = transform.Translate(transform.Module{}, nil, 1, mapped(key, types.TypeI32()), 0)
 			require.NoError(t, err)
 			require.Equal(t, []string{"map.len", "map.set", "map.delete", "map.get", "map.lookup"}, sequence(out))
+		}
+	})
+
+	t.Run("does not guard a map set of an i64 value, which always bridges", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{types.NewMapType(types.TypeI32(), types.TypeI64())}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I64_CONST, 2).Emit(instr.MAP_SET).Emit(instr.RETURN)
+			}),
+		}
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		for _, op := range out.Block(0).Operations {
+			require.NotEqual(t, ssa.OpGuardShape, op.Op)
 		}
 	})
 

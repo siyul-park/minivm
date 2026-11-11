@@ -180,6 +180,47 @@ func OverflowsI64(code instr.Opcode) bool {
 	}
 }
 
+// Serves reports whether native code lowers code on a map this shape admits,
+// given the kinds of its key and value operands (ignored by an operation without
+// them): the key is an integer held in its key kind's register class, and an
+// element or value fits one register, which excludes an i64, whose boxed word
+// may be a reference to a heap-promoted value. Translation guards a map only for
+// an operation Serves accepts, and the lowering lowers exactly those.
+func (s Shape) Serves(code instr.Opcode, key, value types.Kind) bool {
+	if !s.Map {
+		return false
+	}
+	switch s.Kind {
+	case types.KindI1, types.KindI8, types.KindI32, types.KindI64:
+	default:
+		return false
+	}
+	if code == instr.MAP_LEN {
+		return true
+	}
+	if s.Kind == types.KindI64 {
+		if key != types.KindI64 {
+			return false
+		}
+	} else if key != types.KindI1 && key != types.KindI8 && key != types.KindI32 {
+		return false
+	}
+	var held types.Kind
+	switch code {
+	case instr.MAP_GET, instr.MAP_LOOKUP:
+		held = s.Elem
+	case instr.MAP_SET:
+		held = value
+	default:
+		return true
+	}
+	switch held {
+	case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64, types.KindRef:
+		return true
+	}
+	return false
+}
+
 // String returns the operation name.
 func (o Op) String() string {
 	switch o {

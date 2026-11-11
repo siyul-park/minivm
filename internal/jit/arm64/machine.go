@@ -983,6 +983,12 @@ func (m *Machine) shape(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 		a.Emit(target.LDR(target.X16, target.X16, int16(jit.OffsetStructTyp)))
 		expect(a, uint64(op.Shape.Type), s.Deopt())
 	}
+	if op.Shape.Map {
+		a.Emit(target.LDR(target.X16, addr, int16(jit.OffsetData)))
+		a.Emit(target.LDR(target.X16, target.X16, int16(jit.OffsetMapTyp)))
+		a.Emit(target.LDRB(target.X16, target.X16, int16(jit.OffsetMapTypeElemKind)))
+		a.Emit(target.CMPI(target.X16, uint16(op.Shape.Elem)), target.BCondLabel(target.OpBNE, s.Deopt()))
+	}
 	if op.Shape.Function != 0 {
 		m.closure(a, addr, op.Shape, s)
 	}
@@ -1381,7 +1387,7 @@ func (m *Machine) mapLen(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 	if !has(op, 1, 1) {
 		return false
 	}
-	if _, ok := m.mapOf(op.Args[0]); !ok || !match(asm.RegTypeInt, asm.Width32, s.Reg(op.Results[0])) {
+	if shape, ok := m.mapOf(op.Args[0]); !ok || !shape.Serves(op.Code, 0, 0) || !match(asm.RegTypeInt, asm.Width32, s.Reg(op.Results[0])) {
 		return false
 	}
 	data := m.container(a, s.Reg(op.Args[0]))
@@ -1395,11 +1401,15 @@ func (m *Machine) mapLen(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 // was found. It mirrors types.get.
 func (m *Machine) mapGet(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	lookup := op.Code == instr.MAP_LOOKUP
-	if len(op.Args) != 2 || len(op.Results) != 1+btoi(lookup) {
+	results := 1
+	if lookup {
+		results = 2
+	}
+	if len(op.Args) != 2 || len(op.Results) != results {
 		return false
 	}
 	shape, ok := m.mapOf(op.Args[0])
-	if !ok || !keyed(s, shape, op.Args[1]) || !loadable(shape.Elem) || s.Type(op.Results[0]).Kind() != shape.Elem {
+	if !ok || !shape.Serves(op.Code, s.Type(op.Args[1]).Kind(), 0) || s.Type(op.Results[0]).Kind() != shape.Elem {
 		return false
 	}
 	if lookup && s.Type(op.Results[1]) != ssa.TypeI1 {
@@ -1449,12 +1459,7 @@ func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 		return false
 	}
 	shape, ok := m.mapOf(op.Args[0])
-	if !ok || !keyed(s, shape, op.Args[1]) {
-		return false
-	}
-	switch s.Type(op.Args[2]).Kind() {
-	case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64, types.KindRef:
-	default:
+	if !ok || !shape.Serves(op.Code, s.Type(op.Args[1]).Kind(), s.Type(op.Args[2]).Kind()) {
 		return false
 	}
 	exit, resume := s.Bridge()
@@ -1511,7 +1516,7 @@ func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 		return false
 	}
 	shape, ok := m.mapOf(op.Args[0])
-	if !ok || !keyed(s, shape, op.Args[1]) {
+	if !ok || !shape.Serves(op.Code, s.Type(op.Args[1]).Kind(), 0) {
 		return false
 	}
 	hit, done := a.Label(), a.Label()
@@ -1537,18 +1542,10 @@ func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 	return true
 }
 
-// mapOf is the shape of map operand v when a guard admitted it and its key is an
-// integer: the keys whose table words compare as the key itself.
+// mapOf is the shape of map operand v when a map guard admitted it.
 func (m *Machine) mapOf(v ssa.Value) (ssa.Shape, bool) {
 	shape, ok := m.guards[v]
-	if !ok || !shape.Map {
-		return shape, false
-	}
-	switch shape.Kind {
-	case types.KindI1, types.KindI8, types.KindI32, types.KindI64:
-		return shape, true
-	}
-	return shape, false
+	return shape, ok && shape.Map
 }
 
 // key is the table's key word of operand v, as types.keyWord makes it: an i64 is
@@ -1750,41 +1747,10 @@ func (m *Machine) ivreg(width asm.RegWidth) asm.VReg {
 	return asm.NewVReg(m.temp, asm.RegTypeInt, width)
 }
 
-// keyed reports whether key is held in the register class of shape's key kind: a
-// 32-bit lane for an i1, i8, or i32 key, a 64-bit word for an i64 key.
-func keyed(s compile.Site, shape ssa.Shape, key ssa.Value) bool {
-	if shape.Kind == types.KindI64 {
-		return s.Type(key) == ssa.TypeI64
-	}
-	switch s.Type(key) {
-	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32:
-		return true
-	}
-	return false
-}
-
-// loadable reports whether an element of kind is read as one register: every
-// kind but i64, whose boxed word may be a reference to a heap-promoted value.
-func loadable(kind types.Kind) bool {
-	switch kind {
-	case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64, types.KindRef:
-		return true
-	}
-	return false
-}
-
 // owns reports whether a map of elements of kind owns references through them:
 // a ref, or an i64 that is a reference to a heap-promoted value when it is wide.
 func owns(kind types.Kind) bool {
 	return kind == types.KindRef || kind == types.KindI64
-}
-
-// btoi is 1 for true, else 0.
-func btoi(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }
 
 // arith lowers add or sub at width. A constant operand within imm12 becomes

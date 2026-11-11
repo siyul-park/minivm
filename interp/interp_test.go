@@ -9417,6 +9417,35 @@ func TestWithThreshold(t *testing.T) {
 		}
 	})
 
+	t.Run("keeps ownership of a map read through a local declared with another element kind", func(t *testing.T) {
+		// One TypedMap[int32] of map[i32]string sits in two locals, the second
+		// declared map[i32]i32 (the verifier admits both through CONST_GET). The
+		// key kind alone would admit the second local's map.set, which would then
+		// overwrite a string reference without releasing it.
+		strMap := types.NewMapType(types.TypeI32(), types.TypeString())
+		intMap := types.NewMapType(types.TypeI32(), types.TypeI32())
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		b.Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_SET, 3)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 2000).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 7).Emit(instr.I32_REM_S)
+		b.Emit(instr.CONST_GET, 1).Emit(instr.CONST_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 2).Emit(instr.I32_REM_S).Emit(instr.SELECT).Emit(instr.MAP_SET)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 7).Emit(instr.I32_REM_S).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_SET)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.MAP_LEN)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code,
+			program.WithLocals(strMap, types.TypeI32(), types.TypeI32(), intMap),
+			program.WithTypes(strMap, intMap),
+			program.WithConstants(types.NewTypedMap[int32](strMap, 0), types.String("a"), types.String("bb")))
+		exits := compareNative(t, prog)
+		require.Positive(t, exits["deopt"], "the guard refuses the map declared with another element kind")
+	})
+
 	t.Run("walks a map with map.iter while native code sets and deletes in it", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 
@@ -9463,9 +9492,8 @@ func TestWithThreshold(t *testing.T) {
 		}
 		require.Equal(t, types.I32(want), runProgram(t, prog))
 
-		// Which inserted keys the walk produces depends on slot order, and each
-		// one it produces leaves the iterator one reference higher, so only the
-		// sum is compared.
+		// Which inserted keys the walk produces depends on slot order, so only
+		// the sum is compared, not the reference counts that follow that order.
 		profiler := prof.New()
 		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()

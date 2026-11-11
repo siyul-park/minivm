@@ -192,8 +192,8 @@ A batch is stored so native code takes its lowest address first, so a single-typ
 
 | Concern | Contract |
 |---|---|
-| Guard | `Translate` guards the map operand of each of these operations with `ssa.Shape{Map, Kind, Elem}` (the declared key and element kinds) when the declared map type has such a key. `itab` admits `*types.TypedMap[K]` of that key and deopts any other representation: a generic `Map`, a host view, another key kind. A refuted offset gets no guard, and the operation bridges. An operation on a map of float, string, or any other key is not guarded and bridges. |
-| Layout | `jit.OffsetMap*` name the table fields, taken from reflection and pinned by `TestMap_Layout`; `jit.Slot*` and `jit.MapHash` name the control states and the hash multiplier. |
+| Guard | `Translate` guards the map operand of an operation only when `ssa.Shape.Serves` accepts it, the one test the lowering applies too: a map of declared integer key, an operand in the key kind's register class, and an element or value that is not an `i64`. `guard.shape` checks the heap slot holds a `*types.TypedMap` of that key kind (the itab) and that the map's declared `MapType.ElemKind` equals the guarded element kind, since one `TypedMap[int32]` serves `map[i32]string` and `map[i32]i32` alike. Any other representation (a generic `Map`, a host view, another key kind, another element kind) deopts. A refuted offset gets no guard, and an operation `Serves` rejects keeps the interpreter's bridge with no guard. |
+| Layout | `jit.OffsetMapTyp`, `OffsetMapTypeElemKind`, and `OffsetMapZero` are constant offsets; the table fields are `jit.OffsetMap*` vars taken from reflection. `TestHeap_Layout` pins every one; `jit.Slot*` and `jit.MapHash` name the control states and the hash multiplier. |
 | Key word | an `i64` is its register; an `i32` zero-extends; an `i8` keeps its low byte; an `i1` is 0 or 1. The operand's static type must be the key kind's register class, else the operation bridges. |
 | Probe | from the home slot `((key ^ seed) * MapHash >> shift) & mask`, linear: an empty control byte misses, a full slot whose key word equals the key hits, a dead slot continues. |
 | Get | a hit loads the value word; a miss yields the map's `Zero`. A reference element is retained either way. `MAP_LOOKUP` adds the presence flag. An `i64` element bridges, since its word may reference a heap-promoted value. |
@@ -201,7 +201,7 @@ A batch is stored so native code takes its lowest address first, so a single-typ
 | Delete | a hit marks the slot dead and lowers `count`, leaving the key and value words, and releases the removed word of a reference or `i64` element. |
 | Walk | native code writes only control bytes, slot words, `count`, and `used`, never `gen` or a slice header, so a running `map.iter` sees native writes as it sees Go's. |
 
-`MAP_NEW_DEFAULT` is a callout served by `types.NewMapForType`. `MAP_CLEAR` and the `MAP_SET` slow path are bridges: the threaded handler is their one implementation.
+`MAP_NEW_DEFAULT` is a callout served by `Interpreter.newMapDefault`, the helper the threaded handler calls. `MAP_CLEAR` and the `MAP_SET` slow path are bridges: the threaded handler is their one implementation.
 
 ### Exit policy
 
