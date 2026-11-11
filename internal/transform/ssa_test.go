@@ -469,7 +469,8 @@ func TestSSAPass_Run(t *testing.T) {
 		require.NoError(t, program.Verify(got))
 
 		counted := got.Constants[0].(*types.Function)
-		require.NotEqual(t, instr.Format(fn.Code), instr.Format(counted.Code))
+		// The loop is laid out as written: no extra move carries the counter around.
+		require.Equal(t, instr.Format(fn.Code), instr.Format(counted.Code))
 
 		values, message := executionResult(t, got)
 		require.Equal(t, wantErr, message)
@@ -517,21 +518,24 @@ func TestSSAPass_Run(t *testing.T) {
 	})
 
 	t.Run("declines a branch its own layout would put out of range", func(t *testing.T) {
+		// The emitted tail is 4 bytes longer than the input's, which fits the branch only up to a limit.
 		for _, tc := range []struct {
 			name    string
-			pad     int
+			adds    int
+			offsets int
 			expects bool
 		}{
-			{name: "within reach", pad: 32736, expects: false},
-			{name: "out of reach", pad: 32748, expects: true}} {
-			require.Zero(t, tc.pad%6)
-
+			{name: "within reach", adds: 5459, expects: false},
+			{name: "out of reach", adds: 5458, offsets: 1, expects: true}} {
 			fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32())
 			done := fn.Label()
 			fn.Append(instr.MustNew(instr.I32_CONST, 1))
 			fn.BrIf(done)
-			for range tc.pad / 6 {
+			for range tc.adds {
 				fn.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.DROP))
+			}
+			for range tc.offsets {
+				fn.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.DROP))
 			}
 			fn.Append(instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.DUP), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.DROP))
 			fn.Bind(done).Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.RETURN))
@@ -544,7 +548,7 @@ func TestSSAPass_Run(t *testing.T) {
 
 			preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), false).Run(pass.NewManager(), input)
 			require.NoError(t, err)
-			require.Equal(t, tc.expects, preserved)
+			require.Equal(t, tc.expects, preserved, tc.name)
 			require.NoError(t, program.Verify(input))
 			if preserved {
 				require.Equal(t, before, input.String())
@@ -1779,6 +1783,137 @@ func TestSSAPass_Run(t *testing.T) {
 		values, message := executionResult(t, prog, interp.WithThreshold(-1))
 		require.Equal(t, wantErr, message)
 		require.Equal(t, want, values)
+	})
+
+	t.Run("lays out a loop so its hot path takes no unconditional branch but the back edge", func(t *testing.T) {
+		optimized := pass.NewPipeline[*ssa.Function]()
+		for _, p := range transform.O3() {
+			optimized.Add(p)
+		}
+		f64 := types.TypeF64()
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{f64, f64, types.TypeI32()},
+			Returns: []types.Type{types.TypeI32()}}).Locals(f64, f64, types.TypeI32(), f64, f64, f64, f64)
+		head, escaped, done := fn.Label(), fn.Label(), fn.Label()
+		fn.Append(instr.MustNew(instr.F64_CONST, 0), instr.MustNew(instr.LOCAL_SET, 3),
+			instr.MustNew(instr.F64_CONST, 0), instr.MustNew(instr.LOCAL_SET, 4),
+			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 5))
+		fn.Bind(head).Append(instr.MustNew(instr.LOCAL_GET, 5), instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_GE_S))
+		fn.BrIf(done)
+		fn.Append(
+			instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.F64_MUL), instr.MustNew(instr.LOCAL_SET, 6),
+			instr.MustNew(instr.LOCAL_GET, 4), instr.MustNew(instr.LOCAL_GET, 4), instr.MustNew(instr.F64_MUL), instr.MustNew(instr.LOCAL_SET, 7),
+			instr.MustNew(instr.LOCAL_GET, 6), instr.MustNew(instr.LOCAL_GET, 7), instr.MustNew(instr.F64_ADD),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(4)), instr.MustNew(instr.F64_GT))
+		fn.BrIf(escaped)
+		fn.Append(
+			instr.MustNew(instr.LOCAL_GET, 6), instr.MustNew(instr.LOCAL_GET, 7), instr.MustNew(instr.F64_SUB), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.F64_ADD), instr.MustNew(instr.LOCAL_SET, 8),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(2)), instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.F64_MUL), instr.MustNew(instr.LOCAL_GET, 4), instr.MustNew(instr.F64_MUL),
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.F64_ADD), instr.MustNew(instr.LOCAL_SET, 9),
+			instr.MustNew(instr.LOCAL_GET, 8), instr.MustNew(instr.LOCAL_SET, 3), instr.MustNew(instr.LOCAL_GET, 9), instr.MustNew(instr.LOCAL_SET, 4),
+			instr.MustNew(instr.LOCAL_GET, 5), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 5))
+		fn.Br(head)
+		fn.Bind(escaped).Append(instr.MustNew(instr.LOCAL_GET, 5), instr.MustNew(instr.RETURN))
+		fn.Bind(done).Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.RETURN))
+		escape := fn.MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.F64_CONST, math.Float64bits(-0.75)), instr.MustNew(instr.F64_CONST, math.Float64bits(0.1)), instr.MustNew(instr.I32_CONST, 50),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+			program.WithConstants(escape))
+		require.NoError(t, program.Verify(prog))
+		want, wantErr := executionResult(t, prog, interp.WithThreshold(-1))
+
+		got := duplicateConstants(prog)
+		_, err := transform.NewSSAPass(optimized, false).Run(pass.NewManager(), got)
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(got))
+		code := instr.Unmarshal(got.Constants[0].(*types.Function).Code)
+
+		jumps := 0
+		for _, in := range code {
+			if in.Opcode() == instr.BR {
+				jumps++
+			}
+		}
+		require.Equal(t, 1, jumps, instr.Format(got.Constants[0].(*types.Function).Code))
+		for _, opts := range [][]interp.Option{{interp.WithThreshold(-1)}, nil} {
+			values, message := executionResult(t, got, opts...)
+			require.Equal(t, wantErr, message)
+			require.Equal(t, want, values)
+		}
+	})
+
+	t.Run("stores a loop value as soon as it is computed unless a later value reads its local", func(t *testing.T) {
+		optimized := pass.NewPipeline[*ssa.Function]()
+		for _, p := range transform.O3() {
+			optimized.Add(p)
+		}
+		build := func(update ...instr.Instruction) *types.Function {
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32(), types.TypeI32(), types.TypeI32())
+			head, done := fn.Label(), fn.Label()
+			fn.Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.LOCAL_SET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.LOCAL_SET, 2),
+				instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 3))
+			fn.Bind(head).Append(instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_GE_S))
+			fn.BrIf(done)
+			fn.Append(update...)
+			fn.Append(instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 3))
+			fn.Br(head)
+			fn.Bind(done).Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN))
+			return fn.MustBuild()
+		}
+		adjacent := func(f *types.Function, op instr.Opcode) bool {
+			code := instr.Unmarshal(f.Code)
+			for i := 1; i < len(code); i++ {
+				if code[i-1].Opcode() == op && code[i].Opcode() == instr.LOCAL_SET {
+					return true
+				}
+			}
+			return false
+		}
+
+		for _, tc := range []struct {
+			name   string
+			update []instr.Instruction
+			early  bool
+		}{
+			{
+				name: "independent updates",
+				update: []instr.Instruction{
+					instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 1),
+					instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.I32_SUB), instr.MustNew(instr.LOCAL_SET, 2)},
+				early: true,
+			},
+			{
+				name: "a later value reads the first one's old value",
+				update: []instr.Instruction{
+					instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_ADD),
+					instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_MUL),
+					instr.MustNew(instr.LOCAL_SET, 2), instr.MustNew(instr.LOCAL_SET, 1)},
+			},
+		} {
+			f := build(tc.update...)
+			prog := program.New([]instr.Instruction{
+				instr.MustNew(instr.I32_CONST, 6), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+				program.WithConstants(f))
+			require.NoError(t, program.Verify(prog), tc.name)
+			want, wantErr := executionResult(t, prog, interp.WithThreshold(-1))
+
+			got := duplicateConstants(prog)
+			_, err := transform.NewSSAPass(optimized, false).Run(pass.NewManager(), got)
+			require.NoError(t, err, tc.name)
+			require.NoError(t, program.Verify(got), tc.name)
+			out := got.Constants[0].(*types.Function)
+			if tc.early {
+				require.True(t, adjacent(out, instr.I32_ADD), tc.name+"\n"+instr.Format(out.Code))
+				require.True(t, adjacent(out, instr.I32_SUB), tc.name+"\n"+instr.Format(out.Code))
+			}
+			for _, opts := range [][]interp.Option{{interp.WithThreshold(-1)}, nil} {
+				values, message := executionResult(t, got, opts...)
+				require.Equal(t, wantErr, message, tc.name)
+				require.Equal(t, want, values, tc.name)
+			}
+		}
 	})
 }
 
