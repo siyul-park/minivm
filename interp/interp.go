@@ -2374,7 +2374,7 @@ func deref[T types.Value](i *Interpreter, val types.Boxed) T {
 }
 
 // cut is a copy of the elements start through end of array.
-func cut[T int8 | int32 | int64 | float32 | float64 | bool](array types.TypedArray[T], start, end int) types.TypedArray[T] {
+func cut[T types.Scalar](array types.TypedArray[T], start, end int) types.TypedArray[T] {
 	if start < 0 || end > len(array) || start > end {
 		panic(ErrIndexOutOfRange)
 	}

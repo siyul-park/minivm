@@ -4168,7 +4168,7 @@ var (
 						if v3 {
 							i.releaseBox(v2)
 						}
-					case *types.TypedMap[string]:
+					case *types.StringMap:
 						v2, v3 := v1.Set(string(unboxRef[types.String](i, v0)), v4)
 						if v3 {
 							i.releaseBox(v2)
@@ -4245,7 +4245,7 @@ var (
 					v2 = v0.Len()
 				case *types.TypedMap[float64]:
 					v2 = v0.Len()
-				case *types.TypedMap[string]:
+				case *types.StringMap:
 					v2 = v0.Len()
 				case *types.Map:
 					v2 = v0.Len()
@@ -4305,7 +4305,7 @@ var (
 					if !v4 {
 						v3 = v1.Zero
 					}
-				case *types.TypedMap[string]:
+				case *types.StringMap:
 					v3, v4 = v1.Get(string(unboxRef[types.String](i, v0)))
 					if !v4 {
 						v3 = v1.Zero
@@ -4366,7 +4366,7 @@ var (
 					v3, v5 = v1.Get(v0.F32())
 				case *types.TypedMap[float64]:
 					v3, v5 = v1.Get(v0.F64())
-				case *types.TypedMap[string]:
+				case *types.StringMap:
 					v3, v5 = v1.Get(string(unboxRef[types.String](i, v0)))
 				case *types.Map:
 					v2, v4 := i.mapKey(v0)
@@ -4441,7 +4441,7 @@ var (
 					if v4 {
 						i.releaseBox(v3)
 					}
-				case *types.TypedMap[string]:
+				case *types.StringMap:
 					v3, v4 := v2.Set(string(unboxRef[types.String](i, v1)), v0)
 					if v4 {
 						i.releaseBox(v3)
@@ -4512,7 +4512,7 @@ var (
 					if v3 {
 						i.releaseBox(v2)
 					}
-				case *types.TypedMap[string]:
+				case *types.StringMap:
 					v2, v3 := v1.Delete(string(unboxRef[types.String](i, v0)))
 					if v3 {
 						i.releaseBox(v2)
@@ -4573,7 +4573,7 @@ var (
 					v0.Clear(func(value types.Boxed) {
 						i.releaseBox(value)
 					})
-				case *types.TypedMap[string]:
+				case *types.StringMap:
 					v0.Clear(func(value types.Boxed) {
 						i.releaseBox(value)
 					})
@@ -4655,7 +4655,7 @@ var (
 						v2.Elems[v1] = types.BoxF64(k)
 						v1++
 					})
-				case *types.TypedMap[string]:
+				case *types.StringMap:
 					v2 = i.newArray(types.NewArrayType(v0.Typ.Key), v0.Len())
 					v1 := 0
 					v0.Range(func(k string, _ types.Boxed) {
@@ -4723,7 +4723,7 @@ var (
 					v2 = v1
 				}
 				switch v2.(type) {
-				case *types.TypedMap[int8], *types.TypedMap[bool], *types.TypedMap[int32], *types.TypedMap[int64], *types.TypedMap[float32], *types.TypedMap[float64], *types.TypedMap[string], *types.Map:
+				case *types.TypedMap[int8], *types.TypedMap[bool], *types.TypedMap[int32], *types.TypedMap[int64], *types.TypedMap[float32], *types.TypedMap[float64], *types.StringMap, *types.Map:
 				default:
 					panic(ErrTypeMismatch)
 				}

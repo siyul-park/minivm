@@ -87,6 +87,10 @@ Larger signed values `MUST` use heap-backed `types.I64` objects and `KindRef`.
 
 Unboxing methods: `I32`, `I8`, `I64`, `F32`, `F64`, `Ref`, `Bool`. Callers `MUST` check `Kind()` unless the contract proves the kind.
 
+## Map Key Words
+
+A numeric `TypedMap` key is stored as one zero-extended word of its own width: `i1`, `i8`, `i32`, and `f32` use the low 8 or 32 bits of raw bits, `i64` and `f64` all 64. Keys compare as their Go values: a float `-0` equals `+0`, and a `NaN` equals nothing. `memory-model.md` owns the table that holds these words.
+
 ## Native Representation
 
 | Static type | Native representation |

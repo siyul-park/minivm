@@ -618,7 +618,7 @@ func literalBody(typ types.Type, literal string) ([]string, error) {
 	return splitLiteral(strings.TrimSuffix(strings.TrimPrefix(literal, prefix), "}"), ',')
 }
 
-func parseTypedArray[T int8 | int32 | int64 | float32 | float64 | bool](parts []string, parse func(string) (T, error)) (types.TypedArray[T], error) {
+func parseTypedArray[T types.Scalar](parts []string, parse func(string) (T, error)) (types.TypedArray[T], error) {
 	if len(parts) == 0 {
 		return types.TypedArray[T]{}, nil
 	}
