@@ -517,26 +517,36 @@ func TestSSAPass_Run(t *testing.T) {
 	})
 
 	t.Run("declines a branch its own layout would put out of range", func(t *testing.T) {
-		// The emitted tail is 4 bytes longer than the input's, which fits the branch only up to a limit.
+		// The emitted branch spans the filler and the tail, whose dup becomes a second constant.
+		four := []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_EQZ), instr.MustNew(instr.DROP)}
+		five := []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_EQZ), instr.MustNew(instr.I32_EQZ), instr.MustNew(instr.DROP)}
+		tail := []instr.Instruction{instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.DUP), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.DROP)}
+		tailWidth := 0
+		for _, in := range tail {
+			tailWidth += in.Width()
+		}
+		tailWidth += instr.MustNew(instr.I32_CONST, 7).Width() - instr.MustNew(instr.DUP).Width()
+
 		for _, tc := range []struct {
 			name    string
-			adds    int
-			offsets int
+			emitted int
 			expects bool
 		}{
-			{name: "within reach", adds: 5459, expects: false},
-			{name: "out of reach", adds: 5458, offsets: 1, expects: true}} {
+			{name: "within reach", emitted: math.MaxInt16, expects: false},
+			{name: "out of reach", emitted: math.MaxInt16 + 1, expects: true}} {
 			fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32())
 			done := fn.Label()
 			fn.Append(instr.MustNew(instr.I32_CONST, 1))
 			fn.BrIf(done)
-			for range tc.adds {
-				fn.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.DROP))
+			filler := tc.emitted - tailWidth
+			fives := filler % 4
+			for range (filler - 5*fives) / 4 {
+				fn.Append(four...)
 			}
-			for range tc.offsets {
-				fn.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.DROP))
+			for range fives {
+				fn.Append(five...)
 			}
-			fn.Append(instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.DUP), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.DROP))
+			fn.Append(tail...)
 			fn.Bind(done).Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.RETURN))
 			span := fn.MustBuild()
 			input := program.New([]instr.Instruction{
@@ -1844,23 +1854,26 @@ func TestSSAPass_Run(t *testing.T) {
 		}
 	})
 
-	t.Run("stores a loop value as soon as it is computed unless a later value reads its local", func(t *testing.T) {
+	t.Run("stores a loop value as soon as it is computed unless a later reader needs its local", func(t *testing.T) {
 		optimized := pass.NewPipeline[*ssa.Function]()
 		for _, p := range transform.O3() {
 			optimized.Add(p)
 		}
+		i32 := types.TypeI32()
+		const counter, first, second = 1, 2, 3
 		build := func(update ...instr.Instruction) *types.Function {
-			fn := types.NewFunctionBuilder(&types.FunctionType{
-				Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32(), types.TypeI32(), types.TypeI32())
+			fn := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{i32}, Returns: []types.Type{i32}}).Locals(i32, i32, i32)
 			head, done := fn.Label(), fn.Label()
-			fn.Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.LOCAL_SET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.LOCAL_SET, 2),
-				instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, 3))
-			fn.Bind(head).Append(instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_GE_S))
+			fn.Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.LOCAL_SET, counter),
+				instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.LOCAL_SET, first),
+				instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.LOCAL_SET, second))
+			fn.Bind(head).Append(instr.MustNew(instr.LOCAL_GET, counter), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_GE_S))
 			fn.BrIf(done)
+			fn.Append(instr.MustNew(instr.LOCAL_GET, counter), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, counter))
 			fn.Append(update...)
-			fn.Append(instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 3))
 			fn.Br(head)
-			fn.Bind(done).Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN))
+			fn.Bind(done).Append(instr.MustNew(instr.LOCAL_GET, first), instr.MustNew(instr.I32_CONST, 100), instr.MustNew(instr.I32_MUL),
+				instr.MustNew(instr.LOCAL_GET, second), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN))
 			return fn.MustBuild()
 		}
 		adjacent := func(f *types.Function, op instr.Opcode) bool {
@@ -1872,55 +1885,58 @@ func TestSSAPass_Run(t *testing.T) {
 			}
 			return false
 		}
+		get := func(slot uint64) instr.Instruction { return instr.MustNew(instr.LOCAL_GET, slot) }
+		set := func(slot uint64) instr.Instruction { return instr.MustNew(instr.LOCAL_SET, slot) }
+		plus := func(n uint64) []instr.Instruction {
+			return []instr.Instruction{instr.MustNew(instr.I32_CONST, n), instr.MustNew(instr.I32_ADD)}
+		}
 
 		for _, tc := range []struct {
 			name   string
 			update []instr.Instruction
-			early  bool
+			early  []instr.Opcode
 		}{
 			{
 				name: "independent updates",
-				update: []instr.Instruction{
-					instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 1),
-					instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.I32_SUB), instr.MustNew(instr.LOCAL_SET, 2)},
-				early: true,
+				update: append(append(append([]instr.Instruction{get(first)}, plus(3)...), set(first), get(second), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.I32_SUB)),
+					set(second)),
+				early: []instr.Opcode{instr.I32_ADD, instr.I32_SUB},
 			},
 			{
-				name: "the jump passes the first one's old value on",
-				update: []instr.Instruction{
-					instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_ADD),
-					instr.MustNew(instr.LOCAL_GET, 1),
-					instr.MustNew(instr.LOCAL_SET, 2), instr.MustNew(instr.LOCAL_SET, 1)},
+				name:   "a later value reads the first one's old value",
+				update: append(append([]instr.Instruction{get(first)}, plus(3)...), get(first), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_MUL), set(second), set(first)),
 			},
 			{
-				name: "a later value reads the first one's old value",
-				update: []instr.Instruction{
-					instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_ADD),
-					instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_MUL),
-					instr.MustNew(instr.LOCAL_SET, 2), instr.MustNew(instr.LOCAL_SET, 1)},
+				name:   "the jump passes the first one's old value to the second",
+				update: append(append([]instr.Instruction{get(second)}, plus(1)...), get(first), set(second), set(first)),
+			},
+			{
+				name:   "the jump passes the first one's old value on after summing",
+				update: []instr.Instruction{get(first), get(second), instr.MustNew(instr.I32_ADD), get(first), set(second), set(first)},
 			},
 		} {
-			f := build(tc.update...)
-			prog := program.New([]instr.Instruction{
-				instr.MustNew(instr.I32_CONST, 6), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
-				program.WithConstants(f))
-			require.NoError(t, program.Verify(prog), tc.name)
-			want, wantErr := executionResult(t, prog, interp.WithThreshold(-1))
+			t.Run(tc.name, func(t *testing.T) {
+				f := build(tc.update...)
+				prog := program.New([]instr.Instruction{
+					instr.MustNew(instr.I32_CONST, 4), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+					program.WithConstants(f))
+				require.NoError(t, program.Verify(prog))
+				want, wantErr := executionResult(t, prog, interp.WithThreshold(-1))
 
-			got := duplicateConstants(prog)
-			_, err := transform.NewSSAPass(optimized, false).Run(pass.NewManager(), got)
-			require.NoError(t, err, tc.name)
-			require.NoError(t, program.Verify(got), tc.name)
-			out := got.Constants[0].(*types.Function)
-			if tc.early {
-				require.True(t, adjacent(out, instr.I32_ADD), tc.name+"\n"+instr.Format(out.Code))
-				require.True(t, adjacent(out, instr.I32_SUB), tc.name+"\n"+instr.Format(out.Code))
-			}
-			for _, opts := range [][]interp.Option{{interp.WithThreshold(-1)}, nil} {
-				values, message := executionResult(t, got, opts...)
-				require.Equal(t, wantErr, message, tc.name)
-				require.Equal(t, want, values, tc.name)
-			}
+				got := duplicateConstants(prog)
+				_, err := transform.NewSSAPass(optimized, false).Run(pass.NewManager(), got)
+				require.NoError(t, err)
+				require.NoError(t, program.Verify(got))
+				out := got.Constants[0].(*types.Function)
+				for _, op := range tc.early {
+					require.True(t, adjacent(out, op), instr.Format(out.Code))
+				}
+				for _, opts := range [][]interp.Option{{interp.WithThreshold(-1)}, nil} {
+					values, message := executionResult(t, got, opts...)
+					require.Equal(t, wantErr, message)
+					require.Equal(t, want, values, instr.Format(out.Code))
+				}
+			})
 		}
 	})
 }

@@ -628,10 +628,10 @@ func (e *emitter) walk() bool {
 }
 
 // layout orders the blocks for emission: block 0 first, then, after a branch
-// no inverse comparison can flip, its fall-through successor, else the lowest
-// block not yet placed. A branch an inverse can flip keeps that order, since
-// the flip already puts a following exit behind it. A block that ends the
-// module goes last.
+// whose condition is not an exact-inverse comparison, its fall-through
+// successor, else the lowest block not yet placed. A comparison with an
+// inverse keeps the walk order, since the inversion already puts a following
+// exit behind the branch.
 func (e *emitter) layout() {
 	n := e.function.Len()
 	placed := make([]bool, n)
@@ -641,15 +641,8 @@ func (e *emitter) layout() {
 		if len(e.order) > 0 {
 			next = e.following(e.order[len(e.order)-1], placed)
 		}
-		for id := range n {
-			if next < 0 && !placed[id] && (len(e.order) == 0 || e.terms[id].Op != ssa.OpComplete) {
-				next = id
-			}
-		}
-		for id := range n {
-			if next < 0 && !placed[id] {
-				next = id
-			}
+		if next < 0 {
+			next = slices.Index(placed, false)
 		}
 		placed[next] = true
 		e.order = append(e.order, next)
@@ -662,22 +655,30 @@ func (e *emitter) layout() {
 	}
 }
 
-// following returns the block to place after id, or -1 when id does not end
-// in a branch that needs its fall-through successor next.
+// following returns the fall-through successor of id when it is a branch whose
+// condition is not an exact-inverse comparison and the successor is not yet
+// placed, else -1.
 func (e *emitter) following(id int, placed []bool) int {
 	term := e.terms[id]
-	if term.Op != ssa.OpBranch || len(term.Edges) != 2 {
+	if term.Op != ssa.OpBranch || len(term.Edges) != 2 || e.inverts(id) {
 		return -1
 	}
-	if last := len(e.ops[id]) - 1; last >= 0 && len(term.Args) == 1 && len(e.ops[id][last].Results) == 1 && e.ops[id][last].Results[0] == term.Args[0] {
-		if _, ok := inverses[e.ops[id][last].Code]; ok && e.ops[id][last].Op == ssa.OpExec {
-			return -1
-		}
-	}
-	if next := term.Edges[1].Block; !placed[next] && e.terms[next].Op != ssa.OpComplete {
+	if next := term.Edges[1].Block; !placed[next] {
 		return next
 	}
 	return -1
+}
+
+// inverts reports whether block id ends in a branch on a comparison with an
+// exact inverse.
+func (e *emitter) inverts(id int) bool {
+	term, ops := e.terms[id], e.ops[id]
+	if len(ops) == 0 || len(term.Args) != 1 {
+		return false
+	}
+	last := ops[len(ops)-1]
+	_, ok := inverses[last.Code]
+	return ok && last.Op == ssa.OpExec && len(last.Results) == 1 && last.Results[0] == term.Args[0]
 }
 
 func (e *emitter) open(id int) bool {
@@ -714,17 +715,21 @@ func (e *emitter) settle(id, index int) {
 	}
 	v := operation.Results[0]
 	at := slices.Index(edge.Args, v)
-	if at < 0 || e.stack[len(e.stack)-1] != v || e.uses[v] != 1 || e.homed[v] || e.remat[v] {
+	if at < 0 || e.stack[len(e.stack)-1] != v || e.uses[v] != 1 {
+		return
+	}
+	if e.homed[v] || e.remat[v] {
 		return
 	}
 	dest := e.home[e.function.Block(edge.Block).Params[at]]
-	reads := func(w ssa.Value) bool {
-		source, ok := e.source[w]
-		return e.home[w] == dest && e.homed[w] ||
-			ok && e.remat[w] && source.Op == ssa.OpLoad && source.Slot.Space == ssa.SpaceLocal && source.Slot.Index == dest
+	reads := func(w ssa.Value) bool { return e.homed[w] && e.home[w] == dest }
+	for _, w := range edge.Args {
+		if w != v && !e.settled[w] && reads(w) {
+			return
+		}
 	}
 	for _, later := range e.ops[id][index+1:] {
-		if later.Slot.Space == ssa.SpaceLocal && later.Slot.Index == dest && (later.Op == ssa.OpLoad || later.Op == ssa.OpStore) || slices.ContainsFunc(later.Args, reads) {
+		if slices.ContainsFunc(later.Args, reads) {
 			return
 		}
 	}
