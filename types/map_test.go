@@ -94,7 +94,7 @@ func TestTypedMap(t *testing.T) {
 
 // replay applies one random operation sequence to a TypedMap and to a Go map,
 // the reference model, and requires every observable result to agree.
-func replay[K bool | int8 | int32 | int64 | float32 | float64](t *testing.T, typ *types.MapType, pool []K, ops int, seed uint64) {
+func replay[K types.Scalar](t *testing.T, typ *types.MapType, pool []K, ops int, seed uint64) {
 	rng := rand.New(rand.NewPCG(seed, 1))
 	m := types.NewTypedMap[K](typ, rng.IntN(4)*8)
 	model := map[K]types.Boxed{}
@@ -327,7 +327,7 @@ func TestTypedMap_Set(t *testing.T) {
 		}
 	})
 
-	t.Run("keys crafted against the default multiplier do not cluster", func(t *testing.T) {
+	t.Run("keys crafted against the unseeded hash do not cluster", func(t *testing.T) {
 		const multiplier = uint64(0x9E3779B97F4A7C15)
 		inverse := multiplier
 		for range 6 {
@@ -350,6 +350,20 @@ func TestTypedMap_Set(t *testing.T) {
 			}
 		}
 		require.Less(t, runs, n/2, "crafted keys share one probe cluster")
+	})
+
+	t.Run("tables built the same way hash with different seeds", func(t *testing.T) {
+		orders := map[string]bool{}
+		for range 16 {
+			m := types.NewTypedMap[int64](types.NewMapType(types.TypeI64(), types.TypeI32()), 0)
+			for k := range int64(24) {
+				m.Set(k, types.BoxI32(1))
+			}
+			var order []int64
+			m.Range(func(key int64, _ types.Boxed) { order = append(order, key) })
+			orders[fmt.Sprint(order)] = true
+		}
+		require.Greater(t, len(orders), 1, "every table walked its slots in the same order")
 	})
 
 	t.Run("reuses deleted slots without rehashing", func(t *testing.T) {
@@ -749,29 +763,29 @@ func TestMapIterator_Next(t *testing.T) {
 		const present = 200
 		tests := []struct {
 			name   string
-			mutate func(m *types.TypedMap[int32], rng *rand.Rand)
+			mutate func(m *types.TypedMap[int32], rng *rand.Rand, del func(int32))
 		}{
-			{"set and delete", func(m *types.TypedMap[int32], rng *rand.Rand) {
+			{"set and delete", func(m *types.TypedMap[int32], rng *rand.Rand, del func(int32)) {
 				key := int32(rng.IntN(2 * present))
 				if rng.IntN(2) == 0 {
 					m.Set(key, 1)
 				} else {
-					m.Delete(key)
+					del(key)
 				}
 			}},
-			{"growth every step", func(m *types.TypedMap[int32], rng *rand.Rand) {
+			{"growth every step", func(m *types.TypedMap[int32], rng *rand.Rand, del func(int32)) {
 				for range 64 {
 					m.Set(int32(present+rng.IntN(1<<20)), 1)
 				}
-				m.Delete(int32(rng.IntN(present)))
+				del(int32(rng.IntN(present)))
 			}},
-			{"delete churn", func(m *types.TypedMap[int32], rng *rand.Rand) {
+			{"delete churn", func(m *types.TypedMap[int32], rng *rand.Rand, del func(int32)) {
 				for range 8 {
 					key := int32(present + rng.IntN(64))
 					m.Set(key, 1)
-					m.Delete(key)
+					del(key)
 				}
-				m.Delete(int32(rng.IntN(present)))
+				del(int32(rng.IntN(present)))
 			}},
 		}
 		for _, tt := range tests {
@@ -782,9 +796,11 @@ func TestMapIterator_Next(t *testing.T) {
 					for k := range int32(present) {
 						m.Set(k, 1)
 					}
-					originals := map[int32]bool{}
-					for k := range int32(present) {
-						originals[k] = true
+					deleted := map[int32]bool{}
+					del := func(key int32) {
+						if _, ok := m.Delete(key); ok {
+							deleted[key] = true
+						}
 					}
 					visited := map[int32]bool{}
 					it := types.NewMapIterator(1, m)
@@ -792,17 +808,12 @@ func TestMapIterator_Next(t *testing.T) {
 						key := int32(it.Current().(types.I32))
 						_, live := m.Get(key)
 						require.True(t, live, "produced a deleted key %d", key)
-						require.False(t, visited[key], "key %d visited twice", key)
+						require.False(t, visited[key] && !deleted[key], "key %d visited twice without a delete", key)
 						visited[key] = true
-						tt.mutate(m, rng)
-						for key := range originals {
-							if _, live := m.Get(key); !live {
-								delete(originals, key)
-							}
-						}
+						tt.mutate(m, rng, del)
 					}
-					for key := range originals {
-						require.True(t, visited[key], "present-throughout key %d skipped", key)
+					for key := range int32(present) {
+						require.True(t, visited[key] || deleted[key], "present-throughout key %d skipped", key)
 					}
 				}
 			})
@@ -880,7 +891,6 @@ func TestTypedMap_Clone(t *testing.T) {
 		require.Equal(t, types.BoxRef(1), v)
 		require.Equal(t, 1, src.Len())
 	})
-
 }
 
 func TestTypedMap_String(t *testing.T) {
@@ -907,8 +917,8 @@ func TestTypedMap_String(t *testing.T) {
 		m.Set(1, types.BoxI32(2))
 		require.Equal(t, "map[f64]i32{1: 2}", m.String())
 	})
-
 }
+
 func TestStringMap_Kind(t *testing.T) {
 	require.Equal(t, types.KindRef, types.NewStringMap(types.NewMapType(types.TypeString(), types.TypeI32()), 0).Kind())
 }

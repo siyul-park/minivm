@@ -26,7 +26,7 @@ The minimum Go version is the version declared in `go.mod`.
 | `pass`, `analysis` | experimental | write program-level passes and query bytecode CFG facts through `pass.Manager` |
 | `internal/...`, `cli`, `cmd` | none | implementation |
 
-`types.TypedMap[K]` holds numeric keys only (`bool`, `int8`, `int32`, `int64`, `float32`, `float64`); a string-keyed map is `types.StringMap`, built by `types.NewStringMap`. An embedder that instantiated `TypedMap[string]` or `NewTypedMap[string]` switches to those.
+`types.TypedMap[K]` takes a key from the closed set `bool`, `int8`, `int32`, `int64`, `float32`, `float64` (`types.Scalar`); a string-keyed map is `types.StringMap`.
 
 An experimental package `MAY` change its API in a minor release. SSA translation and SSA passes are internal (`internal/transform`, `internal/ssa`): an external pass works on `*program.Program`. No exported signature in a public package names an `internal/` type.
 

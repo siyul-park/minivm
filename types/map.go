@@ -16,7 +16,7 @@ import (
 // pointer-free open-addressing table, so native code can read them without
 // touching a Go map. A TypedMap `MUST` come from NewTypedMap; its zero value is
 // not usable. Iteration follows slot order, which is unspecified to callers.
-type TypedMap[K tableKey] struct {
+type TypedMap[K Scalar] struct {
 	Typ   *MapType
 	Zero  Boxed
 	table table
@@ -79,7 +79,6 @@ type MapType struct {
 type MapIterator struct {
 	iter    *reflect.MapIter
 	table   *table
-	live    func(key uint64) bool
 	slots   []uint64
 	ctrl    []byte
 	pos     int
@@ -92,17 +91,12 @@ type MapIterator struct {
 	done    bool
 }
 
-// tableKey is the key types a TypedMap holds in its table.
-type tableKey interface {
-	bool | int8 | int32 | int64 | float32 | float64
-}
-
 // table is an open-addressing hash table from a numeric key word to a Boxed
 // value word. It holds no Go pointers besides its two slices. Slot i keeps its
 // key at slots[2i] and its value at slots[2i+1], and its state at ctrl[i]. The
-// capacity is a power of two, and a key's home slot is its word times the odd
-// multiplier mul, shifted right by shift. mul is random per table so no key set
-// can be crafted to collide. Probing is linear; a deleted slot becomes a
+// capacity is a power of two, and a key's home slot is its word xor seed,
+// times tableHash, shifted right by shift. seed is random per table, so keys
+// crafted to collide for the bare constant spread out. Probing is linear; a deleted slot becomes a
 // tombstone that a later insert reuses, and a rehash into fresh arrays drops
 // tombstones. Keys compare as their Go values, so floats follow Go map keys:
 // -0 and +0 are one key whose latest written bits are kept, and a NaN never
@@ -112,7 +106,7 @@ type table struct {
 	slots []uint64
 	mask  uint64
 	shift uint64
-	mul   uint64
+	seed  uint64
 	count int
 	used  int
 	gen   uint64
@@ -131,7 +125,10 @@ const (
 	slotDead
 )
 
-const tableMinCapacity = 8
+const (
+	tableMinCapacity = 8
+	tableHash        = 0x9E3779B97F4A7C15
+)
 
 const (
 	mapIteratorInvalid mapIteratorKind = iota
@@ -185,7 +182,7 @@ func NewMapForType(typ *MapType, capacity int) Value {
 }
 
 // NewTypedMap creates a typed map sized for capacity entries.
-func NewTypedMap[K tableKey](typ *MapType, capacity int) *TypedMap[K] {
+func NewTypedMap[K Scalar](typ *MapType, capacity int) *TypedMap[K] {
 	m := &TypedMap[K]{Typ: typ, Zero: Zero(typ.ElemKind)}
 	m.table.init(capacity)
 	return m
@@ -746,19 +743,40 @@ func (it *MapIterator) decode(key uint64) Value {
 	}
 }
 
-// walk starts it on m's current slots. A NaN key cannot be deleted, so it is
-// always live; any other key is live while the table still holds it.
-func walk[K tableKey](it *MapIterator, m *TypedMap[K]) {
-	t := &m.table
-	it.table, it.slots, it.ctrl, it.gen = t, t.slots, t.ctrl, t.gen
-	it.live = func(word uint64) bool {
-		key := wordKey[K](word)
-		_, ok := get(t, key)
-		return ok || key != key
+// live reports whether the live table still holds the key word, which a rehash
+// may have moved off the slots the walk started on.
+func (it *MapIterator) live(word uint64) bool {
+	switch it.kind {
+	case mapIteratorI8:
+		return holds[int8](it.table, word)
+	case mapIteratorI1:
+		return holds[bool](it.table, word)
+	case mapIteratorI32:
+		return holds[int32](it.table, word)
+	case mapIteratorI64:
+		return holds[int64](it.table, word)
+	case mapIteratorF32:
+		return holds[float32](it.table, word)
+	default:
+		return holds[float64](it.table, word)
 	}
 }
 
-func get[K tableKey](t *table, key K) (uint64, bool) {
+// holds reports whether t holds the key. A NaN key cannot be deleted, so it is
+// always held.
+func holds[K Scalar](t *table, word uint64) bool {
+	key := wordKey[K](word)
+	_, ok := get(t, key)
+	return ok || key != key
+}
+
+// walk starts it on m's current slots.
+func walk[K Scalar](it *MapIterator, m *TypedMap[K]) {
+	t := &m.table
+	it.table, it.slots, it.ctrl, it.gen = t, t.slots, t.ctrl, t.gen
+}
+
+func get[K Scalar](t *table, key K) (uint64, bool) {
 	hit, _ := probe(t, key)
 	if hit < 0 {
 		return 0, false
@@ -766,7 +784,7 @@ func get[K tableKey](t *table, key K) (uint64, bool) {
 	return t.slots[2*hit+1], true
 }
 
-func set[K tableKey](t *table, key K, value uint64) (uint64, bool) {
+func set[K Scalar](t *table, key K, value uint64) (uint64, bool) {
 	hit, free := probe(t, key)
 	if hit >= 0 {
 		old := t.slots[2*hit+1]
@@ -789,7 +807,7 @@ func set[K tableKey](t *table, key K, value uint64) (uint64, bool) {
 // rehash moves every entry into fresh arrays, doubling them when more than
 // three eighths of the slots hold live entries and keeping the size otherwise
 // so tombstones alone never force growth.
-func rehash[K tableKey](t *table) {
+func rehash[K Scalar](t *table) {
 	ctrl, slots := t.ctrl, t.slots
 	n := len(ctrl)
 	if t.count*8 > n*3 {
@@ -808,7 +826,7 @@ func rehash[K tableKey](t *table) {
 	}
 }
 
-func remove[K tableKey](t *table, key K) (uint64, bool) {
+func remove[K Scalar](t *table, key K) (uint64, bool) {
 	hit, _ := probe(t, key)
 	if hit < 0 {
 		return 0, false
@@ -822,13 +840,13 @@ func remove[K tableKey](t *table, key K) (uint64, bool) {
 // probe returns the slot holding key, or -1, and the slot a new key would
 // take: the first tombstone on the path, else the empty slot that ended it.
 // Slots compare as Go values, so a NaN key never hits and -0 hits +0.
-func probe[K tableKey](t *table, key K) (hit, free int) {
+func probe[K Scalar](t *table, key K) (hit, free int) {
 	var zero K
 	word := keyWord(key)
 	if key == zero {
 		word = 0
 	}
-	i := (word * t.mul >> t.shift) & t.mask
+	i := ((word ^ t.seed) * tableHash >> t.shift) & t.mask
 	free = -1
 	for {
 		switch t.ctrl[i] {
@@ -855,7 +873,7 @@ func (t *table) init(capacity int) {
 	for n*3 < capacity*4 {
 		n *= 2
 	}
-	t.mul = rand.Uint64() | 1
+	t.seed = rand.Uint64()
 	t.alloc(n)
 }
 
@@ -883,7 +901,7 @@ func (t *table) each(fn func(key, value uint64)) {
 }
 
 // keyWord returns the key in the low bits of a word; wordKey inverts it.
-func keyWord[K tableKey](key K) uint64 {
+func keyWord[K Scalar](key K) uint64 {
 	switch unsafe.Sizeof(key) {
 	case 1:
 		return uint64(*(*uint8)(unsafe.Pointer(&key)))
@@ -894,7 +912,7 @@ func keyWord[K tableKey](key K) uint64 {
 	}
 }
 
-func wordKey[K tableKey](word uint64) K {
+func wordKey[K Scalar](word uint64) K {
 	var key K
 	switch unsafe.Sizeof(key) {
 	case 1:

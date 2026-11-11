@@ -282,7 +282,7 @@ func extentOf(t reflect.Type) extent {
 	}
 }
 
-func typedArray[T int8 | int32 | int64 | float32 | float64 | bool](
+func typedArray[T types.Scalar](
 	bounds extent,
 	stride uintptr,
 	read func(unsafe.Pointer) T,
@@ -655,7 +655,7 @@ func (e *Encoder) alloc(val types.Value) (types.Boxed, error) {
 // is read as a standalone value and narrowed straight to K: routing it through a
 // slot first would allocate a heap reference for an i64 too large to box and then
 // drop it, since such a map never stores a key as a reference.
-func typedMap[K int8 | int32 | int64 | float32 | float64 | bool](key *conversion, narrow func(types.Value) (K, error)) func(*Encoder, types.Value, unsafe.Pointer, types.Boxed) error {
+func typedMap[K types.Scalar](key *conversion, narrow func(types.Value) (K, error)) func(*Encoder, types.Value, unsafe.Pointer, types.Boxed) error {
 	return func(e *Encoder, m types.Value, p unsafe.Pointer, value types.Boxed) error {
 		val, err := key.value(e, p)
 		if err != nil {

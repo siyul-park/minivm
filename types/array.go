@@ -7,7 +7,7 @@ import (
 )
 
 // TypedArray is a dense array of a primitive element type.
-type TypedArray[T int8 | int32 | int64 | float32 | float64 | bool] []T
+type TypedArray[T Scalar] []T
 
 // Array is a heap array of boxed elements of a ref or i64-wide element type.
 type Array struct {
@@ -191,7 +191,7 @@ func (t *ArrayType) String() string {
 	return "[]" + t.Elem.String()
 }
 
-func formatElem[T int8 | int32 | int64 | float32 | float64 | bool](v T) string {
+func formatElem[T Scalar](v T) string {
 	switch x := any(v).(type) {
 	case bool:
 		return I1(x).String()

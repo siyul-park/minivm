@@ -2,6 +2,11 @@ package types
 
 import "fmt"
 
+// Scalar is the Go type of a scalar array element or map key.
+type Scalar interface {
+	bool | int8 | int32 | int64 | float32 | float64
+}
+
 // I32, I64, F32, and F64 are scalar VM values.
 type I32 int32
 
