@@ -28,6 +28,9 @@ type emitter struct {
 	loops    map[int]bool
 	liveIn   []map[ssa.Value]bool
 	placed   bool
+	order    []int
+	after    []int
+	settled  map[ssa.Value]bool
 	spare    map[ssa.Value]bool
 	produced map[ssa.Value]bool
 	used     map[ssa.Value]int
@@ -75,6 +78,7 @@ func emit(function *ssa.Function, constants *pool, module bool, source *types.Fu
 	if !e.collect() {
 		return nil, nil, false
 	}
+	e.layout()
 	e.liveness()
 	for range len(e.uses) + 1 {
 		e.params()
@@ -600,26 +604,81 @@ func (e *emitter) live(id int, keep func(ssa.Value) bool, link func(a, b ssa.Val
 
 func (e *emitter) walk() bool {
 	e.code, e.fixes, e.needed = nil, nil, ssa.NoValue
-	e.used = map[ssa.Value]int{}
+	e.used, e.settled = map[ssa.Value]int{}, map[ssa.Value]bool{}
 	e.starts = make([]int, e.function.Len())
-	for id := range e.function.Len() {
+	for _, id := range e.order {
 		e.starts[id], e.floor = len(e.code), len(e.code)
 		if !e.open(id) {
 			return false
 		}
-		for _, operation := range e.ops[id] {
+		for i, operation := range e.ops[id] {
 			if operation.Op != ssa.OpStore && operation.Op != ssa.OpExec && (e.remat[operation.Results[0]] || e.uses[operation.Results[0]] == 0) {
 				continue
 			}
 			if !e.perform(operation) {
 				return false
 			}
+			e.settle(id, i)
 		}
 		if !e.close(id) {
 			return false
 		}
 	}
 	return true
+}
+
+// layout orders the blocks for emission: block 0 first, then, after a branch
+// whose condition is not an exact-inverse comparison, its fall-through
+// successor, else the lowest block not yet placed. A comparison with an
+// inverse keeps the walk order, since the inversion already puts a following
+// exit behind the branch.
+func (e *emitter) layout() {
+	n := e.function.Len()
+	placed := make([]bool, n)
+	e.order, e.after = nil, make([]int, n)
+	for len(e.order) < n {
+		next := -1
+		if len(e.order) > 0 {
+			next = e.following(e.order[len(e.order)-1], placed)
+		}
+		if next < 0 {
+			next = slices.Index(placed, false)
+		}
+		placed[next] = true
+		e.order = append(e.order, next)
+	}
+	for i, id := range e.order {
+		e.after[id] = -1
+		if i+1 < n {
+			e.after[id] = e.order[i+1]
+		}
+	}
+}
+
+// following returns the fall-through successor of id when it is a branch whose
+// condition is not an exact-inverse comparison and the successor is not yet
+// placed, else -1.
+func (e *emitter) following(id int, placed []bool) int {
+	term := e.terms[id]
+	if term.Op != ssa.OpBranch || len(term.Edges) != 2 || e.inverts(id) {
+		return -1
+	}
+	if next := term.Edges[1].Block; !placed[next] {
+		return next
+	}
+	return -1
+}
+
+// inverts reports whether block id ends in a branch on a comparison with an
+// exact inverse.
+func (e *emitter) inverts(id int) bool {
+	term, ops := e.terms[id], e.ops[id]
+	if len(ops) == 0 || len(term.Args) != 1 {
+		return false
+	}
+	last := ops[len(ops)-1]
+	_, ok := inverses[last.Code]
+	return ok && last.Op == ssa.OpExec && len(last.Results) == 1 && last.Results[0] == term.Args[0]
 }
 
 func (e *emitter) open(id int) bool {
@@ -641,6 +700,45 @@ func (e *emitter) open(id int) bool {
 	return true
 }
 
+// settle stores operation's result to the loop param it feeds as soon as it is
+// computed, so the code runs the producer and its store back to back, when
+// nothing computed after it reads that param's local. The final walk only: a
+// placeholder home says nothing about which values share a local.
+func (e *emitter) settle(id, index int) {
+	term := e.terms[id]
+	if !e.placed || term.Op != ssa.OpJump || !e.loops[term.Edges[0].Block] {
+		return
+	}
+	edge, operation := term.Edges[0], e.ops[id][index]
+	if len(operation.Results) != 1 || len(e.stack) == 0 {
+		return
+	}
+	v := operation.Results[0]
+	at := slices.Index(edge.Args, v)
+	if at < 0 || e.stack[len(e.stack)-1] != v || e.uses[v] != 1 {
+		return
+	}
+	if e.homed[v] || e.remat[v] {
+		return
+	}
+	dest := e.home[e.function.Block(edge.Block).Params[at]]
+	reads := func(w ssa.Value) bool { return e.homed[w] && e.home[w] == dest }
+	for _, w := range edge.Args {
+		if w != v && !e.settled[w] && reads(w) {
+			return
+		}
+	}
+	for _, later := range e.ops[id][index+1:] {
+		if slices.ContainsFunc(later.Args, reads) {
+			return
+		}
+	}
+	e.used[v]++
+	e.write(instr.LOCAL_SET, uint64(dest))
+	e.stack = e.stack[:len(e.stack)-1]
+	e.settled[v] = true
+}
+
 func (e *emitter) close(id int) bool {
 	term := e.terms[id]
 	switch term.Op {
@@ -653,7 +751,7 @@ func (e *emitter) close(id int) bool {
 		if !e.module || !e.carry(term.Args) {
 			return false
 		}
-		if id != e.function.Len()-1 {
+		if e.after[id] >= 0 {
 			e.branch(instr.BR, e.function.Len())
 		}
 	case ssa.OpJump:
@@ -662,8 +760,8 @@ func (e *emitter) close(id int) bool {
 		if e.loops[edge.Block] {
 			args = nil
 			for i, param := range e.function.Block(edge.Block).Params {
-				// An argument already in its param's local needs no move.
-				if home, ok := e.home[edge.Args[i]]; ok && (edge.Args[i] == param || e.placed && home == e.home[param]) {
+				// An argument already in its param's local, or stored as it was computed, needs no move.
+				if home, ok := e.home[edge.Args[i]]; ok && (edge.Args[i] == param || e.placed && home == e.home[param]) || e.settled[edge.Args[i]] {
 					continue
 				}
 				args, moves = append(args, edge.Args[i]), append(moves, e.home[param])
@@ -687,7 +785,7 @@ func (e *emitter) close(id int) bool {
 			return true
 		}
 		last := len(e.code) - 1
-		if last >= e.floor && term.Edges[0].Block == id+1 {
+		if last >= e.floor && term.Edges[0].Block == e.after[id] {
 			if inverse, ok := inverses[e.code[last].Opcode()]; ok {
 				e.code[last] = instr.MustNew(inverse)
 				e.branch(instr.BR_IF, term.Edges[1].Block)
@@ -794,7 +892,7 @@ func (e *emitter) results(results []ssa.Value) bool {
 }
 
 func (e *emitter) leave(id, next int) {
-	if next != id+1 {
+	if next != e.after[id] {
 		e.branch(instr.BR, next)
 	}
 }
