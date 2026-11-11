@@ -202,6 +202,12 @@ var callouts = [256]callout{
 	instr.STRUCT_NEW_DEFAULT: func(i *Interpreter, code []byte, _ [3]types.Boxed) types.Value {
 		return i.newStruct(i.types[index(code)].(*types.StructType))
 	},
+	instr.MAP_NEW_DEFAULT: func(i *Interpreter, code []byte, args [3]types.Boxed) types.Value {
+		if args[0].I32() < 0 {
+			panic(ErrIndexOutOfRange)
+		}
+		return types.NewMapForType(i.types[index(code)].(*types.MapType), int(args[0].I32()))
+	},
 	instr.ARRAY_SLICE: func(i *Interpreter, _ []byte, args [3]types.Boxed) types.Value {
 		if hosted(i.heap[args[0].Ref()]) {
 			panic(ErrTypeMismatch)

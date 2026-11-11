@@ -70,13 +70,19 @@ type Slot struct {
 // (types.TypedArray[T] for a scalar Kind, *types.Array for KindRef); when
 // Struct is set, a *types.Struct of struct type Type; when Function is set,
 // a *types.Closure over that function of function type Type holding at
-// least Captures upvals. A CALL carries the closure Shape its callee is
+// least Captures upvals; when Map is set, a *types.TypedMap of key kind Kind.
+// A CALL carries the closure Shape its callee is
 // known to have, or, when its callee is unknown, Type alone: the function
 // type every callee shares.
 type Shape struct {
-	// Kind is the admitted array element kind; meaningless when Struct or
-	// Function.
+	// Kind is the admitted array element kind, or the key kind when Map;
+	// meaningless when Struct or Function.
 	Kind types.Kind
+	// Map reports whether the admitted representation is a numeric-keyed
+	// map: a *types.TypedMap whose key kind is Kind.
+	Map bool
+	// Elem is the declared element kind of the admitted map, when Map.
+	Elem types.Kind
 	// Struct reports whether the admitted representation is a struct of
 	// type Type instead of an array of Kind.
 	Struct bool

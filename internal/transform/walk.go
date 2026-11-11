@@ -259,11 +259,20 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		if m == nil {
 			return false
 		}
+		w.guardMap(len(w.stack)-2, m)
 		results := []fact{{kind: m.ElemKind}}
 		if operation == instr.MAP_LOOKUP {
 			results = append(results, fact{kind: types.KindI1})
 		}
 		return w.emit(operation, 2, results)
+	case instr.MAP_LEN, instr.MAP_SET, instr.MAP_DELETE:
+		pops := len(instr.TypeOf(operation).Pop)
+		if len(w.stack) < pops {
+			return false
+		}
+		if m := w.stack[len(w.stack)-pops].mapType; m != nil {
+			w.guardMap(len(w.stack)-pops, m)
+		}
 	case instr.MAP_NEW_DEFAULT:
 		if len(w.stack) == 0 {
 			return false
@@ -360,6 +369,16 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		results[i] = fact{kind: types.Kind(kind)}
 	}
 	return w.emit(operation, len(effect.Pop), results)
+}
+
+// guardMap guards the map at stack position at when its declared key is an
+// integer: native code reads such a map's table, and any other key kind keeps
+// the interpreter's map operation.
+func (w *walker) guardMap(at int, m *types.MapType) {
+	switch m.KeyKind {
+	case types.KindI1, types.KindI8, types.KindI32, types.KindI64:
+		w.guard(at, ssa.Shape{Map: true, Kind: m.KeyKind, Elem: m.ElemKind})
+	}
 }
 
 func (w *walker) dup() bool {

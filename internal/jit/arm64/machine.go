@@ -55,6 +55,12 @@ type bound struct {
 	index asm.VReg
 }
 
+// table is the words of a guarded map's table that a probe reads: the map's
+// own data word, the control bytes, the key and value words, and the mask.
+type table struct {
+	data, ctrl, slots, mask asm.VReg
+}
+
 // imm12 is the largest immediate the lowerings place in one 12-bit field.
 const imm12 = 0xFFF
 
@@ -770,6 +776,14 @@ func (m *Machine) exec(a *asm.Assembler, op ssa.Operation, s compile.Site) bool 
 		return m.structGet(a, op, s)
 	case instr.STRUCT_SET:
 		return m.structSet(a, op, s)
+	case instr.MAP_LEN:
+		return m.mapLen(a, op, s)
+	case instr.MAP_GET, instr.MAP_LOOKUP:
+		return m.mapGet(a, op, s)
+	case instr.MAP_SET:
+		return m.mapSet(a, op, s)
+	case instr.MAP_DELETE:
+		return m.mapDelete(a, op, s)
 	default:
 		return false
 	}
@@ -1319,15 +1333,6 @@ func (m *Machine) structGet(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 	return true
 }
 
-// retain counts one more reference to ref, as the interpreter's retainBox:
-// any reference, the null one included.
-func (m *Machine) retain(a *asm.Assembler, ref asm.VReg) {
-	skip := a.Label()
-	m.count(a, ref, skip, true)
-	a.Emit(target.ADDI(target.X17, target.X17, 1), target.STR(target.X17, target.X16, 0))
-	a.Bind(skip)
-}
-
 // structSet writes a statically typed value to a dynamically indexed guarded
 // struct. Bounds use the runtime field count; a field whose declared kind
 // differs from the value's deopts, since threaded SetField converts by the
@@ -1369,6 +1374,256 @@ func (m *Machine) structSet(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 		a.Emit(target.STR(val, off, 0))
 	}
 	return true
+}
+
+// mapLen loads the entry count of a guarded map.
+func (m *Machine) mapLen(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	if !has(op, 1, 1) {
+		return false
+	}
+	if _, ok := m.mapOf(op.Args[0]); !ok || !match(asm.RegTypeInt, asm.Width32, s.Reg(op.Results[0])) {
+		return false
+	}
+	data := m.container(a, s.Reg(op.Args[0]))
+	a.Emit(target.LDR(s.Reg(op.Results[0]), data, int16(jit.OffsetMapCount)))
+	return true
+}
+
+// mapGet looks up a key in a guarded map, as interp's MAP_GET and MAP_LOOKUP
+// do with a TypedMap: the element at a full slot holding the key, else the map's
+// zero, retained when it is a reference; MAP_LOOKUP also yields whether the key
+// was found. It mirrors types.get.
+func (m *Machine) mapGet(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	lookup := op.Code == instr.MAP_LOOKUP
+	if len(op.Args) != 2 || len(op.Results) != 1+btoi(lookup) {
+		return false
+	}
+	shape, ok := m.mapOf(op.Args[0])
+	if !ok || !keyed(s, shape, op.Args[1]) || !loadable(shape.Elem) || s.Type(op.Results[0]).Kind() != shape.Elem {
+		return false
+	}
+	if lookup && s.Type(op.Results[1]) != ssa.TypeI1 {
+		return false
+	}
+	dst := s.Reg(op.Results[0])
+	hit, miss, done := a.Label(), a.Label(), a.Label()
+	data := m.container(a, s.Reg(op.Args[0]))
+	key := m.key(a, s, shape, op.Args[1])
+	t := m.table(a, data)
+	slot := m.probe(a, t, key, m.home(a, t, key), asm.VReg{}, hit, miss)
+
+	a.Bind(hit)
+	a.Emit(target.LDR(dst, slot, 8))
+	if lookup {
+		m.Const(a, s.Reg(op.Results[1]), 1)
+	}
+	a.Emit(target.BLabel(done))
+	a.Bind(miss)
+	a.Emit(target.LDR(dst, data, int16(jit.OffsetMapZero)))
+	if lookup {
+		m.Const(a, s.Reg(op.Results[1]), 0)
+	}
+	a.Bind(done)
+	if shape.Elem == types.KindRef {
+		m.retain(a, dst)
+	}
+	return true
+}
+
+// retain counts one more reference to ref, as the interpreter's retainBox:
+// any reference, the null one included.
+func (m *Machine) retain(a *asm.Assembler, ref asm.VReg) {
+	skip := a.Label()
+	m.count(a, ref, skip, true)
+	a.Emit(target.ADDI(target.X17, target.X17, 1), target.STR(target.X17, target.X16, 0))
+	a.Bind(skip)
+}
+
+// mapSet stores a value under a key of a guarded map, as types.set does: it
+// replaces the value of a full slot holding the key, else takes the first dead
+// slot on the probe, else the empty slot that ended it. An insert that would
+// rehash changes nothing and bridges, so the Go set owns growth. A map of
+// references (or wide i64s) adopts the value and releases the one it replaced.
+func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	if !has(op, 3, 0) {
+		return false
+	}
+	shape, ok := m.mapOf(op.Args[0])
+	if !ok || !keyed(s, shape, op.Args[1]) {
+		return false
+	}
+	switch s.Type(op.Args[2]).Kind() {
+	case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64, types.KindRef:
+	default:
+		return false
+	}
+	exit, resume := s.Bridge()
+	hit, empty, claim := a.Label(), a.Label(), a.Label()
+	word := box(a, s, op.Args[2])
+	if _, ok := word.(asm.VReg); !ok {
+		boxed := m.vreg()
+		a.Emit(target.MOV(boxed, word))
+		word = boxed
+	}
+	data := m.container(a, s.Reg(op.Args[0]))
+	key := m.key(a, s, shape, op.Args[1])
+	t := m.table(a, data)
+	index, free := m.home(a, t, key), m.vreg()
+	a.Emit(target.LDI(free, ^uint64(0))...)
+	slot := m.probe(a, t, key, index, free, hit, empty)
+
+	a.Bind(empty)
+	used, want, limit, state := m.vreg(), m.vreg(), m.vreg(), m.vreg()
+	a.Emit(
+		target.CMNI(free, 1), target.CSEL(free, index, free, target.CondEQ),
+		target.LDRBR(state, t.ctrl, free), target.CBNZLabel(state, claim),
+		// (used+1)*4 > (mask+1)*3 is the load factor at which table.set rehashes.
+		target.LDR(used, data, int16(jit.OffsetMapUsed)), target.ADDI(used, used, 1), target.LSLI(want, used, 2),
+		target.ADDI(limit, t.mask, 1), target.LSLI(target.X16, limit, 1), target.ADD(limit, limit, target.X16),
+		target.CMP(want, limit), target.BCondLabel(target.OpBGT, exit),
+		target.STR(used, data, int16(jit.OffsetMapUsed)),
+	)
+	a.Bind(claim)
+	a.Emit(target.LDI(state, jit.SlotFull)...)
+	count := m.vreg()
+	a.Emit(
+		target.STRBR(state, t.ctrl, free),
+		target.LSLI(slot, free, 4), target.ADD(slot, t.slots, slot),
+		target.STR(key, slot, 0), target.STR(word, slot, 8),
+		target.LDR(count, data, int16(jit.OffsetMapCount)), target.ADDI(count, count, 1), target.STR(count, data, int16(jit.OffsetMapCount)),
+		target.BLabel(resume),
+	)
+	a.Bind(hit)
+	if owns(shape.Elem) {
+		m.replace(a, s, address{base: slot, offset: 8}, word)
+	} else {
+		a.Emit(target.STR(word, slot, 8))
+	}
+	a.Bind(resume)
+	return true
+}
+
+// mapDelete removes a key from a guarded map, as types.remove does: the slot
+// becomes a tombstone and the count drops, leaving the key and value words in
+// place. A map of references releases the removed value.
+func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	if !has(op, 2, 0) {
+		return false
+	}
+	shape, ok := m.mapOf(op.Args[0])
+	if !ok || !keyed(s, shape, op.Args[1]) {
+		return false
+	}
+	hit, done := a.Label(), a.Label()
+	data := m.container(a, s.Reg(op.Args[0]))
+	key := m.key(a, s, shape, op.Args[1])
+	t := m.table(a, data)
+	index := m.home(a, t, key)
+	slot := m.probe(a, t, key, index, asm.VReg{}, hit, done)
+
+	a.Bind(hit)
+	state, count := m.vreg(), m.vreg()
+	a.Emit(target.LDI(state, jit.SlotDead)...)
+	a.Emit(
+		target.STRBR(state, t.ctrl, index),
+		target.LDR(count, data, int16(jit.OffsetMapCount)), target.SUBI(count, count, 1), target.STR(count, data, int16(jit.OffsetMapCount)),
+	)
+	if owns(shape.Elem) {
+		old := m.vreg()
+		a.Emit(target.LDR(old, slot, 8))
+		m.release(a, old, s)
+	}
+	a.Bind(done)
+	return true
+}
+
+// mapOf is the shape of map operand v when a guard admitted it and its key is an
+// integer: the keys whose table words compare as the key itself.
+func (m *Machine) mapOf(v ssa.Value) (ssa.Shape, bool) {
+	shape, ok := m.guards[v]
+	if !ok || !shape.Map {
+		return shape, false
+	}
+	switch shape.Kind {
+	case types.KindI1, types.KindI8, types.KindI32, types.KindI64:
+		return shape, true
+	}
+	return shape, false
+}
+
+// key is the table's key word of operand v, as types.keyWord makes it: an i64 is
+// its own register; an i32 zero-extends, an i8 keeps its low byte, and an i1
+// is 0 or 1 (a Boxed.Bool is any nonzero payload).
+func (m *Machine) key(a *asm.Assembler, s compile.Site, shape ssa.Shape, v ssa.Value) asm.VReg {
+	word := s.Reg(v)
+	if shape.Kind == types.KindI64 {
+		return word
+	}
+	key := m.vreg()
+	switch shape.Kind {
+	case types.KindI32:
+		a.Emit(target.UXTW(key, word))
+	case types.KindI8:
+		a.Emit(target.UXTB(key, word))
+	default:
+		a.Emit(target.CMPI(word, 0), target.CSET(key, target.CondNE))
+	}
+	return key
+}
+
+// table loads the words of the map table whose data word is data.
+func (m *Machine) table(a *asm.Assembler, data asm.VReg) table {
+	t := table{data: data, ctrl: m.vreg(), slots: m.vreg(), mask: m.vreg()}
+	a.Emit(
+		target.LDR(t.ctrl, data, int16(jit.OffsetMapCtrl)),
+		target.LDR(t.slots, data, int16(jit.OffsetMapSlots)),
+		target.LDR(t.mask, data, int16(jit.OffsetMapMask)),
+	)
+	return t
+}
+
+// home is the home slot of key: ((key ^ seed) * hash >> shift) & mask, as the
+// table computes it.
+func (m *Machine) home(a *asm.Assembler, t table, key asm.VReg) asm.VReg {
+	index := m.vreg()
+	a.Emit(target.LDR(target.X16, t.data, int16(jit.OffsetMapSeed)), target.EOR(index, key, target.X16))
+	a.Emit(target.LDI(target.X17, jit.MapHash)...)
+	a.Emit(
+		target.MUL(index, index, target.X17),
+		target.LDR(target.X16, t.data, int16(jit.OffsetMapShift)),
+		target.LSR(index, index, target.X16),
+		target.AND(index, index, t.mask),
+	)
+	return index
+}
+
+// probe walks the table linearly from index, as types.probe does. It branches
+// to miss at an empty slot and to hit at a full slot holding key, leaving the
+// slot's index in index and its address in the returned register; a dead slot is
+// passed over. A free register (not the zero VReg) holds -1 on entry and ends
+// holding the first dead slot passed, if any.
+func (m *Machine) probe(a *asm.Assembler, t table, key, index, free asm.VReg, hit, miss asm.Label) asm.VReg {
+	loop, next := a.Label(), a.Label()
+	state, slot, word := m.vreg(), m.vreg(), m.vreg()
+	a.Bind(loop)
+	a.Emit(target.LDRBR(state, t.ctrl, index), target.CBZLabel(state, miss), target.CMPI(state, jit.SlotFull))
+	if free == (asm.VReg{}) {
+		a.Emit(target.BCondLabel(target.OpBNE, next))
+	} else {
+		full := a.Label()
+		a.Emit(
+			target.BCondLabel(target.OpBEQ, full),
+			target.CMNI(free, 1), target.CSEL(free, index, free, target.CondEQ), target.BLabel(next),
+		)
+		a.Bind(full)
+	}
+	a.Emit(
+		target.LSLI(slot, index, 4), target.ADD(slot, t.slots, slot),
+		target.LDR(word, slot, 0), target.CMP(word, key), target.BCondLabel(target.OpBEQ, hit),
+	)
+	a.Bind(next)
+	a.Emit(target.ADDI(index, index, 1), target.AND(index, index, t.mask), target.BLabel(loop))
+	return slot
 }
 
 // elements is the element pointer and length of guarded array v: the ones
@@ -1493,6 +1748,43 @@ func (m *Machine) vreg() asm.VReg {
 func (m *Machine) ivreg(width asm.RegWidth) asm.VReg {
 	m.temp--
 	return asm.NewVReg(m.temp, asm.RegTypeInt, width)
+}
+
+// keyed reports whether key is held in the register class of shape's key kind: a
+// 32-bit lane for an i1, i8, or i32 key, a 64-bit word for an i64 key.
+func keyed(s compile.Site, shape ssa.Shape, key ssa.Value) bool {
+	if shape.Kind == types.KindI64 {
+		return s.Type(key) == ssa.TypeI64
+	}
+	switch s.Type(key) {
+	case ssa.TypeI1, ssa.TypeI8, ssa.TypeI32:
+		return true
+	}
+	return false
+}
+
+// loadable reports whether an element of kind is read as one register: every
+// kind but i64, whose boxed word may be a reference to a heap-promoted value.
+func loadable(kind types.Kind) bool {
+	switch kind {
+	case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64, types.KindRef:
+		return true
+	}
+	return false
+}
+
+// owns reports whether a map of elements of kind owns references through them:
+// a ref, or an i64 that is a reference to a heap-promoted value when it is wide.
+func owns(kind types.Kind) bool {
+	return kind == types.KindRef || kind == types.KindI64
+}
+
+// btoi is 1 for true, else 0.
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // arith lowers add or sub at width. A constant operand within imm12 becomes

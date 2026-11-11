@@ -17,11 +17,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// mapKey is the key expression a map program pushes for iteration i: i times mul,
+// modulo space, shifted by shift, converted to the map's key kind.
+type mapKey struct {
+	kind  types.Type
+	shift uint64
+	// wide spreads an i64 key beyond the 49 bits a boxed i64 holds inline.
+	wide bool
+}
+
 // pollDeadline bounds poll. It is a hang guard, not a performance budget: a
 // condition holds in milliseconds, but -race plus atomic coverage on a loaded
 // CI runner slows native warmup by an order of magnitude over the 5s a plain
 // run needs.
 const pollDeadline = 60 * time.Second
+
+// exitKinds are the vm_jit_exits_total labels.
+var exitKinds = []string{"bridge", "deopt", "release", "call", "safepoint", "box"}
 
 // indirectFibFunction is fib(n, self) = n < 2 ? n : fib(n-1, self)(n-1, self)
 // + fib(n-2, self)(n-2, self), calling itself through param 1 (the callee
@@ -1077,20 +1089,6 @@ func requireNative(t *testing.T, prog *program.Program) {
 	require.Equal(t, wantCounts, counts)
 }
 
-// poll runs cond on the calling goroutine until it holds, so nothing cond
-// touches outlives the case's deferred teardown. It fails the test after
-// pollDeadline.
-func poll(t *testing.T, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(pollDeadline)
-	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatalf("condition never satisfied")
-		}
-		time.Sleep(time.Millisecond)
-	}
-}
-
 // runProgram runs prog threaded and returns the single value it leaves on
 // the stack.
 func runProgram(t *testing.T, prog *program.Program) types.Value {
@@ -1167,3 +1165,146 @@ func leafSumProgram(t *testing.T, indirect bool) *program.Program {
 		program.WithConstants(leaf.MustBuild(), sibling.MustBuild(), sum.MustBuild()),
 		program.WithGlobals(types.TypeI32(), typ))
 }
+
+// exitsOf is the exits profiler has counted so far, by kind.
+func exitsOf(profiler *prof.Profiler) map[string]float64 {
+	out := map[string]float64{}
+	for _, kind := range exitKinds {
+		out[kind], _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: kind})
+	}
+	return out
+}
+
+// compareNative runs prog threaded, then natively at threshold 1 until native
+// code has run it, and requires the same value and the same reference counts of
+// every heap object. It returns the exits the last native run took, by kind.
+func compareNative(t *testing.T, prog *program.Program) map[string]float64 {
+	t.Helper()
+
+	threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+	defer threaded.Close()
+	require.NoError(t, threaded.Run(context.Background()))
+	want, err := threaded.Pop()
+	require.NoError(t, err)
+	_, wantCounts := heapOf(threaded)
+
+	profiler := prof.New()
+	vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+	defer vm.Close()
+	var exits map[string]float64
+	prior, priorEntries := map[string]float64{}, 0.0
+	poll(t, func() bool {
+		require.NoError(t, vm.Run(context.Background()))
+		got, err := vm.Pop()
+		require.NoError(t, err)
+		_, counts := heapOf(vm)
+		require.Equal(t, want, got)
+		require.Equal(t, wantCounts, counts)
+		vm.Reset()
+		vm.Flush()
+		total := exitsOf(profiler)
+		exits = map[string]float64{}
+		for kind, n := range total {
+			exits[kind], prior[kind] = n-prior[kind], n
+		}
+		entries := nativeEntries(profiler)
+		ran := entries > priorEntries
+		priorEntries = entries
+		return ran
+	})
+	return exits
+}
+
+// poll runs cond on the calling goroutine until it holds, so nothing cond
+// touches outlives the case's deferred teardown. It fails the test after
+// pollDeadline.
+func poll(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(pollDeadline)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("condition never satisfied")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func (k mapKey) emit(b *instr.Builder, mul, space uint64) {
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, mul).Emit(instr.I32_MUL).Emit(instr.I32_CONST, space).Emit(instr.I32_REM_S)
+	if k.shift > 0 {
+		b.Emit(instr.I32_CONST, k.shift).Emit(instr.I32_SUB)
+	}
+	if k.kind.Kind() == types.KindI64 {
+		b.Emit(instr.I32_TO_I64_S)
+	}
+	if k.wide {
+		b.Emit(instr.I64_CONST, 1<<50+3).Emit(instr.I64_MUL)
+	}
+}
+
+// mapProgram runs iterations of body over local 0, a map of typ made with
+// capacity, with local 1 the iteration, local 2 an i32 accumulator, and extra
+// locals after them. It leaves the accumulator times 1000 plus the map's length.
+func mapProgram(t *testing.T, typ *types.MapType, capacity, iterations int, constants []types.Value, extra []types.Type, body func(b *instr.Builder)) *program.Program {
+	t.Helper()
+	return mapProgramFrom(t, typ, func(b *instr.Builder) {
+		b.Emit(instr.I32_CONST, uint64(capacity)).Emit(instr.MAP_NEW_DEFAULT, 0).Emit(instr.LOCAL_SET, 0)
+	}, iterations, constants, extra, body)
+}
+
+// mapProgramFrom is mapProgram with the module's first instructions, which
+// leave the map in local 0, given by start.
+func mapProgramFrom(t *testing.T, typ *types.MapType, start func(b *instr.Builder), iterations int, constants []types.Value, extra []types.Type, body func(b *instr.Builder)) *program.Program {
+	t.Helper()
+	b := instr.NewBuilder()
+	loop, done := b.Label(), b.Label()
+	start(b)
+	b.Bind(loop)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(iterations)).Emit(instr.I32_GE_S).BrIf(done)
+	body(b)
+	b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).Br(loop)
+	b.Bind(done)
+	b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1000).Emit(instr.I32_MUL).Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_LEN).Emit(instr.I32_ADD)
+	code, err := b.Assemble()
+	require.NoError(t, err)
+	locals := append([]types.Type{typ, types.TypeI32(), types.TypeI32()}, extra...)
+	return program.New(code, program.WithLocals(locals...), program.WithTypes(typ), program.WithConstants(constants...))
+}
+
+// mapBody is one iteration over local 0 that sets, deletes every third time,
+// gets, and looks up keys of key's kind, folding the elements it reads into the
+// accumulator. in and out convert between the i32 it stores and the element type.
+func mapBody(key mapKey, space uint64, in, out func(b *instr.Builder)) func(b *instr.Builder) {
+	return func(b *instr.Builder) {
+		skip, hit, next := b.Label(), b.Label(), b.Label()
+		b.Emit(instr.LOCAL_GET, 0)
+		key.emit(b, 37, space)
+		b.Emit(instr.LOCAL_GET, 1)
+		in(b)
+		b.Emit(instr.MAP_SET)
+
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 3).Emit(instr.I32_REM_S).BrIf(skip)
+		b.Emit(instr.LOCAL_GET, 0)
+		key.emit(b, 5, space)
+		b.Emit(instr.MAP_DELETE)
+		b.Bind(skip)
+
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0)
+		key.emit(b, 11, space)
+		b.Emit(instr.MAP_GET)
+		out(b)
+		b.Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+
+		b.Emit(instr.LOCAL_GET, 0)
+		key.emit(b, 13, space)
+		b.Emit(instr.MAP_LOOKUP).BrIf(hit)
+		b.Emit(instr.DROP).Br(next)
+		b.Bind(hit)
+		out(b)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Bind(next)
+	}
+}
+
+// identity leaves the i32 on the stack as it is.
+func identity(*instr.Builder) {}

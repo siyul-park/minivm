@@ -151,6 +151,18 @@ func TestFormat(t *testing.T) {
 			"\treturn v1\n", ssa.Format(f))
 	})
 
+	t.Run("prints the key and element kind of a map shape", func(t *testing.T) {
+		b := ssa.New("m")
+		entry := b.Block()
+		state, table, guarded := b.Value(ssa.TypeState), b.Value(ssa.TypeRef), b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Returns: 0}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Results: []ssa.Value{table}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Map: true, Kind: types.KindI8, Elem: types.KindF64}, Args: []ssa.Value{table}, State: state, Results: []ssa.Value{guarded}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, State: state})
+
+		require.Contains(t, ssa.Format(b.Build()), "\tv3:ref = guard.shape v2 map key i8 elem f64 state v1\n")
+	})
+
 	t.Run("prints kind f64 even though its Kind value is the zero value", func(t *testing.T) {
 		b := ssa.New("f64shape")
 		entry := b.Block()

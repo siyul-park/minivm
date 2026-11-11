@@ -278,12 +278,12 @@ One opcode per row, in opcode-value order.
 | Structs | `STRUCT_GET` | `struct.get` | ✅ | 🔲 | guarded, else bridges and resumes native code |
 | Structs | `STRUCT_SET` | `struct.set` | ✅ | 🔲 | guarded, else bridges and resumes native code |
 | Maps | `MAP_NEW` | `map.new` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
-| Maps | `MAP_NEW_DEFAULT` | `map.new_default` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
-| Maps | `MAP_LEN` | `map.len` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
-| Maps | `MAP_GET` | `map.get` | ⬜ | 🔲 | bridges and resumes native code on ARM64; a map of undeclared type makes the translator decline the whole unit |
-| Maps | `MAP_LOOKUP` | `map.lookup` | ⬜ | 🔲 | bridges and resumes native code on ARM64; a map of undeclared type makes the translator decline the whole unit |
-| Maps | `MAP_SET` | `map.set` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
-| Maps | `MAP_DELETE` | `map.delete` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| Maps | `MAP_NEW_DEFAULT` | `map.new_default` | ⬜ | 🔲 | served as a callout and resumes native code on ARM64 (`jit-internals.md`, Exits) |
+| Maps | `MAP_LEN` | `map.len` | ◐ | 🔲 | reads the entry count of a map of declared `i1`/`i8`/`i32`/`i64` key behind a shape guard, else bridges and resumes native code (`jit-internals.md`, Maps) |
+| Maps | `MAP_GET` | `map.get` | ◐ | 🔲 | probes the table of a map of declared `i1`/`i8`/`i32`/`i64` key behind a shape guard, else bridges and resumes native code; an `i64` element bridges; a map of undeclared type makes the translator decline the whole unit |
+| Maps | `MAP_LOOKUP` | `map.lookup` | ◐ | 🔲 | probes the table of a map of declared `i1`/`i8`/`i32`/`i64` key behind a shape guard, else bridges and resumes native code; an `i64` element bridges; a map of undeclared type makes the translator decline the whole unit |
+| Maps | `MAP_SET` | `map.set` | ◐ | 🔲 | stores into the table of a map of declared `i1`/`i8`/`i32`/`i64` key behind a shape guard; an insert that must rehash and an `i64` value bridge and resume native code, as does any other map |
+| Maps | `MAP_DELETE` | `map.delete` | ◐ | 🔲 | tombstones the slot in the table of a map of declared `i1`/`i8`/`i32`/`i64` key behind a shape guard, else bridges and resumes native code |
 | Maps | `MAP_CLEAR` | `map.clear` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Maps | `MAP_KEYS` | `map.keys` | ⬜ | 🔲 | deoptimizes on ARM64: it allocates every key before the result array, so a heap-exhaustion trap between them would repeat those allocations |
 | Closures | `CLOSURE_NEW` | `closure.new` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
