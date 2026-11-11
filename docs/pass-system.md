@@ -14,7 +14,7 @@ pipeline   ordered transforms + invalidation
 
 ## Standard pipelines
 
-`internal/transform` `O1`, `O2`, and `O3` define the SSA pass order once. `optimize.O1`–`O3` use them directly. The JIT uses `O1` for Baseline and `O3` for Optimized, with its profile-reading `BCEPass` as a late pass.
+`internal/transform` `O1`, `O2`, and `O3` define the SSA pass order once. `optimize.O1`–`O3` use them directly; `optimize.O3` also inlines (see Inlining under SSA). The JIT uses `O1` for Baseline and `O3` for Optimized, with its profile-reading `BCEPass` as a late pass.
 
 ## Layers
 
@@ -27,11 +27,15 @@ pipeline   ordered transforms + invalidation
 
 ## SSA
 
-Each pass owns one policy. Current passes include folding, simplification, promotion, forwarding, CSE, guard elimination, LICM, and DCE.
+Each pass owns one policy. Current passes include folding, simplification, promotion, forwarding, CSE, guard elimination, LICM, DCE, inlining, and state stripping.
+
+DCE removes a block param no operation, terminator, frame or live param reads, with the edge arguments that feed it. A param of the entry block is always kept. A state's frames read their locals, so a function that keeps its states keeps the values they name.
 
 LICM moves pure operations that cannot trap (`op.Traps()`), and in a loop that calls, allocates, and releases nothing (`quiet` in `internal/transform/licm.go`), slot loads the loop never stores and shape guards on invariant refs in blocks every iteration runs. A hoisted guard takes the loop header's entry state, so its failure deopts at loop entry. In such a loop, the array ops on an invariant array guard read the array through one `slice` (`ssa.OpSlice`) placed in the preheader of the outermost such loop; the bytecode emitter drops it.
 
-Inlining (`InlinePass`, JIT Optimized tier only, ahead of the `O3` passes) replaces a `CALL` of a constant callee with the callee's body when the callee is a pure scalar leaf (`leaf` in `internal/transform/inline.go`): no call, handler, capture, write or allocation, only scalar params, locals and results (no i64 or ref), at most 32 instructions, and no backward branch. Every state-bearing operation of the inlined body takes the `CALL`'s own state, so a deopt resumes the interpreter at the `CALL`, which reruns the pure callee unobserved. A feedback-guarded callee keeps its guard ahead of the body. Lowering's check on bridged operations in such a body is owned by `jit-internals.md` (Exits).
+Inlining (`InlinePass`, ahead of the `O3` passes in the JIT Optimized tier and in the bytecode `optimize.O3`) replaces a `CALL` of a constant callee with the callee's body when the callee is a pure scalar leaf (`leaf` in `internal/transform/inline.go`): no call, handler, capture, write or allocation, only scalar params, locals and results (no i64 or ref), at most 32 instructions, and no backward branch. Every state-bearing operation of the inlined body takes the `CALL`'s own state, so a deopt resumes the interpreter at the `CALL`, which reruns the pure callee unobserved. A feedback-guarded callee keeps its guard ahead of the body. Lowering's check on bridged operations in such a body is owned by `jit-internals.md` (Exits). The bytecode path has no state to resume from, so there a trap in the body would be reported in the caller's frame: it inlines only a leaf none of whose operations may trap, where a division or remainder by a nonzero constant cannot. Removing the call also removes that call's frame and stack use, so a frame or stack limit reached only at that call no longer traps; a resource limit is not program semantics. The bytecode path reads each callee as it was before any round trip rewrote it, so a rewrite that is rolled back leaves nothing in a caller.
+
+State stripping (`StripPass`) removes every state operation and the state each operation and terminator holds. Bytecode emission never reads a state, and a state's frames keep dead values alive, so `transform.SSAPass` strips ahead of its pipeline and after inlining, and the pipeline's DCE then removes what only a state named. A later pass may add a state back (`PromotePass` seeds one for i64 locals), which emission ignores. Stripped SSA is outside the `ssa.Verify` contract, which requires a state on every exec, store, guard and exit; it is only emitted to bytecode, which `program.Verify` checks. The JIT tiers keep their states.
 
 Bounds-check elimination (`BCEPass`, JIT only: it reads `Profile.Refuted`) drops the check of an array op on a slice indexed by a loop's induction variable `i`: the header tests `i <s n` with `n` invariant, `i` enters at a constant ≥ 0 and every latch adds a constant ≥ 1 that cannot wrap past `n` (any step for a constant `n`, else 1). The index becomes a `bound` (`ssa.OpBound`). `n ≤ length` is checked once, even when `n` is the array's own `array.len`, by a `guard.bounds n, length` in the preheader at the header's entry state; a loop whose header entry offset is refuted keeps its checks.
 

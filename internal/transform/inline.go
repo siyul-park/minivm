@@ -16,6 +16,10 @@ import (
 // serves the opcode at its state's IP (compile.ErrInlined).
 type InlinePass struct {
 	module Module
+	// trapless admits only a body that cannot trap: bytecode emission drops
+	// the states, so a trap inside the body would be reported in the caller's
+	// frame. The JIT keeps them and leaves it false.
+	trapless bool
 }
 
 // sizeMax caps the bytecode instructions of an inlined callee.
@@ -115,10 +119,37 @@ func (p *InlinePass) body(ref int, target *types.Function) *ssa.Function {
 	if _, err := NewPromotePass().Run(nil, body); err != nil {
 		return nil
 	}
-	if !leaf(target, body) {
+	if !leaf(target, body) || p.trapless && traps(body) {
 		return nil
 	}
 	return body
+}
+
+// traps reports whether body runs an operation that may trap: a division or
+// remainder whose divisor is not a nonzero constant.
+func traps(body *ssa.Function) bool {
+	consts := map[ssa.Value]uint64{}
+	for b := range body.Len() {
+		for _, operation := range body.Block(b).Operations {
+			if operation.Op == ssa.OpConst {
+				consts[operation.Results[0]] = operation.Const
+			}
+		}
+	}
+	for b := range body.Len() {
+		for _, operation := range body.Block(b).Operations {
+			if operation.Op != ssa.OpExec || !operation.Code.Traps() {
+				continue
+			}
+			if len(operation.Args) != 2 {
+				return true
+			}
+			if word, ok := consts[operation.Args[1]]; !ok || uint32(word) == 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // leaf reports whether a call of target can be replaced by body, its

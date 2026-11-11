@@ -194,4 +194,81 @@ func TestDCEPass_Run(t *testing.T) {
 		require.NoError(t, ssa.Verify(fn))
 		require.Contains(t, ssa.Format(fn), "const 0")
 	})
+
+	t.Run("removes a loop param nothing reads and the edge arguments that feed it", func(t *testing.T) {
+		b := ssa.New("f")
+		entry, head, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
+		b.Param(entry, ssa.TypeI32)
+		zero, stale := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{zero}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 9, Results: []ssa.Value{stale}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: head, Args: []ssa.Value{zero, stale}}}})
+
+		i, carried := b.Param(head, ssa.TypeI32), b.Param(head, ssa.TypeI32)
+		limit, below := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
+		b.Add(head, ssa.Operation{Op: ssa.OpConst, Const: 3, Results: []ssa.Value{limit}})
+		b.Add(head, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{i, limit}, State: deoptState(b, head), Results: []ssa.Value{below}})
+		b.Term(head, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{below}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
+
+		one, next := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
+		b.Add(body, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
+		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{i, one}, State: deoptState(b, body), Results: []ssa.Value{next}})
+		b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: head, Args: []ssa.Value{next, carried}}}})
+		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{i}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.False(t, preserved)
+		require.NoError(t, ssa.Verify(fn))
+		require.Len(t, fn.Block(0).Params, 1)
+		require.Len(t, fn.Block(1).Params, 1)
+		require.Len(t, fn.Block(0).Terminator.Edges[0].Args, 1)
+		require.Len(t, fn.Block(2).Terminator.Edges[0].Args, 1)
+		require.NotContains(t, ssa.Format(fn), "const 9")
+	})
+
+	t.Run("keeps a loop param only a frame local reads", func(t *testing.T) {
+		b := ssa.New("f")
+		entry, head := b.Block(), b.Block()
+		zero := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{zero}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: head, Args: []ssa.Value{zero}}}})
+		kept, state := b.Param(head, ssa.TypeI32), b.Value(ssa.TypeState)
+		b.Add(head, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Locals: []ssa.Local{{Index: 0, Value: kept}}}}, Results: []ssa.Value{state}})
+		b.Term(head, ssa.Terminator{Op: ssa.OpExit, State: state})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.True(t, preserved)
+		require.Len(t, fn.Block(1).Params, 1)
+	})
+
+	t.Run("keeps the edge argument of an entry param a back edge feeds", func(t *testing.T) {
+		b := ssa.New("f")
+		entry, body, exit := b.Block(), b.Block(), b.Block()
+		i := b.Param(entry, ssa.TypeI32)
+		limit, below := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 3, Results: []ssa.Value{limit}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{i, limit}, State: deoptState(b, entry), Results: []ssa.Value{below}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{below}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
+		one, next := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
+		b.Add(body, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
+		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{i, one}, State: deoptState(b, body), Results: []ssa.Value{next}})
+		b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: entry, Args: []ssa.Value{next}}}})
+		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{i}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		_, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(fn))
+		require.Contains(t, ssa.Format(fn), "i32.add")
+	})
 }
