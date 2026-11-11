@@ -242,6 +242,32 @@ func TestOptimizer_Optimize(t *testing.T) {
 		}
 	})
 
+	t.Run("O3 inlining removes the frame a call needs, so a frame limit reached only there no longer traps", func(t *testing.T) {
+		build := func() *program.Program {
+			leaf := types.NewFunctionBuilder(&types.FunctionType{
+				Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Append(
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN)).MustBuild()
+			return program.New([]instr.Instruction{
+				instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+				program.WithConstants(leaf))
+		}
+		run := func(prog *program.Program) error {
+			vm := interp.MustNew(prog, interp.WithFrame(1))
+			defer vm.Close()
+			return vm.Run(context.Background())
+		}
+
+		require.Error(t, run(build()))
+		for _, level := range []optimize.Level{optimize.O1, optimize.O2} {
+			optimized, err := optimize.New(level).Optimize(build())
+			require.NoError(t, err)
+			require.Error(t, run(optimized), level)
+		}
+		optimized, err := optimize.New(optimize.O3).Optimize(build())
+		require.NoError(t, err)
+		require.NoError(t, run(optimized))
+	})
+
 	t.Run("O3 repairs branch offsets after shrinking", func(t *testing.T) {
 		build := func() *program.Program {
 			fb := types.NewFunctionBuilder(&types.FunctionType{
@@ -469,7 +495,7 @@ func TestOptimizer_Add(t *testing.T) {
 	pipeline.Add(transform.NewFoldPass())
 
 	o := optimize.New(optimize.O0)
-	o.Add(transform.NewSSAPass(pipeline))
+	o.Add(transform.NewSSAPass(pipeline, false))
 
 	prog := program.New([]instr.Instruction{
 		instr.MustNew(instr.I32_CONST, 1),

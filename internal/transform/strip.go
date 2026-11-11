@@ -9,7 +9,9 @@ import (
 // StripPass removes every deopt state: the state operations, and the state
 // each operation and terminator holds. Only an executor that resumes the
 // interpreter from a state reads them; bytecode emission does not, so the
-// values a state alone keeps alive become dead.
+// values a state alone keeps alive become dead. Stripped SSA is outside the
+// ssa.Verify contract, which requires a state on every exec, store, guard and
+// exit; it is only emitted to bytecode, which program.Verify checks.
 type StripPass struct{}
 
 var _ pass.Pass[*ssa.Function] = (*StripPass)(nil)

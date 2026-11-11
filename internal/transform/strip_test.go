@@ -39,7 +39,7 @@ func TestStripPass_Run(t *testing.T) {
 		require.Contains(t, ssa.Format(fn), "return")
 	})
 
-	t.Run("lets a later DCE remove a value only a frame read", func(t *testing.T) {
+	t.Run("leaves the values a frame named in place", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		x, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
@@ -49,11 +49,10 @@ func TestStripPass_Run(t *testing.T) {
 		fn := b.Build()
 
 		_, err := transform.NewStripPass().Run(pass.NewManager(), fn)
-		require.NoError(t, err)
-		_, err = transform.NewDCEPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.NotContains(t, ssa.Format(fn), "const 1")
+		require.NotContains(t, ssa.Format(fn), "state")
+		require.Contains(t, ssa.Format(fn), "const 1")
 	})
 
 	t.Run("reports a function without states as preserved", func(t *testing.T) {

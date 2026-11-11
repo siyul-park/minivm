@@ -139,6 +139,11 @@ func liveness(function *ssa.Function, blocks []int) (map[site]bool, map[ssa.Valu
 		}
 		push(currentBlock.Terminator.State)
 	}
+	for i := range function.Block(0).Params {
+		for _, e := range incoming[0] {
+			push(e.Args[i])
+		}
+	}
 
 	for len(queue) > 0 {
 		v := queue[len(queue)-1]

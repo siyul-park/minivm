@@ -62,20 +62,20 @@ func (o *Optimizer) Add(p pass.Pass[*program.Program]) {
 func (o *Optimizer) passes() []pass.Pass[*program.Program] {
 	switch o.level {
 	case O1:
-		return compose(transform.O1())
+		return compose(transform.O1(), false)
 	case O2:
-		return compose(transform.O2())
+		return compose(transform.O2(), false)
 	case O3:
-		return compose(transform.O3(), transform.WithInline())
+		return compose(transform.O3(), true)
 	default:
 		return nil
 	}
 }
 
-func compose(passes []pass.Pass[*ssa.Function], opts ...transform.SSAOption) []pass.Pass[*program.Program] {
+func compose(passes []pass.Pass[*ssa.Function], inline bool) []pass.Pass[*program.Program] {
 	pipeline := pass.NewPipeline[*ssa.Function]()
 	for _, p := range passes {
 		pipeline.Add(p)
 	}
-	return []pass.Pass[*program.Program]{transform.NewSSAPass(pipeline, opts...), transform.NewCompactPass()}
+	return []pass.Pass[*program.Program]{transform.NewSSAPass(pipeline, inline), transform.NewCompactPass()}
 }

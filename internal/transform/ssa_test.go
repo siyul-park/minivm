@@ -65,8 +65,8 @@ func duplicateConstants(input *program.Program) *program.Program {
 }
 
 func TestNewSSAPass(t *testing.T) {
-	require.NotNil(t, transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()))
-	require.NotNil(t, transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), transform.WithInline()))
+	require.NotNil(t, transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), false))
+	require.NotNil(t, transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), true))
 }
 
 func TestSSAPass_Run(t *testing.T) {
@@ -176,7 +176,7 @@ func TestSSAPass_Run(t *testing.T) {
 			want, wantErr := executionResult(t, prog)
 
 			got := duplicateConstants(prog)
-			_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), got)
+			_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), false).Run(pass.NewManager(), got)
 			require.NoError(t, err)
 			require.NoError(t, program.Verify(got))
 
@@ -195,7 +195,7 @@ func TestSSAPass_Run(t *testing.T) {
 			want, wantErr := executionResult(t, prog)
 
 			got := duplicateConstants(prog)
-			preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), got)
+			preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), false).Run(pass.NewManager(), got)
 			require.NoError(t, err)
 			require.NoError(t, program.Verify(got))
 			if !preserved {
@@ -218,7 +218,7 @@ func TestSSAPass_Run(t *testing.T) {
 			want, wantErr := executionResult(t, prog)
 
 			got := duplicateConstants(prog)
-			preserved, err := transform.NewSSAPass(pipeline()).Run(pass.NewManager(), got)
+			preserved, err := transform.NewSSAPass(pipeline(), false).Run(pass.NewManager(), got)
 			require.NoError(t, err)
 			require.NoError(t, program.Verify(got))
 			if !preserved {
@@ -298,7 +298,7 @@ func TestSSAPass_Run(t *testing.T) {
 			values, message := executionResult(t, prog)
 
 			got := duplicateConstants(prog)
-			_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
+			_, err := transform.NewSSAPass(pipeline, false).Run(pass.NewManager(), got)
 			require.NoError(t, err)
 			require.NoError(t, program.Verify(got))
 			if len(got.Code) < len(prog.Code) {
@@ -324,7 +324,7 @@ func TestSSAPass_Run(t *testing.T) {
 			instr.MustNew(instr.I64_CONST, 1), instr.MustNew(instr.I64_CONST, 50),
 			instr.MustNew(instr.I64_SHL)})
 		require.NoError(t, program.Verify(got))
-		_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
+		_, err := transform.NewSSAPass(pipeline, false).Run(pass.NewManager(), got)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(got))
 		require.NotContains(t, instr.Format(got.Code), "i64.shl")
@@ -338,7 +338,7 @@ func TestSSAPass_Run(t *testing.T) {
 		got := program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I64_EQZ), instr.MustNew(instr.DROP)},
 			program.WithConstants(types.I64(wide)))
 		require.NoError(t, program.Verify(got))
-		_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
+		_, err := transform.NewSSAPass(pipeline, false).Run(pass.NewManager(), got)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(got))
 		require.NotContains(t, instr.Format(got.Code), "const.get")
@@ -350,7 +350,7 @@ func TestSSAPass_Run(t *testing.T) {
 		pipeline.Add(transform.NewDCEPass())
 
 		got := program.New([]instr.Instruction{instr.MustNew(instr.NOP), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.NOP)})
-		_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
+		_, err := transform.NewSSAPass(pipeline, false).Run(pass.NewManager(), got)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(got))
 		require.Equal(t, instr.Format(instr.Marshal([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1)})), instr.Format(got.Code))
@@ -363,7 +363,7 @@ func TestSSAPass_Run(t *testing.T) {
 		got := program.New([]instr.Instruction{
 			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2),
 			instr.MustNew(instr.I32_ADD), instr.MustNew(instr.DROP)})
-		_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
+		_, err := transform.NewSSAPass(pipeline, false).Run(pass.NewManager(), got)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(got))
 		require.Empty(t, got.Code)
@@ -384,7 +384,7 @@ func TestSSAPass_Run(t *testing.T) {
 
 		want, wantErr := executionResult(t, prog)
 		got := duplicateConstants(prog)
-		_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
+		_, err := transform.NewSSAPass(pipeline, false).Run(pass.NewManager(), got)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(got))
 		require.NotContains(t, instr.Format(got.Constants[0].(*types.Function).Code), "i32.const 0x00000002")
@@ -419,7 +419,7 @@ func TestSSAPass_Run(t *testing.T) {
 
 		want, wantErr := executionResult(t, prog)
 		got := duplicateConstants(prog)
-		_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
+		_, err := transform.NewSSAPass(pipeline, false).Run(pass.NewManager(), got)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(got))
 
@@ -464,7 +464,7 @@ func TestSSAPass_Run(t *testing.T) {
 
 		want, wantErr := executionResult(t, prog)
 		got := duplicateConstants(prog)
-		_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
+		_, err := transform.NewSSAPass(pipeline, false).Run(pass.NewManager(), got)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(got))
 
@@ -505,7 +505,7 @@ func TestSSAPass_Run(t *testing.T) {
 
 		want, wantErr := executionResult(t, prog)
 		got := duplicateConstants(prog)
-		_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
+		_, err := transform.NewSSAPass(pipeline, false).Run(pass.NewManager(), got)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(got))
 
@@ -542,7 +542,7 @@ func TestSSAPass_Run(t *testing.T) {
 			want, wantErr := executionResult(t, input)
 			before := input.String()
 
-			preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), input)
+			preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), false).Run(pass.NewManager(), input)
 			require.NoError(t, err)
 			require.Equal(t, tc.expects, preserved)
 			require.NoError(t, program.Verify(input))
@@ -572,7 +572,7 @@ func TestSSAPass_Run(t *testing.T) {
 			return false, nil
 		}))
 		outer := pass.NewPipeline[*program.Program]()
-		outer.Add(transform.NewSSAPass(inner))
+		outer.Add(transform.NewSSAPass(inner, false))
 		_, err = outer.Run(manager, prog)
 		require.NoError(t, err)
 
@@ -630,7 +630,7 @@ func TestSSAPass_Run(t *testing.T) {
 		t.Run("a recursive call keeps its constant callee and no value is homed", func(t *testing.T) {
 			f := fib.MustBuild()
 			prog := call(20, f)
-			_, err := transform.NewSSAPass(optimized).Run(pass.NewManager(), prog)
+			_, err := transform.NewSSAPass(optimized, false).Run(pass.NewManager(), prog)
 			require.NoError(t, err)
 			require.NoError(t, program.Verify(prog))
 
@@ -663,7 +663,7 @@ func TestSSAPass_Run(t *testing.T) {
 				"optimized": optimized,
 			} {
 				prog := call(10, countdown.MustBuild())
-				_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), prog)
+				_, err := transform.NewSSAPass(pipeline, false).Run(pass.NewManager(), prog)
 				require.NoError(t, err, name)
 				require.NoError(t, program.Verify(prog), name)
 				require.Equal(t, types.I32(55), run(prog, interp.WithThreshold(-1)), name)
@@ -709,7 +709,7 @@ func TestSSAPass_Run(t *testing.T) {
 					prog := program.New([]instr.Instruction{
 						instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_CONST, tc.flag),
 						instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(tc.f))
-					_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), prog)
+					_, err := transform.NewSSAPass(pipeline, false).Run(pass.NewManager(), prog)
 					require.NoError(t, err)
 					require.NoError(t, program.Verify(prog))
 					for _, opts := range [][]interp.Option{{interp.WithThreshold(-1)}, nil} {
@@ -764,7 +764,7 @@ func TestSSAPass_Run(t *testing.T) {
 			f := fn.MustBuild()
 
 			rewritten := duplicateConstants(program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.DROP)}, program.WithConstants(f)))
-			_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), rewritten)
+			_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), false).Run(pass.NewManager(), rewritten)
 			require.NoError(t, err)
 			var got []instr.Opcode
 			for _, inst := range instr.Unmarshal(rewritten.Constants[0].(*types.Function).Code) {
@@ -819,7 +819,7 @@ func TestSSAPass_Run(t *testing.T) {
 			want, wantErr := executionResult(t, prog, interp.WithThreshold(-1))
 
 			got := duplicateConstants(prog)
-			_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), got)
+			_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), false).Run(pass.NewManager(), got)
 			require.NoError(t, err)
 			require.NoError(t, program.Verify(got))
 			values, message := executionResult(t, got, interp.WithThreshold(-1))
@@ -940,7 +940,7 @@ func TestSSAPass_Run(t *testing.T) {
 				want := run(prog)
 
 				got := duplicateConstants(prog)
-				_, err := transform.NewSSAPass(optimized).Run(pass.NewManager(), got)
+				_, err := transform.NewSSAPass(optimized, false).Run(pass.NewManager(), got)
 				require.NoError(t, err)
 				require.NoError(t, program.Verify(got))
 				require.Equal(t, want, run(got))
@@ -1011,7 +1011,7 @@ func TestSSAPass_Run(t *testing.T) {
 
 		got := duplicateConstants(prog)
 		start := time.Now()
-		_, err := transform.NewSSAPass(optimized).Run(pass.NewManager(), got)
+		_, err := transform.NewSSAPass(optimized, false).Run(pass.NewManager(), got)
 		elapsed := time.Since(start)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(got))
@@ -1042,7 +1042,7 @@ func TestSSAPass_Run(t *testing.T) {
 			require.NoError(t, program.Verify(prog))
 			want := run(prog)
 			got := duplicateConstants(prog)
-			_, err := transform.NewSSAPass(optimized).Run(pass.NewManager(), got)
+			_, err := transform.NewSSAPass(optimized, false).Run(pass.NewManager(), got)
 			require.NoError(t, err)
 			require.NoError(t, program.Verify(got))
 			require.Equal(t, want, run(got))
@@ -1112,7 +1112,7 @@ func TestSSAPass_Run(t *testing.T) {
 			want := run(prog)
 
 			got := duplicateConstants(prog)
-			_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), got)
+			_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), false).Run(pass.NewManager(), got)
 			require.NoError(t, err)
 			require.NoError(t, program.Verify(got))
 			require.Equal(t, want, run(got))
@@ -1256,7 +1256,7 @@ func TestSSAPass_Run(t *testing.T) {
 		check := func(t *testing.T, prog *program.Program) *types.Function {
 			require.NoError(t, program.Verify(prog))
 			got := duplicateConstants(prog)
-			_, err := transform.NewSSAPass(optimized).Run(pass.NewManager(), got)
+			_, err := transform.NewSSAPass(optimized, false).Run(pass.NewManager(), got)
 			require.NoError(t, err)
 			require.NoError(t, program.Verify(got))
 			for _, opts := range [][]interp.Option{{interp.WithThreshold(-1)}, nil} {
@@ -1397,7 +1397,7 @@ func TestSSAPass_Run(t *testing.T) {
 				before := prog.Constants[0].(*types.Function).Code
 
 				got := duplicateConstants(prog)
-				_, err := transform.NewSSAPass(pipeline).Run(pass.NewManager(), got)
+				_, err := transform.NewSSAPass(pipeline, false).Run(pass.NewManager(), got)
 				require.NoError(t, err, name)
 				require.NoError(t, program.Verify(got), name+" "+pipelineName)
 				if tc.changed {
@@ -1444,7 +1444,7 @@ func TestSSAPass_Run(t *testing.T) {
 			require.NoError(t, program.Verify(input))
 			before := input.String()
 
-			preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), input)
+			preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), false).Run(pass.NewManager(), input)
 			require.NoError(t, err)
 			require.True(t, preserved, name)
 			require.Equal(t, before, input.String(), name)
@@ -1460,7 +1460,7 @@ func TestSSAPass_Run(t *testing.T) {
 		require.NoError(t, program.Verify(prog))
 		before := fn.Code
 
-		_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), prog)
+		_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), false).Run(pass.NewManager(), prog)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(prog))
 		require.Equal(t, before, fn.Code)
@@ -1477,7 +1477,7 @@ func TestSSAPass_Run(t *testing.T) {
 		require.NoError(t, program.Verify(prog))
 		goodBefore, firstBefore, secondBefore := good.Code, first.Code, second.Code
 
-		preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), prog)
+		preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), false).Run(pass.NewManager(), prog)
 		require.NoError(t, err)
 		require.False(t, preserved)
 		require.NoError(t, program.Verify(prog))
@@ -1496,7 +1496,7 @@ func TestSSAPass_Run(t *testing.T) {
 		require.Error(t, program.Verify(prog))
 		before := prog.String()
 
-		preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), prog)
+		preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), false).Run(pass.NewManager(), prog)
 		require.NoError(t, err)
 		require.True(t, preserved)
 		require.Equal(t, before, prog.String())
@@ -1531,7 +1531,7 @@ func TestSSAPass_Run(t *testing.T) {
 			}
 			return true, nil
 		}))
-		preserved, err := transform.NewSSAPass(counted).Run(pass.NewManager(), prog)
+		preserved, err := transform.NewSSAPass(counted, false).Run(pass.NewManager(), prog)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(prog))
 		require.Equal(t, 2, calls)
@@ -1557,7 +1557,7 @@ func TestSSAPass_Run(t *testing.T) {
 		require.NoError(t, program.Verify(prog))
 		before := prog.String()
 
-		preserved, err := transform.NewSSAPass(optimized).Run(pass.NewManager(), prog)
+		preserved, err := transform.NewSSAPass(optimized, false).Run(pass.NewManager(), prog)
 		require.NoError(t, err)
 		require.True(t, preserved)
 		require.Equal(t, before, prog.String())
@@ -1587,7 +1587,7 @@ func TestSSAPass_Run(t *testing.T) {
 		want, wantErr := executionResult(t, prog, interp.WithThreshold(-1), interp.WithFuel(1<<24))
 
 		got := duplicateConstants(prog)
-		_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), got)
+		_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), false).Run(pass.NewManager(), got)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(got))
 		for _, local := range got.Constants[0].(*types.Function).Locals[len(loop.Locals):] {
@@ -1630,7 +1630,7 @@ func TestSSAPass_Run(t *testing.T) {
 		results := map[string]bool{}
 		for range 200 {
 			got := duplicateConstants(prog)
-			_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function]()).Run(pass.NewManager(), got)
+			_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), false).Run(pass.NewManager(), got)
 			require.NoError(t, err)
 			require.NoError(t, program.Verify(got))
 			results[got.String()] = true
@@ -1663,7 +1663,7 @@ func TestSSAPass_Run(t *testing.T) {
 		for _, p := range transform.O3() {
 			optimized.Add(p)
 		}
-		_, err := transform.NewSSAPass(optimized).Run(pass.NewManager(), got)
+		_, err := transform.NewSSAPass(optimized, false).Run(pass.NewManager(), got)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(got))
 
@@ -1712,27 +1712,73 @@ func TestSSAPass_Run(t *testing.T) {
 		}{
 			"a constant nonzero divisor": {divisor: instr.MustNew(instr.I32_CONST, 2), calls: 0},
 			"a divisor that may be zero": {divisor: instr.MustNew(instr.LOCAL_GET, 1), calls: 2},
+			"a constant zero divisor":    {divisor: instr.MustNew(instr.I32_CONST, 0), calls: 2},
 		} {
 			prog := pair(tc.divisor)
 			require.NoError(t, program.Verify(prog), name)
 			want, wantErr := executionResult(t, prog, interp.WithThreshold(-1))
 
 			plain := duplicateConstants(prog)
-			_, err := transform.NewSSAPass(optimized).Run(pass.NewManager(), plain)
+			_, err := transform.NewSSAPass(optimized, false).Run(pass.NewManager(), plain)
 			require.NoError(t, err, name)
 			require.Equal(t, 2, calls(plain), name)
 
 			got := duplicateConstants(prog)
-			_, err = transform.NewSSAPass(optimized, transform.WithInline()).Run(pass.NewManager(), got)
+			_, err = transform.NewSSAPass(optimized, true).Run(pass.NewManager(), got)
 			require.NoError(t, err, name)
 			require.NoError(t, program.Verify(got), name)
 			require.Equal(t, tc.calls, calls(got), name)
 			for _, opts := range [][]interp.Option{{interp.WithThreshold(-1)}, nil} {
 				values, message := executionResult(t, got, opts...)
-				require.Equal(t, wantErr, message, name)
-				require.Equal(t, want, values, name)
+				// A trap names its instruction offsets, which the rewrite moves.
+				require.Equal(t, strings.SplitN(wantErr, ":", 2)[0], strings.SplitN(message, ":", 2)[0], name)
+				if wantErr == "" {
+					require.Equal(t, want, values, name)
+				}
 			}
 		}
+	})
+
+	t.Run("inlines the callee as it was before a rejected rewrite", func(t *testing.T) {
+		leaf := types.NewFunctionBuilder(&types.FunctionType{
+			Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN)).MustBuild()
+		caller := types.NewFunctionBuilder(&types.FunctionType{
+			Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.RETURN)).MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, 4), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL)},
+			program.WithConstants(leaf, caller))
+		require.NoError(t, program.Verify(prog))
+		want, wantErr := executionResult(t, prog, interp.WithThreshold(-1))
+		leafBefore := leaf.Code
+
+		// The third function rewritten is the leaf's caller; the leaf is the second, and its
+		// integer addition becomes a float one, which the emitted code cannot verify.
+		calls := 0
+		sabotage := pass.NewPipeline[*ssa.Function]()
+		sabotage.Add(run[*ssa.Function, bool](func(_ *pass.Manager, f *ssa.Function) (bool, error) {
+			calls++
+			if calls != 2 {
+				return true, nil
+			}
+			for id := range f.Len() {
+				for i, operation := range f.Block(id).Operations {
+					if operation.Op == ssa.OpExec && operation.Code == instr.I32_ADD {
+						f.Block(id).Operations[i].Code = instr.F64_ADD
+					}
+				}
+			}
+			return false, nil
+		}))
+		_, err := transform.NewSSAPass(sabotage, true).Run(pass.NewManager(), prog)
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+		require.Equal(t, leafBefore, leaf.Code)
+		require.NotContains(t, instr.Format(caller.Code), "call")
+		values, message := executionResult(t, prog, interp.WithThreshold(-1))
+		require.Equal(t, wantErr, message)
+		require.Equal(t, want, values)
 	})
 }
 

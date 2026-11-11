@@ -16,10 +16,10 @@ import (
 // serves the opcode at its state's IP (compile.ErrInlined).
 type InlinePass struct {
 	module Module
-	// quiet admits only a body that traps nowhere: bytecode emission drops the
-	// states, so a trap inside the body would be reported in the caller's
+	// trapless admits only a body that cannot trap: bytecode emission drops
+	// the states, so a trap inside the body would be reported in the caller's
 	// frame. The JIT keeps them and leaves it false.
-	quiet bool
+	trapless bool
 }
 
 // sizeMax caps the bytecode instructions of an inlined callee.
@@ -119,7 +119,7 @@ func (p *InlinePass) body(ref int, target *types.Function) *ssa.Function {
 	if _, err := NewPromotePass().Run(nil, body); err != nil {
 		return nil
 	}
-	if !leaf(target, body) || p.quiet && traps(body) {
+	if !leaf(target, body) || p.trapless && traps(body) {
 		return nil
 	}
 	return body

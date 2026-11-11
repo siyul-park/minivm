@@ -16,14 +16,15 @@ type SSAPass struct {
 	inline   bool
 }
 
-// SSAOption configures an SSAPass.
-type SSAOption func(*SSAPass)
-
 type pool struct {
 	prog    *program.Program
 	boxed   []types.Boxed
 	objects Objects
 	at      map[types.Boxed]int
+	// callees resolves a function to a copy made before any round trip
+	// rewrites it, which the inliner reads: a rewrite later rolled back must
+	// leave no trace in a caller.
+	callees Objects
 }
 
 // change is a function rewritten by a round trip; a nil function is the
@@ -41,20 +42,11 @@ type original struct {
 
 var _ pass.Pass[*program.Program] = (*SSAPass)(nil)
 
-// WithInline inlines, ahead of the states' removal, each call of a pure
-// scalar leaf that cannot trap (see InlinePass).
-func WithInline() SSAOption {
-	return func(p *SSAPass) { p.inline = true }
-}
-
-// NewSSAPass returns an SSA round-trip pass. Each function first has its deopt
+// NewSSAPass returns an SSA round-trip pass. Each function first has each call
+// of a pure scalar leaf that cannot trap inlined, when inline, and its deopt
 // states stripped, which emission never reads, then runs pipeline.
-func NewSSAPass(pipeline *pass.Pipeline[*ssa.Function], opts ...SSAOption) *SSAPass {
-	p := &SSAPass{pipeline: pipeline}
-	for _, opt := range opts {
-		opt(p)
-	}
-	return p
+func NewSSAPass(pipeline *pass.Pipeline[*ssa.Function], inline bool) *SSAPass {
+	return &SSAPass{pipeline: pipeline, inline: inline}
 }
 
 // Run applies the SSA round trip. The program is verified once afterwards.
@@ -66,6 +58,16 @@ func NewSSAPass(pipeline *pass.Pipeline[*ssa.Function], opts ...SSAOption) *SSAP
 func (p *SSAPass) Run(_ *pass.Manager, prog *program.Program) (bool, error) {
 	constants := newPool(prog)
 	size := len(prog.Constants)
+	if p.inline {
+		constants.callees = Objects{}
+		for ref, object := range constants.objects {
+			if object.Function != nil {
+				snapshot := *object.Function
+				object.Function = &snapshot
+			}
+			constants.callees[ref] = object
+		}
+	}
 
 	manager := pass.NewManager()
 
@@ -159,7 +161,9 @@ func (p *SSAPass) roundtrip(manager *pass.Manager, constants *pool, address int,
 		return false, err
 	}
 	if p.inline {
-		if _, err := (&InlinePass{module: constants.module(), quiet: true}).Run(manager, f); err != nil {
+		module := constants.module()
+		module.Objects = constants.callees
+		if _, err := (&InlinePass{module: module, trapless: true}).Run(manager, f); err != nil {
 			return false, err
 		}
 	}

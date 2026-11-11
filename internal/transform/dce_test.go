@@ -248,4 +248,27 @@ func TestDCEPass_Run(t *testing.T) {
 		require.True(t, preserved)
 		require.Len(t, fn.Block(1).Params, 1)
 	})
+
+	t.Run("keeps the edge argument of an entry param a back edge feeds", func(t *testing.T) {
+		b := ssa.New("f")
+		entry, body, exit := b.Block(), b.Block(), b.Block()
+		i := b.Param(entry, ssa.TypeI32)
+		limit, below := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 3, Results: []ssa.Value{limit}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{i, limit}, State: deoptState(b, entry), Results: []ssa.Value{below}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{below}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
+		one, next := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
+		b.Add(body, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
+		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{i, one}, State: deoptState(b, body), Results: []ssa.Value{next}})
+		b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: entry, Args: []ssa.Value{next}}}})
+		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{i}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		_, err := transform.NewDCEPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(fn))
+		require.Contains(t, ssa.Format(fn), "i32.add")
+	})
 }
