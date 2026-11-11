@@ -1507,6 +1507,42 @@ var runTests = []struct {
 		values: []types.Value{types.I32(2)},
 	},
 	{
+		// -0 and +0 are one f64 key.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.F64_CONST, math.Float64bits(math.Copysign(0, -1))), instr.MustNew(instr.I32_CONST, 10),
+			instr.MustNew(instr.F64_CONST, 0), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.MAP_LEN),
+		}, program.WithTypes(types.NewMapType(types.TypeF64(), types.TypeI32()))),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		// -0 and +0 are one f64 key.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.F64_CONST, math.Float64bits(math.Copysign(0, -1))), instr.MustNew(instr.I32_CONST, 10),
+			instr.MustNew(instr.F64_CONST, 0), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(math.Copysign(0, -1))), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeF64(), types.TypeI32()))),
+		values: []types.Value{types.I32(20)},
+	},
+	{
+		// NaN never matches, so both entries stay.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.F64_CONST, math.Float64bits(math.NaN())), instr.MustNew(instr.I32_CONST, 10),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(math.NaN())), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.MAP_LEN),
+		}, program.WithTypes(types.NewMapType(types.TypeF64(), types.TypeI32()))),
+		values: []types.Value{types.I32(2)},
+	},
+	{
+		// NaN never matches, so get misses.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.F64_CONST, math.Float64bits(math.NaN())), instr.MustNew(instr.I32_CONST, 10),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(math.NaN())), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(math.NaN())), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeF64(), types.TypeI32()))),
+		values: []types.Value{types.I32(0)},
+	},
+	{
 		program: program.New([]instr.Instruction{
 			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
 			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.MAP_GET),

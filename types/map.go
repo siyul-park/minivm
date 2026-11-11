@@ -4,16 +4,23 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"math/bits"
 	"reflect"
 	"sort"
 	"strings"
+	"unsafe"
 )
 
-// TypedMap is a map from a primitive or string key to boxed values.
+// TypedMap is a map from a primitive or string key to boxed values. A numeric
+// key lives in the pointer-free open-addressing table so native code can reach
+// it from this struct's address; a string key lives in a Go map. Exactly one of
+// the two is in use, chosen by K at construction. Iteration follows slot order
+// for numeric keys and is unspecified for string keys.
 type TypedMap[K comparable] struct {
 	Typ     *MapType
 	Zero    Boxed
 	entries map[K]Boxed
+	table   table
 }
 
 // Map is a map with keys of any kind, indexed by MapKey.
@@ -55,14 +62,21 @@ type MapType struct {
 	TraceValues bool
 }
 
-// MapIterator walks the live map via reflect.MapIter rather than a
-// construction-time snapshot: a snapshot of ref-typed keys/values would not be
-// refcount-protected, so a MAP_DELETE on an entry still queued in the snapshot
-// could free it before the iterator reached it. Ranging over the live map has
-// no such hazard - Go guarantees a key deleted mid-range is simply never
-// produced.
+// MapIterator walks the live map rather than a construction-time snapshot: a
+// snapshot of ref-typed keys/values would not be refcount-protected, so a
+// MAP_DELETE on an entry still queued in the snapshot could free it before the
+// iterator reached it. Each entry present for the whole walk is produced once,
+// and a key deleted before the iterator reaches it is never produced. A string
+// or generic map relies on Go's range guarantee; a numeric table walks slots in
+// order, and after a rehash it keeps walking the slots it started on and
+// produces a key only while the live table still holds it. Clear ends the walk.
 type MapIterator struct {
 	iter    *reflect.MapIter
+	table   *table
+	slots   []uint64
+	ctrl    []byte
+	pos     int
+	gen     uint64
 	current Value
 	typ     Type
 	ref     Ref
@@ -71,12 +85,44 @@ type MapIterator struct {
 	done    bool
 }
 
+// table is an open-addressing hash table from a numeric key word to a Boxed
+// value word. It holds no Go pointers besides its two slices. Slot i keeps its
+// key at slots[2i] and its value at slots[2i+1], and its state at ctrl[i]. The
+// capacity is a power of two, mask is capacity-1, and a key's home slot is its
+// multiply-shift hash >> shift. Probing is linear; a deleted slot becomes a
+// tombstone, and a rehash into fresh arrays drops tombstones. Floats follow Go
+// map keys: -0 and +0 are one key (the latest stored bits are reported), and a
+// NaN never matches, so every Set of NaN adds an entry that only Clear removes.
+type table struct {
+	ctrl  []byte
+	slots []uint64
+	mask  uint64
+	shift uint64
+	count int
+	used  int
+	gen   uint64
+	neg   uint64
+	abs   uint64
+	inf   uint64
+}
+
 type mapIteratorKind byte
 
 // KindText marks a MapKey indexed by string content rather than by heap
 // reference. It discriminates map keys only and is never an operand kind, so
 // an empty string key stays distinct from a null reference key.
 const KindText Kind = 0xFE
+
+const (
+	slotEmpty byte = iota
+	slotFull
+	slotDead
+)
+
+const (
+	tableMinCapacity = 8
+	tableHash        = 0x9E3779B97F4A7C15
+)
 
 const (
 	mapIteratorInvalid mapIteratorKind = iota
@@ -88,6 +134,18 @@ const (
 	mapIteratorF64
 	mapIteratorString
 	mapIteratorGeneric
+)
+
+// Native code reads a TypedMap's table at these byte offsets from the map
+// base; a layout change must fail to compile here until native code is updated.
+const tableOffset = unsafe.Offsetof(TypedMap[int64]{}.table)
+
+var (
+	_ = [1]byte{}[tableOffset+unsafe.Offsetof(table{}.ctrl)-24]
+	_ = [1]byte{}[tableOffset+unsafe.Offsetof(table{}.slots)-48]
+	_ = [1]byte{}[tableOffset+unsafe.Offsetof(table{}.mask)-72]
+	_ = [1]byte{}[tableOffset+unsafe.Offsetof(table{}.shift)-80]
+	_ = [1]byte{}[tableOffset+unsafe.Offsetof(table{}.count)-88]
 )
 
 var (
@@ -131,7 +189,18 @@ func NewMapForType(typ *MapType, capacity int) Value {
 
 // NewTypedMap creates a typed map.
 func NewTypedMap[K comparable](typ *MapType, capacity int) *TypedMap[K] {
-	return &TypedMap[K]{Typ: typ, Zero: Zero(typ.ElemKind), entries: make(map[K]Boxed, capacity)}
+	m := &TypedMap[K]{Typ: typ, Zero: Zero(typ.ElemKind)}
+	switch any(*new(K)).(type) {
+	case bool, int8, int32, int64:
+		m.table.init(capacity, 0, 0, 0)
+	case float32:
+		m.table.init(capacity, 1<<31, 1<<31-1, 0x7F800000)
+	case float64:
+		m.table.init(capacity, 1<<63, 1<<63-1, 0x7FF0000000000000)
+	default:
+		m.entries = make(map[K]Boxed, capacity)
+	}
+	return m
 }
 
 // NewMap returns an empty generic map.
@@ -167,27 +236,27 @@ func NewMapIterator(ref Ref, val Value) *MapIterator {
 	case *TypedMap[int8]:
 		it.typ = NewIteratorType(m.Typ.Key)
 		it.kind = mapIteratorI8
-		it.iter = reflect.ValueOf(m.entries).MapRange()
+		it.walk(&m.table)
 	case *TypedMap[bool]:
 		it.typ = NewIteratorType(m.Typ.Key)
 		it.kind = mapIteratorI1
-		it.iter = reflect.ValueOf(m.entries).MapRange()
+		it.walk(&m.table)
 	case *TypedMap[int32]:
 		it.typ = NewIteratorType(m.Typ.Key)
 		it.kind = mapIteratorI32
-		it.iter = reflect.ValueOf(m.entries).MapRange()
+		it.walk(&m.table)
 	case *TypedMap[int64]:
 		it.typ = NewIteratorType(m.Typ.Key)
 		it.kind = mapIteratorI64
-		it.iter = reflect.ValueOf(m.entries).MapRange()
+		it.walk(&m.table)
 	case *TypedMap[float32]:
 		it.typ = NewIteratorType(m.Typ.Key)
 		it.kind = mapIteratorF32
-		it.iter = reflect.ValueOf(m.entries).MapRange()
+		it.walk(&m.table)
 	case *TypedMap[float64]:
 		it.typ = NewIteratorType(m.Typ.Key)
 		it.kind = mapIteratorF64
-		it.iter = reflect.ValueOf(m.entries).MapRange()
+		it.walk(&m.table)
 	case *TypedMap[string]:
 		it.typ = NewIteratorType(m.Typ.Key)
 		it.kind = mapIteratorString
@@ -202,44 +271,68 @@ func NewMapIterator(ref Ref, val Value) *MapIterator {
 
 // Get returns the value for key and whether it exists.
 func (m *TypedMap[K]) Get(key K) (Boxed, bool) {
-	value, ok := m.entries[key]
-	return value, ok
+	if m.entries != nil {
+		value, ok := m.entries[key]
+		return value, ok
+	}
+	value, ok := m.table.get(keyWord(key))
+	return Boxed(value), ok
 }
 
 // Set stores value under key and returns the replaced value and whether one existed.
 func (m *TypedMap[K]) Set(key K, value Boxed) (Boxed, bool) {
-	old, ok := m.entries[key]
-	m.entries[key] = value
-	return old, ok
+	if m.entries != nil {
+		old, ok := m.entries[key]
+		m.entries[key] = value
+		return old, ok
+	}
+	old, ok := m.table.set(keyWord(key), uint64(value))
+	return Boxed(old), ok
 }
 
 // Delete removes key and returns the removed value and whether one existed.
 func (m *TypedMap[K]) Delete(key K) (Boxed, bool) {
-	old, ok := m.entries[key]
-	if ok {
-		delete(m.entries, key)
+	if m.entries != nil {
+		old, ok := m.entries[key]
+		if ok {
+			delete(m.entries, key)
+		}
+		return old, ok
 	}
-	return old, ok
+	old, ok := m.table.delete(keyWord(key))
+	return Boxed(old), ok
 }
 
 // Clear calls fn on every value and removes all entries.
 func (m *TypedMap[K]) Clear(fn func(Boxed)) {
-	for _, value := range m.entries {
-		fn(value)
+	if m.entries != nil {
+		for _, value := range m.entries {
+			fn(value)
+		}
+		m.entries = make(map[K]Boxed)
+		return
 	}
-	m.entries = make(map[K]Boxed)
+	m.table.clear(func(value uint64) { fn(Boxed(value)) })
 }
 
 // Len returns the number of entries.
 func (m *TypedMap[K]) Len() int {
-	return len(m.entries)
+	if m.entries != nil {
+		return len(m.entries)
+	}
+	return m.table.count
 }
 
-// Range calls fn on every entry in unspecified order.
+// Range calls fn on every entry, in slot order for numeric keys and in
+// unspecified order otherwise. fn must not modify m.
 func (m *TypedMap[K]) Range(fn func(K, Boxed)) {
-	for key, value := range m.entries {
-		fn(key, value)
+	if m.entries != nil {
+		for key, value := range m.entries {
+			fn(key, value)
+		}
+		return
 	}
+	m.table.each(func(key, value uint64) { fn(wordKey[K](key), Boxed(value)) })
 }
 
 // Get returns the entry for key and whether it exists.
@@ -314,6 +407,9 @@ func (it *MapIterator) Next() bool {
 		return false
 	}
 	it.started = true
+	if it.table != nil {
+		return it.nextSlot()
+	}
 	if it.iter == nil || !it.iter.Next() {
 		it.current = BoxedNull
 		it.done = true
@@ -321,18 +417,6 @@ func (it *MapIterator) Next() bool {
 	}
 	it.done = false
 	switch it.kind {
-	case mapIteratorI8:
-		it.current = I8(int8(it.iter.Key().Int()))
-	case mapIteratorI1:
-		it.current = I1(it.iter.Key().Bool())
-	case mapIteratorI32:
-		it.current = I32(int32(it.iter.Key().Int()))
-	case mapIteratorI64:
-		it.current = I64(it.iter.Key().Int())
-	case mapIteratorF32:
-		it.current = F32(float32(it.iter.Key().Float()))
-	case mapIteratorF64:
-		it.current = F64(it.iter.Key().Float())
 	case mapIteratorString:
 		it.current = String(it.iter.Key().String())
 	case mapIteratorGeneric:
@@ -375,16 +459,24 @@ func (m *TypedMap[K]) Refs(dst []Ref) []Ref {
 			dst = append(dst, Ref(value.Ref()))
 		}
 	}
+	m.table.each(func(_, value uint64) {
+		if Boxed(value).Kind() == KindRef {
+			dst = append(dst, Ref(Boxed(value).Ref()))
+		}
+	})
 	return dst
 }
 
 // Clone returns a copy of m with its own entries and the same Typ and Zero. The
 // values are boxed words, so the references they hold are shared, not copied.
 func (m *TypedMap[K]) Clone() *TypedMap[K] {
-	c := NewTypedMap[K](m.Typ, len(m.entries))
-	c.Zero = m.Zero
-	maps.Copy(c.entries, m.entries)
-	return c
+	c := *m
+	c.table.ctrl = append([]byte(nil), m.table.ctrl...)
+	c.table.slots = append([]uint64(nil), m.table.slots...)
+	if m.entries != nil {
+		c.entries = maps.Clone(m.entries)
+	}
+	return &c
 }
 
 // String returns the textual representation.
@@ -567,4 +659,215 @@ func (m *TypedMap[K]) cloneValue() Value {
 
 func (m *Map) cloneValue() Value {
 	return m.Clone()
+}
+
+// nextSlot advances to the next full slot. A rehash leaves the iterator on the
+// slots it started on, so a key found there is produced only while the live
+// table still holds it; a NaN key cannot be deleted and needs no check.
+func (it *MapIterator) nextSlot() bool {
+	if it.gen != it.table.gen {
+		it.current = BoxedNull
+		it.done = true
+		return false
+	}
+	rehashed := unsafe.SliceData(it.slots) != unsafe.SliceData(it.table.slots)
+	for it.pos < len(it.ctrl) {
+		i := it.pos
+		it.pos++
+		if it.ctrl[i] != slotFull {
+			continue
+		}
+		key := it.slots[2*i]
+		if rehashed && !it.table.isNaN(key) {
+			if _, ok := it.table.get(key); !ok {
+				continue
+			}
+		}
+		it.done = false
+		it.current = it.decode(key)
+		return true
+	}
+	it.current = BoxedNull
+	it.done = true
+	return false
+}
+
+func (it *MapIterator) walk(t *table) {
+	it.table, it.slots, it.ctrl, it.gen = t, t.slots, t.ctrl, t.gen
+}
+
+func (it *MapIterator) decode(key uint64) Value {
+	switch it.kind {
+	case mapIteratorI8:
+		return I8(int8(key))
+	case mapIteratorI1:
+		return I1(key != 0)
+	case mapIteratorI32:
+		return I32(int32(key))
+	case mapIteratorI64:
+		return I64(int64(key))
+	case mapIteratorF32:
+		return F32(math.Float32frombits(uint32(key)))
+	default:
+		return F64(math.Float64frombits(key))
+	}
+}
+
+func (t *table) init(capacity int, neg, abs, inf uint64) {
+	t.neg, t.abs, t.inf = neg, abs, inf
+	n := tableMinCapacity
+	for n*3 < capacity*4 {
+		n *= 2
+	}
+	t.alloc(n)
+}
+
+func (t *table) get(key uint64) (uint64, bool) {
+	if t.isNaN(key) {
+		return 0, false
+	}
+	hit, _ := t.probe(key, true)
+	if hit < 0 {
+		return 0, false
+	}
+	return t.slots[2*hit+1], true
+}
+
+func (t *table) set(key, value uint64) (uint64, bool) {
+	nan := t.isNaN(key)
+	hit, free := t.probe(key, !nan)
+	if hit >= 0 && !nan {
+		old := t.slots[2*hit+1]
+		t.slots[2*hit], t.slots[2*hit+1] = key, value
+		return old, true
+	}
+	if t.ctrl[free] == slotEmpty {
+		if (t.used+1)*4 > len(t.ctrl)*3 {
+			t.rehash()
+			_, free = t.probe(key, false)
+		}
+		t.used++
+	}
+	t.ctrl[free] = slotFull
+	t.slots[2*free], t.slots[2*free+1] = key, value
+	t.count++
+	return 0, false
+}
+
+// rehash moves every entry into fresh arrays, doubling them when more than
+// three eighths of the slots hold live entries and keeping the size otherwise
+// so tombstones alone never force growth.
+func (t *table) rehash() {
+	ctrl, slots := t.ctrl, t.slots
+	n := len(ctrl)
+	if t.count*8 > n*3 {
+		n *= 2
+	}
+	t.alloc(n)
+	for i, state := range ctrl {
+		if state != slotFull {
+			continue
+		}
+		_, free := t.probe(slots[2*i], false)
+		t.ctrl[free] = slotFull
+		t.slots[2*free], t.slots[2*free+1] = slots[2*i], slots[2*i+1]
+		t.count++
+		t.used++
+	}
+}
+
+func (t *table) delete(key uint64) (uint64, bool) {
+	if t.isNaN(key) {
+		return 0, false
+	}
+	hit, _ := t.probe(key, true)
+	if hit < 0 {
+		return 0, false
+	}
+	old := t.slots[2*hit+1]
+	t.ctrl[hit] = slotDead
+	t.count--
+	return old, true
+}
+
+func (t *table) clear(fn func(uint64)) {
+	t.each(func(_, value uint64) { fn(value) })
+	t.alloc(tableMinCapacity)
+	t.gen++
+}
+
+func (t *table) alloc(n int) {
+	t.ctrl = make([]byte, n)
+	t.slots = make([]uint64, 2*n)
+	t.mask = uint64(n - 1)
+	t.shift = uint64(64 - bits.TrailingZeros(uint(n)))
+	t.count, t.used = 0, 0
+}
+
+func (t *table) each(fn func(key, value uint64)) {
+	slots, ctrl := t.slots, t.ctrl
+	for i, state := range ctrl {
+		if state == slotFull {
+			fn(slots[2*i], slots[2*i+1])
+		}
+	}
+}
+
+// probe returns the slot holding key, or -1, and the slot a new key would
+// take: the first tombstone on the path, else the empty slot that ended it.
+// A key probed with match false never hits, which is how a NaN key is added.
+func (t *table) probe(key uint64, match bool) (hit, free int) {
+	canon := key
+	if canon == t.neg {
+		canon = 0
+	}
+	i := (canon * tableHash >> t.shift) & t.mask
+	free = -1
+	for {
+		switch t.ctrl[i] {
+		case slotEmpty:
+			if free < 0 {
+				free = int(i)
+			}
+			return -1, free
+		case slotDead:
+			if free < 0 {
+				free = int(i)
+			}
+		default:
+			if stored := t.slots[2*i]; match && (stored == canon || (canon == 0 && stored == t.neg)) {
+				return int(i), free
+			}
+		}
+		i = (i + 1) & t.mask
+	}
+}
+
+func (t *table) isNaN(key uint64) bool {
+	return key&t.abs > t.inf
+}
+
+// keyWord returns the numeric key in the low bits of a word; wordKey inverts it.
+func keyWord[K comparable](key K) uint64 {
+	switch unsafe.Sizeof(key) {
+	case 1:
+		return uint64(*(*uint8)(unsafe.Pointer(&key)))
+	case 4:
+		return uint64(*(*uint32)(unsafe.Pointer(&key)))
+	default:
+		return *(*uint64)(unsafe.Pointer(&key))
+	}
+}
+
+func wordKey[K comparable](word uint64) K {
+	var key K
+	switch unsafe.Sizeof(key) {
+	case 1:
+		*(*uint8)(unsafe.Pointer(&key)) = uint8(word)
+	case 4:
+		*(*uint32)(unsafe.Pointer(&key)) = uint32(word)
+	default:
+		*(*uint64)(unsafe.Pointer(&key)) = word
+	}
+	return key
 }

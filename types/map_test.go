@@ -1,12 +1,231 @@
 package types_test
 
 import (
+	"fmt"
 	"math"
+	"math/rand/v2"
+	"sort"
 	"testing"
 
 	types "github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
+
+// goMap is the reference model: the Go-map TypedMap that the open-addressing table replaced.
+type goMap[K comparable] struct {
+	entries map[K]types.Boxed
+}
+
+func (g *goMap[K]) set(key K, value types.Boxed) (types.Boxed, bool) {
+	old, ok := g.entries[key]
+	g.entries[key] = value
+	return old, ok
+}
+
+func (g *goMap[K]) delete(key K) (types.Boxed, bool) {
+	old, ok := g.entries[key]
+	delete(g.entries, key)
+	return old, ok
+}
+
+func (g *goMap[K]) clear() []types.Boxed {
+	var values []types.Boxed
+	for _, value := range g.entries {
+		values = append(values, value)
+	}
+	g.entries = map[K]types.Boxed{}
+	return values
+}
+
+func boxedWords(values []types.Boxed) []string {
+	out := make([]string, len(values))
+	for i, value := range values {
+		out[i] = fmt.Sprint(uint64(value))
+	}
+	sort.Strings(out)
+	return out
+}
+
+func entryLines[K comparable](rangeFn func(func(K, types.Boxed))) []string {
+	var out []string
+	rangeFn(func(key K, value types.Boxed) {
+		out = append(out, fmt.Sprintf("%v/%d", key, uint64(value)))
+	})
+	sort.Strings(out)
+	return out
+}
+
+// TestTypedMap owns the whole-map contract: every key kind behaves exactly as the Go-map model.
+func TestTypedMap(t *testing.T) {
+	negZero32 := float32(math.Copysign(0, -1))
+	negZero64 := math.Copysign(0, -1)
+	floats32 := []float32{0, negZero32, float32(math.NaN()), float32(math.Inf(1)), float32(math.Inf(-1)), math.SmallestNonzeroFloat32, -math.SmallestNonzeroFloat32, math.MaxFloat32, 1, -1, 1.5}
+	floats64 := []float64{0, negZero64, math.NaN(), math.Inf(1), math.Inf(-1), math.SmallestNonzeroFloat64, -math.SmallestNonzeroFloat64, math.MaxFloat64, 1, -1, 1.5}
+	ints := func(limit int) []int64 {
+		out := []int64{0, 1, -1}
+		for i := range limit {
+			out = append(out, int64(i*7919-limit))
+		}
+		return out
+	}
+	pool := func(limit int) []int32 {
+		var out []int32
+		for _, v := range ints(limit) {
+			out = append(out, int32(v))
+		}
+		return append(out, math.MinInt32, math.MaxInt32)
+	}
+
+	tests := []struct {
+		name string
+		run  func(t *testing.T, seed uint64)
+	}{
+		{"i1", func(t *testing.T, seed uint64) {
+			replay(t, types.NewMapType(types.TypeI1(), types.TypeI32()), []bool{false, true}, 400, seed)
+		}},
+		{"i8", func(t *testing.T, seed uint64) {
+			var keys []int8
+			for i := math.MinInt8; i <= math.MaxInt8; i++ {
+				keys = append(keys, int8(i))
+			}
+			replay(t, types.NewMapType(types.TypeI8(), types.TypeI32()), keys, 4000, seed)
+		}},
+		{"i32 small pool", func(t *testing.T, seed uint64) {
+			replay(t, types.NewMapType(types.TypeI32(), types.TypeI32()), pool(6), 4000, seed)
+		}},
+		{"i32 growth", func(t *testing.T, seed uint64) {
+			replay(t, types.NewMapType(types.TypeI32(), types.TypeI32()), pool(3000), 20000, seed)
+		}},
+		{"i64 extremes", func(t *testing.T, seed uint64) {
+			keys := []int64{0, 1, -1, math.MinInt64, math.MaxInt64, 1 << 50, -(1 << 50), 1 << 32, 1 << 63 >> 1}
+			replay(t, types.NewMapType(types.TypeI64(), types.TypeI32()), keys, 4000, seed)
+		}},
+		{"i64 growth", func(t *testing.T, seed uint64) {
+			replay(t, types.NewMapType(types.TypeI64(), types.TypeI32()), ints(3000), 20000, seed)
+		}},
+		{"f32 edge keys", func(t *testing.T, seed uint64) {
+			replay(t, types.NewMapType(types.TypeF32(), types.TypeI32()), floats32, 4000, seed)
+		}},
+		{"f64 edge keys", func(t *testing.T, seed uint64) {
+			replay(t, types.NewMapType(types.TypeF64(), types.TypeI32()), floats64, 4000, seed)
+		}},
+		{"f64 growth", func(t *testing.T, seed uint64) {
+			var keys []float64
+			for _, v := range ints(1500) {
+				keys = append(keys, float64(v)/8)
+			}
+			replay(t, types.NewMapType(types.TypeF64(), types.TypeI32()), append(keys, floats64...), 20000, seed)
+		}},
+		{"string", func(t *testing.T, seed uint64) {
+			replay(t, types.NewMapType(types.TypeString(), types.TypeI32()), []string{"", "a", "b", "ab", "ba"}, 2000, seed)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for seed := uint64(1); seed <= 5; seed++ {
+				tt.run(t, seed)
+			}
+		})
+	}
+
+	t.Run("tombstone churn keeps probing bounded", func(t *testing.T) {
+		m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32(), types.TypeI32()), 0)
+		for i := int32(0); i < 50000; i++ {
+			m.Set(i, types.BoxI32(i))
+			if i >= 3 {
+				_, ok := m.Delete(i - 3)
+				require.True(t, ok)
+			}
+			_, ok := m.Get(-1)
+			require.False(t, ok)
+		}
+		require.Equal(t, 3, m.Len())
+	})
+
+	t.Run("float key edge rules", func(t *testing.T) {
+		m := types.NewTypedMap[float64](types.NewMapType(types.TypeF64(), types.TypeI32()), 0)
+		m.Set(negZero64, types.BoxI32(1))
+		m.Set(0, types.BoxI32(2))
+		var keys []float64
+		m.Range(func(k float64, _ types.Boxed) { keys = append(keys, k) })
+		require.Len(t, keys, 1)
+		require.False(t, math.Signbit(keys[0]))
+
+		m.Set(negZero64, types.BoxI32(3))
+		keys = keys[:0]
+		m.Range(func(k float64, _ types.Boxed) { keys = append(keys, k) })
+		require.True(t, math.Signbit(keys[0]))
+
+		for i := range 40 {
+			_, ok := m.Set(math.NaN(), types.BoxI32(int32(i)))
+			require.False(t, ok)
+		}
+		require.Equal(t, 41, m.Len())
+		_, ok := m.Get(math.NaN())
+		require.False(t, ok)
+		_, ok = m.Delete(math.NaN())
+		require.False(t, ok)
+		require.Equal(t, 41, m.Len())
+		visited := 0
+		m.Range(func(float64, types.Boxed) { visited++ })
+		require.Equal(t, 41, visited)
+	})
+}
+
+// replay applies one random operation sequence to a TypedMap and to the Go-map
+// model and requires every observable result to agree.
+func replay[K comparable](t *testing.T, typ *types.MapType, pool []K, ops int, seed uint64) {
+	rng := rand.New(rand.NewPCG(seed, 1))
+	m := types.NewTypedMap[K](typ, rng.IntN(4)*8)
+	model := &goMap[K]{entries: map[K]types.Boxed{}}
+	for n := 0; n < ops; n++ {
+		key := pool[rng.IntN(len(pool))]
+		value := types.BoxI32(int32(rng.IntN(1 << 20)))
+		switch op := rng.IntN(100); {
+		case op < 40:
+			gotOld, gotOK := m.Set(key, value)
+			wantOld, wantOK := model.set(key, value)
+			require.Equal(t, wantOK, gotOK, "set %v", key)
+			require.Equal(t, wantOld, gotOld, "set %v", key)
+		case op < 60:
+			got, gotOK := m.Get(key)
+			want, wantOK := model.entries[key]
+			require.Equal(t, wantOK, gotOK, "get %v", key)
+			require.Equal(t, want, got, "get %v", key)
+		case op < 90:
+			gotOld, gotOK := m.Delete(key)
+			wantOld, wantOK := model.delete(key)
+			require.Equal(t, wantOK, gotOK, "delete %v", key)
+			require.Equal(t, wantOld, gotOld, "delete %v", key)
+		case op < 92:
+			var got []types.Boxed
+			m.Clear(func(value types.Boxed) { got = append(got, value) })
+			require.Equal(t, boxedWords(model.clear()), boxedWords(got), "clear")
+		case op < 96:
+			require.Equal(t, entryLines[K](func(fn func(K, types.Boxed)) {
+				for k, v := range model.entries {
+					fn(k, v)
+				}
+			}), entryLines[K](m.Range), "range")
+		default:
+			c := m.Clone()
+			require.Equal(t, entryLines[K](m.Range), entryLines[K](c.Range), "clone")
+			c.Set(key, value)
+			c.Delete(key)
+			require.Equal(t, entryLines[K](func(fn func(K, types.Boxed)) {
+				for k, v := range model.entries {
+					fn(k, v)
+				}
+			}), entryLines[K](m.Range), "clone shares storage")
+		}
+		require.Equal(t, len(model.entries), m.Len(), "len after op %d", n)
+	}
+	require.Equal(t, entryLines[K](func(fn func(K, types.Boxed)) {
+		for k, v := range model.entries {
+			fn(k, v)
+		}
+	}), entryLines[K](m.Range))
+}
 
 func TestMapLiteral(t *testing.T) {
 	value := &types.MapLiteral{Typ: types.NewMapType(types.TypeI32(), types.TypeString()), Keys: []types.Value{types.I32(1)}, Values: []types.Value{types.String("a")}}
@@ -213,6 +432,7 @@ func TestTypedMap_Range(t *testing.T) {
 	})
 	require.Equal(t, []int64{1}, keys)
 }
+
 func TestMap_Get(t *testing.T) {
 	m := types.NewMap(types.NewMapType(types.TypeString(), types.TypeI32()))
 	m.Set(types.MapKey{Kind: types.KindRef, Bits: 1}, types.MapEntry{Key: types.BoxRef(1), Value: types.BoxI32(2)})
@@ -332,6 +552,124 @@ func TestMapIterator_Next(t *testing.T) {
 		it := types.NewMapIterator(7, m)
 		require.True(t, it.Next())
 		require.Equal(t, types.BoxRef(9), it.Current())
+	})
+
+	t.Run("clear ends the walk", func(t *testing.T) {
+		m := types.NewTypedMap[float64](types.NewMapType(types.TypeF64(), types.TypeI32()), 0)
+		for range 10 {
+			m.Set(math.NaN(), 1)
+		}
+		it := types.NewMapIterator(7, m)
+		require.True(t, it.Next())
+		m.Clear(func(types.Boxed) {})
+		m.Set(100, 1)
+		require.False(t, it.Next())
+		require.True(t, it.Done())
+		require.Equal(t, []types.Ref{7}, it.Refs(nil))
+	})
+
+	t.Run("every key kind visits each entry once", func(t *testing.T) {
+		drain := func(m types.Value) []string {
+			var out []string
+			for it := types.NewMapIterator(1, m); it.Next(); {
+				out = append(out, it.Current().String())
+			}
+			sort.Strings(out)
+			return out
+		}
+		i1 := types.NewTypedMap[bool](types.NewMapType(types.TypeI1(), types.TypeI32()), 0)
+		i1.Set(false, 0)
+		i1.Set(true, 0)
+		i8 := types.NewTypedMap[int8](types.NewMapType(types.TypeI8(), types.TypeI32()), 0)
+		i8.Set(-128, 0)
+		i8.Set(127, 0)
+		i32 := types.NewTypedMap[int32](types.NewMapType(types.TypeI32(), types.TypeI32()), 0)
+		i32.Set(math.MinInt32, 0)
+		i32.Set(7, 0)
+		i64 := types.NewTypedMap[int64](types.NewMapType(types.TypeI64(), types.TypeI32()), 0)
+		i64.Set(math.MinInt64, 0)
+		i64.Set(1<<50, 0)
+		f32 := types.NewTypedMap[float32](types.NewMapType(types.TypeF32(), types.TypeI32()), 0)
+		f32.Set(float32(math.Inf(-1)), 0)
+		f32.Set(1.5, 0)
+		f64 := types.NewTypedMap[float64](types.NewMapType(types.TypeF64(), types.TypeI32()), 0)
+		f64.Set(math.NaN(), 0)
+		f64.Set(math.NaN(), 0)
+		f64.Set(-2.5, 0)
+		str := types.NewTypedMap[string](types.NewMapType(types.TypeString(), types.TypeI32()), 0)
+		str.Set("a", 0)
+		str.Set("b", 0)
+		require.Equal(t, []string{"false", "true"}, drain(i1))
+		require.Equal(t, []string{"-128", "127"}, drain(i8))
+		require.Equal(t, []string{"-2147483648", "7"}, drain(i32))
+		require.Equal(t, []string{"-9223372036854775808", "1125899906842624"}, drain(i64))
+		require.Len(t, drain(f32), 2)
+		require.Len(t, drain(f64), 3)
+		require.Len(t, drain(str), 2)
+	})
+
+	t.Run("mutation during iteration", func(t *testing.T) {
+		const present = 200
+		tests := []struct {
+			name   string
+			mutate func(m *types.TypedMap[int32], rng *rand.Rand)
+		}{
+			{"set and delete", func(m *types.TypedMap[int32], rng *rand.Rand) {
+				key := int32(rng.IntN(2 * present))
+				if rng.IntN(2) == 0 {
+					m.Set(key, 1)
+				} else {
+					m.Delete(key)
+				}
+			}},
+			{"growth every step", func(m *types.TypedMap[int32], rng *rand.Rand) {
+				for range 64 {
+					m.Set(int32(present+rng.IntN(1<<20)), 1)
+				}
+				m.Delete(int32(rng.IntN(present)))
+			}},
+			{"delete churn", func(m *types.TypedMap[int32], rng *rand.Rand) {
+				for range 8 {
+					key := int32(present + rng.IntN(64))
+					m.Set(key, 1)
+					m.Delete(key)
+				}
+				m.Delete(int32(rng.IntN(present)))
+			}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				for seed := uint64(1); seed <= 20; seed++ {
+					rng := rand.New(rand.NewPCG(seed, 7))
+					m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32(), types.TypeI32()), 0)
+					for k := range int32(present) {
+						m.Set(k, 1)
+					}
+					originals := map[int32]bool{}
+					for k := range int32(present) {
+						originals[k] = true
+					}
+					visited := map[int32]bool{}
+					it := types.NewMapIterator(1, m)
+					for it.Next() {
+						key := int32(it.Current().(types.I32))
+						_, live := m.Get(key)
+						require.True(t, live, "produced a deleted key %d", key)
+						require.False(t, visited[key], "key %d visited twice", key)
+						visited[key] = true
+						tt.mutate(m, rng)
+						for key := range originals {
+							if _, live := m.Get(key); !live {
+								delete(originals, key)
+							}
+						}
+					}
+					for key := range originals {
+						require.True(t, visited[key], "present-throughout key %d skipped", key)
+					}
+				}
+			})
+		}
 	})
 }
 
