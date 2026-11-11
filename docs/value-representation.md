@@ -89,7 +89,7 @@ Unboxing methods: `I32`, `I8`, `I64`, `F32`, `F64`, `Ref`, `Bool`. Callers `MUST
 
 ## Map Key Words
 
-A numeric `TypedMap` key is stored as one zero-extended word of its own width: `i1`, `i8`, `i32`, and `f32` use the low 8 or 32 bits of raw bits, `i64` and `f64` all 64. Equality is bit equality except for floats: the hash and match treat `-0` as `+0`, and a `NaN` matches nothing. `memory-model.md` owns the table that holds these words.
+A numeric `TypedMap` key is stored as one zero-extended word of its own width: `i1`, `i8`, `i32`, and `f32` use the low 8 or 32 bits of raw bits, `i64` and `f64` all 64. Keys compare as their Go values: a float `-0` equals `+0`, and a `NaN` equals nothing. `memory-model.md` owns the table that holds these words.
 
 ## Native Representation
 

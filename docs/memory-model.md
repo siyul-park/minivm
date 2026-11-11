@@ -49,16 +49,16 @@ Transfers `MUST` preserve counts exactly. Native execution `MAY` borrow backing 
 
 ## Map Storage
 
-`types/map.go` owns map storage. A `TypedMap` with a numeric key (`i1`, `i8`, `i32`, `i64`, `f32`, `f64`) keeps its entries in an open-addressing table of two flat arrays that hold no Go pointers; a `TypedMap[string]` and the generic `Map` keep a Go map. Native code `MUST NOT` touch a Go map, so only the table is reachable from machine code.
+`types/map.go` owns map storage. A `TypedMap` with a numeric key (`i1`, `i8`, `i32`, `i64`, `f32`, `f64`) keeps its entries in an open-addressing table of two flat arrays that hold no Go pointers. A `StringMap` and the generic `Map` keep a Go map. Native code `MUST NOT` touch a Go map, so only the table is reachable from machine code.
 
 | Part | Contract |
 |---|---|
-| Capacity | a power of two, at least 8; a key's home slot is its multiply-shift hash, and probing is linear |
-| Slot | key word, then `Boxed` value word, in `slots`; state `empty`, `full`, or `dead` (tombstone) in `ctrl` |
+| Capacity | a power of two, at least 8 for a map built by `NewTypedMap`; a zero-value `TypedMap` is not usable |
+| Hash | a key word times a random odd multiplier drawn per table, shifted to the capacity; the multiplier survives rehash and `Clone`, so no key set can be crafted to collide |
+| Slot | key word, then `Boxed` value word, in `slots`; state `empty`, `full`, or `dead` (tombstone) in `ctrl`; probing is linear and an insert reuses the first tombstone on its path |
 | Load | live entries plus tombstones stay at or below three quarters of capacity; an insert past that rehashes into fresh arrays, doubling them when live entries exceed three eighths and keeping the size otherwise |
-| Layout | `ctrl`, `slots`, `mask`, `shift`, `count` sit at fixed offsets from the `TypedMap` base, pinned by compile-time assertions in `types/map.go` |
 
-Iteration order (`Range`, `map.keys`, `map.iter`) is unspecified; for numeric keys it follows slot order. Under mutation, `map.iter` `MUST` produce every entry present for the whole walk exactly once and `MUST NOT` produce a key deleted before the walk reaches it. Entries inserted during the walk `MAY` be produced. A rehash does not restart or skip the walk, and `map.clear` ends a walk over numeric keys. Float keys follow Go map keys: `-0` and `+0` are one key whose stored bits are the latest written, and a `NaN` key never matches, so each set adds an entry that only `map.clear` removes.
+Iteration order (`Range`, `map.keys`, `map.iter`) is unspecified; for numeric keys it follows slot order. Under mutation, `map.iter` `MUST` produce every entry present for the whole walk exactly once and `MUST NOT` produce a key deleted before the walk reaches it. Entries inserted during the walk `MAY` be produced. A rehash does not restart or skip the walk, and `map.clear` ends every walk and clears a Go-map-backed map in place. Float keys follow Go map keys: `-0` and `+0` are one key whose stored bits are the latest written, and a `NaN` key never matches, so each set adds an entry that only `map.clear` removes.
 
 ## Reference Counting
 

@@ -4,7 +4,7 @@ import (
 	"github.com/dave/jennifer/jen"
 )
 
-// typedKey is one types.TypedMap instantiation: the Go type its keys have, how
+// typedKey is one types.TypedMap instantiation, or types.StringMap for string: the Go type its keys have, how
 // a boxed key operand reads as that type, and how a key of that type boxes.
 type typedKey struct {
 	typ  string
@@ -283,6 +283,9 @@ func mapSwitch(subject jen.Code, body func(typedKey) []jen.Code, rest ...jen.Cod
 }
 
 func (k typedKey) instance() jen.Code {
+	if k.typ == "string" {
+		return jen.Op("*").Qual(typesPkg, "StringMap")
+	}
 	return jen.Op("*").Qual(typesPkg, "TypedMap").Index(jen.Id(k.typ))
 }
 

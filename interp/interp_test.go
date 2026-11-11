@@ -9648,6 +9648,35 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 	})
 
+	t.Run("map iterator resumed after clear retains no released key", func(t *testing.T) {
+		typ := types.NewMapType(types.TypeAny(), types.TypeI32())
+		code := []instr.Instruction{}
+		for n := uint64(1); n <= 3; n++ {
+			code = append(code, instr.MustNew(instr.I32_CONST, n), instr.MustNew(instr.REF_NEW), instr.MustNew(instr.I32_CONST, n))
+		}
+		code = append(code,
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.MAP_NEW, 0), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.MAP_ITER), instr.MustNew(instr.LOCAL_SET, 1),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.MAP_CLEAR),
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.RESUME),
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.CORO_DONE),
+		)
+		vm := interp.MustNew(program.New(code, program.WithTypes(typ), program.WithLocals(typ, types.NewIteratorType(types.TypeAny()))))
+		defer vm.Close()
+		require.NoError(t, vm.Run(t.Context()))
+		done, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I1(true), done)
+
+		live := 0
+		for addr := 1; addr < vm.HeapLen(); addr++ {
+			if count, err := vm.RefCount(addr); err == nil && count > 0 {
+				live++
+			}
+		}
+		require.Equal(t, 2, live, "only the map and its iterator stay alive")
+	})
+
 	t.Run("runs every program standalone and fused", func(t *testing.T) {
 		for _, mode := range []struct {
 			name string
