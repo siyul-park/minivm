@@ -9520,9 +9520,25 @@ func TestWithThreshold(t *testing.T) {
 			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 7).Emit(instr.I32_MUL).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_SET)
 			b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 7).Emit(instr.I32_MUL).Emit(instr.MAP_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
 		})
-		exits := compareNative(t, prog)
-		require.Positive(t, exits["bridge"], "an insert past the load factor rehashes in Go")
-		require.Less(t, exits["bridge"], float64(20), "only the inserts that rehash leave native code")
+		compareNative(t, prog)
+
+		// The first run that enters native code may enter after the map stopped
+		// growing, so the bridges are counted over runs that start native.
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		var bridges float64
+		poll(t, func() bool {
+			before, entries := exitsOf(profiler)["bridge"], nativeEntries(profiler)
+			require.NoError(t, vm.Run(context.Background()))
+			_, err := vm.Pop()
+			require.NoError(t, err)
+			vm.Reset()
+			vm.Flush()
+			bridges = exitsOf(profiler)["bridge"] - before
+			return entries > 0 && bridges > 0
+		})
+		require.Less(t, bridges, float64(20), "only the inserts that rehash leave native code")
 	})
 
 }
