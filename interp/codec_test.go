@@ -14,6 +14,7 @@ import (
 	interp "github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -463,6 +464,81 @@ func TestRegistry_Marshal(t *testing.T) {
 		_, err = fn.(*interp.HostFunction).Fn(i, []types.Boxed{types.BoxRef(recv), types.BoxI32(2)})
 		require.NoError(t, err)
 		require.Zero(t, src.Count)
+	})
+
+	t.Run("a scalar func call allocates a bounded number of times", func(t *testing.T) {
+		if testing.CoverMode() != "" {
+			t.Skip("coverage instrumentation changes allocation counts")
+		}
+		i := interp.MustNew(program.New(nil), interp.WithThreshold(-1))
+		r := interp.NewRegistry()
+		defer i.Close()
+
+		fn, err := r.Marshal(i, func(a, b int32) int32 { return a*31 + b })
+		require.NoError(t, err)
+		host := fn.(*interp.HostFunction)
+		params := []types.Boxed{types.BoxI32(100000), types.BoxI32(70000)}
+
+		got, err := host.Fn(i, params)
+		require.NoError(t, err)
+		require.Equal(t, []types.Boxed{types.BoxI32(3170000)}, got)
+
+		// The floor is what reflect.Value.Call and the result slice cost; the
+		// per-call codec scratch must not add to it. The bound leaves room for
+		// sync.Pool dropping items under the race detector.
+		const limit = 6
+		allocs := testing.AllocsPerRun(100, func() {
+			_, _ = host.Fn(i, params)
+		})
+		require.LessOrEqual(t, allocs, float64(limit))
+	})
+
+	t.Run("a func rejects a scalar param that does not fit", func(t *testing.T) {
+		i := interp.MustNew(program.New(nil), interp.WithThreshold(-1))
+		r := interp.NewRegistry()
+		defer i.Close()
+
+		fn, err := r.Marshal(i, func(a int8, b uint8) int { return int(a) + int(b) })
+		require.NoError(t, err)
+		host := fn.(*interp.HostFunction)
+
+		got, err := host.Fn(i, []types.Boxed{types.BoxI8(-3), types.BoxI32(200)})
+		require.NoError(t, err)
+		require.Equal(t, []types.Boxed{types.BoxI64(197)}, got)
+
+		_, err = host.Fn(i, []types.Boxed{types.BoxI32(300), types.BoxI32(1)})
+		require.ErrorIs(t, err, interp.ErrValueOverflow)
+		_, err = host.Fn(i, []types.Boxed{types.BoxI32(1), types.BoxI32(-1)})
+		require.ErrorIs(t, err, interp.ErrValueOverflow)
+		_, err = host.Fn(i, []types.Boxed{types.BoxF64(1), types.BoxI32(1)})
+		require.ErrorIs(t, err, interp.ErrTypeMismatch)
+	})
+
+	t.Run("concurrent calls on one func do not share scratch", func(t *testing.T) {
+		r := interp.NewRegistry()
+		prog := program.New(nil)
+		seed := interp.MustNew(prog)
+		defer seed.Close()
+		fn, err := r.Marshal(seed, func(a, b int32) int32 { return a - b })
+		require.NoError(t, err)
+		host := fn.(*interp.HostFunction)
+
+		var wg sync.WaitGroup
+		for worker := range 4 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				i := interp.MustNew(prog, interp.WithThreshold(-1))
+				defer i.Close()
+				for n := range 500 {
+					got, err := host.Fn(i, []types.Boxed{types.BoxI32(int32(n + worker)), types.BoxI32(int32(worker))})
+					if !assert.NoError(t, err) || !assert.Equal(t, []types.Boxed{types.BoxI32(int32(n))}, got) {
+						return
+					}
+				}
+			}()
+		}
+		wg.Wait()
 	})
 
 	t.Run("map key reachable from a guest lookup", func(t *testing.T) {

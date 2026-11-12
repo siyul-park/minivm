@@ -34,6 +34,10 @@ type Decoder struct {
 	registry *Registry
 }
 
+// unboxer stores a scalar slot into the Go scalar at p, reporting false when
+// the slot is not a number of the right kind or does not fit.
+type unboxer func(types.Boxed, unsafe.Pointer) bool
+
 // Unmarshal decodes an encoded value.
 func (f UnmarshalerFunc) Unmarshal(d *Decoder, val types.Value, p unsafe.Pointer) error {
 	return f(d, val, p)
@@ -53,7 +57,23 @@ func (d *Decoder) Decode(val types.Value, t reflect.Type, p unsafe.Pointer) erro
 	if err != nil {
 		return err
 	}
+	if b, ok := val.(types.Boxed); ok {
+		return slot(d, c, b, p)
+	}
 	value, err := d.interp.deref(val)
+	if err != nil {
+		return err
+	}
+	return c.set(d, value, p)
+}
+
+// slot writes the slot b through c. A scalar slot of a scalar Go kind is stored
+// directly; anything else resolves the slot and converts the value it names.
+func slot(d *Decoder, c *conversion, b types.Boxed, p unsafe.Pointer) error {
+	if c.unbox != nil && b.Kind() != types.KindRef && c.unbox(b, p) {
+		return nil
+	}
+	value, err := d.interp.deref(b)
 	if err != nil {
 		return err
 	}
@@ -364,6 +384,65 @@ func fieldIndex(typ *types.StructType, name string, used []bool) (int, bool) {
 		return idx, true
 	}
 	return 0, false
+}
+
+func unboxBool() unboxer {
+	return func(b types.Boxed, p unsafe.Pointer) bool {
+		kind, bits, ok := boxedBits(b)
+		if !ok {
+			return false
+		}
+		n, ok := intBits(kind, bits)
+		if ok {
+			*(*bool)(p) = n != 0
+		}
+		return ok
+	}
+}
+
+func unboxSigned[T ~int | ~int8 | ~int16 | ~int32 | ~int64]() unboxer {
+	return func(b types.Boxed, p unsafe.Pointer) bool {
+		kind, bits, ok := boxedBits(b)
+		if !ok {
+			return false
+		}
+		n, ok := intBits(kind, bits)
+		if !ok || int64(T(n)) != n {
+			return false
+		}
+		*(*T)(p) = T(n)
+		return true
+	}
+}
+
+func unboxUnsigned[T ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr]() unboxer {
+	return func(b types.Boxed, p unsafe.Pointer) bool {
+		kind, bits, ok := boxedBits(b)
+		if !ok {
+			return false
+		}
+		n, ok := uintBits(kind, bits)
+		if !ok || uint64(T(n)) != n {
+			return false
+		}
+		*(*T)(p) = T(n)
+		return true
+	}
+}
+
+func unboxFloat[T ~float32 | ~float64]() unboxer {
+	return func(b types.Boxed, p unsafe.Pointer) bool {
+		kind, bits, ok := boxedBits(b)
+		if !ok {
+			return false
+		}
+		f, ok := floatBits(kind, bits)
+		if !ok || math.IsInf(float64(T(f)), 0) && !math.IsInf(f, 0) {
+			return false
+		}
+		*(*T)(p) = T(f)
+		return true
+	}
 }
 
 func setBool(_ *Decoder, val types.Value, p unsafe.Pointer) error {

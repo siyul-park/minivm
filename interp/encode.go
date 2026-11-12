@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"sync"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/types"
@@ -52,6 +53,16 @@ type sliceHeader struct {
 	data unsafe.Pointer
 	len  int
 	cap  int
+}
+
+// callFrame is the scratch one call of a wrapped Go func needs: the argument
+// slots the params decode into, the argument list handed to reflect, and the
+// holders the results are read from. A frame is built once per signature and
+// recycled, so a call allocates none of it.
+type callFrame struct {
+	in      []reflect.Value
+	args    []reflect.Value
+	holders []reflect.Value
 }
 
 // Marshal converts a value to its encoded form.
@@ -333,40 +344,47 @@ func marshalMap(t reflect.Type, mt *types.MapType, key, elem *conversion) Marsha
 	}
 }
 
-// wrap exposes a bound Go function to the VM. Scratch is allocated inside the
-// returned closure on every call: the *HostFunction may be reachable from
-// program constants, so pooled interpreters built from the same program share
-// it and may call it concurrently from separate goroutines.
+// wrap exposes a bound Go function to the VM. The *HostFunction may be reachable
+// from program constants, so pooled interpreters built from the same program
+// share it and may call it concurrently from separate goroutines: each call
+// takes its own frame from frames, and a nested call takes another.
 func (e *Encoder) wrap(fn reflect.Value, typ *types.FunctionType) *HostFunction {
 	registry := e.registry
 	sig := fn.Type()
+	frames := sync.Pool{New: func() any { return newCallFrame(sig) }}
 
 	return NewHostFunction(typ, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
 		if len(params) != len(typ.Params) {
 			return nil, fmt.Errorf("%w: got %d params, want %d", ErrTypeMismatch, len(params), len(typ.Params))
 		}
-		in := make([]reflect.Value, sig.NumIn())
-		dec := &Decoder{interp: i, registry: registry}
+		f := frames.Get().(*callFrame)
+		defer func() {
+			f.reset()
+			frames.Put(f)
+		}()
+
+		dec := i.decoder(registry)
 		at := 0
-		for idx := range in {
-			param := sig.In(idx)
-			if param == typeContext {
+		for idx := range f.in {
+			if !f.args[idx].IsValid() {
 				ctx := i.Context()
 				if ctx == nil {
 					ctx = context.Background()
 				}
-				in[idx] = reflect.ValueOf(ctx)
+				f.in[idx] = reflect.ValueOf(ctx)
 				continue
 			}
-			arg := reflect.New(param)
-			if err := dec.Decode(params[at], param, arg.UnsafePointer()); err != nil {
+			c, err := registry.conversion(sig.In(idx))
+			if err == nil {
+				err = slot(dec, c, params[at], f.args[idx].UnsafePointer())
+			}
+			if err != nil {
 				return nil, fmt.Errorf("function param %d: %w", at, err)
 			}
-			in[idx] = arg.Elem()
 			at++
 		}
 
-		out := fn.Call(in)
+		out := fn.Call(f.in)
 		if len(out) > 0 && out[len(out)-1].Type().Implements(typeError) {
 			last := out[len(out)-1]
 			if err := hostError(last); err != nil {
@@ -375,10 +393,10 @@ func (e *Encoder) wrap(fn reflect.Value, typ *types.FunctionType) *HostFunction 
 			out = out[:len(out)-1]
 		}
 
-		enc := &Encoder{interp: i, registry: registry}
+		enc := i.encoder(registry)
 		returns := make([]types.Boxed, len(out))
 		for idx := range out {
-			boxed, err := enc.slot(out[idx], typ.Returns[idx])
+			boxed, err := enc.slotAt(f.holders[idx], out[idx], typ.Returns[idx])
 			if err != nil {
 				enc.discard()
 				return nil, fmt.Errorf("function return %d: %w", idx, err)
@@ -387,6 +405,39 @@ func (e *Encoder) wrap(fn reflect.Value, typ *types.FunctionType) *HostFunction 
 		}
 		return returns, nil
 	})
+}
+
+func newCallFrame(sig reflect.Type) *callFrame {
+	f := &callFrame{
+		in:      make([]reflect.Value, sig.NumIn()),
+		args:    make([]reflect.Value, sig.NumIn()),
+		holders: make([]reflect.Value, sig.NumOut()),
+	}
+	for idx := range f.in {
+		if param := sig.In(idx); param != typeContext {
+			f.args[idx] = reflect.New(param)
+			f.in[idx] = f.args[idx].Elem()
+		}
+	}
+	for idx := range f.holders {
+		f.holders[idx] = reflect.New(sig.Out(idx))
+	}
+	return f
+}
+
+// reset drops what the last call left in the frame, so a pooled frame keeps
+// nothing the Go side could still reach alive.
+func (f *callFrame) reset() {
+	for idx := range f.args {
+		if f.args[idx].IsValid() {
+			f.args[idx].Elem().SetZero()
+		} else {
+			f.in[idx] = reflect.Value{}
+		}
+	}
+	for idx := range f.holders {
+		f.holders[idx].Elem().SetZero()
+	}
 }
 
 // hostError reports the error a Go call returned in its trailing result, or nil
@@ -405,11 +456,21 @@ func hostError(v reflect.Value) error {
 // signature holds a parameter or a result in. v is a value rather than an
 // address, so it takes a holder of its own for the conversion to read.
 func (e *Encoder) slot(v reflect.Value, typ types.Type) (types.Boxed, error) {
-	holder := reflect.New(v.Type())
+	return e.slotAt(reflect.New(v.Type()), v, typ)
+}
+
+// slotAt is slot reading v through holder, a pointer to a Go value of v's type
+// the caller owns, so a repeated conversion allocates none. A primitive Go kind
+// compiles its slot form directly; any other converts to a standalone value and
+// narrows it.
+func (e *Encoder) slotAt(holder, v reflect.Value, typ types.Type) (types.Boxed, error) {
 	holder.Elem().Set(v)
 	c, err := e.registry.conversion(v.Type())
 	if err != nil {
 		return 0, err
+	}
+	if c.kind != reflect.Invalid {
+		return c.box(e, holder.UnsafePointer())
 	}
 	val, err := c.value(e, holder.UnsafePointer())
 	if err != nil {

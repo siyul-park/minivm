@@ -55,6 +55,11 @@ type conversion struct {
 	view  MarshalerFunc
 	box   boxer
 	set   UnmarshalerFunc
+
+	// unbox stores a scalar slot without boxing it into a types.Value. It
+	// reports false for a slot it cannot store exactly, and the caller then
+	// converts through set, which reports why.
+	unbox unboxer
 }
 
 // field addresses one exported Go field through a compiled offset.
@@ -96,7 +101,7 @@ var (
 )
 
 // leaves holds the conversion of every primitive Go kind, indexed by that kind.
-// Only the vm, value, box, and set fields are filled; compile copies them onto
+// Only the vm, value, box, set, and unbox fields are filled; compile copies them onto
 // the conversion it is building. Selecting an entry once at compile time is
 // what keeps field access free of a per-read kind switch.
 var leaves = [...]conversion{
@@ -105,12 +110,14 @@ var leaves = [...]conversion{
 		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I1(*(*bool)(p)), nil },
 		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxI1(*(*bool)(p)), nil },
 		set:   setBool,
+		unbox: unboxBool(),
 	},
 	reflect.Int8: {
 		vm:    types.TypeI8(),
 		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I32(*(*int8)(p)), nil },
 		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxI8(*(*int8)(p)), nil },
 		set:   setSigned[int8](),
+		unbox: unboxSigned[int8](),
 	},
 	reflect.Int16: {
 		vm:    types.TypeI32(),
@@ -118,13 +125,15 @@ var leaves = [...]conversion{
 		box: func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) {
 			return types.BoxI32(int32(*(*int16)(p))), nil
 		},
-		set: setSigned[int16](),
+		set:   setSigned[int16](),
+		unbox: unboxSigned[int16](),
 	},
 	reflect.Int32: {
 		vm:    types.TypeI32(),
 		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I32(*(*int32)(p)), nil },
 		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxI32(*(*int32)(p)), nil },
 		set:   setSigned[int32](),
+		unbox: unboxSigned[int32](),
 	},
 	reflect.Int: {
 		vm:    types.TypeI64(),
@@ -132,13 +141,15 @@ var leaves = [...]conversion{
 		box: func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
 			return e.boxI64(int64(*(*int)(p)))
 		},
-		set: setSigned[int](),
+		set:   setSigned[int](),
+		unbox: unboxSigned[int](),
 	},
 	reflect.Int64: {
 		vm:    types.TypeI64(),
 		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I64(*(*int64)(p)), nil },
 		box:   func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) { return e.boxI64(*(*int64)(p)) },
 		set:   setSigned[int64](),
+		unbox: unboxSigned[int64](),
 	},
 	reflect.Uint8: {
 		vm:    types.TypeI32(),
@@ -146,7 +157,8 @@ var leaves = [...]conversion{
 		box: func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) {
 			return types.BoxI32(int32(*(*uint8)(p))), nil
 		},
-		set: setUnsigned[uint8](),
+		set:   setUnsigned[uint8](),
+		unbox: unboxUnsigned[uint8](),
 	},
 	reflect.Uint16: {
 		vm:    types.TypeI32(),
@@ -154,7 +166,8 @@ var leaves = [...]conversion{
 		box: func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) {
 			return types.BoxI32(int32(*(*uint16)(p))), nil
 		},
-		set: setUnsigned[uint16](),
+		set:   setUnsigned[uint16](),
+		unbox: unboxUnsigned[uint16](),
 	},
 	reflect.Uint32: {
 		vm: types.TypeI32(),
@@ -164,7 +177,8 @@ var leaves = [...]conversion{
 		box: func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) {
 			return types.BoxI32(int32(*(*uint32)(p))), nil
 		},
-		set: setUnsigned[uint32](),
+		set:   setUnsigned[uint32](),
+		unbox: unboxUnsigned[uint32](),
 	},
 	reflect.Uint: {
 		vm: types.TypeI64(),
@@ -174,7 +188,8 @@ var leaves = [...]conversion{
 		box: func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
 			return e.boxI64(int64(*(*uint)(p)))
 		},
-		set: setUnsigned[uint](),
+		set:   setUnsigned[uint](),
+		unbox: unboxUnsigned[uint](),
 	},
 	reflect.Uint64: {
 		vm: types.TypeI64(),
@@ -184,7 +199,8 @@ var leaves = [...]conversion{
 		box: func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
 			return e.boxI64(int64(*(*uint64)(p)))
 		},
-		set: setUnsigned[uint64](),
+		set:   setUnsigned[uint64](),
+		unbox: unboxUnsigned[uint64](),
 	},
 	reflect.Uintptr: {
 		vm: types.TypeI64(),
@@ -194,19 +210,22 @@ var leaves = [...]conversion{
 		box: func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
 			return e.boxI64(int64(*(*uintptr)(p)))
 		},
-		set: setUnsigned[uintptr](),
+		set:   setUnsigned[uintptr](),
+		unbox: unboxUnsigned[uintptr](),
 	},
 	reflect.Float32: {
 		vm:    types.TypeF32(),
 		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.F32(*(*float32)(p)), nil },
 		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxF32(*(*float32)(p)), nil },
 		set:   setFloat[float32](),
+		unbox: unboxFloat[float32](),
 	},
 	reflect.Float64: {
 		vm:    types.TypeF64(),
 		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.F64(*(*float64)(p)), nil },
 		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxF64(*(*float64)(p)), nil },
 		set:   setFloat[float64](),
+		unbox: unboxFloat[float64](),
 	},
 	reflect.String: {
 		vm:    types.TypeString(),
@@ -375,7 +394,7 @@ func (r *Registry) structure(p *conversion, seen map[reflect.Type]*conversion) e
 		reflect.Uint64, reflect.Uintptr, reflect.Float32, reflect.Float64, reflect.String:
 		l := leaves[t.Kind()]
 		p.kind = t.Kind()
-		p.vm, p.value, p.box, p.set = l.vm, l.value, l.box, l.set
+		p.vm, p.value, p.box, p.set, p.unbox = l.vm, l.value, l.box, l.set, l.unbox
 		return nil
 
 	case reflect.Interface:
@@ -684,6 +703,10 @@ func asUint(val types.Value) (uint64, bool) {
 	if !ok {
 		return 0, false
 	}
+	return uintBits(kind, bits)
+}
+
+func uintBits(kind types.Kind, bits uint64) (uint64, bool) {
 	switch kind {
 	case types.KindI32:
 		return uint64(uint32(bits)), true
@@ -754,6 +777,10 @@ func asInt(val types.Value) (int64, bool) {
 	if !ok {
 		return 0, false
 	}
+	return intBits(kind, bits)
+}
+
+func intBits(kind types.Kind, bits uint64) (int64, bool) {
 	switch kind {
 	case types.KindI32:
 		return int64(int32(bits)), true
@@ -787,6 +814,10 @@ func asFloat(val types.Value) (float64, bool) {
 	if !ok {
 		return 0, false
 	}
+	return floatBits(kind, bits)
+}
+
+func floatBits(kind types.Kind, bits uint64) (float64, bool) {
 	switch kind {
 	case types.KindF32:
 		return float64(math.Float32frombits(uint32(bits))), true
@@ -816,16 +847,22 @@ func bitsOf(val types.Value) (types.Kind, uint64, bool) {
 	case types.F64:
 		return types.KindF64, math.Float64bits(float64(v)), true
 	case types.Boxed:
-		switch v.Kind() {
-		case types.KindI32, types.KindI8, types.KindI1:
-			return types.KindI32, uint64(uint32(v.I32())), true
-		case types.KindI64:
-			return types.KindI64, uint64(v.I64()), true
-		case types.KindF32:
-			return types.KindF32, uint64(math.Float32bits(v.F32())), true
-		case types.KindF64:
-			return types.KindF64, math.Float64bits(v.F64()), true
-		}
+		return boxedBits(v)
+	}
+	return 0, 0, false
+}
+
+// boxedBits is bitsOf for a slot, which needs no types.Value to be read.
+func boxedBits(v types.Boxed) (types.Kind, uint64, bool) {
+	switch v.Kind() {
+	case types.KindI32, types.KindI8, types.KindI1:
+		return types.KindI32, uint64(uint32(v.I32())), true
+	case types.KindI64:
+		return types.KindI64, uint64(v.I64()), true
+	case types.KindF32:
+		return types.KindF32, uint64(math.Float32bits(v.F32())), true
+	case types.KindF64:
+		return types.KindF64, math.Float64bits(v.F64()), true
 	}
 	return 0, 0, false
 }
