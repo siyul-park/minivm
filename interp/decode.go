@@ -38,6 +38,22 @@ type Decoder struct {
 // the slot is not a number of the right kind or does not fit.
 type unboxer func(types.Boxed, unsafe.Pointer) bool
 
+// store writes the scalar of the given kind and raw bits into the Go scalar at
+// p, returning the number it read and whether it fit. It is the one place a
+// slot narrows into a Go number: set and unbox both run it.
+type store[N int64 | uint64 | float64] func(kind types.Kind, bits uint64, p unsafe.Pointer) (N, fit)
+
+// fit reports how a scalar slot stores into a Go scalar.
+type fit uint8
+
+const (
+	fits fit = iota
+	mismatched
+	overflowed
+)
+
+var setBool = setScalar(reflect.TypeFor[bool](), storeBool)
+
 // Unmarshal decodes an encoded value.
 func (f UnmarshalerFunc) Unmarshal(d *Decoder, val types.Value, p unsafe.Pointer) error {
 	return f(d, val, p)
@@ -386,74 +402,6 @@ func fieldIndex(typ *types.StructType, name string, used []bool) (int, bool) {
 	return 0, false
 }
 
-func unboxBool() unboxer {
-	return func(b types.Boxed, p unsafe.Pointer) bool {
-		kind, bits, ok := boxedBits(b)
-		if !ok {
-			return false
-		}
-		n, ok := intBits(kind, bits)
-		if ok {
-			*(*bool)(p) = n != 0
-		}
-		return ok
-	}
-}
-
-func unboxSigned[T ~int | ~int8 | ~int16 | ~int32 | ~int64]() unboxer {
-	return func(b types.Boxed, p unsafe.Pointer) bool {
-		kind, bits, ok := boxedBits(b)
-		if !ok {
-			return false
-		}
-		n, ok := intBits(kind, bits)
-		if !ok || int64(T(n)) != n {
-			return false
-		}
-		*(*T)(p) = T(n)
-		return true
-	}
-}
-
-func unboxUnsigned[T ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr]() unboxer {
-	return func(b types.Boxed, p unsafe.Pointer) bool {
-		kind, bits, ok := boxedBits(b)
-		if !ok {
-			return false
-		}
-		n, ok := uintBits(kind, bits)
-		if !ok || uint64(T(n)) != n {
-			return false
-		}
-		*(*T)(p) = T(n)
-		return true
-	}
-}
-
-func unboxFloat[T ~float32 | ~float64]() unboxer {
-	return func(b types.Boxed, p unsafe.Pointer) bool {
-		kind, bits, ok := boxedBits(b)
-		if !ok {
-			return false
-		}
-		f, ok := floatBits(kind, bits)
-		if !ok || math.IsInf(float64(T(f)), 0) && !math.IsInf(f, 0) {
-			return false
-		}
-		*(*T)(p) = T(f)
-		return true
-	}
-}
-
-func setBool(_ *Decoder, val types.Value, p unsafe.Pointer) error {
-	n, ok := asInt(val)
-	if !ok {
-		return fmt.Errorf("%w: source=%T target=bool", ErrTypeMismatch, val)
-	}
-	*(*bool)(p) = n != 0
-	return nil
-}
-
 func setString(_ *Decoder, val types.Value, p unsafe.Pointer) error {
 	text, ok := val.(types.String)
 	if !ok {
@@ -464,46 +412,89 @@ func setString(_ *Decoder, val types.Value, p unsafe.Pointer) error {
 }
 
 func setSigned[T ~int | ~int8 | ~int16 | ~int32 | ~int64]() UnmarshalerFunc {
-	target := reflect.TypeFor[T]()
-	return func(_ *Decoder, val types.Value, p unsafe.Pointer) error {
-		n, ok := asInt(val)
-		if !ok {
-			return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, val, target)
-		}
-		if int64(T(n)) != n {
-			return fmt.Errorf("%w: %d overflows %s", ErrValueOverflow, n, target)
-		}
-		*(*T)(p) = T(n)
-		return nil
-	}
+	return setScalar(reflect.TypeFor[T](), storeSigned[T])
 }
 
 func setUnsigned[T ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr]() UnmarshalerFunc {
-	target := reflect.TypeFor[T]()
+	return setScalar(reflect.TypeFor[T](), storeUnsigned[T])
+}
+
+func setFloat[T ~float32 | ~float64]() UnmarshalerFunc {
+	return setScalar(reflect.TypeFor[T](), storeFloat[T])
+}
+
+// setScalar adapts a store to an UnmarshalerFunc reading a standalone value.
+func setScalar[N int64 | uint64 | float64](target reflect.Type, run store[N]) UnmarshalerFunc {
 	return func(_ *Decoder, val types.Value, p unsafe.Pointer) error {
-		n, ok := asUint(val)
+		kind, bits, ok := bitsOf(val)
 		if !ok {
 			return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, val, target)
 		}
-		if uint64(T(n)) != n {
-			return fmt.Errorf("%w: %d overflows %s", ErrValueOverflow, n, target)
+		n, status := run(kind, bits, p)
+		switch status {
+		case mismatched:
+			return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, val, target)
+		case overflowed:
+			return fmt.Errorf("%w: %v overflows %s", ErrValueOverflow, n, target)
 		}
-		*(*T)(p) = T(n)
 		return nil
 	}
 }
 
-func setFloat[T ~float32 | ~float64]() UnmarshalerFunc {
-	target := reflect.TypeFor[T]()
-	return func(_ *Decoder, val types.Value, p unsafe.Pointer) error {
-		f, ok := asFloat(val)
+// unboxScalar adapts a store to an unboxer reading a slot, which needs no
+// types.Value to be built.
+func unboxScalar[N int64 | uint64 | float64](run store[N]) unboxer {
+	return func(b types.Boxed, p unsafe.Pointer) bool {
+		kind, bits, ok := boxedBits(b)
 		if !ok {
-			return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, val, target)
+			return false
 		}
-		if math.IsInf(float64(T(f)), 0) && !math.IsInf(f, 0) {
-			return fmt.Errorf("%w: %g overflows %s", ErrValueOverflow, f, target)
-		}
-		*(*T)(p) = T(f)
-		return nil
+		_, status := run(kind, bits, p)
+		return status == fits
 	}
+}
+
+func storeBool(kind types.Kind, bits uint64, p unsafe.Pointer) (int64, fit) {
+	n, ok := intBits(kind, bits)
+	if !ok {
+		return 0, mismatched
+	}
+	*(*bool)(p) = n != 0
+	return n, fits
+}
+
+func storeSigned[T ~int | ~int8 | ~int16 | ~int32 | ~int64](kind types.Kind, bits uint64, p unsafe.Pointer) (int64, fit) {
+	n, ok := intBits(kind, bits)
+	if !ok {
+		return 0, mismatched
+	}
+	if int64(T(n)) != n {
+		return n, overflowed
+	}
+	*(*T)(p) = T(n)
+	return n, fits
+}
+
+func storeUnsigned[T ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr](kind types.Kind, bits uint64, p unsafe.Pointer) (uint64, fit) {
+	n, ok := uintBits(kind, bits)
+	if !ok {
+		return 0, mismatched
+	}
+	if uint64(T(n)) != n {
+		return n, overflowed
+	}
+	*(*T)(p) = T(n)
+	return n, fits
+}
+
+func storeFloat[T ~float32 | ~float64](kind types.Kind, bits uint64, p unsafe.Pointer) (float64, fit) {
+	f, ok := floatBits(kind, bits)
+	if !ok {
+		return 0, mismatched
+	}
+	if math.IsInf(float64(T(f)), 0) && !math.IsInf(f, 0) {
+		return f, overflowed
+	}
+	*(*T)(p) = T(f)
+	return f, fits
 }

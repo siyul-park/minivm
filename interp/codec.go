@@ -110,14 +110,14 @@ var leaves = [...]conversion{
 		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I1(*(*bool)(p)), nil },
 		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxI1(*(*bool)(p)), nil },
 		set:   setBool,
-		unbox: unboxBool(),
+		unbox: unboxScalar(storeBool),
 	},
 	reflect.Int8: {
 		vm:    types.TypeI8(),
 		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I32(*(*int8)(p)), nil },
 		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxI8(*(*int8)(p)), nil },
 		set:   setSigned[int8](),
-		unbox: unboxSigned[int8](),
+		unbox: unboxScalar(storeSigned[int8]),
 	},
 	reflect.Int16: {
 		vm:    types.TypeI32(),
@@ -126,14 +126,14 @@ var leaves = [...]conversion{
 			return types.BoxI32(int32(*(*int16)(p))), nil
 		},
 		set:   setSigned[int16](),
-		unbox: unboxSigned[int16](),
+		unbox: unboxScalar(storeSigned[int16]),
 	},
 	reflect.Int32: {
 		vm:    types.TypeI32(),
 		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I32(*(*int32)(p)), nil },
 		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxI32(*(*int32)(p)), nil },
 		set:   setSigned[int32](),
-		unbox: unboxSigned[int32](),
+		unbox: unboxScalar(storeSigned[int32]),
 	},
 	reflect.Int: {
 		vm:    types.TypeI64(),
@@ -142,14 +142,14 @@ var leaves = [...]conversion{
 			return e.boxI64(int64(*(*int)(p)))
 		},
 		set:   setSigned[int](),
-		unbox: unboxSigned[int](),
+		unbox: unboxScalar(storeSigned[int]),
 	},
 	reflect.Int64: {
 		vm:    types.TypeI64(),
 		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.I64(*(*int64)(p)), nil },
 		box:   func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) { return e.boxI64(*(*int64)(p)) },
 		set:   setSigned[int64](),
-		unbox: unboxSigned[int64](),
+		unbox: unboxScalar(storeSigned[int64]),
 	},
 	reflect.Uint8: {
 		vm:    types.TypeI32(),
@@ -158,7 +158,7 @@ var leaves = [...]conversion{
 			return types.BoxI32(int32(*(*uint8)(p))), nil
 		},
 		set:   setUnsigned[uint8](),
-		unbox: unboxUnsigned[uint8](),
+		unbox: unboxScalar(storeUnsigned[uint8]),
 	},
 	reflect.Uint16: {
 		vm:    types.TypeI32(),
@@ -167,7 +167,7 @@ var leaves = [...]conversion{
 			return types.BoxI32(int32(*(*uint16)(p))), nil
 		},
 		set:   setUnsigned[uint16](),
-		unbox: unboxUnsigned[uint16](),
+		unbox: unboxScalar(storeUnsigned[uint16]),
 	},
 	reflect.Uint32: {
 		vm: types.TypeI32(),
@@ -178,7 +178,7 @@ var leaves = [...]conversion{
 			return types.BoxI32(int32(*(*uint32)(p))), nil
 		},
 		set:   setUnsigned[uint32](),
-		unbox: unboxUnsigned[uint32](),
+		unbox: unboxScalar(storeUnsigned[uint32]),
 	},
 	reflect.Uint: {
 		vm: types.TypeI64(),
@@ -189,7 +189,7 @@ var leaves = [...]conversion{
 			return e.boxI64(int64(*(*uint)(p)))
 		},
 		set:   setUnsigned[uint](),
-		unbox: unboxUnsigned[uint](),
+		unbox: unboxScalar(storeUnsigned[uint]),
 	},
 	reflect.Uint64: {
 		vm: types.TypeI64(),
@@ -200,7 +200,7 @@ var leaves = [...]conversion{
 			return e.boxI64(int64(*(*uint64)(p)))
 		},
 		set:   setUnsigned[uint64](),
-		unbox: unboxUnsigned[uint64](),
+		unbox: unboxScalar(storeUnsigned[uint64]),
 	},
 	reflect.Uintptr: {
 		vm: types.TypeI64(),
@@ -211,21 +211,21 @@ var leaves = [...]conversion{
 			return e.boxI64(int64(*(*uintptr)(p)))
 		},
 		set:   setUnsigned[uintptr](),
-		unbox: unboxUnsigned[uintptr](),
+		unbox: unboxScalar(storeUnsigned[uintptr]),
 	},
 	reflect.Float32: {
 		vm:    types.TypeF32(),
 		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.F32(*(*float32)(p)), nil },
 		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxF32(*(*float32)(p)), nil },
 		set:   setFloat[float32](),
-		unbox: unboxFloat[float32](),
+		unbox: unboxScalar(storeFloat[float32]),
 	},
 	reflect.Float64: {
 		vm:    types.TypeF64(),
 		value: func(_ *Encoder, p unsafe.Pointer) (types.Value, error) { return types.F64(*(*float64)(p)), nil },
 		box:   func(_ *Encoder, p unsafe.Pointer) (types.Boxed, error) { return types.BoxF64(*(*float64)(p)), nil },
 		set:   setFloat[float64](),
-		unbox: unboxFloat[float64](),
+		unbox: unboxScalar(storeFloat[float64]),
 	},
 	reflect.String: {
 		vm:    types.TypeString(),
@@ -420,67 +420,7 @@ func (r *Registry) structure(p *conversion, seen map[reflect.Type]*conversion) e
 		}
 		p.vm = fn
 		p.value = marshalFunc(t, fn)
-		failing := t.NumOut() > 0 && t.Out(t.NumOut()-1).Implements(typeError)
-
-		p.set = func(d *Decoder, val types.Value, p unsafe.Pointer) error {
-			target, ok := d.interp.callable(val)
-			if !ok || target.Type() == nil || !target.Type().Equals(fn) {
-				return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, val, t)
-			}
-			call := reflect.MakeFunc(t, func(in []reflect.Value) []reflect.Value {
-				out := make([]reflect.Value, t.NumOut())
-				for idx := range out {
-					out[idx] = reflect.Zero(t.Out(idx))
-				}
-				fail := func(err error) []reflect.Value {
-					if !failing {
-						panic(err)
-					}
-					out[len(out)-1] = reflect.ValueOf(err)
-					return out
-				}
-
-				ctx := context.Background()
-				enc := &Encoder{interp: d.interp, registry: d.registry}
-				params := make([]types.Boxed, 0, len(fn.Params))
-				for idx := range in {
-					arg := in[idx]
-					if t.In(idx) == typeContext {
-						if caller, _ := arg.Interface().(context.Context); caller != nil {
-							ctx = caller
-						}
-						continue
-					}
-					boxed, err := enc.slot(arg, fn.Params[len(params)])
-					if err != nil {
-
-						enc.discard()
-						return fail(fmt.Errorf("function param %d: %w", len(params), err))
-					}
-					params = append(params, boxed)
-				}
-
-				returns, err := d.interp.invoke(ctx, val, params)
-				if err != nil {
-					return fail(err)
-				}
-				defer func() {
-					for _, value := range returns {
-						d.interp.releaseBox(value)
-					}
-				}()
-				for idx := range returns {
-					result := reflect.New(t.Out(idx))
-					if err := r.Unmarshal(d.interp, returns[idx], result.Interface()); err != nil {
-						return fail(fmt.Errorf("function return %d: %w", idx, err))
-					}
-					out[idx] = result.Elem()
-				}
-				return out
-			})
-			reflect.NewAt(t, p).Elem().Set(call)
-			return nil
-		}
+		p.set = r.unmarshalFunc(t, fn)
 		return nil
 
 	case reflect.Array, reflect.Slice:
@@ -595,6 +535,76 @@ func (r *Registry) function(t reflect.Type, seen map[reflect.Type]*conversion) (
 	return &types.FunctionType{Params: params, Returns: returns}, nil
 }
 
+// unmarshalFunc binds a VM function to a Go func of type t. The returned
+// conversion keeps what it needs from the decoder that ran it, because the
+// decoder is scratch a later conversion resets.
+func (r *Registry) unmarshalFunc(t reflect.Type, fn *types.FunctionType) UnmarshalerFunc {
+	failing := t.NumOut() > 0 && t.Out(t.NumOut()-1).Implements(typeError)
+	return func(d *Decoder, val types.Value, p unsafe.Pointer) error {
+		target, ok := d.interp.callable(val)
+		if !ok || target.Type() == nil || !target.Type().Equals(fn) {
+			return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, val, t)
+		}
+		// The conversion's decoder is scratch a later conversion resets, so the
+		// call keeps a copy of it.
+		copied := *d
+		d = &copied
+		call := reflect.MakeFunc(t, func(in []reflect.Value) []reflect.Value {
+			out := make([]reflect.Value, t.NumOut())
+			for idx := range out {
+				out[idx] = reflect.Zero(t.Out(idx))
+			}
+			fail := func(err error) []reflect.Value {
+				if !failing {
+					panic(err)
+				}
+				out[len(out)-1] = reflect.ValueOf(err)
+				return out
+			}
+
+			ctx := context.Background()
+			enc := &Encoder{interp: d.interp, registry: d.registry}
+			params := make([]types.Boxed, 0, len(fn.Params))
+			for idx := range in {
+				arg := in[idx]
+				if t.In(idx) == typeContext {
+					if caller, _ := arg.Interface().(context.Context); caller != nil {
+						ctx = caller
+					}
+					continue
+				}
+				boxed, err := enc.slot(arg, fn.Params[len(params)])
+				if err != nil {
+
+					enc.discard()
+					return fail(fmt.Errorf("function param %d: %w", len(params), err))
+				}
+				params = append(params, boxed)
+			}
+
+			returns, err := d.interp.invoke(ctx, val, params)
+			if err != nil {
+				return fail(err)
+			}
+			defer func() {
+				for _, value := range returns {
+					d.interp.releaseBox(value)
+				}
+			}()
+			for idx := range returns {
+				result := reflect.New(t.Out(idx))
+				if err := r.Unmarshal(d.interp, returns[idx], result.Interface()); err != nil {
+					return fail(fmt.Errorf("function return %d: %w", idx, err))
+				}
+				out[idx] = result.Elem()
+			}
+			return out
+		})
+		reflect.NewAt(t, p).Elem().Set(call)
+		return nil
+	}
+}
+
 // registered copies a construction-time registration into p.
 func (r *Registry) registered(p *conversion) bool {
 	e, ok := r.entries[p.typ]
@@ -696,14 +706,6 @@ func opaque(t reflect.Type) bool {
 		}
 	}
 	return false
-}
-
-func asUint(val types.Value) (uint64, bool) {
-	kind, bits, ok := bitsOf(val)
-	if !ok {
-		return 0, false
-	}
-	return uintBits(kind, bits)
 }
 
 func uintBits(kind types.Kind, bits uint64) (uint64, bool) {

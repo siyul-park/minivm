@@ -57,12 +57,17 @@ type sliceHeader struct {
 
 // callFrame is the scratch one call of a wrapped Go func needs: the argument
 // slots the params decode into, the argument list handed to reflect, and the
-// holders the results are read from. A frame is built once per signature and
+// holders the results are read from, and the Decoder and Encoder the call
+// converts with. The interpreter's shared pair cannot serve: a conversion may
+// call back into the VM, and that nested call needs a pair of its own. A frame
+// is built once per signature and
 // recycled, so a call allocates none of it.
 type callFrame struct {
 	in      []reflect.Value
 	args    []reflect.Value
 	holders []reflect.Value
+	dec     Decoder
+	enc     Encoder
 }
 
 // Marshal converts a value to its encoded form.
@@ -363,7 +368,9 @@ func (e *Encoder) wrap(fn reflect.Value, typ *types.FunctionType) *HostFunction 
 			frames.Put(f)
 		}()
 
-		dec := i.decoder(registry)
+		f.dec = Decoder{interp: i, registry: registry}
+		f.enc = Encoder{interp: i, registry: registry, owned: f.enc.owned[:0]}
+		dec, enc := &f.dec, &f.enc
 		at := 0
 		for idx := range f.in {
 			if !f.args[idx].IsValid() {
@@ -393,10 +400,9 @@ func (e *Encoder) wrap(fn reflect.Value, typ *types.FunctionType) *HostFunction 
 			out = out[:len(out)-1]
 		}
 
-		enc := i.encoder(registry)
 		returns := make([]types.Boxed, len(out))
 		for idx := range out {
-			boxed, err := enc.slotAt(f.holders[idx], out[idx], typ.Returns[idx])
+			boxed, err := enc.slot(out[idx], typ.Returns[idx], f.holders[idx])
 			if err != nil {
 				enc.discard()
 				return nil, fmt.Errorf("function return %d: %w", idx, err)
@@ -453,17 +459,18 @@ func hostError(v reflect.Value) error {
 }
 
 // slot converts the Go value v into a slot of typ, the form a declared VM
-// signature holds a parameter or a result in. v is a value rather than an
-// address, so it takes a holder of its own for the conversion to read.
-func (e *Encoder) slot(v reflect.Value, typ types.Type) (types.Boxed, error) {
-	return e.slotAt(reflect.New(v.Type()), v, typ)
-}
-
-// slotAt is slot reading v through holder, a pointer to a Go value of v's type
-// the caller owns, so a repeated conversion allocates none. A primitive Go kind
-// compiles its slot form directly; any other converts to a standalone value and
-// narrows it.
-func (e *Encoder) slotAt(holder, v reflect.Value, typ types.Type) (types.Boxed, error) {
+// signature holds a parameter or a result in. The conversion reads v through a
+// pointer to a Go value of v's type: the optional holder, which a caller that
+// converts repeatedly owns and reuses, or else a fresh one. A primitive Go kind
+// compiles its slot form directly, which is typ by construction; any other
+// converts to a standalone value and narrows it to typ.
+func (e *Encoder) slot(v reflect.Value, typ types.Type, holders ...reflect.Value) (types.Boxed, error) {
+	holder := reflect.Value{}
+	if len(holders) > 0 {
+		holder = holders[0]
+	} else {
+		holder = reflect.New(v.Type())
+	}
 	holder.Elem().Set(v)
 	c, err := e.registry.conversion(v.Type())
 	if err != nil {

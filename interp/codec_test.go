@@ -63,7 +63,47 @@ type codecFirst struct{ Shared codecShared }
 
 type codecSecond struct{ Shared codecShared }
 
+type (
+	marshalInt  int32
+	marshalU8   uint8
+	marshalF32  float32
+	marshalBool bool
+	marshalTag  int32
+)
+
+// marshalNesting is a result whose conversion re-enters a marshaled func and
+// then fails after allocating a value the embedder owns.
+type marshalNesting struct{}
+
 var errCodecPanic = errors.New("codec panic")
+
+var (
+	nested     func() (string, error)
+	nestedHeap *interp.Interpreter
+	nestedAddr int
+)
+
+func (marshalNesting) MarshalVM(*interp.Encoder) (types.Value, error) {
+	if _, err := nested(); err != nil {
+		return nil, err
+	}
+	addr, err := nestedHeap.Alloc(types.String("embedder-owned"))
+	if err != nil {
+		return nil, err
+	}
+	nestedAddr = addr
+	return nil, errors.New("bad")
+}
+
+func liveRefs(i *interp.Interpreter) int {
+	n := 0
+	for addr := 1; addr < i.HeapLen(); addr++ {
+		if count, err := i.RefCount(addr); err == nil && count > 0 {
+			n++
+		}
+	}
+	return n
+}
 
 func TestWithMarshaler(t *testing.T) {
 	millis := interp.WithMarshaler(
@@ -539,6 +579,114 @@ func TestRegistry_Marshal(t *testing.T) {
 			}()
 		}
 		wg.Wait()
+	})
+
+	t.Run("a result conversion that re-enters a marshaled func keeps its own scratch", func(t *testing.T) {
+		i := interp.MustNew(program.New(nil), interp.WithThreshold(-1))
+		r := interp.NewRegistry()
+		defer i.Close()
+
+		nested = nil
+		nestedHeap = i
+		inner, err := r.Marshal(i, func() string { return "inner-result" })
+		require.NoError(t, err)
+		require.NoError(t, r.Unmarshal(i, inner, &nested))
+		outer, err := r.Marshal(i, func() (string, marshalNesting) { return "outer-result", marshalNesting{} })
+		require.NoError(t, err)
+		host := outer.(*interp.HostFunction)
+
+		before := liveRefs(i)
+		for range 3 {
+			_, err = host.Fn(i, nil)
+			require.ErrorContains(t, err, "function return 1")
+		}
+		// The failed results are released, and the nested call neither frees a
+		// value the embedder allocated meanwhile nor leaks the outer result:
+		// only the three embedder-owned strings remain.
+		require.Equal(t, before+3, liveRefs(i))
+		count, err := i.RefCount(nestedAddr)
+		require.NoError(t, err)
+		require.Equal(t, 1, count)
+		val, err := i.Load(nestedAddr)
+		require.NoError(t, err)
+		require.Equal(t, types.String("embedder-owned"), val)
+	})
+
+	t.Run("a callback keeps the registry that decoded it", func(t *testing.T) {
+		i := interp.MustNew(program.New(nil), interp.WithThreshold(-1))
+		defer i.Close()
+		scaled := interp.NewRegistry(interp.WithMarshaler(reflect.TypeFor[marshalTag](), types.TypeI32(), interp.MarshalerFunc(
+			func(_ *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
+				return types.I32(*(*int32)(p) * 1000), nil
+			})))
+		plain := interp.NewRegistry()
+		echo := interp.NewHostFunction(
+			&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
+			func(_ *interp.Interpreter, p []types.Boxed) ([]types.Boxed, error) { return p, nil })
+
+		fn, err := scaled.Marshal(i, func(cb func(marshalTag) (int32, error)) (int32, error) {
+			var other int32
+			if err := plain.Unmarshal(i, types.I32(1), &other); err != nil {
+				return 0, err
+			}
+			return cb(7)
+		})
+		require.NoError(t, err)
+		addr, err := i.Alloc(echo)
+		require.NoError(t, err)
+
+		got, err := fn.(*interp.HostFunction).Fn(i, []types.Boxed{types.BoxRef(addr)})
+		require.NoError(t, err)
+		require.Equal(t, []types.Boxed{types.BoxI32(7000)}, got)
+	})
+
+	t.Run("a primitive result keeps its slot form", func(t *testing.T) {
+		i := interp.MustNew(program.New(nil), interp.WithThreshold(-1))
+		r := interp.NewRegistry()
+		defer i.Close()
+
+		for name, tc := range map[string]struct {
+			fn   any
+			want types.Value
+		}{
+			"bool":       {func() bool { return true }, types.I1(true)},
+			"named bool": {func() marshalBool { return true }, types.I1(true)},
+			"int8":       {func() int8 { return -7 }, types.I8(-7)},
+			"int16":      {func() int16 { return -300 }, types.I32(-300)},
+			"named i32":  {func() marshalInt { return -9 }, types.I32(-9)},
+			"uint8":      {func() uint8 { return 255 }, types.I32(255)},
+			"named u8":   {func() marshalU8 { return 200 }, types.I32(200)},
+			"uint32":     {func() uint32 { return math.MaxUint32 }, types.I32(-1)},
+			"int":        {func() int { return math.MaxInt64 }, types.I64(math.MaxInt64)},
+			"min int64":  {func() int64 { return math.MinInt64 }, types.I64(math.MinInt64)},
+			"small i64":  {func() int64 { return -2 }, types.I64(-2)},
+			"max uint":   {func() uint { return math.MaxUint64 }, types.I64(-1)},
+			"high bit":   {func() uint64 { return 1 << 63 }, types.I64(math.MinInt64)},
+			"f32 inf":    {func() float32 { return float32(math.Inf(1)) }, types.F32(float32(math.Inf(1)))},
+			"f32 -inf":   {func() float32 { return float32(math.Inf(-1)) }, types.F32(float32(math.Inf(-1)))},
+			"named f32":  {func() marshalF32 { return 2.5 }, types.F32(2.5)},
+			"f32 nan":    {func() float32 { return float32(math.NaN()) }, types.F32(float32(math.NaN()))},
+			"f64 -inf":   {func() float64 { return math.Inf(-1) }, types.F64(math.Inf(-1))},
+			"string":     {func() string { return "s" }, types.String("s")},
+		} {
+			t.Run(name, func(t *testing.T) {
+				fn, err := r.Marshal(i, tc.fn)
+				require.NoError(t, err)
+				got, err := fn.(*interp.HostFunction).Fn(i, nil)
+				require.NoError(t, err)
+				require.Len(t, got, 1)
+				var have types.Value = types.Unbox(got[0])
+				if got[0].Kind() == types.KindRef {
+					have, err = i.Load(got[0].Ref())
+					require.NoError(t, err)
+				}
+				if f, ok := tc.want.(types.F32); ok && math.IsNaN(float64(f)) {
+					require.True(t, math.IsNaN(float64(have.(types.F32))))
+					return
+				}
+				require.Equal(t, tc.want, have)
+			})
+		}
 	})
 
 	t.Run("map key reachable from a guest lookup", func(t *testing.T) {
