@@ -838,6 +838,23 @@ var runTests = []struct {
 		values: []types.Value{types.F64(2.5)},
 	},
 	{
+		// Boxing keeps a NaN's sign, so abs and copysign see it in every tier.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.F64_CONST, math.Float64bits(1)),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(math.Inf(1))), instr.MustNew(instr.F64_CONST, math.Float64bits(math.Inf(1))), instr.MustNew(instr.F64_SUB),
+			instr.MustNew(instr.F64_ABS), instr.MustNew(instr.F64_COPYSIGN),
+		}),
+		values: []types.Value{types.F64(1)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.F64_CONST, math.Float64bits(1)),
+			instr.MustNew(instr.F64_CONST, math.Float64bits(math.Inf(1))), instr.MustNew(instr.F64_CONST, math.Float64bits(math.Inf(1))), instr.MustNew(instr.F64_SUB),
+			instr.MustNew(instr.F64_ABS), instr.MustNew(instr.F64_NEG), instr.MustNew(instr.F64_COPYSIGN),
+		}),
+		values: []types.Value{types.F64(-1)},
+	},
+	{
 		program: program.New([]instr.Instruction{
 			instr.MustNew(instr.F64_CONST, math.Float64bits(-7)), instr.MustNew(instr.F64_CONST, math.Float64bits(3)), instr.MustNew(instr.F64_REM),
 		}),
@@ -8751,7 +8768,14 @@ func TestWithThreshold(t *testing.T) {
 				})
 				require.NoError(t, runErr, "%s %x", c.code, args)
 				require.NoError(t, popErr, "%s %x", c.code, args)
-				require.Equal(t, want, got, "%s %x", c.code, args)
+				if want.Kind() == types.KindF64 && math.IsNaN(want.F64()) {
+					// A NaN's payload is unspecified; its kind and sign are not.
+					require.Equal(t, types.KindF64, got.Kind(), "%s %x", c.code, args)
+					require.True(t, math.IsNaN(got.F64()), "%s %x", c.code, args)
+					require.Equal(t, math.Signbit(want.F64()), math.Signbit(got.F64()), "%s %x", c.code, args)
+				} else {
+					require.Equal(t, want, got, "%s %x", c.code, args)
+				}
 				require.Positive(t, entries, "%s %x", c.code, args)
 				require.Zero(t, deopts, "%s %x", c.code, args)
 			}
@@ -9954,6 +9978,61 @@ func TestInterpreter_Run(t *testing.T) {
 			counts = append(counts, count)
 		}
 		require.Equal(t, []int{2, 1}, counts, "the map is held by its local and its iterator; the iterator only by its local")
+	})
+
+	t.Run("boxes every f64 NaN as an f64", func(t *testing.T) {
+		// sub(a) = a - a, called with +Inf: on ARM64 the hardware NaN it
+		// returns is a positive quiet NaN, whose raw bits decode as an i32.
+		fb := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeF64()}, Returns: []types.Type{types.TypeF64()}})
+		fb.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.F64_SUB), instr.MustNew(instr.RETURN))
+		sub := fb.MustBuild()
+		// caller calls sub in a loop. An i64 on the operand stack across the
+		// loop header keeps the caller threaded, so native sub returns through
+		// its entry stub; otherwise the native caller boxes sub's result.
+		caller := func(threaded bool) *program.Program {
+			b := instr.NewBuilder()
+			loop, done := b.Label(), b.Label()
+			if threaded {
+				b.Emit(instr.I64_CONST, 0)
+			}
+			b.Bind(loop)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 200).Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.F64_CONST, math.Float64bits(math.Inf(1))).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.LOCAL_SET, 1)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+			b.Br(loop)
+			b.Bind(done).Emit(instr.LOCAL_GET, 1)
+			code, err := b.Assemble()
+			require.NoError(t, err)
+			return program.New(code, program.WithConstants(sub), program.WithLocals(types.TypeI32(), types.TypeF64()))
+		}
+		run := func(t *testing.T, vm *interp.Interpreter) {
+			require.NoError(t, vm.Run(t.Context()))
+			v, err := vm.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.KindF64, v.Kind())
+			require.True(t, math.IsNaN(v.F64()))
+			vm.Reset()
+		}
+
+		t.Run("threaded", func(t *testing.T) {
+			vm := interp.MustNew(caller(true), interp.WithThreshold(-1))
+			defer vm.Close()
+			run(t, vm)
+		})
+		for name, threaded := range map[string]bool{"native caller": false, "native callee": true} {
+			t.Run(name, func(t *testing.T) {
+				testenv.MustHaveJIT(t)
+				profiler := prof.New()
+				vm := interp.MustNew(caller(threaded), interp.WithThreshold(1), interp.WithProfiler(profiler))
+				defer vm.Close()
+				poll(t, func() bool {
+					vm.Flush()
+					entries := nativeEntries(profiler)
+					run(t, vm)
+					return entries > 0
+				})
+			})
+		}
 	})
 
 	t.Run("runs every program standalone and fused", func(t *testing.T) {

@@ -82,6 +82,23 @@ func TestBoxF64(t *testing.T) {
 			require.Equal(t, tt.val, val.F64())
 		})
 	}
+	for _, c := range []struct {
+		bits uint64
+		want types.Boxed
+	}{
+		{0x7FF8000000000000, types.BoxedNaN},
+		{0x7FF8000000000001, types.BoxedNaN},
+		{0x7FFFFFFFFFFFFFFF, types.BoxedNaN},
+		{0x7FF0000000000002, types.BoxedNaN},
+		{0xFFF8000000000007, 0xFFF8000000000007},
+		{0x7FF0000000000000, 0x7FF0000000000000},
+	} {
+		t.Run(fmt.Sprintf("%#x", c.bits), func(t *testing.T) {
+			val := types.BoxF64(math.Float64frombits(c.bits))
+			require.Equal(t, c.want, val)
+			require.Equal(t, types.KindF64, val.Kind())
+		})
+	}
 }
 func TestBoxRef(t *testing.T) {
 	tests := []struct {
@@ -121,6 +138,7 @@ func TestBoxWord(t *testing.T) {
 		{"i64", types.KindI64, 0xFFFFFFFFFFFFFFFD, types.BoxI64(-3)},
 		{"f32", types.KindF32, uint64(math.Float32bits(1.5)), types.BoxF32(1.5)},
 		{"f64", types.KindF64, math.Float64bits(2.5), types.BoxF64(2.5)},
+		{"f64 NaN", types.KindF64, 0x7FF8000000000001, types.BoxedNaN},
 		{"ref", types.KindRef, uint64(types.BoxRef(9)), types.BoxRef(9)},
 		{"unknown kind", types.Kind(7), 5, 0},
 	} {

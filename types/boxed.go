@@ -5,7 +5,7 @@ import (
 	"math"
 )
 
-// Boxed is a value packed into one 64-bit word: an f64 as itself, any other kind as a NaN carrying a kind tag and payload.
+// Boxed is a value packed into one 64-bit word: an f64 as itself, a positive NaN as BoxedNaN, any other kind as a NaN carrying a kind tag and payload.
 type Boxed uint64
 
 const (
@@ -26,6 +26,10 @@ const (
 	BoxedFalse = Boxed(exponent | uint64(KindI1)<<VBits)
 	// BoxedTrue is the i1 true.
 	BoxedTrue = Boxed(exponent | uint64(KindI1)<<VBits | 1)
+	// BoxedNaN is the f64 every positive NaN boxes as. A positive NaN's bits
+	// may hold a kind tag; BoxedNaN's tag is KindF64. A negative NaN never
+	// does, so it keeps its bits.
+	BoxedNaN = Boxed(exponent | 1)
 )
 
 // exponent is the all-ones float64 exponent that marks a boxed non-f64 value.
@@ -47,9 +51,14 @@ func IsBoxable(v int64) bool {
 	return minI64 <= v && v <= maxI64
 }
 
-// BoxF64 boxes a float64 value.
+// BoxF64 boxes a float64 value. A positive NaN boxes as BoxedNaN, so a NaN
+// keeps its sign but not its payload.
 func BoxF64(v float64) Boxed {
-	return Boxed(math.Float64bits(v))
+	u := math.Float64bits(v)
+	if int64(u) > exponent {
+		return BoxedNaN
+	}
+	return Boxed(u)
 }
 
 // BoxRef boxes a reference index.
@@ -72,7 +81,9 @@ func BoxWord(kind Kind, word uint64) Boxed {
 		return BoxI64(int64(word))
 	case KindF32:
 		return BoxF32(math.Float32frombits(uint32(word)))
-	case KindF64, KindRef:
+	case KindF64:
+		return BoxF64(math.Float64frombits(word))
+	case KindRef:
 		return Boxed(word)
 	default:
 		return 0
