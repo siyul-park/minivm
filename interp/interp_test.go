@@ -9927,6 +9927,35 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 2, live, "only the map and its iterator stay alive")
 	})
 
+	t.Run("coro.done releases the reference it pops", func(t *testing.T) {
+		typ := types.NewMapType(types.TypeI32(), types.TypeI32())
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		for n := 1; n <= 5; n++ {
+			b.Emit(instr.I32_CONST, uint64(n)).Emit(instr.I32_CONST, uint64(n))
+		}
+		b.Emit(instr.I32_CONST, 5).Emit(instr.MAP_NEW, 0).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_ITER).Emit(instr.LOCAL_SET, 1)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.RESUME)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.CORO_DONE).BrIf(done)
+		b.Br(loop)
+		b.Bind(done)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+
+		vm := interp.MustNew(program.New(code, program.WithTypes(typ), program.WithLocals(typ, types.NewIteratorType(types.TypeI32()))))
+		defer vm.Close()
+		require.NoError(t, vm.Run(t.Context()))
+		counts := []int{}
+		for addr := 1; addr < vm.HeapLen(); addr++ {
+			count, err := vm.RefCount(addr)
+			require.NoError(t, err)
+			counts = append(counts, count)
+		}
+		require.Equal(t, []int{2, 1}, counts, "the map is held by its local and its iterator; the iterator only by its local")
+	})
+
 	t.Run("runs every program standalone and fused", func(t *testing.T) {
 		for _, mode := range []struct {
 			name string

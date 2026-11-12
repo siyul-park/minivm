@@ -823,6 +823,7 @@ var (
 				default:
 					panic(ErrTypeMismatch)
 				}
+				i.releaseBox(v0)
 				i.stack[i.sp-1] = types.BoxI1(v1 != 0)
 				i.fr.ip++
 			}
