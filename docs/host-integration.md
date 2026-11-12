@@ -27,6 +27,8 @@ Runnable examples for each layer are in `interp/example_test.go`.
 
 A `Marshal`ed func becomes callable by `Alloc` then `SetGlobal`, or as a program constant.
 
+A call into a `Marshal`ed func goes through `reflect.Value.Call`. The per-call scratch (argument slots, argument list, result holders, decoder and encoder) is pooled and reused, and primitive params and results convert without boxing. A call still allocates for the reflected result, the result slice, and anything the conversion must build: string results, i64 results too wide to box, extra results, and slice, map, pointer, struct and function params. A `HostFunction` written directly skips the reflection and the conversion, so it is the cheaper layer on a path that calls per iteration; `benchmarks.md` owns the measured cost.
+
 An unmarshalled Go func returns a failed call as its trailing `error`. A func type without a trailing `error` panics on failure, so typed callbacks `SHOULD` declare one.
 
 | Go | VM |
