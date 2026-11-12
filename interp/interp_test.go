@@ -9291,6 +9291,256 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, runs*want, after-before)
 	})
 
+	t.Run("runs map operations natively for every integer key kind", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		for _, tt := range []struct {
+			name  string
+			key   types.Type
+			shift uint64
+			space uint64
+			wide  bool
+		}{
+			{"i1", types.TypeI1(), 0, 2, false},
+			{"i8 with negative keys", types.TypeI8(), 30, 61, false},
+			{"i32", types.TypeI32(), 0, 61, false},
+			{"i64", types.TypeI64(), 0, 61, false},
+			{"i64 beyond the inline range", types.TypeI64(), 0, 61, true},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				typ := types.NewMapType(tt.key, types.TypeI32())
+				prog := mapProgram(t, typ, 128, 3000, nil, nil, mapBody(mapKey{tt.key, tt.shift, tt.wide}, tt.space, identity, identity))
+				exits := compareNative(t, prog)
+				require.Zero(t, exits["bridge"], "the map operations stay native")
+				require.Zero(t, exits["deopt"])
+			})
+		}
+	})
+
+	t.Run("runs map operations natively for every element kind", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		for _, tt := range []struct {
+			name    string
+			elem    types.Type
+			in, out func(b *instr.Builder)
+		}{
+			{"f32", types.TypeF32(), func(b *instr.Builder) { b.Emit(instr.I32_TO_F32_S) }, func(b *instr.Builder) { b.Emit(instr.F32_TO_I32_S) }},
+			{"f64", types.TypeF64(), func(b *instr.Builder) { b.Emit(instr.I32_TO_F64_S) }, func(b *instr.Builder) { b.Emit(instr.F64_TO_I32_S) }},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				typ := types.NewMapType(types.TypeI32(), tt.elem)
+				prog := mapProgram(t, typ, 128, 3000, nil, nil, mapBody(mapKey{types.TypeI32(), 0, false}, 61, tt.in, tt.out))
+				exits := compareNative(t, prog)
+				require.Zero(t, exits["bridge"], "the map operations stay native")
+			})
+		}
+	})
+
+	t.Run("keeps i64 elements, boxed beyond the inline range, equal to threaded code", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		typ := types.NewMapType(types.TypeI32(), types.TypeI64())
+		in := func(b *instr.Builder) { b.Emit(instr.I32_TO_I64_S).Emit(instr.I64_CONST, 1<<50+5).Emit(instr.I64_MUL) }
+		out := func(b *instr.Builder) { b.Emit(instr.I64_CONST, 1<<50+5).Emit(instr.I64_DIV_S).Emit(instr.I64_TO_I32) }
+		prog := mapProgram(t, typ, 128, 3000, nil, nil, mapBody(mapKey{types.TypeI32(), 0, false}, 61, in, out))
+		compareNative(t, prog)
+	})
+
+	t.Run("counts references through ref-valued map operations as threaded code does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		// Each iteration stores one of two constant strings under a key, so a
+		// stored key replaces an element, deletes drop one, and every get and
+		// lookup keeps the element it reads in local 3.
+		for _, tt := range []struct {
+			name string
+			elem types.Type
+		}{
+			{"string", types.TypeString()},
+			{"any", types.TypeAny()},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				typ := types.NewMapType(types.TypeI32(), tt.elem)
+				key := mapKey{types.TypeI32(), 0, false}
+				prog := mapProgram(t, typ, 128, 3000, []types.Value{types.String("a"), types.String("bb")}, []types.Type{tt.elem}, func(b *instr.Builder) {
+					skip, hit, next := b.Label(), b.Label(), b.Label()
+					b.Emit(instr.LOCAL_GET, 0)
+					key.emit(b, 37, 61)
+					b.Emit(instr.CONST_GET, 0).Emit(instr.CONST_GET, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 2).Emit(instr.I32_REM_S).Emit(instr.SELECT)
+					b.Emit(instr.MAP_SET)
+
+					b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 3).Emit(instr.I32_REM_S).BrIf(skip)
+					b.Emit(instr.LOCAL_GET, 0)
+					key.emit(b, 5, 61)
+					b.Emit(instr.MAP_DELETE)
+					b.Bind(skip)
+
+					b.Emit(instr.LOCAL_GET, 0)
+					key.emit(b, 11, 61)
+					b.Emit(instr.MAP_GET).Emit(instr.LOCAL_SET, 3)
+
+					b.Emit(instr.LOCAL_GET, 0)
+					key.emit(b, 13, 61)
+					b.Emit(instr.MAP_LOOKUP).BrIf(hit)
+					b.Emit(instr.DROP).Br(next)
+					b.Bind(hit)
+					b.Emit(instr.LOCAL_SET, 3).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+					b.Bind(next)
+				})
+				exits := compareNative(t, prog)
+				require.Zero(t, exits["bridge"], "the map operations stay native")
+			})
+		}
+	})
+
+	t.Run("falls back to the interpreter behind a guard when the map is not the declared representation", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		for _, tt := range []struct {
+			name   string
+			key    types.Type
+			actual types.Value
+		}{
+			{"a generic map", types.TypeI32(), types.NewMap(types.NewMapType(types.TypeI32(), types.TypeI32()))},
+			{"another key kind", types.TypeI32(), types.NewTypedMap[int8](types.NewMapType(types.TypeI8(), types.TypeI32()), 0)},
+			{"a wider key kind", types.TypeI8(), types.NewTypedMap[int32](types.NewMapType(types.TypeI32(), types.TypeI32()), 0)},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				typ := types.NewMapType(tt.key, types.TypeI32())
+				prog := mapProgramFrom(t, typ, func(b *instr.Builder) {
+					b.Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_SET, 0)
+				}, 3000, []types.Value{tt.actual}, nil, mapBody(mapKey{tt.key, 0, false}, 61, identity, identity))
+				exits := compareNative(t, prog)
+				require.Positive(t, exits["deopt"], "the guard refutes")
+			})
+		}
+	})
+
+	t.Run("keeps ownership of a map read through a local declared with another element kind", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		// One TypedMap[int32] of map[i32]string sits in two locals, the second
+		// declared map[i32]i32 (the verifier admits both through CONST_GET). The
+		// key kind alone would admit the second local's map.set, which would then
+		// overwrite a string reference without releasing it.
+		strMap := types.NewMapType(types.TypeI32(), types.TypeString())
+		intMap := types.NewMapType(types.TypeI32(), types.TypeI32())
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		b.Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_SET, 3)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 2000).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 7).Emit(instr.I32_REM_S)
+		b.Emit(instr.CONST_GET, 1).Emit(instr.CONST_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 2).Emit(instr.I32_REM_S).Emit(instr.SELECT).Emit(instr.MAP_SET)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 7).Emit(instr.I32_REM_S).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_SET)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.MAP_LEN)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code,
+			program.WithLocals(strMap, types.TypeI32(), types.TypeI32(), intMap),
+			program.WithTypes(strMap, intMap),
+			program.WithConstants(types.NewTypedMap[int32](strMap, 0), types.String("a"), types.String("bb")))
+		exits := compareNative(t, prog)
+		require.Positive(t, exits["deopt"], "the guard refuses the map declared with another element kind")
+	})
+
+	t.Run("walks a map with map.iter while native code sets and deletes in it", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		typ := types.NewMapType(types.TypeI32(), types.TypeI32())
+		mutate := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{typ, types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
+		mutate.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.MAP_SET)
+		mutate.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1000).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.I32_CONST, 1).Emit(instr.MAP_SET)
+		mutate.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_DELETE)
+		mutate.Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_LEN).Emit(instr.RETURN)
+
+		// The module fills a small map, walks it, and calls mutate on each key
+		// below 1000 it produces: the key just produced is deleted and a key above
+		// 1000 inserted, which the walk may or may not produce. The sum of the
+		// original keys does not depend on that.
+		b := instr.NewBuilder()
+		fill, fillDone, walk, walked, skip := b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.MAP_NEW_DEFAULT, 0).Emit(instr.LOCAL_SET, 0)
+		b.Bind(fill)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 60).Emit(instr.I32_GE_S).BrIf(fillDone)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 3).Emit(instr.I32_MUL).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_GET, 3).Emit(instr.MAP_SET)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3).Br(fill)
+		b.Bind(fillDone)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_ITER).Emit(instr.LOCAL_SET, 1)
+		b.Bind(walk)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.CORO_DONE).BrIf(walked)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.CORO_VALUE).Emit(instr.LOCAL_SET, 4)
+		b.Emit(instr.LOCAL_GET, 4).Emit(instr.I32_CONST, 1000).Emit(instr.I32_GE_S).BrIf(skip)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 4).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 4).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+		b.Bind(skip)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.RESUME).Emit(instr.DROP).Br(walk)
+		b.Bind(walked)
+		b.Emit(instr.LOCAL_GET, 2)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code,
+			program.WithLocals(typ, types.NewIteratorType(types.TypeI32()), types.TypeI32(), types.TypeI32(), types.TypeI32()),
+			program.WithTypes(typ),
+			program.WithConstants(mutate.MustBuild()))
+
+		want := int32(0)
+		for n := range 60 {
+			want += int32(n*3 + 1)
+		}
+		require.Equal(t, types.I32(want), runProgram(t, prog))
+
+		// Which inserted keys the walk produces depends on slot order, so only
+		// the sum is compared, not the reference counts that follow that order.
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		var got types.Value
+		poll(t, func() bool {
+			require.NoError(t, vm.Run(context.Background()))
+			var err error
+			got, err = vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(want), got)
+			vm.Reset()
+			vm.Flush()
+			return nativeEntries(profiler) > 0
+		})
+	})
+
+	t.Run("grows a map past the load factor mid-loop through the interpreter and keeps running natively", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		typ := types.NewMapType(types.TypeI32(), types.TypeI32())
+		prog := mapProgram(t, typ, 0, 600, nil, nil, func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 7).Emit(instr.I32_MUL).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_SET)
+			b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 7).Emit(instr.I32_MUL).Emit(instr.MAP_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		})
+		compareNative(t, prog)
+
+		// The first run that enters native code may enter after the map stopped
+		// growing, so the bridges are counted over runs that start native.
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		var bridges float64
+		poll(t, func() bool {
+			before, entries := exitsOf(profiler)["bridge"], nativeEntries(profiler)
+			require.NoError(t, vm.Run(context.Background()))
+			_, err := vm.Pop()
+			require.NoError(t, err)
+			vm.Reset()
+			vm.Flush()
+			bridges = exitsOf(profiler)["bridge"] - before
+			return entries > 0 && bridges > 0
+		})
+		require.Less(t, bridges, float64(20), "only the inserts that rehash leave native code")
+	})
+
 }
 
 func TestMustNew(t *testing.T) {

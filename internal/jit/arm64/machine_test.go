@@ -1,7 +1,10 @@
 package arm64_test
 
 import (
+	"fmt"
 	"math"
+	"math/rand/v2"
+	"reflect"
 	"runtime"
 	"slices"
 	"testing"
@@ -40,6 +43,14 @@ type typed struct {
 type known struct {
 	compile.Site
 	words map[ssa.Value]uint64
+}
+
+// table is the state of a TypedMap's table, read through reflection (snapshot).
+type table struct {
+	ctrl, slots            []uint64
+	mask, shift, seed, gen uint64
+	count, used            int
+	capacity               int
 }
 
 const (
@@ -127,6 +138,36 @@ func read(ctx *jit.Context, v jit.Value) uint64 {
 		return ctx.Slot(v.Loc.Slot)
 	}
 	return ctx.Reg(v.Loc.Reg)
+}
+
+// arrays is the identity of m's backing arrays: a rehash changes it.
+func arrays(m any) [2]uintptr {
+	v := reflect.ValueOf(m).Elem().FieldByName("table")
+	return [2]uintptr{v.FieldByName("ctrl").Pointer(), v.FieldByName("slots").Pointer()}
+}
+
+func snapshot(m any) table {
+	v := reflect.ValueOf(m).Elem().FieldByName("table")
+	t := table{
+		mask: v.FieldByName("mask").Uint(), shift: v.FieldByName("shift").Uint(), seed: v.FieldByName("seed").Uint(), gen: v.FieldByName("gen").Uint(),
+		count: int(v.FieldByName("count").Int()), used: int(v.FieldByName("used").Int()),
+	}
+	ctrl, slots := v.FieldByName("ctrl"), v.FieldByName("slots")
+	for i := range ctrl.Len() {
+		t.ctrl = append(t.ctrl, ctrl.Index(i).Uint())
+	}
+	for i := range slots.Len() {
+		t.slots = append(t.slots, slots.Index(i).Uint())
+	}
+	t.capacity = ctrl.Len()
+	return t
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func TestNew(t *testing.T) {
@@ -672,9 +713,9 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("reads a sliced array across bridge and safepoint resumes that relocate Context.Heap", func(t *testing.T) {
-		// sum(a[i] + len(m)) over i < len(a): the bridged map.len keeps the
-		// loop quiet, so the hoist pass slices a.
-		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32()), types.NewMapType(types.TypeI32(), types.TypeI32())}, []types.Type{types.TypeI32(), types.TypeI32()}, func(b *instr.Builder) {
+		// sum(a[i] + len(m)) over i < len(a): the bridged map.len (a float key keeps
+		// the interpreter's map) keeps the loop quiet, so the hoist pass slices a.
+		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32()), types.NewMapType(types.TypeF64(), types.TypeI32())}, []types.Type{types.TypeI32(), types.TypeI32()}, func(b *instr.Builder) {
 			header, done := b.Label(), b.Label()
 			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
 			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
@@ -698,7 +739,7 @@ func TestNew(t *testing.T) {
 		}
 		require.Contains(t, ssa.Format(f), "slice")
 
-		heap := []types.Value{nil, types.TypedArray[int32]{10, 20, 30, 40, 50, 60, 70}, types.NewMap(types.NewMapType(types.TypeI32(), types.TypeI32()))}
+		heap := []types.Value{nil, types.TypedArray[int32]{10, 20, 30, 40, 50, 60, 70}, types.NewMap(types.NewMapType(types.TypeF64(), types.TypeI32()))}
 		stack := []types.Boxed{types.BoxRef(1), types.BoxRef(2), 0, 0}
 		// RETURN releases both reference params; counts above one keep
 		// those releases from reaching the last reference.
@@ -2036,7 +2077,7 @@ func TestMachine_Lower(t *testing.T) {
 		{
 			name: "declines an opcode without a lowering",
 			regs: regs{1: ssa.TypeRef, 2: i32, 3: ssa.TypeRef},
-			op:   exec(instr.MAP_GET, 1, 2),
+			op:   exec(instr.MAP_KEYS, 1),
 		},
 	}...)
 
@@ -2061,6 +2102,29 @@ func TestMachine_Lower(t *testing.T) {
 				rows = append(rows, target.LDI(target.X17, uint64(jit.Itab(types.TypedArray[int32](nil))))...)
 				return append(rows,
 					target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, exit),
+					target.MOV(reg(ssa.TypeRef, 2), reg(ssa.TypeRef, 1)),
+				)
+			}(),
+			lower: true,
+		},
+		{
+			name: "admits a map of the exact key and additionally checks the declared element kind",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Map: true, Kind: types.KindI32, Elem: types.KindRef}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{
+					target.SBFX(vr(1), reg(ssa.TypeRef, 1), 0, 32), target.LSLI(vr(1), vr(1), 4),
+					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.ADD(vr(1), target.X16, vr(1)),
+					target.LDR(target.X16, vr(1), 0),
+				}
+				rows = append(rows, target.LDI(target.X17, uint64(jit.Itab((*types.TypedMap[int32])(nil))))...)
+				rows = append(rows, target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, exit))
+				return append(rows,
+					target.LDR(target.X16, vr(1), int16(jit.OffsetData)),
+					target.LDR(target.X16, target.X16, int16(jit.OffsetMapTyp)),
+					target.LDRB(target.X16, target.X16, int16(jit.OffsetMapTypeElemKind)),
+					target.CMPI(target.X16, uint16(types.KindRef)), target.BCondLabel(target.OpBNE, exit),
 					target.MOV(reg(ssa.TypeRef, 2), reg(ssa.TypeRef, 1)),
 				)
 			}(),
@@ -2876,6 +2940,290 @@ func TestMachine_Lower(t *testing.T) {
 		})
 	}
 
+	// Map operations over a guarded integer-keyed map, written from the table's
+	// contract: a key's home slot is ((key ^ seed) * hash >> shift) & mask, a
+	// lookup walks ctrl[i] from it (0 empty, 1 full, 2 dead) comparing the key word
+	// at slots[2i], and a set that must rehash leaves the table untouched and
+	// bridges. The helpers number the virtual registers in the order a lowering
+	// takes them: the heap slot address, the table, the key word when it is not
+	// the operand itself, then ctrl, slots, mask, the home slot index, the first
+	// dead slot a set remembers, and the probe's state byte, slot address, and
+	// slot key word.
+	// The shape guard lowered ahead of each operation takes vr(1) for the heap slot
+	// address it reads, so the operation's own registers count from vr(2).
+	guarded := vr
+	vr := func(n int) asm.VReg { return guarded(n + 1) }
+	type walk struct{ data, ctrl, slots, mask, index, free, state, slot, word int }
+	layout := func(data, ctrl int, tracked bool) walk {
+		w := walk{data: data, ctrl: ctrl, slots: ctrl + 1, mask: ctrl + 2, index: ctrl + 3}
+		next := ctrl + 4
+		if tracked {
+			w.free, next = next, next+1
+		}
+		w.state, w.slot, w.word = next, next+1, next+2
+		return w
+	}
+	intMap := func(key, elem types.Kind) *ssa.Operation {
+		return &ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Map: true, Kind: key, Elem: elem}, Args: []ssa.Value{1}, Results: []ssa.Value{2}}
+	}
+	offset := func(o uintptr) int16 { return int16(o) }
+	tableOf := func(ref asm.VReg, addr int) []asm.Instruction {
+		return []asm.Instruction{
+			target.SBFX(vr(addr), ref, 0, 32), target.LSLI(vr(addr), vr(addr), 4),
+			target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+			target.ADD(vr(addr), target.X16, vr(addr)),
+			target.LDR(vr(addr+1), vr(addr), int16(jit.OffsetData)),
+		}
+	}
+	words := func(w walk) []asm.Instruction {
+		return []asm.Instruction{
+			target.LDR(vr(w.ctrl), vr(w.data), offset(jit.OffsetMapCtrl)),
+			target.LDR(vr(w.slots), vr(w.data), offset(jit.OffsetMapSlots)),
+			target.LDR(vr(w.mask), vr(w.data), offset(jit.OffsetMapMask)),
+		}
+	}
+	home := func(w walk, key asm.Reg) []asm.Instruction {
+		rows := []asm.Instruction{target.LDR(target.X16, vr(w.data), offset(jit.OffsetMapSeed)), target.EOR(vr(w.index), key, target.X16)}
+		rows = append(rows, target.LDI(target.X17, 0x9E3779B97F4A7C15)...)
+		return append(rows,
+			target.MUL(vr(w.index), vr(w.index), target.X17),
+			target.LDR(target.X16, vr(w.data), offset(jit.OffsetMapShift)),
+			target.LSR(vr(w.index), vr(w.index), target.X16),
+			target.AND(vr(w.index), vr(w.index), vr(w.mask)),
+		)
+	}
+	// probe walks from the home slot. An empty slot goes to miss, a matching key to
+	// hit. A tracked walk remembers the first dead slot in w.free; full labels the
+	// code past that bookkeeping.
+	probe := func(w walk, key asm.Reg, loop, next, full, hit, miss asm.Label) []asm.Instruction {
+		rows := []asm.Instruction{
+			target.LDRBR(vr(w.state), vr(w.ctrl), vr(w.index)), target.CBZLabel(vr(w.state), miss),
+			target.CMPI(vr(w.state), 1),
+		}
+		if w.free == 0 {
+			rows = append(rows, target.BCondLabel(target.OpBNE, next))
+		} else {
+			rows = append(rows,
+				target.BCondLabel(target.OpBEQ, full),
+				target.CMNI(vr(w.free), 1), target.CSEL(vr(w.free), vr(w.index), vr(w.free), target.CondEQ), target.BLabel(next),
+			)
+		}
+		return append(rows,
+			target.LSLI(vr(w.slot), vr(w.index), 4), target.ADD(vr(w.slot), vr(w.slots), vr(w.slot)),
+			target.LDR(vr(w.word), vr(w.slot), 0), target.CMP(vr(w.word), key), target.BCondLabel(target.OpBEQ, hit),
+			target.ADDI(vr(w.index), vr(w.index), 1), target.AND(vr(w.index), vr(w.index), vr(w.mask)), target.BLabel(loop),
+		)
+	}
+	retained := func(ref asm.VReg, skip asm.Label) []asm.Instruction {
+		return slices.Concat(
+			[]asm.Instruction{target.LSRI(target.X16, ref, 49)},
+			target.LDI(target.X17, types.Tag(types.KindRef)>>49),
+			[]asm.Instruction{
+				target.CMP(target.X16, target.X17),
+				target.BCondLabel(target.OpBNE, skip),
+				target.SBFX(target.X17, ref, 0, 32),
+			},
+			counter,
+			[]asm.Instruction{target.ADDI(target.X17, target.X17, 1), target.STR(target.X17, target.X16, 0)},
+		)
+	}
+	released := func(old asm.VReg) []asm.Instruction {
+		return slices.Concat(
+			[]asm.Instruction{target.LSRI(target.X16, old, 49)},
+			target.LDI(target.X17, types.Tag(types.KindRef)>>49),
+			[]asm.Instruction{
+				target.CMP(target.X16, target.X17),
+				target.BCondLabel(target.OpBNE, resume),
+				target.SBFX(target.X17, old, 0, 32),
+				target.CBZLabel(target.X17, resume),
+			},
+			counter,
+			[]asm.Instruction{
+				target.CMPI(target.X17, 1),
+				target.BCondLabel(target.OpBLE, exit),
+				target.SUBI(target.X17, target.X17, 1),
+				target.STR(target.X17, target.X16, 0),
+			},
+		)
+	}
+	// get is map.get or map.lookup; hit, miss, and done are labels 2, 3, and 4, and
+	// the probe's loop and next 5 and 6. The heap slot is vr(1), the table vr(2).
+	get := func(ref, dst asm.VReg, key asm.Reg, keyRows []asm.Instruction, flag asm.VReg, extra []asm.Instruction) []asm.Instruction {
+		w := layout(2, 3+min(len(keyRows), 1), false)
+		rows := slices.Concat(tableOf(ref, 1), keyRows, words(w), home(w, key), probe(w, key, 5, 6, 0, 2, 3))
+		rows = append(rows, target.LDR(dst, vr(w.slot), 8))
+		if flag != (asm.VReg{}) {
+			rows = append(rows, target.LDI(flag, 1)...)
+		}
+		rows = append(rows, target.BLabel(4), target.LDR(dst, vr(2), offset(jit.OffsetMapZero)))
+		if flag != (asm.VReg{}) {
+			rows = append(rows, target.LDI(flag, 0)...)
+		}
+		return append(rows, extra...)
+	}
+	// set is map.set. A value that boxes into a register (valueRows) is vr(1), so
+	// the heap slot follows it; labels hit, empty, and claim are 2, 3, and 4, and
+	// the probe's loop, next, and full 5, 6, and 7. The table is only changed once
+	// the load factor admits the insert, else the set bridges untouched.
+	set := func(ref asm.VReg, key asm.Reg, keyRows, valueRows []asm.Instruction, value asm.Reg, release bool) []asm.Instruction {
+		first := 1 + min(len(valueRows), 1)
+		w := layout(first+1, first+2+min(len(keyRows), 1), true)
+		used, want, limit, state, count := w.word+1, w.word+2, w.word+3, w.word+4, w.word+5
+		rows := slices.Concat(valueRows, tableOf(ref, first), keyRows, words(w), home(w, key), target.LDI(vr(w.free), ^uint64(0)), probe(w, key, 5, 6, 7, 2, 3))
+		rows = append(rows,
+			target.CMNI(vr(w.free), 1), target.CSEL(vr(w.free), vr(w.index), vr(w.free), target.CondEQ),
+			target.LDRBR(vr(state), vr(w.ctrl), vr(w.free)), target.CBNZLabel(vr(state), 4),
+			target.LDR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)), target.ADDI(vr(used), vr(used), 1), target.LSLI(vr(want), vr(used), 2),
+			target.ADDI(vr(limit), vr(w.mask), 1), target.LSLI(target.X16, vr(limit), 1), target.ADD(vr(limit), vr(limit), target.X16),
+			target.CMP(vr(want), vr(limit)), target.BCondLabel(target.OpBGT, exit),
+			target.STR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)),
+		)
+		rows = append(rows, target.LDI(vr(state), jit.SlotFull)...)
+		rows = append(rows,
+			target.STRBR(vr(state), vr(w.ctrl), vr(w.free)),
+			target.LSLI(vr(w.slot), vr(w.free), 4), target.ADD(vr(w.slot), vr(w.slots), vr(w.slot)),
+			target.STR(key, vr(w.slot), 0), target.STR(value, vr(w.slot), 8),
+			target.LDR(vr(count), vr(w.data), offset(jit.OffsetMapCount)), target.ADDI(vr(count), vr(count), 1), target.STR(vr(count), vr(w.data), offset(jit.OffsetMapCount)),
+			target.BLabel(resume),
+		)
+		if !release {
+			return append(rows, target.STR(value, vr(w.slot), 8))
+		}
+		old := vr(count + 1)
+		rows = append(rows, target.LDR(old, vr(w.slot), 8), target.STR(value, vr(w.slot), 8))
+		return append(rows, released(old)...)
+	}
+	// del is map.delete; hit and done are labels 2 and 3, the probe's loop and next 4 and 5.
+	del := func(ref asm.VReg, key asm.Reg, keyRows []asm.Instruction, release bool) []asm.Instruction {
+		w := layout(2, 3+min(len(keyRows), 1), false)
+		rows := slices.Concat(tableOf(ref, 1), keyRows, words(w), home(w, key), probe(w, key, 4, 5, 0, 2, 3))
+		state, count := w.word+1, w.word+2
+		rows = append(rows, target.LDI(vr(state), jit.SlotDead)...)
+		rows = append(rows,
+			target.STRBR(vr(state), vr(w.ctrl), vr(w.index)),
+			target.LDR(vr(count), vr(w.data), offset(jit.OffsetMapCount)), target.SUBI(vr(count), vr(count), 1), target.STR(vr(count), vr(w.data), offset(jit.OffsetMapCount)),
+		)
+		if !release {
+			return rows
+		}
+		old := vr(count + 1)
+		return append(append(rows, target.LDR(old, vr(w.slot), 8)), released(old)...)
+	}
+	zext := func(key asm.VReg, into int) []asm.Instruction { return []asm.Instruction{target.UXTW(vr(into), key)} }
+	box32 := func(value asm.VReg) []asm.Instruction {
+		return append(boxed(types.KindI32, target.UXTW(target.X16, value)), target.MOV(vr(1), target.X16))
+	}
+	ref, mapped := ssa.TypeRef, func(code instr.Opcode, results int, args ...ssa.Value) ssa.Operation {
+		op := ssa.Operation{Op: ssa.OpExec, Code: code, Args: args}
+		for i := range results {
+			op.Results = append(op.Results, ssa.Value(len(args)+2+i))
+		}
+		return op
+	}
+	tests = append(tests, []test{
+		{
+			name: "map.len loads the count of the guarded map",
+			regs: regs{1: ref, 2: ref, 3: i32}, guard: intMap(types.KindI32, types.KindI32),
+			op:   ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_LEN, Args: []ssa.Value{2}, Results: []ssa.Value{3}},
+			rows: append(tableOf(reg(ref, 2), 1), target.LDR(reg(i32, 3), vr(2), offset(jit.OffsetMapCount))), lower: true,
+		},
+		{
+			name: "map.get of an i32 key zero-extends it, probes, and returns the element or the map's zero",
+			regs: regs{1: ref, 2: ref, 3: i32, 4: i32}, guard: intMap(types.KindI32, types.KindI32),
+			op:   mapped(instr.MAP_GET, 1, 2, 3),
+			rows: get(reg(ref, 2), reg(i32, 4), vr(3), zext(reg(i32, 3), 3), asm.VReg{}, nil), lower: true,
+		},
+		{
+			name: "map.get of an i8 key keeps its low byte",
+			regs: regs{1: ref, 2: ref, 3: ssa.TypeI8, 4: f64}, guard: intMap(types.KindI8, types.KindF64),
+			op:   mapped(instr.MAP_GET, 1, 2, 3),
+			rows: get(reg(ref, 2), reg(f64, 4), vr(3), []asm.Instruction{target.UXTB(vr(3), reg(ssa.TypeI8, 3))}, asm.VReg{}, nil), lower: true,
+		},
+		{
+			name: "map.get of an i1 key compares it against zero",
+			regs: regs{1: ref, 2: ref, 3: ssa.TypeI1, 4: f32}, guard: intMap(types.KindI1, types.KindF32),
+			op:   mapped(instr.MAP_GET, 1, 2, 3),
+			rows: get(reg(ref, 2), reg(f32, 4), vr(3), []asm.Instruction{target.CMPI(reg(ssa.TypeI1, 3), 0), target.CSET(vr(3), target.CondNE)}, asm.VReg{}, nil), lower: true,
+		},
+		{
+			name: "map.get of an i64 key hashes the register itself",
+			regs: regs{1: ref, 2: ref, 3: i64, 4: ssa.TypeI1}, guard: intMap(types.KindI64, types.KindI1),
+			op:   mapped(instr.MAP_GET, 1, 2, 3),
+			rows: get(reg(ref, 2), reg(ssa.TypeI1, 4), reg(i64, 3), nil, asm.VReg{}, nil), lower: true,
+		},
+		{
+			name: "map.get of a ref element retains the result",
+			regs: regs{1: ref, 2: ref, 3: i32, 4: ref}, guard: intMap(types.KindI32, types.KindRef),
+			op:   mapped(instr.MAP_GET, 1, 2, 3),
+			rows: get(reg(ref, 2), reg(ref, 4), vr(3), zext(reg(i32, 3), 3), asm.VReg{}, retained(reg(ref, 4), 7)), lower: true,
+		},
+		{
+			name: "map.lookup also returns whether the key was present",
+			regs: regs{1: ref, 2: ref, 3: i32, 4: i32, 5: ssa.TypeI1}, guard: intMap(types.KindI32, types.KindI32),
+			op:   mapped(instr.MAP_LOOKUP, 2, 2, 3),
+			rows: get(reg(ref, 2), reg(i32, 4), vr(3), zext(reg(i32, 3), 3), reg(ssa.TypeI1, 5), nil), lower: true,
+		},
+		{
+			name: "map.set stores the boxed value in the first dead slot or the empty one that ended the probe, bridging when the table must rehash",
+			regs: regs{1: ref, 2: ref, 3: i32, 4: i32}, guard: intMap(types.KindI32, types.KindI32),
+			op:   ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_SET, Args: []ssa.Value{2, 3, 4}},
+			rows: set(reg(ref, 2), vr(4), zext(reg(i32, 3), 4), box32(reg(i32, 4)), vr(1), false), lower: true,
+		},
+		{
+			name: "map.set of a ref element adopts the value and releases the element it replaced",
+			regs: regs{1: ref, 2: ref, 3: i32, 4: ref}, guard: intMap(types.KindI32, types.KindRef),
+			op:   ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_SET, Args: []ssa.Value{2, 3, 4}},
+			rows: set(reg(ref, 2), vr(3), zext(reg(i32, 3), 3), nil, reg(ref, 4), true), lower: true,
+		},
+		{
+			name: "map.delete marks the slot dead and counts it out",
+			regs: regs{1: ref, 2: ref, 3: i32}, guard: intMap(types.KindI32, types.KindI32),
+			op:   ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_DELETE, Args: []ssa.Value{2, 3}},
+			rows: del(reg(ref, 2), vr(3), zext(reg(i32, 3), 3), false), lower: true,
+		},
+		{
+			name: "map.delete of a ref element also releases the removed element",
+			regs: regs{1: ref, 2: ref, 3: i64}, guard: intMap(types.KindI64, types.KindRef),
+			op:   ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_DELETE, Args: []ssa.Value{2, 3}},
+			rows: del(reg(ref, 2), reg(i64, 3), nil, true), lower: true,
+		},
+		{
+			name: "map.get declines a map that carries no shape guard",
+			regs: regs{1: ref, 3: i32, 4: i32},
+			op:   mapped(instr.MAP_GET, 1, 1, 3),
+		},
+		{
+			name: "map.get declines a key whose type is not the map's key kind",
+			regs: regs{1: ref, 2: ref, 3: i64, 4: i32}, guard: intMap(types.KindI32, types.KindI32),
+			op: mapped(instr.MAP_GET, 1, 2, 3),
+		},
+		{
+			name: "map.get declines an i64 element, which is not a raw word",
+			regs: regs{1: ref, 2: ref, 3: i32, 4: i64}, guard: intMap(types.KindI32, types.KindI64),
+			op: mapped(instr.MAP_GET, 1, 2, 3),
+		},
+		{
+			name: "map.get declines a result of another kind than the map's element",
+			regs: regs{1: ref, 2: ref, 3: i32, 4: f64}, guard: intMap(types.KindI32, types.KindI32),
+			op: mapped(instr.MAP_GET, 1, 2, 3),
+		},
+		{
+			name: "map.set declines an i64 value, whose boxing may exit",
+			regs: regs{1: ref, 2: ref, 3: i32, 4: i64}, guard: intMap(types.KindI32, types.KindRef),
+			op: ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_SET, Args: []ssa.Value{2, 3, 4}},
+		},
+		{
+			name: "map.delete declines a map that carries no shape guard",
+			regs: regs{1: ref, 3: i32},
+			op:   ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_DELETE, Args: []ssa.Value{1, 3}},
+		},
+		{
+			name: "map.len declines an array's shape",
+			regs: regs{1: ref, 2: ref, 3: i32}, guard: &i32array,
+			op: ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_LEN, Args: []ssa.Value{2}, Results: []ssa.Value{3}},
+		},
+	}...)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m, a := arm64.New(), asm.New(target.New())
@@ -2905,6 +3253,123 @@ func TestMachine_Lower(t *testing.T) {
 				require.Equal(t, tt.rows, a.Rows()[start:])
 			}
 		})
+	}
+
+	t.Run("map operations leave the table byte-identical to the Go table's", func(t *testing.T) {
+		testenv.MustHaveArch(t, "arm64")
+
+		t.Run("i32 keys", func(t *testing.T) {
+			mirror[int32](t, types.TypeI32(), types.BoxI32, func(n int) int32 { return int32(n * 7919) })
+		})
+		t.Run("i8 keys", func(t *testing.T) {
+			mirror[int8](t, types.TypeI8(), types.BoxI8, func(n int) int8 { return int8(n*37 - 90) })
+		})
+		t.Run("i1 keys", func(t *testing.T) { mirror[bool](t, types.TypeI1(), types.BoxI1, func(n int) bool { return n%2 == 0 }) })
+		t.Run("i64 keys", func(t *testing.T) {
+			mirror[int64](t, types.TypeI64(), types.BoxI64, func(n int) int64 { return int64(n) << 33 })
+		})
+	})
+}
+
+// mirror runs the same random operations on a Go table and on its clone, the
+// clone through native code that serves a bridge with the Go method, and
+// requires the two tables to agree word for word after each: ctrl, slots, count,
+// used, and the arrays' identity, so a native rehash would show. It also
+// requires native code to bridge exactly the sets the Go table rehashes on.
+func mirror[K types.Scalar](t *testing.T, key types.Type, box func(K) types.Boxed, keyOf func(int) K) {
+	typ := types.NewMapType(key, types.TypeI32())
+	mapType := typ
+	run := func(emit func(*instr.Builder), returns ...types.Type) (uintptr, []jit.Exit) {
+		fn := function(t, []types.Type{mapType, key, types.TypeI32()}, nil, emit)
+		fn.Typ.Returns = returns
+		return lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
+	}
+	set, setExits := run(func(b *instr.Builder) {
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.MAP_SET).Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+	}, types.TypeI32())
+	del, delExits := run(func(b *instr.Builder) {
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_DELETE).Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+	}, types.TypeI32())
+	lookup, lookupExits := run(func(b *instr.Builder) {
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_LOOKUP).Emit(instr.RETURN)
+	}, types.TypeI32(), types.TypeI1())
+	length, lengthExits := run(func(b *instr.Builder) {
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_LEN).Emit(instr.RETURN)
+	}, types.TypeI32())
+
+	for _, initial := range []int{0, 5, 40} {
+		for _, space := range []int{3, 12, 50} {
+			t.Run(fmt.Sprintf("capacity %d over %d keys", initial, space), func(t *testing.T) {
+				want := types.NewTypedMap[K](typ, initial)
+				got := want.Clone()
+				heap := []types.Value{nil, got}
+				rc := []int{0, 1 << 20}
+				rng := rand.New(rand.NewPCG(uint64(initial), uint64(space)))
+
+				// call runs code on got with key k and value v, serving each bridge it
+				// takes with serve, and returns the result words and the bridges served.
+				call := func(code uintptr, exits []jit.Exit, k K, v int32, serve func(jit.Exit)) ([]types.Boxed, int) {
+					stack := []types.Boxed{types.BoxRef(1), box(k), types.BoxI32(v), 0}
+					ctx := enter(t, stack)
+					ctx.Heap = address(t, heap)
+					ctx.RC = address(t, rc)
+					bridges := 0
+					for trap := jit.Enter(code, ctx); trap != jit.TrapReturn; trap = jit.Resume(ctx) {
+						require.Equal(t, jit.TrapBridge, trap)
+						exit := exits[ctx.Exit()]
+						require.Equal(t, jit.ExitBridge, exit.Kind)
+						serve(exit)
+						bridges++
+					}
+					return stack, bridges
+				}
+				never := func(jit.Exit) { require.Fail(t, "bridged an operation native code serves") }
+				bridged := 0
+
+				for step := range 1500 {
+					k, v := keyOf(rng.IntN(space)), int32(rng.IntN(1000))
+					switch n := rng.IntN(10); {
+					case n < 5:
+						before := arrays(want)
+						want.Set(k, types.BoxI32(v))
+						rehashed := arrays(want) != before
+						before = arrays(got)
+						_, bridges := call(set, setExits, k, v, func(exit jit.Exit) {
+							require.Equal(t, instr.MAP_SET, exit.Code)
+							require.Equal(t, before, arrays(got), "native code must not touch the arrays before it bridges")
+							got.Set(k, types.BoxI32(v))
+						})
+						require.Equal(t, rehashed, arrays(got) != before)
+						require.Equal(t, btoi(rehashed), bridges, "step %d: native set and Go set disagree on rehashing", step)
+						bridged += bridges
+					case n < 8:
+						want.Delete(k)
+						_, bridges := call(del, delExits, k, v, never)
+						require.Zero(t, bridges)
+					case n < 9:
+						value, ok := want.Get(k)
+						if !ok {
+							value = want.Zero
+						}
+						out, bridges := call(lookup, lookupExits, k, v, never)
+						require.Zero(t, bridges)
+						require.Equal(t, []types.Boxed{value, types.BoxI1(ok)}, out[:2], "step %d", step)
+					default:
+						out, bridges := call(length, lengthExits, k, v, never)
+						require.Zero(t, bridges)
+						require.Equal(t, types.BoxI32(int32(want.Len())), out[0], "step %d", step)
+					}
+					require.Equal(t, snapshot(want), snapshot(got), "step %d", step)
+				}
+				distinct := map[K]bool{}
+				for n := range space {
+					distinct[keyOf(n)] = true
+				}
+				if len(distinct) > 6 && initial < 40 {
+					require.Positive(t, bridged, "the sequence never reached the load factor")
+				}
+			})
+		}
 	}
 }
 

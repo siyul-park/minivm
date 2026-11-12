@@ -58,6 +58,8 @@ Transfers `MUST` preserve counts exactly. Native execution `MAY` borrow backing 
 | Slot | key word, then `Boxed` value word, in `slots`; state `empty`, `full`, or `dead` (tombstone) in `ctrl`; probing is linear and an insert reuses the first tombstone on its path |
 | Load | live entries plus tombstones stay at or below three quarters of capacity; an insert past that rehashes into fresh arrays, doubling them when live entries exceed three eighths and keeping the size otherwise |
 
+Native code reads and writes the table of a `TypedMap` with an integer key (`i1`, `i8`, `i32`, `i64`) through `jit.OffsetMap*` (`jit-internals.md`, Maps). It `MUST` choose the same slot and make the same `count` and `used` updates as `set`, `remove`, and `get`, and `MUST NOT` rehash: an insert past the load takes the Go `set`. It `MUST NOT` write `gen`, a slice header, or `seed`.
+
 Iteration order (`Range`, `map.keys`, `map.iter`) is unspecified; for numeric keys it follows slot order. Under mutation, `map.iter` `MUST` produce every entry present for the whole walk exactly once and `MUST NOT` produce a key deleted before the walk reaches it. Entries inserted during the walk `MAY` be produced. A rehash does not restart or skip the walk, and `map.clear` ends a walk over a numeric table. A `StringMap` or `Map` is cleared in place, so a walk over it produces nothing already cleared, but entries added after the clear `MAY` still appear. Float keys follow Go map keys: `-0` and `+0` are one key whose stored bits are the latest written, and a `NaN` key never matches, so each set adds an entry that only `map.clear` removes.
 
 ## Reference Counting

@@ -1200,16 +1200,113 @@ blk0: ()
 	v1:ref = load local[0]
 	v2:i32 = const 3
 	v4:state = state {addr=1 base=0 ip=7 returns=1 stack=[v1, v2]}
-	v3:i32 = map.get v1, v2 state v4
-	v5:ref = load local[0]
-	v6:i32 = const 4
-	v9:state = state {addr=1 base=0 ip=15 returns=1 stack=[v3, v5, v6]}
-	v7:i32, v8:i1 = map.lookup v5, v6 state v9
-	v11:state = state {addr=1 base=0 ip=17 returns=1 stack=[v3, v7]}
-	v10:i32 = i32.add v3, v7 state v11
-	v12:state = state {addr=1 base=0 ip=18 returns=1 stack=[v10]}
-	return v10 state v12
+	v3:ref = guard.shape v1 map key i32 elem i32 state v4
+	v5:i32 = map.get v3, v2 state v4
+	v6:ref = load local[0]
+	v7:i32 = const 4
+	v9:state = state {addr=1 base=0 ip=15 returns=1 stack=[v5, v6, v7]}
+	v8:ref = guard.shape v6 map key i32 elem i32 state v9
+	v10:i32, v11:i1 = map.lookup v8, v7 state v9
+	v13:state = state {addr=1 base=0 ip=17 returns=1 stack=[v5, v10]}
+	v12:i32 = i32.add v5, v10 state v13
+	v14:state = state {addr=1 base=0 ip=18 returns=1 stack=[v12]}
+	return v12 state v14
 `, ssa.Format(out))
+	})
+
+	t.Run("guards the declared map of an integer key before each map operation", func(t *testing.T) {
+		mapped := func(key, elem types.Type) *types.Function {
+			return &types.Function{
+				Typ: &types.FunctionType{Params: []types.Type{types.NewMapType(key, elem)}, Returns: []types.Type{types.TypeI32()}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_LEN).Emit(instr.DROP)
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_CONST, 2).Emit(instr.MAP_SET)
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.MAP_DELETE)
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.MAP_GET).Emit(instr.DROP)
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.MAP_LOOKUP).Emit(instr.DROP).Emit(instr.DROP)
+					b.Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+				}),
+			}
+		}
+		sequence := func(out *ssa.Function) []string {
+			var got []string
+			for _, op := range out.Block(0).Operations {
+				switch {
+				case op.Op == ssa.OpGuardShape:
+					got = append(got, fmt.Sprintf("guard map key %s elem %s", op.Shape.Kind, op.Shape.Elem))
+					require.True(t, op.Shape.Map)
+				case op.Op == ssa.OpExec && op.Code.Reads(instr.Heap):
+					got = append(got, instr.TypeOf(op.Code).Mnemonic)
+				}
+			}
+			return got
+		}
+
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, mapped(types.TypeI32(), types.TypeI32()), 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, []string{
+			"guard map key i32 elem i32", "map.len",
+			"guard map key i32 elem i32", "map.set",
+			"guard map key i32 elem i32", "map.delete",
+			"guard map key i32 elem i32", "map.get",
+			"guard map key i32 elem i32", "map.lookup",
+		}, sequence(out))
+
+		// An i64 element is read through a bridge, so a get or lookup of it gets no
+		// guard; the length, the delete, and a set of an i32 value are lowered.
+		out, _, err = transform.Translate(transform.Module{}, nil, 1, mapped(types.TypeI32(), types.TypeI64()), 0)
+		require.NoError(t, err)
+		require.Equal(t, []string{
+			"guard map key i32 elem i64", "map.len",
+			"guard map key i32 elem i64", "map.set",
+			"guard map key i32 elem i64", "map.delete",
+			"map.get",
+			"map.lookup",
+		}, sequence(out))
+
+		for _, key := range []types.Type{types.TypeI1(), types.TypeI8(), types.TypeI64()} {
+			out, _, err = transform.Translate(transform.Module{}, nil, 1, mapped(key, types.TypeI32()), 0)
+			require.NoError(t, err)
+			require.Contains(t, sequence(out), fmt.Sprintf("guard map key %s elem i32", key.Kind()))
+		}
+
+		for _, key := range []types.Type{types.TypeF32(), types.TypeF64(), types.TypeString()} {
+			out, _, err = transform.Translate(transform.Module{}, nil, 1, mapped(key, types.TypeI32()), 0)
+			require.NoError(t, err)
+			require.Equal(t, []string{"map.len", "map.set", "map.delete", "map.get", "map.lookup"}, sequence(out))
+		}
+	})
+
+	t.Run("does not guard a map set of an i64 value, which always bridges", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{types.NewMapType(types.TypeI32(), types.TypeI64())}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I64_CONST, 2).Emit(instr.MAP_SET).Emit(instr.RETURN)
+			}),
+		}
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		for _, op := range out.Block(0).Operations {
+			require.NotEqual(t, ssa.OpGuardShape, op.Op)
+		}
+	})
+
+	t.Run("skips the map guard at a refuted offset", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{types.NewMapType(types.TypeI32(), types.TypeI32())}, Returns: []types.Type{types.TypeI32()}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_LEN).Emit(instr.RETURN)
+			}),
+		}
+		profiles := transform.Profiles{1: {Refuted: map[int]bool{2: true}}}
+
+		out, _, err := transform.Translate(transform.Module{}, profiles, 1, fn, 0)
+		require.NoError(t, err)
+		for _, op := range out.Block(0).Operations {
+			require.NotEqual(t, ssa.OpGuardShape, op.Op)
+		}
 	})
 
 	t.Run("retains the ref select picks before releasing both operands", func(t *testing.T) {

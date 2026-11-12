@@ -1449,6 +1449,15 @@ func (i *Interpreter) runes(text types.Boxed) types.TypedArray[int32] {
 	return types.TypedArray[int32](deref[types.String](i, text))
 }
 
+// newMapDefault is a new empty map of typ sized for capacity entries.
+func (i *Interpreter) newMapDefault(typ *types.MapType, capacity types.Boxed) types.Value {
+	n := capacity.I32()
+	if n < 0 {
+		panic(ErrIndexOutOfRange)
+	}
+	return types.NewMapForType(typ, int(n))
+}
+
 // newArrayDefault is a new array of typ's element kind holding size zero elements; a
 // []any's are null, each one more reference to null.
 func (i *Interpreter) newArrayDefault(typ *types.ArrayType, size types.Boxed) types.Value {

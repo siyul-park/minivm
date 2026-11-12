@@ -127,6 +127,8 @@ func shape(o Operation) string {
 		fmt.Fprintf(&sb, " closure %d type 0x%x captures %d", s.Function, s.Type, s.Captures)
 	case s.Struct:
 		fmt.Fprintf(&sb, " struct type 0x%x", s.Type)
+	case s.Map:
+		fmt.Fprintf(&sb, " map key %s elem %s", s.Kind, s.Elem)
 	default:
 		fmt.Fprintf(&sb, " kind %s", s.Kind)
 	}

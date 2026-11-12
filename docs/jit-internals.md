@@ -66,7 +66,7 @@ One wake (analysis, the first compiles, their garbage) costs ~0.3–0.6 ms of in
 | `jit.Cache` | Published code and `Context.Natives`. |
 
 - Native code never runs on a goroutine stack; async preemption cannot reach it, so back edges, calls, and returns spend `Budget` explicitly. Back edges and calls branch to safepoint on exhaustion; returns only credit the work. `Budget` carries across Go entries and served calls; each safepoint adds `engine.quota` (Ticks).
-- Native code writes no Go pointer. It reads heap interface words through `Context.Heap` and object fields at `jit.Offset*`.
+- Native code writes no Go pointer. It reads heap interface words through `Context.Heap` and object fields at `jit.Offset*`, and writes only integer words: element and field words, reference counts, and the control bytes, slot words, `count`, and `used` of a numeric map table (Maps).
 - A slice (`ssa.OpSlice`, placed by LICM in a quiet loop's preheader: `pass-system.md`) loads a guarded array's element pointer and length once; the loop's array ops read them, not `Context.Heap`. They are never reloaded: a quiet loop resizes or replaces no container, and neither do the exits it resumes from (a safepoint, a bridge of an op that writes nothing), though a bridge may move `Context.Heap`. The pointer may sit in a register or a spill slot; it is no GC root, and its container, which a quiet loop never releases, keeps the array reachable.
 - Registers: X24 budget, X25 frame base, X27 next record address, X26 context, X16/X17 scratch, X18/X28 untouched. Allocatable: X0–X15, X19–X23, D0–D31.
 - X24 mirrors `Context.Budget`: exits store it, resumed exits reload it, and a normal Go entry stores it back after native return.
@@ -163,7 +163,7 @@ A deopt stub sits out of line after the next terminator that does not fall throu
 
 | Exit | Resume rule |
 |---|---|
-| Callout | A bridge of `STRING_CONCAT`, `STRING_NEW_UTF32`, `STRING_ENCODE_UTF32`, `ARRAY_NEW_DEFAULT`, `STRUCT_NEW_DEFAULT`, or `ARRAY_SLICE` is served by `engine.callout`: the op's own `Interpreter` helper (the one its threaded handler calls) computes the object from the operand words, Go allocates it and hands native code its one reference through `Context.Results`; no scratch frame, operand retain, or handler run. The helper writes no operand count, so a panic (heap exhaustion, the op's own fault) deopts as a trap with every count unchanged and threaded code reports it. A `STRUCT_NEW_DEFAULT` or `ARRAY_NEW_DEFAULT` callout also fills the type's bin (Reserve). |
+| Callout | A bridge of `STRING_CONCAT`, `STRING_NEW_UTF32`, `STRING_ENCODE_UTF32`, `ARRAY_NEW_DEFAULT`, `STRUCT_NEW_DEFAULT`, `ARRAY_SLICE`, or `MAP_NEW_DEFAULT` is served by `engine.callout`: the op's own `Interpreter` helper (the one its threaded handler calls) computes the object from the operand words, Go allocates it and hands native code its one reference through `Context.Results`; no scratch frame, operand retain, or handler run. The helper writes no operand count, so a panic (heap exhaustion, the op's own fault) deopts as a trap with every count unchanged and threaded code reports it. A `STRUCT_NEW_DEFAULT` or `ARRAY_NEW_DEFAULT` callout also fills the type's bin (Reserve). |
 | Bridge | `engine.bridge` runs the op's threaded handler once in Go, then native resumes, for every op `bridgeable` admits. It denies a control transfer (the op writes `Branch`), `ARRAY_NEW` (its declared two-operand arity does not cover the `1+count` it pops), and `MAP_KEYS` (it allocates every key before the result array); their bridges deopt. An op with a host-view operand deopts before its handler runs: a view runs `Registry` conversions, which are host code. |
 | Release | `Exit.Word` identifies the last ref; interpreter owns reclamation, then native resumes. |
 | Box | `Exit.Word` carries the wide i64; interpreter allocates a boxed value, then native resumes. |
@@ -185,6 +185,23 @@ A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every ad
 | flush | `engine.run`, `engine.enter`, `Run` | Native code's return to the interpreter at depth 0, whether it returned, exited, or carries a fault to re-raise, runs `tcache.flush` when a miss has armed or filled a type: one field check otherwise, with no `defer`, which cost every entry. `Run` flushes once more as it returns, since `dispatch` recovers a panic that skipped that return. It returns every unused ref through `Interpreter.undo`, which frees the slot without finalize or a refs walk and keeps the object, an array included, for the next fill, since no one could hold it; it disarms every type. |
 
 A batch is stored so native code takes its lowest address first, so a single-type program leaves the heap threaded would. With several types, unused refs can sit below taken ones: their slots return to `free` and `HeapLen` can read higher than threaded code's.
+
+### Maps
+
+`arm64.Machine` serves `MAP_LEN`, `MAP_GET`, `MAP_LOOKUP`, `MAP_SET`, and `MAP_DELETE` over the table of a `TypedMap` with an `i1`, `i8`, `i32`, or `i64` key (`memory-model.md`, Map Storage). It mirrors `types.get`, `set`, and `remove` step for step, so a table that native and Go code both mutate equals the table Go alone would produce.
+
+| Concern | Contract |
+|---|---|
+| Guard | `Translate` guards the map operand of an operation only when `ssa.Shape.Serves` accepts it, the one test the lowering applies too: a map of declared integer key, an operand in the key kind's register class, and an element or value that is not an `i64`. `guard.shape` checks the heap slot holds a `*types.TypedMap` of that key kind (the itab) and that the map's declared `MapType.ElemKind` equals the guarded element kind, since one `TypedMap[int32]` serves `map[i32]string` and `map[i32]i32` alike. Any other representation (a generic `Map`, a host view, another key kind, another element kind) deopts. A refuted offset gets no guard, and an operation `Serves` rejects keeps the interpreter's bridge with no guard. |
+| Layout | `jit.OffsetMapTyp`, `OffsetMapTypeElemKind`, and `OffsetMapZero` are constant offsets; the table fields are `jit.OffsetMap*` vars taken from reflection. `TestHeap_Layout` pins every one; `jit.Slot*` and `jit.MapHash` name the control states and the hash multiplier. |
+| Key word | an `i64` is its register; an `i32` zero-extends; an `i8` keeps its low byte; an `i1` is 0 or 1. The operand's static type must be the key kind's register class, else the operation bridges. |
+| Probe | from the home slot `((key ^ seed) * MapHash >> shift) & mask`, linear: an empty control byte misses, a full slot whose key word equals the key hits, a dead slot continues. |
+| Get | a hit loads the value word; a miss yields the map's `Zero`. A reference element is retained either way. `MAP_LOOKUP` adds the presence flag. An `i64` element bridges, since its word may reference a heap-promoted value. |
+| Set | a hit replaces the value word. A miss takes the first dead slot on the probe, else the empty slot that ended it; an empty slot needs `(used+1)*4 <= (mask+1)*3`, then `used` and `count` rise, a dead slot raises only `count`. When the load would be exceeded, nothing is written and the operation bridges, so Go's `set` rehashes. The value word is adopted; an element of reference or `i64` kind releases the word replaced. An `i64` value bridges, since boxing it may exit. |
+| Delete | a hit marks the slot dead and lowers `count`, leaving the key and value words, and releases the removed word of a reference or `i64` element. |
+| Walk | native code writes only control bytes, slot words, `count`, and `used`, never `gen` or a slice header, so a running `map.iter` sees native writes as it sees Go's. |
+
+`MAP_NEW_DEFAULT` is a callout served by `Interpreter.newMapDefault`, the helper the threaded handler calls. `MAP_CLEAR` and the `MAP_SET` slow path are bridges: the threaded handler is their one implementation.
 
 ### Exit policy
 

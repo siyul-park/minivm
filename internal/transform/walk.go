@@ -259,11 +259,20 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		if m == nil {
 			return false
 		}
+		w.guardMap(operation, m, 2)
 		results := []fact{{kind: m.ElemKind}}
 		if operation == instr.MAP_LOOKUP {
 			results = append(results, fact{kind: types.KindI1})
 		}
 		return w.emit(operation, 2, results)
+	case instr.MAP_LEN, instr.MAP_SET, instr.MAP_DELETE:
+		pops := len(instr.TypeOf(operation).Pop)
+		if len(w.stack) < pops {
+			return false
+		}
+		if m := w.stack[len(w.stack)-pops].mapType; m != nil {
+			w.guardMap(operation, m, pops)
+		}
 	case instr.MAP_NEW_DEFAULT:
 		if len(w.stack) == 0 {
 			return false
@@ -360,6 +369,24 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		results[i] = fact{kind: types.Kind(kind)}
 	}
 	return w.emit(operation, len(effect.Pop), results)
+}
+
+// guardMap guards the map of operation, which pops pops operands, when native
+// code lowers the operation on it (ssa.Shape.Serves): any other operation keeps
+// the interpreter's, and a guard it never uses would only cost a deopt.
+func (w *walker) guardMap(operation instr.Opcode, m *types.MapType, pops int) {
+	top := len(w.stack)
+	var key, value types.Kind
+	if pops > 1 {
+		key = w.stack[top-pops+1].kind
+	}
+	if pops > 2 {
+		value = w.stack[top-1].kind
+	}
+	shape := ssa.Shape{Map: true, Kind: m.KeyKind, Elem: m.ElemKind}
+	if shape.Serves(operation, key, value) {
+		w.guard(top-pops, shape)
+	}
 }
 
 func (w *walker) dup() bool {

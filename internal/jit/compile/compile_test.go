@@ -38,6 +38,12 @@ type machine struct {
 	falls []bool
 	// fused records every result Site.Fuse admitted.
 	fused []ssa.Value
+	// shapes records every shape guard's Shape, and deopts a null operand at
+	// its operation's state.
+	shapes []ssa.Shape
+	// native lowers MAP_SET with a slow path that bridges, as a machine that
+	// serves the operation inline does.
+	native bool
 }
 
 func (m *machine) Arch() asm.Arch      { return arm64.New() }
@@ -65,7 +71,7 @@ func (m *machine) Enter(a *asm.Assembler, l compile.Layout) asm.Label {
 }
 
 func (m *machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	if op.Op == ssa.OpExec && (op.Code == instr.MAP_GET || op.Code == instr.MAP_SET) {
+	if op.Op == ssa.OpExec && (op.Code == instr.MAP_GET || op.Code == instr.MAP_SET && !m.native || op.Code == instr.MAP_NEW_DEFAULT) {
 		return false
 	}
 	m.calls = append(m.calls, op.Op.String())
@@ -73,6 +79,13 @@ func (m *machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 		m.regs = map[ssa.Value]asm.VReg{}
 	}
 	switch {
+	case op.Op == ssa.OpGuardShape:
+		m.shapes = append(m.shapes, op.Shape)
+		a.Emit(arm64.CBZLabel(s.Reg(op.Args[0]), s.Deopt()))
+	case op.Op == ssa.OpExec && op.Code == instr.MAP_SET:
+		exit, resume := s.Bridge()
+		a.Emit(arm64.CBZLabel(s.Reg(op.Args[1]), exit))
+		a.Bind(resume)
 	case op.Op == ssa.OpExec && op.Code == instr.I32_DIV_S:
 		a.Emit(arm64.CBZLabel(s.Reg(op.Args[1]), s.Trap()))
 	case op.Op == ssa.OpExec && op.Code == instr.STRUCT_NEW_DEFAULT:
@@ -1040,6 +1053,71 @@ func TestLower(t *testing.T) {
 		_, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
 		require.NoError(t, err)
 		require.Contains(t, m.calls, ssa.OpGuardShape.String())
+	})
+
+	t.Run("routes a map shape guard to Machine.Lower and deopts a failed one at the operation's state", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		ref := constant(b, entry, types.BoxRef(1))
+		at := state(b, entry, 4, ssa.Operand{Value: ref})
+		guarded := b.Value(ssa.TypeRef)
+		shape := ssa.Shape{Map: true, Kind: types.KindI32, Elem: types.KindRef}
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: shape, Args: []ssa.Value{ref}, State: at, Results: []ssa.Value{guarded}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+
+		m := new(machine)
+		assembly, err := compile.Lower(b.Build(), m, function(0, 0), nil, 0, false, true)
+		require.NoError(t, err)
+		require.Equal(t, []ssa.Shape{shape}, m.shapes)
+		require.Len(t, assembly.Exits, 1)
+		require.Equal(t, jit.ExitDeopt, assembly.Exits[0].Kind)
+		require.False(t, assembly.Exits[0].Trap, "a refuted speculation, not the operation's own trap")
+		require.Equal(t, 4, assembly.Exits[0].Frame.IP)
+	})
+
+	t.Run("places a map.set slow path as a resumable bridge that adopts the stored value", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		m1 := constant(b, entry, types.BoxRef(1))
+		key := constant(b, entry, types.BoxI32(2))
+		val := constant(b, entry, types.BoxRef(3))
+		at := state(b, entry, 0, ssa.Operand{Value: m1}, ssa.Operand{Value: key}, ssa.Operand{Value: val, Owned: true})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_SET, Args: []ssa.Value{m1, key, val}, State: at})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+
+		m := &machine{native: true}
+		assembly, err := compile.Lower(b.Build(), m, function(0, 0, instr.MustNew(instr.MAP_SET)), nil, 0, false, true)
+		require.NoError(t, err)
+		require.Equal(t, []string{"prologue", "const", "const", "const", "exec", "return", "exit 0 1", "jump", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []jit.Exit{{
+			Kind:    jit.ExitBridge,
+			Code:    instr.MAP_SET,
+			Pops:    3,
+			Adopts:  1,
+			Frame:   assembly.Exits[0].Frame,
+			Results: nil,
+		}}, assembly.Exits)
+		require.Len(t, assembly.Exits[0].Frame.Stack, 3)
+		require.True(t, assembly.Exits[0].Frame.Stack[2].Owned)
+	})
+
+	t.Run("bridges map.new_default with the capacity it pops and the map it yields", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		capacity := constant(b, entry, types.BoxI32(16))
+		at := state(b, entry, 0, ssa.Operand{Value: capacity})
+		got := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_NEW_DEFAULT, Args: []ssa.Value{capacity}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+
+		assembly, err := compile.Lower(b.Build(), new(machine), function(0, 0, instr.MustNew(instr.MAP_NEW_DEFAULT, 0)), nil, 0, false, true)
+		require.NoError(t, err)
+		require.Len(t, assembly.Exits, 1)
+		require.Equal(t, jit.ExitBridge, assembly.Exits[0].Kind)
+		require.Equal(t, instr.MAP_NEW_DEFAULT, assembly.Exits[0].Code)
+		require.Equal(t, 1, assembly.Exits[0].Pops)
+		require.Zero(t, assembly.Exits[0].Adopts)
+		require.Equal(t, []types.Kind{types.KindRef}, assembly.Exits[0].Results)
 	})
 
 	t.Run("routes a value guard to Machine.Lower", func(t *testing.T) {

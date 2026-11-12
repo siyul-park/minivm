@@ -4212,11 +4212,8 @@ var (
 				if i.sp == 0 {
 					panic(ErrStackUnderflow)
 				}
-				v0 := int(i.stack[i.sp-1].I32())
-				if v0 < 0 {
-					panic(ErrIndexOutOfRange)
-				}
-				i.stack[i.sp-1] = types.BoxRef(i.alloc(types.NewMapForType(v1, v0)))
+				v0 := i.newMapDefault(v1, i.stack[i.sp-1])
+				i.stack[i.sp-1] = types.BoxRef(i.alloc(v0))
 				i.fr.ip += 3
 			}
 		},
