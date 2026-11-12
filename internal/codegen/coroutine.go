@@ -100,6 +100,7 @@ func coroDone() jen.Code {
 		jen.Switch(jen.Id("co").Op(":=").Id("i").Dot("heap").Index(jen.Id("ref").Dot("Ref").Call()).Assert(jen.Type())).Block(jen.Case(jen.Op("*").Id("coroutine")).Block(jen.If(jen.Id("co").Dot("done")).Block(jen.Id("done").Op("=").Lit(1))),
 			jen.Case(jen.Qual(typesPkg, "Iterator")).Block(jen.If(jen.Id("co").Dot("Done").Call()).Block(jen.Id("done").Op("=").Lit(1))),
 			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch")))),
+		jen.Id("i").Dot("releaseBox").Call(jen.Id("ref")),
 		top(1).Op("=").Qual(typesPkg, "BoxI1").Call(jen.Id("done").Op("!=").Lit(0)),
 		next())
 }
