@@ -9418,6 +9418,8 @@ func TestWithThreshold(t *testing.T) {
 	})
 
 	t.Run("keeps ownership of a map read through a local declared with another element kind", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
 		// One TypedMap[int32] of map[i32]string sits in two locals, the second
 		// declared map[i32]i32 (the verifier admits both through CONST_GET). The
 		// key kind alone would admit the second local's map.set, which would then
