@@ -3,7 +3,6 @@ package compile
 
 import (
 	"fmt"
-	"maps"
 	"slices"
 
 	"github.com/siyul-park/minivm/analysis"
@@ -26,11 +25,11 @@ type lowering struct {
 	// its function's own entry.
 	osr   bool
 	count bool
-	// headers are f's loop headers and loops marks every block in a loop
-	// body; gate rejects a bridge or box exit outside them (see scan); block
-	// is the block being lowered.
+	// headers are f's loop headers and inner maps every block in a loop
+	// body to the body of its innermost loop; gate rejects a bridge or box
+	// exit outside them (see scan); block is the block being lowered.
 	headers []int
-	loops   map[int]bool
+	inner   []map[int]bool
 	gate    bool
 	block   int
 	// upvals reports that f reads or writes its upvals.
@@ -327,16 +326,21 @@ func (l *lowering) word(k jit.Kind, kind types.Kind, reg asm.VReg) (exit, resume
 	return l.stub(id)
 }
 
-// scan fills headers, loops, gate, upvals, uses, and remats. A scalar or ref
+// scan fills headers, inner, gate, upvals, uses, and remats. A scalar or ref
 // constant is rematerialized when f has a call and no loop block uses it: a
 // loop keeps its constants in registers.
 func (l *lowering) scan() {
 	f := l.f
 	dom := graph.NewDominance(f)
 	l.headers = graph.Headers(f, dom)
-	l.loops = map[int]bool{}
+	l.inner = make([]map[int]bool, f.Len())
 	for _, h := range l.headers {
-		maps.Copy(l.loops, graph.Body(f, dom, h))
+		body := graph.Body(f, dom, h)
+		for block := range body {
+			if l.inner[block] == nil || len(body) < len(l.inner[block]) {
+				l.inner[block] = body
+			}
+		}
 	}
 
 	entry := f.Entry().IP
@@ -353,7 +357,7 @@ func (l *lowering) scan() {
 		mark := func(args []ssa.Value) {
 			for _, v := range args {
 				l.uses[v]++
-				if l.loops[id] {
+				if l.inner[id] != nil {
 					looped[v] = true
 				}
 			}
@@ -394,7 +398,7 @@ func (l *lowering) scan() {
 }
 
 func (l *lowering) function() error {
-	order := graph.Order(l.f)
+	order := l.layout()
 	labels := make([]asm.Label, l.f.Len())
 	for _, block := range order {
 		labels[block] = l.a.Label()
@@ -819,7 +823,7 @@ func (l *lowering) fresh(t ssa.Type) asm.VReg {
 
 // exit records the map of an exit of kind k at the current operation's state.
 func (l *lowering) exit(k jit.Kind) int {
-	if l.gate && !l.loops[l.block] && (k == jit.ExitBridge || k == jit.ExitBox) {
+	if l.gate && l.inner[l.block] == nil && (k == jit.ExitBridge || k == jit.ExitBox) {
 		l.fail(fmt.Errorf("%w: prefix %s exit outside every loop", ErrUnsupported, k))
 	}
 	id := len(l.outlets)
@@ -1041,4 +1045,47 @@ func convention(ts []types.Type) []types.Kind {
 		return nil
 	}
 	return types.Kinds(ts)
+}
+
+// layout orders f's blocks for lowering: a reverse postorder in which a
+// two-way branch falls through, when it can, to the successor that stays in
+// its innermost loop, whichever polarity the branch tests. Reverse postorder
+// places the last successor a walk visits right after its block, so the walk
+// visits that successor last.
+func (l *lowering) layout() []int {
+	f := l.f
+	if f.Len() == 0 {
+		return nil
+	}
+	visited := make([]bool, f.Len())
+	post := make([]int, 0, f.Len())
+	type frame struct {
+		block int
+		succ  []int
+	}
+	push := func(stack []frame, block int) []frame {
+		visited[block] = true
+		succ := f.Succ(block)
+		loop := l.inner[block]
+		if f.Block(block).Terminator.Op == ssa.OpBranch && len(succ) == 2 && loop != nil && loop[succ[0]] && !loop[succ[1]] {
+			succ = []int{succ[1], succ[0]}
+		}
+		return append(stack, frame{block, succ})
+	}
+	stack := push(nil, 0)
+	for len(stack) > 0 {
+		top := &stack[len(stack)-1]
+		if len(top.succ) > 0 {
+			next := top.succ[0]
+			top.succ = top.succ[1:]
+			if !visited[next] {
+				stack = push(stack, next)
+			}
+			continue
+		}
+		post = append(post, top.block)
+		stack = stack[:len(stack)-1]
+	}
+	slices.Reverse(post)
+	return post
 }
