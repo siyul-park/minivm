@@ -297,6 +297,67 @@ func TestLower(t *testing.T) {
 		require.Equal(t, []bool{true, false, true}, m.falls)
 	})
 
+	t.Run("lays a loop's body right after its header whichever successor the branch names first", func(t *testing.T) {
+		for _, first := range []bool{true, false} {
+			b := ssa.New("f")
+			entry, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
+			b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+			value := constant(b, header, types.BoxI32(1))
+			at := state(b, header, 9, ssa.Operand{Value: value})
+			b.Add(header, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{value}, State: at})
+			edges := []ssa.Edge{{Block: body}, {Block: exit}}
+			if !first {
+				slices.Reverse(edges)
+			}
+			b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{value}, Edges: edges})
+			b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+			b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
+
+			m := new(machine)
+			_, err := compile.Lower(b.Build(), m, function(0, 1), nil, 0, false, true)
+			require.NoError(t, err)
+			require.Equal(t, []string{"prologue", "jump", "const", "budget", "store", "br", "jump", "return", "exit 0 2", "jump", "epilogue", "enter"}, m.calls, "body first: %v", first)
+		}
+	})
+
+	t.Run("keeps a loop table's default next, the only target a table falls through to", func(t *testing.T) {
+		b := ssa.New("f")
+		entry, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
+		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+		value := constant(b, header, types.BoxI32(1))
+		at := state(b, header, 9, ssa.Operand{Value: value})
+		b.Add(header, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{value}, State: at})
+		b.Term(header, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
+		b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
+
+		m := new(machine)
+		_, err := compile.Lower(b.Build(), m, function(0, 1), nil, 0, false, true)
+		require.NoError(t, err)
+		require.Equal(t, []string{"prologue", "jump", "const", "budget", "store", "table", "return", "jump", "exit 0 2", "jump", "epilogue", "enter"}, m.calls)
+	})
+
+	t.Run("falls through into an inner loop's body before the outer loop's latch", func(t *testing.T) {
+		b := ssa.New("f")
+		entry, outer, inner, body, latch, exit := b.Block(), b.Block(), b.Block(), b.Block(), b.Block(), b.Block()
+		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: outer}}})
+		for _, header := range []struct{ block, in, out int }{{outer, inner, exit}, {inner, body, latch}} {
+			value := constant(b, header.block, types.BoxI32(1))
+			at := state(b, header.block, 9, ssa.Operand{Value: value})
+			b.Add(header.block, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{value}, State: at})
+			b.Term(header.block, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: header.in}, {Block: header.out}}})
+		}
+		constant(b, body, types.BoxI32(2))
+		b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: inner}}})
+		b.Term(latch, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: outer}}})
+		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
+
+		m := new(machine)
+		_, err := compile.Lower(b.Build(), m, function(0, 1), nil, 0, false, true)
+		require.NoError(t, err)
+		require.Equal(t, []string{"prologue", "jump", "const", "budget", "store", "br", "const", "budget", "store", "br", "const", "jump", "jump", "return", "exit 0 2", "jump", "exit 1 2", "jump", "epilogue", "enter"}, m.calls)
+	})
+
 	t.Run("fuses a compare whose only use is the branch right after it", func(t *testing.T) {
 		b := ssa.New("f")
 		entry, left, right := b.Block(), b.Block(), b.Block()

@@ -80,7 +80,7 @@ One wake (analysis, the first compiles, their garbage) costs ~0.3–0.6 ms of in
 | Translate | bytecode → SSA; attach interpreter state to each `OpExec`, return, and completion; block 0 has no predecessors |
 | Baseline | fold → DCE |
 | Optimized | fold → forward → CSE → guard → DCE → promote → LICM → BCE → DCE |
-| Lower | assign registers by SSA type, including register-passed parameters the machine prologue fills, order blocks in reverse postorder with an edge to the next block falling through, resolve block parameters with edge moves, fuse a compare into the branch right after it when nothing else uses it |
+| Lower | assign registers by SSA type, including register-passed parameters the machine prologue fills, order blocks in reverse postorder with an edge to the next block falling through, a two-way branch inside a loop falling through, when it can, to the successor that stays in its innermost loop whichever polarity it tests, resolve block parameters with edge moves, fuse a compare into the branch right after it when nothing else uses it |
 | Build | assemble, allocate, encode, publish through `jit.Code` |
 
 A loop header `MUST` have state before its budget check. An OSR unit loads block-0 parameters from the current operand stack and starts no locals.
