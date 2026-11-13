@@ -347,6 +347,7 @@ func TestLower(t *testing.T) {
 			b.Add(header.block, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{value}, State: at})
 			b.Term(header.block, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: header.in}, {Block: header.out}}})
 		}
+		constant(b, body, types.BoxI32(2))
 		b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: inner}}})
 		b.Term(latch, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: outer}}})
 		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
@@ -354,7 +355,7 @@ func TestLower(t *testing.T) {
 		m := new(machine)
 		_, err := compile.Lower(b.Build(), m, function(0, 1), nil, 0, false, true)
 		require.NoError(t, err)
-		require.Equal(t, []string{"prologue", "jump", "const", "budget", "store", "br", "const", "budget", "store", "br", "jump", "jump", "return", "exit 0 2", "jump", "exit 1 2", "jump", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "jump", "const", "budget", "store", "br", "const", "budget", "store", "br", "const", "jump", "jump", "return", "exit 0 2", "jump", "exit 1 2", "jump", "epilogue", "enter"}, m.calls)
 	})
 
 	t.Run("fuses a compare whose only use is the branch right after it", func(t *testing.T) {
