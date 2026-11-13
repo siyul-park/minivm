@@ -163,6 +163,15 @@ func snapshot(m any) table {
 	return t
 }
 
+// canonical is the rows that replace a positive NaN in X16 with
+// types.BoxedNaN.
+func canonical() []asm.Instruction {
+	return slices.Concat(
+		target.LDI(target.X17, uint64(types.BoxedNaN)-1),
+		[]asm.Instruction{target.CMP(target.X16, target.X17), target.CSINC(target.X16, target.X16, target.X17, target.CondLE)},
+	)
+}
+
 func btoi(b bool) int {
 	if b {
 		return 1
@@ -1368,7 +1377,11 @@ func TestMachine_Enter(t *testing.T) {
 					target.STR(target.X1, target.X25, 8),
 				},
 			)},
-			{[]types.Kind{types.KindF64}, []asm.Instruction{target.STR(target.X0, target.X25, 0)}},
+			{[]types.Kind{types.KindF64}, slices.Concat(
+				[]asm.Instruction{target.MOV(target.X16, target.X0)},
+				canonical(),
+				[]asm.Instruction{target.STR(target.X16, target.X25, 0)},
+			)},
 			{[]types.Kind{types.KindI64}, []asm.Instruction{target.STR(target.X0, target.X25, 0)}},
 		} {
 			m, a := arm64.New(), asm.New(target.New())
@@ -1969,10 +1982,10 @@ func TestMachine_Lower(t *testing.T) {
 			rows: append(boxed(types.KindF32, target.FMOV(target.W16, reg(f32, 1))), target.STR(target.X16, target.X25, 8)), lower: true,
 		},
 		{
-			name: "store f64 writes its bits",
+			name: "store f64 writes its bits, a positive NaN canonical",
 			regs: regs{1: f64},
 			op:   ssa.Operation{Op: ssa.OpStore, Slot: local(1), Args: []ssa.Value{1}},
-			rows: []asm.Instruction{target.STR(reg(f64, 1), target.X25, 8)}, lower: true,
+			rows: slices.Concat([]asm.Instruction{target.FMOV(target.X16, reg(f64, 1))}, canonical(), []asm.Instruction{target.STR(target.X16, target.X25, 8)}), lower: true,
 		},
 		{
 			name: "store global addresses the globals base",
@@ -3961,7 +3974,11 @@ func TestMachine_Call(t *testing.T) {
 			[]asm.Instruction{
 				target.ORR(target.X16, target.X16, target.X17),
 				target.STR(target.X16, target.X25, 32),
-				target.STR(r.Reg(3), target.X25, 40),
+			},
+			[]asm.Instruction{target.FMOV(target.X16, r.Reg(3))},
+			canonical(),
+			[]asm.Instruction{
+				target.STR(target.X16, target.X25, 40),
 				target.ADDI(target.X16, target.X25, 56),
 				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
 				target.CMP(target.X16, target.X17),

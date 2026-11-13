@@ -197,8 +197,12 @@ func (m *Machine) Enter(a *asm.Assembler, l compile.Layout) asm.Label {
 	for i, k := range l.Registers {
 		src := register(i)
 		switch k.Repr() {
-		case types.KindRef, types.KindF64, types.KindI64:
+		case types.KindRef, types.KindI64:
 			a.Emit(target.STR(src, target.X25, int16(8*i)))
+		case types.KindF64:
+			a.Emit(target.MOV(target.X16, src))
+			canonical(a)
+			a.Emit(target.STR(target.X16, target.X25, int16(8*i)))
 		default:
 			a.Emit(target.UXTW(target.X16, src))
 			a.Emit(target.LDI(target.X17, types.Tag(k))...)
@@ -1970,8 +1974,12 @@ func convention(a *asm.Assembler, v asm.Reg, i int, into bool) {
 func box(a *asm.Assembler, s compile.Site, v ssa.Value) asm.Reg {
 	src, k := s.Reg(v), s.Type(v).Kind()
 	switch k {
-	case types.KindF64, types.KindRef:
+	case types.KindRef:
 		return src
+	case types.KindF64:
+		a.Emit(target.FMOV(target.X16, src))
+		canonical(a)
+		return target.X16
 	case types.KindI64:
 		a.Emit(target.LDI(target.X16, 1<<(types.VBits-1))...)
 		a.Emit(target.ADD(target.X17, src, target.X16), target.LSRI(target.X17, target.X17, types.VBits))
@@ -1992,6 +2000,14 @@ func box(a *asm.Assembler, s compile.Site, v ssa.Value) asm.Reg {
 	a.Emit(target.LDI(target.X17, types.Tag(k))...)
 	a.Emit(target.ORR(target.X16, target.X16, target.X17))
 	return target.X16
+}
+
+// canonical replaces the f64 bits in X16 with types.BoxedNaN when they are a
+// positive NaN, as BoxF64 does: one signed compare against +Inf, whose
+// successor is BoxedNaN. X17 is scratch.
+func canonical(a *asm.Assembler) {
+	a.Emit(target.LDI(target.X17, uint64(types.BoxedNaN)-1)...)
+	a.Emit(target.CMP(target.X16, target.X17), target.CSINC(target.X16, target.X16, target.X17, target.CondLE))
 }
 
 // expectRef branches to miss unless ref is tagged Ref, leaving its tag in X16.

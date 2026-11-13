@@ -28,6 +28,7 @@ minivm uses NaN boxing.
 
 - Non-NaN values are `f64`;
 - non-`f64` values use quiet-NaN tags;
+- a positive `f64` NaN boxes as `BoxedNaN` (`0x7FF0000000000001`): a positive quiet NaN, such as ARM64's default NaN or Go's `math.NaN()`, would read as a tagged kind, and `BoxedNaN`'s tag is `KindF64`. A negative NaN never reads as a tag and keeps its bits. A boxed NaN therefore keeps its sign, so `abs`, `neg`, and `copysign` agree across tiers, but not its payload: a NaN's payload is unspecified. `BoxF64` and `BoxWord` canonicalize; native code canonicalizes wherever it boxes an `f64` register;
 - `KindRef` stores a heap index;
 - tag `111` is reserved;
 - `KindAny` is verifier-only.
