@@ -22,6 +22,7 @@ type sample struct {
 
 var columns = []string{
 	"Threaded",
+	"Optimized",
 	"JIT",
 	"JIT speedup",
 	"Wazero",
@@ -99,7 +100,7 @@ func parse(path string) (map[string]map[string]sample, error) {
 		if out[spec.Name] == nil {
 			return nil, fmt.Errorf("missing benchmark output: %s", spec.Name)
 		}
-		for _, runtime := range []string{"threaded", "jit"} {
+		for _, runtime := range []string{"threaded", "optimized", "jit"} {
 			if _, ok := out[spec.Name][runtime]; !ok {
 				return nil, fmt.Errorf("missing %s/%s", spec.Name, runtime)
 			}
@@ -136,11 +137,12 @@ func render(samples map[string]map[string]sample) string {
 	var b strings.Builder
 	b.WriteString("| Kernel | ")
 	b.WriteString(strings.Join(columns, " | "))
-	b.WriteString(" |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+	b.WriteString(" |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
 	for _, name := range names {
 		row := samples[name]
 		values := []string{
 			value(row, "threaded"),
+			value(row, "optimized"),
 			value(row, "jit"),
 			speedup(row),
 			value(row, "wazero"),

@@ -446,6 +446,24 @@ func TestCompile(t *testing.T) {
 		}
 	})
 
+	t.Run("compiles an i64 stored to a global and read back at the Optimized tier", func(t *testing.T) {
+		b := instr.NewBuilder()
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.I64_ADD).Emit(instr.GLOBAL_SET, 0)
+		b.Emit(instr.GLOBAL_GET, 0).Emit(instr.RETURN)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		fn := &types.Function{
+			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI64()}, Returns: []types.Type{types.TypeI64()}},
+			Code: instr.Marshal(code),
+		}
+		module := transform.Module{Globals: []types.Kind{types.KindI64}}
+		for _, tier := range []jit.Tier{jit.Baseline, jit.Optimized} {
+			c, err := compile.Compile(compile.Unit{Address: 1, Function: fn, Module: module, Tier: tier}, arm64.New())
+			require.NoError(t, err)
+			require.NoError(t, c.Free())
+		}
+	})
+
 	t.Run("rereads a register-passed parameter stored before the read", func(t *testing.T) {
 		testenv.MustHaveArch(t, "arm64")
 		b := instr.NewBuilder()

@@ -3,6 +3,7 @@ package transform
 import (
 	"math"
 	"math/bits"
+	"slices"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/graph"
@@ -11,7 +12,12 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// FoldPass evaluates pure operations with constant operands.
+// FoldPass evaluates pure operations with constant operands, reduces integer
+// identities and same-operand forms, and turns a branch or table whose
+// successor is decided into a jump, which drops the blocks it leaves
+// unreachable. A block param that every surviving edge into its block feeds
+// the same constant is that constant; a block a retreating edge also enters
+// has no such param.
 type FoldPass struct{}
 
 var _ pass.Pass[*ssa.Function] = (*FoldPass)(nil)
@@ -23,14 +29,58 @@ func NewFoldPass() *FoldPass {
 
 // Run applies the pass to one SSA function.
 func (p *FoldPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
+	next, changed, ok := foldBlocks(function, true)
+	if !ok {
+		// Collapsing a terminator reached a graph it cannot keep valid: fold
+		// the operations alone.
+		next, changed, _ = foldBlocks(function, false)
+	}
+	if !changed {
+		return true, nil
+	}
+	*function = *next
+	return false, nil
+}
+
+// foldBlocks returns function rebuilt with its operations folded, and its
+// terminators collapsed when collapsing. ok is false when collapsing would
+// leave a block only a retreating edge reaches: the graph is irreducible.
+func foldBlocks(function *ssa.Function, collapsing bool) (next *ssa.Function, changed, ok bool) {
 	constants := map[ssa.Value]uint64{}
 	computed := map[ssa.Value]bool{}
 	r := newRebuilder(function)
-	changed := false
 
-	for _, block := range graph.Order(function) {
+	order := graph.Order(function)
+	index := make(map[int]int, len(order))
+	for i, block := range order {
+		index[block] = i
+	}
+	retreating := map[int]bool{}
+	for _, block := range order {
+		for _, edge := range function.Block(block).Terminator.Edges {
+			if i, ok := index[edge.Block]; ok && i <= index[block] {
+				retreating[edge.Block] = true
+			}
+		}
+	}
+	incoming := map[int][][]ssa.Value{}
+
+	reached, skipped := map[int]bool{0: true}, map[int]bool{}
+	for _, block := range order {
+		if collapsing && !reached[block] {
+			skipped[block] = true
+			continue
+		}
 		id := r.open(block)
 		b := function.Block(block)
+		if block != 0 && !retreating[block] {
+			for i, param := range b.Params {
+				if w, ok := agreed(r, constants, incoming[block], i, r.from.Type(param)); ok {
+					v := r.value(param)
+					constants[v], computed[v] = w, true
+				}
+			}
+		}
 		for _, operation := range b.Operations {
 			operation = r.operation(operation)
 			if next, ok := fold(r, id, constants, computed, operation); ok {
@@ -52,19 +102,97 @@ func (p *FoldPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 				}
 			}
 		}
-		r.builder.Term(id, r.terminator(b.Terminator))
+		term := b.Terminator
+		if collapsing {
+			if collapsed, ok := collapse(r, constants, term); ok {
+				changed = true
+				term = collapsed
+			}
+		}
+		for _, edge := range term.Edges {
+			if skipped[edge.Block] {
+				return nil, false, false
+			}
+			reached[edge.Block] = true
+		}
+		rebuilt := r.terminator(term)
+		for i, edge := range term.Edges {
+			incoming[edge.Block] = append(incoming[edge.Block], rebuilt.Edges[i].Args)
+		}
+		r.builder.Term(id, rebuilt)
 	}
+	return r.builder.Build(), changed, true
+}
 
-	if !changed {
-		return true, nil
+// agreed returns the word every edge passes as its i-th arg when each is a
+// constant of type t with that same word.
+func agreed(r *rebuilder, constants map[ssa.Value]uint64, edges [][]ssa.Value, i int, t ssa.Type) (uint64, bool) {
+	var w uint64
+	for n, args := range edges {
+		c, ok := constants[args[i]]
+		if !ok || r.builder.Type(args[i]) != t || (n > 0 && c != w) {
+			return 0, false
+		}
+		w = c
 	}
-	*function = *r.builder.Build()
-	return false, nil
+	return w, len(edges) > 0
+}
+
+// collapse rewrites a branch or table whose successor is decided into a jump to
+// it, decoding the condition as the interpreter does: from its i32 lane.
+func collapse(r *rebuilder, constants map[ssa.Value]uint64, t ssa.Terminator) (ssa.Terminator, bool) {
+	var edge ssa.Edge
+	switch t.Op {
+	case ssa.OpBranch:
+		if len(t.Edges) == 2 && t.Edges[0].Block == t.Edges[1].Block && slices.Equal(t.Edges[0].Args, t.Edges[1].Args) {
+			edge = t.Edges[0]
+			break
+		}
+		w, ok := constants[r.value(t.Args[0])]
+		if !ok {
+			return t, false
+		}
+		edge = t.Edges[1]
+		if uint32(w) != 0 {
+			edge = t.Edges[0]
+		}
+	case ssa.OpTable:
+		w, ok := constants[r.value(t.Args[0])]
+		if !ok {
+			return t, false
+		}
+		edge = t.Edges[len(t.Edges)-1]
+		if v := int32(uint32(w)); v >= 0 && int(v) < len(t.Edges)-1 {
+			edge = t.Edges[v]
+		}
+	default:
+		return t, false
+	}
+	return ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{edge}}, true
 }
 
 func fold(r *rebuilder, id int, constants map[ssa.Value]uint64, computed map[ssa.Value]bool, operation ssa.Operation) (ssa.Operation, bool) {
 	if operation.Op != ssa.OpExec || !operation.Code.IsPure() {
 		return operation, false
+	}
+	if tagged(operation.Code) && r.builder.Type(operation.Args[0]) != r.builder.Type(operation.Args[1]) {
+		return operation, false
+	}
+	// The interpreter keeps the kind tag of a bitwise operation's operands, so
+	// such a constant takes the operands' type, not the opcode's i32.
+	result := func(w uint64) (ssa.Operation, bool) {
+		t := r.from.Type(operation.Results[0])
+		if tagged(operation.Code) {
+			t = r.builder.Type(operation.Args[0])
+		}
+		if t == r.from.Type(operation.Results[0]) {
+			return ssa.Operation{Op: ssa.OpConst, Const: w, Results: operation.Results}, true
+		}
+		v := r.builder.Value(t)
+		r.builder.Add(id, ssa.Operation{Op: ssa.OpConst, Const: w, Results: []ssa.Value{v}})
+		constants[v], computed[v] = w, true
+		r.alias(operation.Results[0], v)
+		return ssa.Operation{}, true
 	}
 	args := make([]uint64, 0, len(operation.Args))
 	for _, a := range operation.Args {
@@ -75,30 +203,106 @@ func fold(r *rebuilder, id int, constants map[ssa.Value]uint64, computed map[ssa
 		args = append(args, w)
 	}
 	if len(args) == len(operation.Args) {
-		if result, ok := eval(operation.Code, args); ok {
-			return ssa.Operation{Op: ssa.OpConst, Const: result, Results: operation.Results}, true
+		if w, ok := eval(operation.Code, args); ok {
+			return result(w)
 		}
 		return operation, false
 	}
 	if len(operation.Args) != 2 || len(operation.Results) != 1 {
 		return operation, false
 	}
-	right, ok := constants[operation.Args[1]]
+	x, y := operation.Args[0], operation.Args[1]
+	if x == y {
+		w, alias, ok := reflexive(operation.Code)
+		if ok && !alias {
+			return result(w)
+		}
+		if ok && computed[x] && r.builder.Type(x) == r.from.Type(operation.Results[0]) {
+			r.alias(operation.Results[0], x)
+			return ssa.Operation{Op: operation.Op, Code: operation.Code, Args: operation.Args}, true
+		}
+		return operation, false
+	}
+	_, left := constants[x]
+	if _, right := constants[y]; left && !right && commutative(operation.Code) {
+		x, y = y, x
+	}
+	right, ok := constants[y]
 	if !ok {
 		return operation, false
 	}
-	if identity(operation.Code, right) && computed[operation.Args[0]] && r.builder.Type(operation.Args[0]) == r.from.Type(operation.Results[0]) {
-		r.alias(operation.Results[0], operation.Args[0])
+	if w, ok := absorb(operation.Code, right); ok {
+		return result(w)
+	}
+	if identity(operation.Code, right) && computed[x] && r.builder.Type(x) == r.from.Type(operation.Results[0]) {
+		r.alias(operation.Results[0], x)
 		return ssa.Operation{Op: operation.Op, Code: operation.Code, Args: operation.Args}, true
 	}
 	code, amount, ok := shift(operation.Code, right)
 	if !ok {
 		return operation, false
 	}
-	count := r.builder.Value(r.builder.Type(operation.Args[1]))
+	count := r.builder.Value(r.builder.Type(y))
 	r.builder.Add(id, ssa.Operation{Op: ssa.OpConst, Const: amount, Results: []ssa.Value{count}})
 	constants[count] = amount
-	return ssa.Operation{Op: operation.Op, Code: code, Args: []ssa.Value{operation.Args[0], count}, State: operation.State, Results: operation.Results}, true
+	return ssa.Operation{Op: operation.Op, Code: code, Args: []ssa.Value{x, count}, State: operation.State, Results: operation.Results}, true
+}
+
+// tagged reports whether code keeps its operands' kind tag in its result.
+func tagged(code instr.Opcode) bool {
+	switch code {
+	case instr.I32_XOR, instr.I32_AND, instr.I32_OR:
+		return true
+	default:
+		return false
+	}
+}
+
+// reflexive returns what code gives when both operands are the same value: a
+// constant word, or alias when the result is that value.
+func reflexive(code instr.Opcode) (w uint64, alias, ok bool) {
+	switch code {
+	case instr.I32_SUB, instr.I32_XOR, instr.I64_SUB, instr.I64_XOR:
+		return 0, false, true
+	case instr.I32_NE, instr.I32_LT_S, instr.I32_LT_U, instr.I32_GT_S, instr.I32_GT_U,
+		instr.I64_NE, instr.I64_LT_S, instr.I64_LT_U, instr.I64_GT_S, instr.I64_GT_U:
+		return word(false), false, true
+	case instr.I32_EQ, instr.I32_LE_S, instr.I32_LE_U, instr.I32_GE_S, instr.I32_GE_U,
+		instr.I64_EQ, instr.I64_LE_S, instr.I64_LE_U, instr.I64_GE_S, instr.I64_GE_U:
+		return word(true), false, true
+	case instr.I32_AND, instr.I32_OR, instr.I64_AND, instr.I64_OR:
+		return 0, true, true
+	default:
+		return 0, false, false
+	}
+}
+
+// commutative reports whether code gives the same result for swapped integer operands.
+func commutative(code instr.Opcode) bool {
+	switch code {
+	case instr.I32_ADD, instr.I32_MUL, instr.I32_AND, instr.I32_OR, instr.I32_XOR, instr.I32_EQ, instr.I32_NE,
+		instr.I64_ADD, instr.I64_MUL, instr.I64_AND, instr.I64_OR, instr.I64_XOR, instr.I64_EQ, instr.I64_NE:
+		return true
+	default:
+		return false
+	}
+}
+
+// absorb returns the result code gives for any left operand when w is its
+// absorbing right operand, decoded by the opcode's own family.
+func absorb(code instr.Opcode, w uint64) (uint64, bool) {
+	switch code {
+	case instr.I32_MUL, instr.I32_AND:
+		return 0, uint32(w) == 0
+	case instr.I32_OR:
+		return word(int32(-1)), uint32(w) == 0xFFFFFFFF
+	case instr.I64_MUL, instr.I64_AND:
+		return 0, w == 0
+	case instr.I64_OR:
+		return math.MaxUint64, w == math.MaxUint64
+	default:
+		return 0, false
+	}
 }
 
 // identity reports whether w is code's identity operand, decoded by the

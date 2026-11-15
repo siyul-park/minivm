@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/internal/graph"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/types"
 )
@@ -26,6 +27,7 @@ type emitter struct {
 	source   map[ssa.Value]ssa.Operation
 	remat    map[ssa.Value]bool
 	loops    map[int]bool
+	bodies   map[int]map[int]bool
 	liveIn   []map[ssa.Value]bool
 	placed   bool
 	order    []int
@@ -407,9 +409,6 @@ func (e *emitter) params() {
 // placeholders say nothing about which values share a local, so a walk before
 // assign skips only moves that cannot change.
 func (e *emitter) provision() bool {
-	if e.module && len(e.homed) > 0 {
-		return false
-	}
 	e.placed = false
 	e.home = make(map[ssa.Value]int, len(e.homed))
 	for v := range e.homed {
@@ -423,9 +422,6 @@ func (e *emitter) assign() bool {
 	values := make([]ssa.Value, 0, len(e.homed))
 	for v := range e.homed {
 		values = append(values, v)
-	}
-	if e.module && len(values) > 0 {
-		return false
 	}
 	slices.Sort(values)
 
@@ -611,11 +607,12 @@ func (e *emitter) walk() bool {
 		if !e.open(id) {
 			return false
 		}
+		roots := e.rooted(id)
 		for i, operation := range e.ops[id] {
-			if operation.Op != ssa.OpStore && operation.Op != ssa.OpExec && (e.remat[operation.Results[0]] || e.uses[operation.Results[0]] == 0) {
+			if e.elided(operation) {
 				continue
 			}
-			if !e.perform(operation) {
+			if !e.preload(roots[i], id) || !e.perform(operation) {
 				return false
 			}
 			e.settle(id, i)
@@ -627,6 +624,115 @@ func (e *emitter) walk() bool {
 	return true
 }
 
+// preload pushes, ahead of the operation at index that starts an expression
+// tree, the leading arguments of the operation after the tree: roots lists the
+// trees starting here, outermost first. The tree's result then lands beside
+// them instead of being homed. Each is a real load holding its own reference, so
+// a trap inside the tree releases it with the rest of the stack.
+func (e *emitter) preload(roots []int, id int) bool {
+	for _, root := range roots {
+		_, leading := e.consumer(id, root)
+		for _, v := range leading {
+			if !e.fetch(v) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// rooted returns, by the index of its first operation, each expression tree of
+// block id whose result is the argument, after leading ones to load, of the next
+// operation emitted: the leading arguments are rematerialized or homed, and not
+// produced or read inside the tree. A start lists its roots outermost first.
+func (e *emitter) rooted(id int) map[int][]int {
+	roots := map[int][]int{}
+	for root, operation := range e.ops[id] {
+		if e.elided(operation) {
+			continue
+		}
+		start := e.tree(id, root)
+		if start < 0 {
+			continue
+		}
+		consumer, leading := e.consumer(id, root)
+		if consumer < 0 || len(leading) == 0 {
+			continue
+		}
+		inside := e.ops[id][start : root+1]
+		if !slices.ContainsFunc(leading, func(v ssa.Value) bool {
+			return slices.ContainsFunc(inside, func(o ssa.Operation) bool {
+				return !e.elided(o) && slices.Contains(o.Results, v) || slices.Contains(o.Args, v)
+			})
+		}) {
+			roots[start] = append(roots[start], root)
+		}
+	}
+	for _, list := range roots {
+		slices.Reverse(list)
+	}
+	return roots
+}
+
+// tree returns the index of the first operation of the expression tree rooted
+// at the operation at root, or -1: every argument is rematerialized or homed,
+// or the single-use result of the operation emitted just before, itself such a
+// tree, so the tree is a contiguous run of operations that leaves one value. A
+// tree does not enter a frame.
+func (e *emitter) tree(id, root int) int {
+	operation := e.ops[id][root]
+	if len(operation.Results) != 1 || operation.Op == ssa.OpExec && operation.Code.Writes(instr.Frame) {
+		return -1
+	}
+	start := root
+	for i := len(operation.Args) - 1; i >= 0; i-- {
+		v := operation.Args[i]
+		if e.remat[v] || e.homed[v] {
+			continue
+		}
+		before := start - 1
+		for before >= 0 && e.elided(e.ops[id][before]) {
+			before--
+		}
+		if before < 0 || e.uses[v] != 1 || !slices.Equal(e.ops[id][before].Results, []ssa.Value{v}) {
+			return -1
+		}
+		if start = e.tree(id, before); start < 0 {
+			return -1
+		}
+	}
+	return start
+}
+
+// consumer returns the index of the operation emitted after the one at root
+// when it reads root's result as an argument behind others, and those leading
+// arguments, which are rematerialized or homed; else -1.
+func (e *emitter) consumer(id, root int) (int, []ssa.Value) {
+	result := e.ops[id][root].Results[0]
+	if e.homed[result] || e.remat[result] || e.uses[result] != 1 {
+		return -1, nil
+	}
+	next := root + 1
+	for next < len(e.ops[id]) && e.elided(e.ops[id][next]) {
+		next++
+	}
+	if next == len(e.ops[id]) {
+		return -1, nil
+	}
+	args := e.ops[id][next].Args
+	at := slices.Index(args, result)
+	if at <= 0 || slices.ContainsFunc(args[:at], func(v ssa.Value) bool { return !e.remat[v] && !e.homed[v] }) {
+		return -1, nil
+	}
+	return next, args[:at]
+}
+
+// elided reports whether the walk emits nothing for operation: a value it
+// rematerializes at each use, or one nothing reads.
+func (e *emitter) elided(operation ssa.Operation) bool {
+	return operation.Op != ssa.OpStore && operation.Op != ssa.OpExec && (e.remat[operation.Results[0]] || e.uses[operation.Results[0]] == 0)
+}
+
 // layout orders the blocks for emission: block 0 first, then, after a branch
 // whose condition is not an exact-inverse comparison, its fall-through
 // successor, else the lowest block not yet placed. A comparison with an
@@ -636,13 +742,29 @@ func (e *emitter) layout() {
 	n := e.function.Len()
 	placed := make([]bool, n)
 	e.order, e.after = nil, make([]int, n)
+	dominance := graph.NewDominance(e.function)
+	e.bodies = map[int]map[int]bool{}
+	for _, header := range graph.Headers(e.function, dominance) {
+		e.bodies[header] = graph.Body(e.function, dominance, header)
+	}
 	for len(e.order) < n {
 		next := -1
 		if len(e.order) > 0 {
 			next = e.following(e.order[len(e.order)-1], placed)
 		}
 		if next < 0 {
-			next = slices.Index(placed, false)
+			for id := range n {
+				if placed[id] {
+					continue
+				}
+				if next < 0 {
+					next = id
+				}
+				if op := e.terms[id].Op; op != ssa.OpComplete && op != ssa.OpReturn {
+					next = id
+					break
+				}
+			}
 		}
 		placed[next] = true
 		e.order = append(e.order, next)
@@ -655,18 +777,32 @@ func (e *emitter) layout() {
 	}
 }
 
-// following returns the fall-through successor of id when it is a branch whose
-// condition is not an exact-inverse comparison and the successor is not yet
-// placed, else -1.
+// following returns the fall-through successor of id when it is a branch and
+// the successor is not yet placed, else -1. A condition that is not an
+// exact-inverse comparison falls through to its second edge. A comparison with
+// an inverse keeps the walk order, since the inversion already puts a following
+// exit behind the branch, except in a loop header's branch, where the edge that
+// stays in the loop falls through so an iteration takes the back edge alone.
 func (e *emitter) following(id int, placed []bool) int {
 	term := e.terms[id]
-	if term.Op != ssa.OpBranch || len(term.Edges) != 2 || e.inverts(id) {
+	if term.Op != ssa.OpBranch || len(term.Edges) != 2 {
 		return -1
 	}
-	if next := term.Edges[1].Block; !placed[next] {
-		return next
+	next := term.Edges[1].Block
+	if e.inverts(id) {
+		body := e.bodies[id]
+		inside := [2]bool{body[term.Edges[0].Block], body[term.Edges[1].Block]}
+		switch {
+		case inside[0] && !inside[1]:
+			next = term.Edges[0].Block
+		case !inside[1] || inside[0]:
+			return -1
+		}
 	}
-	return -1
+	if placed[next] {
+		return -1
+	}
+	return next
 }
 
 // inverts reports whether block id ends in a branch on a comparison with an
@@ -823,20 +959,25 @@ func (e *emitter) load(args []ssa.Value) bool {
 		}
 	}
 	for _, v := range args[at:] {
-		if e.remat[v] {
-			if !e.perform(e.source[v]) {
-				return false
-			}
-			continue
-		}
-		slot, ok := e.home[v]
-		if !ok {
-			e.needed = v
+		if !e.fetch(v) {
 			return false
 		}
-		e.write(instr.LOCAL_GET, uint64(slot))
-		e.stack = append(e.stack, v)
 	}
+	return true
+}
+
+// fetch pushes v, a value that is rematerialized or homed.
+func (e *emitter) fetch(v ssa.Value) bool {
+	if e.remat[v] {
+		return e.perform(e.source[v])
+	}
+	slot, ok := e.home[v]
+	if !ok {
+		e.needed = v
+		return false
+	}
+	e.write(instr.LOCAL_GET, uint64(slot))
+	e.stack = append(e.stack, v)
 	return true
 }
 

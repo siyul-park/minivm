@@ -19,19 +19,19 @@ func names(passes []pass.Pass[*ssa.Function]) []string {
 }
 
 func TestO1(t *testing.T) {
-	require.Equal(t, names([]pass.Pass[*ssa.Function]{transform.NewFoldPass(), transform.NewDCEPass()}), names(transform.O1()))
+	require.Equal(t, names([]pass.Pass[*ssa.Function]{transform.NewFoldPass(), transform.NewSimplifyPass(), transform.NewDCEPass()}), names(transform.O1()))
 }
 
 func TestO2(t *testing.T) {
 	require.Equal(t, names([]pass.Pass[*ssa.Function]{
-		transform.NewFoldPass(), transform.NewCSEPass(), transform.NewGuardPass(), transform.NewDCEPass(),
+		transform.NewFoldPass(), transform.NewSimplifyPass(), transform.NewCSEPass(), transform.NewGuardPass(), transform.NewDCEPass(),
 	}), names(transform.O2()))
 }
 
 func TestO3(t *testing.T) {
 	base := []pass.Pass[*ssa.Function]{
-		transform.NewFoldPass(), transform.NewForwardPass(), transform.NewCSEPass(), transform.NewGuardPass(),
-		transform.NewDCEPass(), transform.NewPromotePass(), transform.NewLICMPass(),
+		transform.NewFoldPass(), transform.NewSimplifyPass(), transform.NewForwardPass(), transform.NewCSEPass(), transform.NewGuardPass(),
+		transform.NewDCEPass(), transform.NewPromotePass(), transform.NewSimplifyPass(), transform.NewFoldPass(), transform.NewLICMPass(),
 	}
 
 	t.Run("ends with dead-code removal", func(t *testing.T) {

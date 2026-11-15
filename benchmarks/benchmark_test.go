@@ -11,15 +11,35 @@ import (
 	_ "github.com/siyul-park/minivm/benchmarks/fixtures"
 	"github.com/siyul-park/minivm/benchmarks/registry"
 	"github.com/siyul-park/minivm/interp"
+	"github.com/siyul-park/minivm/optimize"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
-func readProgram(spec registry.Spec) *program.Program {
+// modes lists the minivm execution modes shared by tests and benchmarks;
+// optimized runs the O3 bytecode optimizer, then the threaded interpreter.
+var modes = []struct {
+	name     string
+	optimize bool
+	opts     []interp.Option
+}{
+	{name: "threaded", opts: []interp.Option{interp.WithThreshold(-1)}},
+	{name: "optimized", optimize: true, opts: []interp.Option{interp.WithThreshold(-1)}},
+	{name: "jit"},
+}
+
+// readProgram parses the fixture afresh, since optimizing mutates the program.
+func readProgram(spec registry.Spec, optimized bool) *program.Program {
 	prog, err := program.Parse(strings.NewReader(spec.Source.MVM))
 	if err != nil {
 		panic("parse fixture " + spec.Name + ".mvm: " + err.Error())
+	}
+	if optimized {
+		prog, err = optimize.New(optimize.O3).Optimize(prog)
+		if err != nil {
+			panic("optimize fixture " + spec.Name + ".mvm: " + err.Error())
+		}
 	}
 	return prog
 }
@@ -28,17 +48,11 @@ func TestKernels(t *testing.T) {
 	for _, spec := range registry.All() {
 		spec := spec
 		t.Run(spec.Name, func(t *testing.T) {
-			prog := readProgram(spec)
-			require.NoError(t, program.Verify(prog))
 			result := spec.Result()
-			for _, mode := range []struct {
-				name string
-				opts []interp.Option
-			}{
-				{name: "threaded", opts: []interp.Option{interp.WithThreshold(-1)}},
-				{name: "jit"},
-			} {
+			for _, mode := range modes {
 				t.Run(mode.name, func(t *testing.T) {
+					prog := readProgram(spec, mode.optimize)
+					require.NoError(t, program.Verify(prog))
 					vm := interp.MustNew(prog, mode.opts...)
 					defer vm.Close()
 					wireHost(t, vm, spec.Host)
@@ -64,25 +78,20 @@ func BenchmarkKernels(b *testing.B) {
 	for _, spec := range registry.All() {
 		spec := spec
 		b.Run(spec.Name, func(b *testing.B) {
-			prog := readProgram(spec)
 			result := spec.Result()
-			benchmarkVM(b, prog, spec.Host, result)
+			benchmarkVM(b, spec, result)
 			benchmarkNative(b, spec, result)
 			benchmarkExternal(b, spec, result)
 		})
 	}
 }
 
-func benchmarkVM(b *testing.B, prog *program.Program, host *registry.Host, want types.Value) {
+func benchmarkVM(b *testing.B, spec registry.Spec, want types.Value) {
 	b.Helper()
-	for _, mode := range []struct {
-		name string
-		opts []interp.Option
-	}{
-		{name: "threaded", opts: []interp.Option{interp.WithThreshold(-1)}},
-		{name: "jit"},
-	} {
+	host := spec.Host
+	for _, mode := range modes {
 		b.Run(mode.name, func(b *testing.B) {
+			prog := readProgram(spec, mode.optimize)
 			vm := interp.MustNew(prog, mode.opts...)
 			defer vm.Close()
 			ctx := context.Background()

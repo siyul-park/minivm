@@ -369,6 +369,119 @@ blk3: () <-- (blk1)
 		require.Contains(t, pre, "guard.shape")
 	})
 
+	t.Run("does not hoist a load of an unstored local in a loop that calls", func(t *testing.T) {
+		l := newCountedLoop()
+		callee, loaded, sum := l.b.Param(l.pre, ssa.TypeRef), l.b.Value(ssa.TypeI32), l.b.Value(ssa.TypeI32)
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: deoptState(l.b, l.pre)})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 0}, Results: []ssa.Value{loaded}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{loaded, l.counter}, State: deoptState(l.b, l.pre), Results: []ssa.Value{sum}})
+		fn := l.close()
+		require.NoError(t, ssa.Verify(fn))
+
+		_, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(fn))
+		out := ssa.Format(fn)
+		require.Contains(t, blockChunk(out, l.body), "load local[0]")
+		require.NotContains(t, blockChunk(out, l.pre), "load local[0]")
+	})
+
+	t.Run("hoists an unstored local load and the shape guard over it in a loop that releases but calls nothing", func(t *testing.T) {
+		l := newCountedLoop()
+		array, guarded, element, held := l.b.Value(ssa.TypeRef), l.b.Value(ssa.TypeRef), l.b.Value(ssa.TypeI32), l.b.Param(l.pre, ssa.TypeRef)
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 0}, Results: []ssa.Value{array}})
+		state := l.b.Value(ssa.TypeState)
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 4, Stack: []ssa.Operand{{Value: array}, {Value: l.counter}}}}, Results: []ssa.Value{state}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{guarded}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{guarded, l.counter}, State: state, Results: []ssa.Value{element}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{held}, State: state})
+		fn := l.close()
+		require.NoError(t, ssa.Verify(fn))
+
+		_, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(fn))
+		pre := blockChunk(ssa.Format(fn), l.pre)
+		require.Contains(t, pre, "load local[0]")
+		require.Contains(t, pre, "guard.shape")
+		require.NotContains(t, ssa.Format(fn), "slice")
+	})
+
+	t.Run("does not hoist a load of a global in a loop that releases but calls nothing", func(t *testing.T) {
+		l := newCountedLoop()
+		held, loaded, sum := l.b.Param(l.pre, ssa.TypeRef), l.b.Value(ssa.TypeI32), l.b.Value(ssa.TypeI32)
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{held}, State: deoptState(l.b, l.pre)})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal, Index: 0}, Results: []ssa.Value{loaded}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{loaded, l.counter}, State: deoptState(l.b, l.pre), Results: []ssa.Value{sum}})
+		fn := l.close()
+		require.NoError(t, ssa.Verify(fn))
+
+		_, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(fn))
+		out := ssa.Format(fn)
+		require.Contains(t, blockChunk(out, l.body), "load global[0]")
+		require.NotContains(t, blockChunk(out, l.pre), "load global[0]")
+	})
+
+	t.Run("does not hoist a load of a local at another frame base in a loop that releases but calls nothing", func(t *testing.T) {
+		l := newCountedLoop()
+		held, loaded, sum := l.b.Param(l.pre, ssa.TypeRef), l.b.Value(ssa.TypeI32), l.b.Value(ssa.TypeI32)
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{held}, State: deoptState(l.b, l.pre)})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Base: 1, Index: 0}, Results: []ssa.Value{loaded}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{loaded, l.counter}, State: deoptState(l.b, l.pre), Results: []ssa.Value{sum}})
+		fn := l.close()
+		require.NoError(t, ssa.Verify(fn))
+
+		_, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(fn))
+		out := ssa.Format(fn)
+		require.Contains(t, blockChunk(out, l.body), "load local[1+0]")
+		require.NotContains(t, blockChunk(out, l.pre), "load local[1+0]")
+	})
+
+	t.Run("does not hoist a load of a global in a loop that calls", func(t *testing.T) {
+		l := newCountedLoop()
+		callee, loaded, sum := l.b.Param(l.pre, ssa.TypeRef), l.b.Value(ssa.TypeI32), l.b.Value(ssa.TypeI32)
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: deoptState(l.b, l.pre)})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal, Index: 0}, Results: []ssa.Value{loaded}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{loaded, l.counter}, State: deoptState(l.b, l.pre), Results: []ssa.Value{sum}})
+		fn := l.close()
+		require.NoError(t, ssa.Verify(fn))
+
+		_, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(fn))
+		require.Contains(t, blockChunk(ssa.Format(fn), l.body), "load global[0]")
+	})
+
+	t.Run("does not slice an invariant guarded array in a loop that calls", func(t *testing.T) {
+		l := newCountedLoop()
+		array, callee, element := l.b.Param(l.pre, ssa.TypeRef), l.b.Param(l.pre, ssa.TypeRef), l.b.Value(ssa.TypeI32)
+		guarded := l.b.Value(ssa.TypeRef)
+		entry := l.b.Value(ssa.TypeState)
+		l.b.Add(l.pre, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{entry}})
+		l.b.Add(l.pre, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: entry, Results: []ssa.Value{guarded}})
+		state := l.b.Value(ssa.TypeState)
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 4}}, Results: []ssa.Value{state}})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: state})
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{guarded, l.counter}, State: state, Results: []ssa.Value{element}})
+		fn := l.close()
+		require.NoError(t, ssa.Verify(fn))
+
+		_, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(fn))
+		require.NotContains(t, ssa.Format(fn), "slice")
+	})
+
 	t.Run("slices an invariant guarded array once in the preheader", func(t *testing.T) {
 		l := newCountedLoop()
 		array, guarded, element := l.b.Param(l.pre, ssa.TypeRef), l.b.Value(ssa.TypeRef), l.b.Value(ssa.TypeI32)

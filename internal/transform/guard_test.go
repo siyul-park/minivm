@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/internal/transform"
 	"github.com/siyul-park/minivm/pass"
@@ -42,6 +43,28 @@ func TestGuardPass_Run(t *testing.T) {
 		out := ssa.Format(fn)
 		require.Equal(t, 1, strings.Count(out, "guard.shape"))
 		require.Contains(t, out, "return v3")
+	})
+
+	t.Run("collapses a repeated shape guard across a call", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		array := b.Param(entry, ssa.TypeRef)
+		callee := b.Param(entry, ssa.TypeRef)
+		state := b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
+		first := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{first}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: state})
+		second := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{second}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{second}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		_, err := transform.NewGuardPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.Equal(t, 1, strings.Count(ssa.Format(fn), "guard.shape"))
 	})
 
 	t.Run("does not collapse guards admitting different shapes", func(t *testing.T) {

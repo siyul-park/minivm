@@ -1248,9 +1248,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				v2 := v1.Ref()
-				switch i.heap[v2].(type) {
-				case types.I1, types.I8, types.I32, types.I64, types.F32, types.F64:
-				default:
+				if !scalar(i.heap[v2]) {
 					panic(ErrTypeMismatch)
 				}
 				i.heap[v2] = types.Unbox(v0)

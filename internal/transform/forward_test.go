@@ -1,6 +1,7 @@
 package transform_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -61,7 +62,7 @@ func TestForwardPass_Run(t *testing.T) {
 		require.Equal(t, 1, strings.Count(ssa.Format(fn), "load local[0]"))
 	})
 
-	t.Run("keeps a read a store to the same slot separates", func(t *testing.T) {
+	t.Run("replaces a read after a store with the stored value", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		first, second, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
@@ -76,8 +77,9 @@ func TestForwardPass_Run(t *testing.T) {
 		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
 
 		require.NoError(t, err)
-		require.True(t, preserved)
-		require.Equal(t, 2, strings.Count(ssa.Format(fn), "load local[0]"))
+		require.False(t, preserved)
+		require.NoError(t, ssa.Verify(fn))
+		require.Equal(t, 1, strings.Count(ssa.Format(fn), "load local[0]"))
 	})
 
 	t.Run("keeps a read a store to another slot does not separate", func(t *testing.T) {
@@ -151,5 +153,163 @@ func TestForwardPass_Run(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, preserved)
 		require.Equal(t, 2, strings.Count(ssa.Format(fn), "load local[0]"))
+	})
+
+	// store emits "store slot, v" where v is a fresh constant of type t.
+	store := func(b *ssa.Builder, block int, slot ssa.Slot, t ssa.Type) ssa.Value {
+		v, state := b.Value(t), b.Value(ssa.TypeState)
+		b.Add(block, ssa.Operation{Op: ssa.OpConst, Const: 7, Results: []ssa.Value{v}})
+		b.Add(block, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
+		b.Add(block, ssa.Operation{Op: ssa.OpStore, Slot: slot, Args: []ssa.Value{v}, State: state})
+		return v
+	}
+	global := ssa.Slot{Space: ssa.SpaceGlobal}
+
+	t.Run("forwards a stored value to a later read of a global", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		v := store(b, entry, global, ssa.TypeI32)
+		got := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: global, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.False(t, preserved)
+		require.NoError(t, ssa.Verify(fn))
+		require.Equal(t, 0, strings.Count(ssa.Format(fn), "load global[0]"))
+		require.Contains(t, ssa.Format(fn), "return v"+fmt.Sprint(int(v)))
+	})
+
+	t.Run("forwards a stored value to a later read of a local", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		store(b, entry, local(0), ssa.TypeI32)
+		got := b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.False(t, preserved)
+		require.NoError(t, ssa.Verify(fn))
+		require.Equal(t, 0, strings.Count(ssa.Format(fn), "load local[0]"))
+	})
+
+	t.Run("keeps a read whose type differs from the stored value", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		store(b, entry, local(0), ssa.TypeI32)
+		got := b.Value(ssa.TypeI64)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.True(t, preserved)
+		require.Equal(t, 1, strings.Count(ssa.Format(fn), "load local[0]"))
+	})
+
+	t.Run("keeps a read after an i64 store", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		store(b, entry, global, ssa.TypeI64)
+		got := b.Value(ssa.TypeI64)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: global, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.True(t, preserved)
+		require.Equal(t, 1, strings.Count(ssa.Format(fn), "load global[0]"))
+	})
+
+	t.Run("keeps a read after a reference store", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		store(b, entry, local(0), ssa.TypeRef)
+		got := b.Value(ssa.TypeRef)
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.True(t, preserved)
+		require.Equal(t, 1, strings.Count(ssa.Format(fn), "load local[0]"))
+	})
+
+	t.Run("keeps a stored global a call overwrites", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		callee := b.Param(entry, ssa.TypeRef)
+		store(b, entry, global, ssa.TypeI32)
+		state, got := b.Value(ssa.TypeState), b.Value(ssa.TypeI32)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: state})
+		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: global, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.True(t, preserved)
+		require.Equal(t, 1, strings.Count(ssa.Format(fn), "load global[0]"))
+	})
+
+	t.Run("forwards a stored value into a block one edge reaches only", func(t *testing.T) {
+		b := ssa.New("f")
+		entry, next := b.Block(), b.Block()
+		store(b, entry, local(0), ssa.TypeI32)
+		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: next}}})
+		got := b.Value(ssa.TypeI32)
+		b.Add(next, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{got}})
+		b.Term(next, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.False(t, preserved)
+		require.NoError(t, ssa.Verify(fn))
+		require.Equal(t, 0, strings.Count(ssa.Format(fn), "load local[0]"))
+	})
+
+	t.Run("keeps a read of a stored slot in a join block", func(t *testing.T) {
+		b := ssa.New("f")
+		entry, left, right, join := b.Block(), b.Block(), b.Block(), b.Block()
+		cond := b.Param(entry, ssa.TypeI1)
+		store(b, entry, local(0), ssa.TypeI32)
+		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
+		b.Term(left, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
+		b.Term(right, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
+		got := b.Value(ssa.TypeI32)
+		b.Add(join, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{got}})
+		b.Term(join, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		fn := b.Build()
+		require.NoError(t, ssa.Verify(fn))
+
+		preserved, err := transform.NewForwardPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.True(t, preserved)
+		require.Equal(t, 1, strings.Count(ssa.Format(fn), "load local[0]"))
 	})
 }

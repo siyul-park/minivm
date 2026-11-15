@@ -9,7 +9,10 @@ import (
 	"github.com/siyul-park/minivm/pass"
 )
 
-// ForwardPass replaces repeated loads when the slot is unchanged.
+// ForwardPass replaces a load of a slot by the value an earlier load read from
+// it, or an earlier store wrote to it, when the slot is unchanged and the types
+// agree. A stored reference is not forwarded, because the slot owns it, nor is
+// a stored i64, because its load is guarded.
 type ForwardPass struct{}
 
 var _ pass.Pass[*ssa.Function] = (*ForwardPass)(nil)
@@ -44,13 +47,18 @@ func (p *ForwardPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error)
 			operation = r.operation(operation)
 			switch operation.Op {
 			case ssa.OpLoad:
-				if at, ok := held[operation.Slot]; ok {
+				if at, ok := held[operation.Slot]; ok && r.builder.Type(at) == function.Type(operation.Results[0]) {
 					r.alias(operation.Results[0], at)
 					changed = true
 					continue
 				}
 			case ssa.OpStore:
 				delete(held, operation.Slot)
+				// An i64 load carries a kind guard that the stored raw value
+				// cannot satisfy, so only a scalar of another type is held.
+				if at := operation.Args[0]; r.builder.Type(at) != ssa.TypeRef && r.builder.Type(at) != ssa.TypeI64 {
+					held[operation.Slot] = at
+				}
 			case ssa.OpExec:
 				// Drop the held values the code may overwrite.
 				for slot := range held {

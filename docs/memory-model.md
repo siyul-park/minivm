@@ -62,6 +62,12 @@ Native code reads and writes the table of a `TypedMap` with an integer key (`i1`
 
 Iteration order (`Range`, `map.keys`, `map.iter`) is unspecified; for numeric keys it follows slot order. Under mutation, `map.iter` `MUST` produce every entry present for the whole walk exactly once and `MUST NOT` produce a key deleted before the walk reaches it. Entries inserted during the walk `MAY` be produced. A rehash does not restart or skip the walk, and `map.clear` ends a walk over a numeric table. A `StringMap` or `Map` is cleared in place, so a walk over it produces nothing already cleared, but entries added after the clear `MAY` still appear. Float keys follow Go map keys: `-0` and `+0` are one key whose stored bits are the latest written, and a `NaN` key never matches, so each set adds an entry that only `map.clear` removes.
 
+## Representation
+
+A heap object keeps its Go representation type for its lifetime and, for a struct, array, or map, its declared type (`Type().Equals`). The one exception is a `REF_NEW` cell, whose scalar kind `REF_SET` may change. `Interpreter.Store` returns `ErrTypeMismatch` for a value that would change the slot's representation; a scalar replacing a scalar cell is allowed, as with `REF_SET`. Optimizer guards on a shape rely on this. A value borrowed by `Load` keeps it too: the host `MUST NOT` change its type or storage except through `Store`.
+
+A finalizer (`io.Closer.Close`) runs as host code with the VM mid-instruction: it `MUST NOT` write a local or a global (`SetLocal` and `SetGlobal` return `ErrHostCall`), since optimized code holds both across a release.
+
 ## Reference Counting
 
 `retain(addr)` adds one owner. `release(addr)` removes one; zero clears the slot, recycles the index, and iteratively releases child refs.
