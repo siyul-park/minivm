@@ -35,7 +35,11 @@ func cseKey(function *ssa.Function, operation ssa.Operation) (string, bool) {
 		if !operation.Code.IsPure() {
 			return "", false
 		}
-		return fmt.Sprintf("exec %d %v", operation.Code, operation.Args), true
+		args := operation.Args
+		if commutative(operation.Code) && len(args) == 2 && args[0] > args[1] {
+			args = []ssa.Value{args[1], args[0]}
+		}
+		return fmt.Sprintf("exec %d %v", operation.Code, args), true
 	default:
 		return "", false
 	}

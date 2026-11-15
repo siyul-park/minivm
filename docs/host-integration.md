@@ -60,11 +60,11 @@ An unmarshalled Go func returns a failed call as its trailing `error`. A func ty
 | `Retain` | adds one caller-owned ref |
 | `Release` | drops one caller-owned ref |
 | `Load` | borrows; the count is unchanged |
-| `Store` | transfers a concrete value to the slot and releases the replaced value |
+| `Store` | transfers a concrete value of the slot's representation (Go type and declared type; a scalar cell may change scalar kind) to the slot and releases the replaced value; any other value is `ErrTypeMismatch` |
 | `Push` | transfers the value or its ref to the stack |
 | `Pop` | releases the stack ref and returns the detached value |
 | `PopBoxed` | transfers the stack ref to the caller |
-| `SetGlobal` / `SetLocal` | transfer a different ref to the slot and release the replaced ref |
+| `SetGlobal` / `SetLocal` | transfer a different ref to the slot and release the replaced ref; `SetLocal` inside a host function or a finalizer is `ErrHostCall`, since the optimizer assumes only a call writes a caller local, and `SetGlobal` inside a finalizer is too |
 | `Global` / `Local` / `Const` | borrow; the slot keeps its ref |
 
 A value from `Marshal` owns the refs of its fields until the VM takes it. The caller `MUST` hand it to `Push`, `Alloc`, or `Store`, or drop it with `Alloc` then `Release`. Values with no refs, such as scalars, strings, slices, maps, and funcs, need nothing.
@@ -81,6 +81,8 @@ func(vm *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error)
 
 `NewHostFunction` constructs it; `Typ` and `Fn` are public. `params` is call-scoped and borrowed; returning a param hands its ref on as a result. Host functions `MUST NOT` call `vm.Run`.
 
+A value's `Close` (`io.Closer`) runs when the VM frees the value, from an instruction that releases, such as a dropped global or array element, from `Reset`, or from a collection, and so can run in the middle of such an instruction. It runs as host code: `SetLocal` inside it is `ErrHostCall`, as in a host function, and `SetGlobal` is too, which a host function may call. The optimizer keeps locals and globals across a release, so `Close` `MUST NOT` write them. A panic in `Close` leaves the interpreter's host state as it was.
+
 A non-nil error ends the call and is raised as a VM trap with code `TrapCodeHostError`. A guest `try` region covering the call catches it as an `Error` value. An uncaught error ends `Run` with a `*RuntimeError` that wraps it, so `errors.Is` finds the host error.
 
 Calling a Go func bound to a VM function from inside a host function runs the VM function nested on the same interpreter. The nested call sees the host function's arguments untouched, uses the stack above them, and takes the context the Go func receives. A trap or cancellation in the nested call returns as the Go func's error, and the interpreter returns to the state the host function saw. The host function decides whether to return that error: if it does, the outer call raises it as above. A nested call cannot yield: coroutines do not cross the host boundary.
@@ -93,7 +95,9 @@ Calling a Go func bound to a VM function from inside a host function runs the VM
 
 Wrong-kind unboxing is invalid.
 
-`PopBoxed` returns the raw stack word. For `KindRef` the caller `MUST` release the transferred ref when finished, or `Retain` first when another ownership is required. `Load` does not change ownership.
+`PopBoxed` returns the raw stack word. For `KindRef` the caller `MUST` release the transferred ref when finished, or `Retain` first when another ownership is required. `Load` does not change ownership. A value from `Load` is borrowed: the caller `MUST NOT` change its type or storage (for an array, its length, capacity, or backing array) except through `Store`, since the optimizer reads arrays and guards shapes on that representation.
+
+A hook's `Local` and `SetLocal` are exact only on threaded code. On optimized code (bytecode `optimize.O3` or native), locals are not program semantics: a pass or the JIT may hold or drop a local's value, so a hook's `Local` need not see the program's value and its `SetLocal` need not change the program's computation.
 
 ## Heap API
 

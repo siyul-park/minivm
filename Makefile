@@ -197,8 +197,8 @@ benchmark-diff:
 	(cd "$$tmp/tree/benchmarks" && go test -c -o "$$tmp/base.test" .); \
 	(cd benchmarks && go test -c -o "$$tmp/head.test" .); \
 	for round in $$(seq $(benchmark-rounds)); do \
-		(cd "$$tmp/tree/benchmarks" && "$$tmp/base.test" -test.run='^$$' -test.bench='^BenchmarkKernels$$/./^(threaded|jit)$$' -test.benchtime=$(benchmark-time) >> "$$tmp/base.txt"); \
-		(cd benchmarks && "$$tmp/head.test" -test.run='^$$' -test.bench='^BenchmarkKernels$$/./^(threaded|jit)$$' -test.benchtime=$(benchmark-time) >> "$$tmp/head.txt"); \
+		(cd "$$tmp/tree/benchmarks" && "$$tmp/base.test" -test.run='^$$' -test.bench='^BenchmarkKernels$$/./^(threaded|optimized|jit)$$' -test.benchtime=$(benchmark-time) >> "$$tmp/base.txt"); \
+		(cd benchmarks && "$$tmp/head.test" -test.run='^$$' -test.bench='^BenchmarkKernels$$/./^(threaded|optimized|jit)$$' -test.benchtime=$(benchmark-time) >> "$$tmp/head.txt"); \
 	done; \
 	(cd "$$tmp" && go run $(benchstat) base.txt head.txt)
 

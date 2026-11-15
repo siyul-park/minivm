@@ -10,10 +10,15 @@ import (
 	"github.com/siyul-park/minivm/pass"
 )
 
-// LICMPass moves safe loop-invariant operations to preheaders. An array op
-// of a quiet loop whose container is a loop-invariant array guard reads it
-// through one OpSlice in the preheader of the outermost such loop: nothing
-// in a quiet loop resizes or replaces a container.
+// LICMPass moves safe loop-invariant operations to preheaders. A shape guard
+// and a load of a running-frame local the loop never stores hoist from any
+// loop that makes no call: representation is immutable and nothing but a call
+// writes a local or runs host code. A call is excluded because a hoisted value
+// live across it spills for its whole life, and its reload costs more than the
+// load and guard it replaced. An array op of a quiet loop whose container is a
+// loop-invariant array guard reads it through one OpSlice in the preheader of
+// the outermost such loop: nothing in a quiet loop resizes or replaces a
+// container.
 type LICMPass struct{}
 
 var _ pass.Pass[*ssa.Function] = (*LICMPass)(nil)
@@ -59,6 +64,7 @@ func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 		}
 	}
 
+	calling := make(map[int]bool, len(headers))
 	quiets := make(map[int]bool, len(headers))
 	stored := make(map[int]map[ssa.Slot]bool, len(headers))
 	for _, h := range headers {
@@ -66,6 +72,7 @@ func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 		for b := range bodies[h] {
 			for _, operation := range function.Block(b).Operations {
 				quiets[h] = quiets[h] && quiet(function, operation)
+				calling[h] = calling[h] || operation.Op == ssa.OpExec && operation.Code == instr.CALL
 				if operation.Op == ssa.OpStore {
 					stored[h][operation.Slot] = true
 				}
@@ -117,7 +124,7 @@ func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 				}
 				switch {
 				case operation.Op == ssa.OpGuardShape:
-					if !quiets[h] || !invariant(operation.Args[0]) {
+					if calling[h] || !invariant(operation.Args[0]) {
 						continue
 					}
 					// Only a guard every completed iteration runs: one under a
@@ -140,7 +147,7 @@ func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 					}
 					continue
 				case operation.Op == ssa.OpLoad:
-					if !quiets[h] || stored[h][operation.Slot] {
+					if stored[h][operation.Slot] || !quiets[h] && (calling[h] || operation.Slot.Space != ssa.SpaceLocal || operation.Slot.Base != 0) {
 						continue
 					}
 				case hoistable(operation):
@@ -200,11 +207,11 @@ func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 
 // quiet reports whether operation runs no code outside the unit and
 // allocates, releases, resizes, and replaces nothing: no call, allocation
-// (a boxed i64 included), or reference drop. Host code, reachable only
-// through those, is the one way a live container's representation changes
-// (interp.Interpreter.Store), so a loop of quiet operations keeps every
-// container's shape; a quiet loop also writes storage only through its own
-// OpStores.
+// (a boxed i64 included), or reference drop. A container's representation
+// never changes (interp.Interpreter.Store refuses it), but host code,
+// reachable only through those, may resize or replace the storage a hoisted
+// slice names, so a loop of quiet operations keeps it; a quiet loop also
+// writes storage only through its own OpStores.
 func quiet(function *ssa.Function, operation ssa.Operation) bool {
 	switch operation.Op {
 	case ssa.OpRelease:

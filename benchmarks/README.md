@@ -15,6 +15,8 @@ Each workload uses one flat, lower-kebab-case stem under `benchmarks/fixtures/`.
 | `.js` | Goja fixture |
 | `.py` | gpython and CPython fixture |
 
+`naive-checksum.mvm` is written the way an unoptimizing frontend emits code (a constant-false debug branch, a self-copied local, identity operands, a commuted duplicate product, a global stored then reloaded), so the `optimized` mode has work to remove; the other runtimes compute the same checksum plainly.
+
 ## Registry
 
 `benchmarks/registry` is the only benchmark execution index. `registry.All()` returns benchmarks in name order with all registered runtime sources attached. Benchmark runners and report generation do not inspect the fixture directory directly.
@@ -36,20 +38,21 @@ Yaegi supplies the compiled `registry.Register` and dependency symbols, evaluate
 
 ## Runtimes
 
-The corpus contains 29 workloads.
+The corpus contains 30 workloads.
 
 | Runtime | Coverage | Notes |
 |---|---:|---|
-| Threaded | 29 | minivm interpreter with JIT disabled |
-| JIT | 29 | minivm default execution |
-| Native Go | 29 | direct compiled Go implementation |
+| Threaded | 30 | minivm interpreter with JIT disabled |
+| Optimized | 30 | minivm interpreter with JIT disabled, after the O3 bytecode optimizer (`optimize.New(optimize.O3)`) runs on a separately parsed program |
+| JIT | 30 | minivm default execution |
+| Native Go | 30 | direct compiled Go implementation |
 | Wazero | 7 | exact WebAssembly implementations |
-| Tengo | 27 | string-keyed maps only; `map-ops` and `coroutine-gen` have no Tengo equivalent |
-| GopherLua | 26 | I32 workloads; exact I64 values are outside Lua's numeric model |
-| Goja | 29 | I32 plus BigInt-based I64 fixtures |
-| gpython | 29 | Python fixture; one case is intentionally unmeasured |
-| CPython | 29 | same Python fixture through `python3.13`; one case is intentionally unmeasured |
-| Yaegi | 29 | Go fixture; three cases are intentionally unmeasured |
+| Tengo | 28 | string-keyed maps only; `map-ops` and `coroutine-gen` have no Tengo equivalent |
+| GopherLua | 27 | I32 workloads; exact I64 values are outside Lua's numeric model |
+| Goja | 30 | I32 plus BigInt-based I64 fixtures |
+| gpython | 30 | Python fixture; one case is intentionally unmeasured |
+| CPython | 30 | same Python fixture through `python3.13`; one case is intentionally unmeasured |
+| Yaegi | 30 | Go fixture; three cases are intentionally unmeasured |
 
 A runtime cell is `—` only when no meaningful implementation exists or the benchmark is intentionally inapplicable. Yaegi skips `typed-array-sum` because its generic typed-array program is outside Yaegi's supported syntax, `recursive-fib-35` because the interpreted workload is impractical, and `coroutine-gen` because Yaegi's standard library has no `iter` package. gpython skips `map-ops` because its dicts accept only string keys. CPython skips `host-call` because it runs out of process and cannot call a Go function.
 
@@ -57,7 +60,7 @@ A runtime cell is `—` only when no meaningful implementation exists or the ben
 
 `make benchmark` measures every runtime and regenerates the result document. Only measurement time changes by level.
 
-`make benchmark-diff base=<ref>` compares the `threaded` and `jit` tiers against `base` in alternating rounds, with `benchstat`. CI runs it on each branch against its merge base with `main`, and writes the table to the job summary. It reports and does not fail.
+`make benchmark-diff base=<ref>` compares the `threaded`, `optimized`, and `jit` modes against `base` in alternating rounds, with `benchstat`. CI runs it on each branch against its merge base with `main`, and writes the table to the job summary. It reports and does not fail.
 
 | Level | Target |
 |---|---:|

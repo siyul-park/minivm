@@ -35,7 +35,11 @@ type Interpreter struct {
 	done <-chan struct{}
 	// hosts counts the HostFunction calls running; a call that panicked skips
 	// its decrement, so Run clears the count when it returns.
-	hosts    int
+	hosts int
+	// closing counts the finalizers running. A Close is host code that may
+	// write neither a local nor a global, but a host call may write globals,
+	// so SetGlobal needs its own marker.
+	closing  int
 	hook     func(*Interpreter) error
 	codec    Codec
 	profiler *prof.Profiler
@@ -333,8 +337,13 @@ func (i *Interpreter) Global(idx int) (types.Boxed, error) {
 // SetGlobal transfers a different KindRef val to global slot idx and releases the
 // reference the slot held: the caller MUST NOT release val afterward, and
 // retains first to keep an independent reference. Reassigning the current value
-// is a no-op that leaves the caller's ownership unchanged.
+// is a no-op that leaves the caller's ownership unchanged. A finalizer, a
+// value's Close, MUST NOT write a global: SetGlobal returns ErrHostCall until
+// it returns.
 func (i *Interpreter) SetGlobal(idx int, val types.Boxed) error {
+	if i.closing > 0 {
+		return ErrHostCall
+	}
 	if idx < 0 || idx >= len(i.globals) {
 		return ErrSegmentationFault
 	}
@@ -372,8 +381,13 @@ func (i *Interpreter) Local(idx int) (types.Boxed, error) {
 // SetLocal transfers a different KindRef val to local slot idx and releases the
 // reference the slot held: the caller MUST NOT release val afterward, and
 // retains first to keep an independent reference. Reassigning the current value
-// is a no-op that leaves the caller's ownership unchanged.
+// is a no-op that leaves the caller's ownership unchanged. A host function
+// running under Run MUST NOT write its caller's locals: SetLocal returns
+// ErrHostCall until the call returns.
 func (i *Interpreter) SetLocal(idx int, val types.Boxed) error {
+	if i.hosts > 0 {
+		return ErrHostCall
+	}
 	f := i.fr
 	addr := f.bp + idx
 	if addr < 0 || addr >= i.sp {
@@ -406,7 +420,10 @@ func (i *Interpreter) Load(addr int) (types.Value, error) {
 
 // Store transfers a concrete val to the slot at addr and releases the value it
 // replaces. val MUST NOT already be VM-owned; a heap ref is accepted only when
-// it already names addr.
+// it already names addr. A slot keeps its representation for its lifetime: val
+// must have the Go type and declared type of the value it replaces, else Store
+// returns ErrTypeMismatch. Only a scalar cell, which REF_SET also rewrites, may
+// change scalar kind.
 func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 	defer i.guard(&err)
 	if !i.alive(addr) {
@@ -441,6 +458,9 @@ func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 	old := i.heap[addr]
 	switch old.(type) {
 	case *types.Function, *types.Closure, *coroutine:
+		return ErrTypeMismatch
+	}
+	if !(scalar(old) && scalar(val)) && (reflect.TypeOf(old) != reflect.TypeOf(val) || !old.Type().Equals(val.Type())) {
 		return ErrTypeMismatch
 	}
 	i.heap[addr] = val
@@ -926,6 +946,9 @@ func (i *Interpreter) dispatch() (caught bool, err error) {
 			}
 			r = i.locate(r)
 			if i.handle(r) {
+				// Only the panicking host can still be counted: nest saves
+				// and clears the count per level, and handlers do not cross it.
+				i.hosts = 0
 				caught = true
 				return
 			}
@@ -2333,6 +2356,14 @@ func (i *Interpreter) finalize(addr int, v types.Value) {
 		i.remove(addr)
 	}
 	if c, ok := v.(io.Closer); ok {
+		// Close is host code: it may not write the locals or globals the
+		// optimizer holds across the instruction that released v.
+		i.hosts++
+		i.closing++
+		defer func() {
+			i.hosts--
+			i.closing--
+		}()
 		_ = c.Close()
 	}
 }
@@ -2368,6 +2399,16 @@ func (i *Interpreter) refs(v types.Value) []types.Ref {
 func aliasable(val types.Value) bool {
 	typ := reflect.TypeOf(val)
 	return typ != nil && typ.Kind() == reflect.Pointer
+}
+
+// scalar reports whether v is a cell content REF_NEW creates and REF_SET
+// rewrites.
+func scalar(v types.Value) bool {
+	switch v.(type) {
+	case types.I1, types.I8, types.I32, types.I64, types.F32, types.F64:
+		return true
+	}
+	return false
 }
 
 // deref is the T val references, keeping val's reference.

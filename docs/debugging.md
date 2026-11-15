@@ -79,6 +79,8 @@ dbg.BreakIf(0, 10, func(vm *interp.Interpreter) bool { return vm.Len() > 0 })
 
 ## Precision
 
+On optimized code (bytecode `optimize.O3` or native), locals are not program semantics (`pass-system.md`): `Local` and `SetLocal` from a hook do not observe or affect the program's computation, as they do on threaded code. Debug the unoptimized program.
+
 `WithTick(1)` runs no fused or native code, which hide bytecode boundaries: debugger execution is exact bytecode execution. A larger tick runs native code (`jit-internals.md` Ticks).
 
 ## Invariants

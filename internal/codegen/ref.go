@@ -164,14 +164,7 @@ func refSet() jen.Code {
 		jen.If(jen.Id("value").Dot("Kind").Call().Op("==").Qual(typesPkg, "KindRef")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
 		reference(jen.Id("ref")),
 		jen.Id("addr").Op(":=").Id("ref").Dot("Ref").Call(),
-		jen.Switch(jen.Id("i").Dot("heap").Index(jen.Id("addr")).Assert(jen.Type())).Block(
-			jen.Case(
-				jen.Qual(typesPkg, "I1"), jen.Qual(typesPkg, "I8"),
-				jen.Qual(typesPkg, "I32"), jen.Qual(typesPkg, "I64"),
-				jen.Qual(typesPkg, "F32"), jen.Qual(typesPkg, "F64"),
-			),
-			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-		),
+		jen.If(jen.Op("!").Id("scalar").Call(jen.Id("i").Dot("heap").Index(jen.Id("addr")))).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
 		jen.Id("i").Dot("heap").Index(jen.Id("addr")).Op("=").Qual(typesPkg, "Unbox").Call(jen.Id("value")),
 		jen.Id("i").Dot("sp").Op("-=").Lit(2),
 		jen.Id("i").Dot("release").Call(jen.Id("addr")),

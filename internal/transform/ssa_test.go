@@ -217,17 +217,23 @@ func TestSSAPass_Run(t *testing.T) {
 			require.NoError(t, program.Verify(prog))
 			want, wantErr := executionResult(t, prog)
 
-			got := duplicateConstants(prog)
-			preserved, err := transform.NewSSAPass(pipeline(), false).Run(pass.NewManager(), got)
-			require.NoError(t, err)
-			require.NoError(t, program.Verify(got))
-			if !preserved {
-				rewritten++
+			o3 := pass.NewPipeline[*ssa.Function]()
+			for _, p := range transform.O3() {
+				o3.Add(p)
 			}
+			for _, pipeline := range []*pass.Pipeline[*ssa.Function]{pipeline(), o3} {
+				got := duplicateConstants(prog)
+				preserved, err := transform.NewSSAPass(pipeline, false).Run(pass.NewManager(), got)
+				require.NoError(t, err)
+				require.NoError(t, program.Verify(got))
+				if !preserved {
+					rewritten++
+				}
 
-			values, message := executionResult(t, got)
-			require.Equal(t, wantErr, message)
-			require.Equal(t, want, values)
+				values, message := executionResult(t, got)
+				require.Equal(t, wantErr, message)
+				require.Equal(t, want, values)
+			}
 		}
 		require.NotZero(t, rewritten)
 	})
@@ -314,6 +320,27 @@ func TestSSAPass_Run(t *testing.T) {
 			instr.I64_XOR, instr.I64_AND, instr.I64_OR} {
 			require.True(t, folded[op])
 		}
+	})
+
+	t.Run("keeps the i1 type of a comparison xor-ed with itself", func(t *testing.T) {
+		pipeline := pass.NewPipeline[*ssa.Function]()
+		pipeline.Add(transform.NewFoldPass())
+		pipeline.Add(transform.NewDCEPass())
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.I32_GT_U),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.I32_XOR)}, program.WithGlobals(types.TypeI32()))
+		require.NoError(t, program.Verify(prog))
+		values, message := executionResult(t, prog)
+
+		got := duplicateConstants(prog)
+		_, err := transform.NewSSAPass(pipeline, false).Run(pass.NewManager(), got)
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(got))
+
+		routed, routedMessage := executionResult(t, got)
+		require.Equal(t, message, routedMessage)
+		require.Equal(t, values, routed)
+		require.Equal(t, []types.Value{types.I1(false)}, routed)
 	})
 
 	t.Run("folds a wide i64.shl into one i64.const immediate", func(t *testing.T) {
@@ -469,7 +496,8 @@ func TestSSAPass_Run(t *testing.T) {
 		require.NoError(t, program.Verify(got))
 
 		counted := got.Constants[0].(*types.Function)
-		require.NotEqual(t, instr.Format(fn.Code), instr.Format(counted.Code))
+		// The body falls through its header's test, as written.
+		require.Equal(t, instr.Format(fn.Code), instr.Format(counted.Code))
 
 		values, message := executionResult(t, got)
 		require.Equal(t, wantErr, message)
@@ -509,7 +537,8 @@ func TestSSAPass_Run(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(got))
 
-		require.NotEqual(t, instr.Format(fn.Code), instr.Format(got.Constants[0].(*types.Function).Code))
+		// The body falls through its header's test, as written.
+		require.Equal(t, instr.Format(fn.Code), instr.Format(got.Constants[0].(*types.Function).Code))
 
 		values, message := executionResult(t, got)
 		require.Equal(t, wantErr, message)
@@ -805,6 +834,42 @@ func TestSSAPass_Run(t *testing.T) {
 		}
 	})
 
+	t.Run("lays a forward join out the same whichever block numbers precede it", func(t *testing.T) {
+		build := func(joinFirst bool) *types.Function {
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32(), types.TypeI32()},
+				Returns: []types.Type{types.TypeI32()}})
+			left, right, join, taken := fn.Label(), fn.Label(), fn.Label(), fn.Label()
+			fn.Append(instr.MustNew(instr.LOCAL_GET, 0)).BrIf(right).Br(left)
+			emitJoin := func() {
+				fn.Bind(join).Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_LT_S)).BrIf(taken)
+				fn.Append(instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.RETURN))
+				fn.Bind(taken).Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.RETURN))
+			}
+			if joinFirst {
+				emitJoin()
+			}
+			fn.Bind(left).Br(join)
+			fn.Bind(right).Br(join)
+			if !joinFirst {
+				emitJoin()
+			}
+			return fn.MustBuild()
+		}
+		opcodes := func(f *types.Function) []instr.Opcode {
+			rewritten := duplicateConstants(program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.DROP)}, program.WithConstants(f)))
+			_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), false).Run(pass.NewManager(), rewritten)
+			require.NoError(t, err)
+			var got []instr.Opcode
+			for _, inst := range instr.Unmarshal(rewritten.Constants[0].(*types.Function).Code) {
+				got = append(got, inst.Opcode())
+			}
+			return got
+		}
+
+		require.Equal(t, opcodes(build(false)), opcodes(build(true)))
+	})
+
 	t.Run("leaves the comparison of an earlier block alone", func(t *testing.T) {
 		// The branch tests a value two paths join with: only one of them is a comparison.
 		fn := types.NewFunctionBuilder(&types.FunctionType{
@@ -943,7 +1008,7 @@ func TestSSAPass_Run(t *testing.T) {
 			{name: "a loop closed by a branch", f: sum.MustBuild(), arg: 10, kept: true},
 			{name: "a swap", f: trade(2, 1, 2), arg: 5, extras: 1},
 			{name: "a rotation", f: trade(3, 1, 2, 3), arg: 5, extras: 1},
-			{name: "an fnv hash", f: fnv.MustBuild(), arg: 1024, extras: 1},
+			{name: "an fnv hash", f: fnv.MustBuild(), arg: 1024, kept: true},
 			{name: "a fibonacci recurrence", f: fib.MustBuild(), arg: 10},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
@@ -1380,6 +1445,155 @@ func TestSSAPass_Run(t *testing.T) {
 			require.Equal(t, []instr.Opcode{
 				instr.LOCAL_GET, instr.LOCAL_GET, instr.I32_ADD, instr.LOCAL_TEE, instr.GLOBAL_SET, instr.I32_CONST, instr.LOCAL_GET, instr.I32_SUB, instr.RETURN}, opcodes(f))
 		})
+
+		// offsetSum returns (sum + arr[idx]) * sum, computed through a temporary: the add
+		// needs sum beneath the load's result, so sum is loaded first rather than homing
+		// the result. array.get can trap; sum is a real local.get that holds its own reference.
+		offsetSum := func() *types.Function {
+			return types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32(), arrayType, types.TypeI32()},
+				Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32()).Append(
+				instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.LOCAL_SET, 3),
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.I32_ADD),
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_MUL), instr.MustNew(instr.RETURN)).MustBuild()
+		}
+
+		t.Run("an operand is loaded ahead of the producer whose result needs it", func(t *testing.T) {
+			fn := offsetSum()
+			call := func(idx uint64) *program.Program {
+				return program.New([]instr.Instruction{
+					instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.I32_CONST, idx),
+					instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+					program.WithConstants(fn, types.TypedArray[int32]{1, 2, 3}), program.WithTypes(arrayType))
+			}
+
+			f := check(t, call(1))
+			require.Equal(t, []instr.Opcode{
+				instr.LOCAL_GET, instr.LOCAL_GET, instr.LOCAL_GET, instr.ARRAY_GET, instr.I32_ADD, instr.LOCAL_GET, instr.I32_MUL, instr.RETURN}, opcodes(f))
+			require.Len(t, f.Locals, len(fn.Locals))
+		})
+
+		t.Run("a trap in a producer with an operand loaded ahead of it is caught and released", func(t *testing.T) {
+			// The module has a handler, so only fn is rewritten.
+			b := program.NewBuilder()
+			start, end, catch, done := b.Label(), b.Label(), b.Label(), b.Label()
+			b.Type(arrayType)
+			b.Bind(start).Emit(instr.I32_CONST, 10).ConstGet(types.TypedArray[int32]{1, 2, 3}).Emit(instr.I32_CONST, 9).ConstGet(offsetSum()).Emit(instr.CALL)
+			b.Bind(end).Br(done)
+			b.Bind(catch).Emit(instr.DROP).Emit(instr.I32_CONST, 7)
+			b.Bind(done)
+			b.Try(start, end, catch, 0)
+			prog := b.MustBuild()
+			require.NoError(t, program.Verify(prog))
+
+			got := duplicateConstants(prog)
+			_, err := transform.NewSSAPass(optimized, false).Run(pass.NewManager(), got)
+			require.NoError(t, err)
+			require.NoError(t, program.Verify(got))
+			for _, c := range got.Constants {
+				if f, ok := c.(*types.Function); ok {
+					require.Equal(t, []instr.Opcode{
+						instr.LOCAL_GET, instr.LOCAL_GET, instr.LOCAL_GET, instr.ARRAY_GET, instr.I32_ADD, instr.LOCAL_GET, instr.I32_MUL, instr.RETURN}, opcodes(f))
+				}
+			}
+			for _, opts := range [][]interp.Option{{interp.WithThreshold(-1)}, nil} {
+				want, wantRefs := outcome(prog, opts...)
+				values, refs := outcome(got, opts...)
+				require.Equal(t, []types.Value{types.I32(7)}, values)
+				require.Equal(t, want, values)
+				require.Equal(t, wantRefs, refs)
+			}
+		})
+
+		t.Run("operands are loaded ahead of an expression whose result needs them", func(t *testing.T) {
+			// sum + arr[i] * (i % 7) through a temporary: the add needs sum beneath the
+			// whole product, so sum is loaded before the product's first operation.
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32(), arrayType, types.TypeI32()},
+				Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32()).Append(
+				instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.ARRAY_GET),
+				instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.I32_REM_S), instr.MustNew(instr.I32_MUL),
+				instr.MustNew(instr.LOCAL_SET, 3),
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 3), instr.MustNew(instr.I32_ADD),
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_MUL), instr.MustNew(instr.RETURN)).MustBuild()
+			f := check(t, program.New([]instr.Instruction{
+				instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.I32_CONST, 2),
+				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+				program.WithConstants(fn, types.TypedArray[int32]{1, 2, 3}), program.WithTypes(arrayType)))
+			require.Equal(t, []instr.Opcode{
+				instr.LOCAL_GET, instr.LOCAL_GET, instr.LOCAL_GET, instr.ARRAY_GET, instr.LOCAL_GET, instr.I32_CONST, instr.I32_REM_S, instr.I32_MUL,
+				instr.I32_ADD, instr.LOCAL_GET, instr.I32_MUL, instr.RETURN}, opcodes(f))
+			require.Len(t, f.Locals, len(fn.Locals))
+		})
+
+		t.Run("an inner loop's body falls through its header and its exit follows", func(t *testing.T) {
+			b := program.NewBuilder()
+			outer, outerDone, inner, innerDone := b.Label(), b.Label(), b.Label(), b.Label()
+			b.Locals(types.TypeI32(), types.TypeI32(), types.TypeI32())
+			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+			b.Bind(outer)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 2).Emit(instr.I32_GE_S).BrIf(outerDone)
+			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+			b.Bind(inner)
+			b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 3).Emit(instr.I32_GE_S).BrIf(innerDone)
+			b.Emit(instr.LOCAL_GET, 0).ConstGet(types.TypedArray[int32]{1, 2, 3}).Emit(instr.LOCAL_GET, 2).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+			b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+			b.Br(inner)
+			b.Bind(innerDone)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1000).Emit(instr.I32_REM_S).Emit(instr.LOCAL_SET, 0)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+			b.Br(outer)
+			b.Bind(outerDone).Emit(instr.LOCAL_GET, 0)
+			prog := b.MustBuild()
+			require.NoError(t, program.Verify(prog))
+
+			got := duplicateConstants(prog)
+			_, err := transform.NewSSAPass(optimized, false).Run(pass.NewManager(), got)
+			require.NoError(t, err)
+			require.NoError(t, program.Verify(got))
+			want, _ := executionResult(t, prog)
+			values, _ := executionResult(t, got)
+			require.Equal(t, want, values)
+
+			// Both loops' tests branch out on the inverted comparison; none branches into its body.
+			require.NotContains(t, instr.Format(got.Code), "i32.lt_s")
+			require.Equal(t, 2, strings.Count(instr.Format(got.Code), "\tbr "), instr.Format(got.Code))
+		})
+
+		t.Run("a module's exit falls off the end of its loop", func(t *testing.T) {
+			b := program.NewBuilder()
+			header, done := b.Label(), b.Label()
+			b.Locals(types.TypeI32(), types.TypeI32())
+			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+			b.Bind(header)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 3).Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.LOCAL_GET, 1).ConstGet(types.TypedArray[int32]{1, 2, 3}).Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+			b.Br(header)
+			b.Bind(done).Emit(instr.LOCAL_GET, 1)
+			prog := b.MustBuild()
+			require.NoError(t, program.Verify(prog))
+
+			got := duplicateConstants(prog)
+			_, err := transform.NewSSAPass(optimized, false).Run(pass.NewManager(), got)
+			require.NoError(t, err)
+			require.NoError(t, program.Verify(got))
+			want, _ := executionResult(t, prog)
+			values, _ := executionResult(t, got)
+			require.Equal(t, want, values)
+			require.Equal(t, []types.Value{types.I32(6), types.I32(6), types.I32(3)}, values)
+
+			brs := 0
+			for _, inst := range instr.Unmarshal(got.Code) {
+				if inst.Opcode() == instr.BR {
+					brs++
+				}
+			}
+			require.Equal(t, 1, brs, instr.Format(got.Code))
+			require.Len(t, got.Locals, len(prog.Locals))
+		})
 	})
 
 	t.Run("emits only code that verifies", func(t *testing.T) {
@@ -1451,9 +1665,7 @@ func TestSSAPass_Run(t *testing.T) {
 				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(body(
 				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.RETURN_CALL)))),
 			"an exception handler": program.New([]instr.Instruction{
-				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(guarded.MustBuild())),
-			"a module value needing a local": program.New([]instr.Instruction{
-				instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.DUP), instr.MustNew(instr.I32_ADD)}, program.WithGlobals(types.TypeI32()))} {
+				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(guarded.MustBuild()))} {
 			require.NoError(t, program.Verify(input))
 			before := input.String()
 
@@ -1462,6 +1674,18 @@ func TestSSAPass_Run(t *testing.T) {
 			require.True(t, preserved, name)
 			require.Equal(t, before, input.String(), name)
 		}
+	})
+
+	t.Run("homes a module value in a new module local", func(t *testing.T) {
+		input := program.New([]instr.Instruction{
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.DUP), instr.MustNew(instr.I32_ADD)}, program.WithGlobals(types.TypeI32()))
+
+		preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), false).Run(pass.NewManager(), input)
+
+		require.NoError(t, err)
+		require.False(t, preserved)
+		require.NoError(t, program.Verify(input))
+		require.Equal(t, []types.Type{types.TypeI32()}, input.Locals)
 	})
 
 	t.Run("restores a function whose fault is reported at a literal holding it", func(t *testing.T) {
@@ -1845,8 +2069,8 @@ func TestSSAPass_Run(t *testing.T) {
 			}
 		}
 		require.Equal(t, 1, jumps, instr.Format(got.Constants[0].(*types.Function).Code))
-		// The counter's test has an inverse, so it keeps its exit behind it.
-		require.Regexp(t, `i32\.lt_s\n\d+:\tbr_if`, instr.Format(got.Constants[0].(*types.Function).Code))
+		// The counter's test has an inverse and its second edge leaves the loop, so the body falls through.
+		require.Regexp(t, `i32\.ge_s\n\d+:\tbr_if`, instr.Format(got.Constants[0].(*types.Function).Code))
 		for _, opts := range [][]interp.Option{{interp.WithThreshold(-1)}, nil} {
 			values, message := executionResult(t, got, opts...)
 			require.Equal(t, wantErr, message)

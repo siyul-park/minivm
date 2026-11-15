@@ -14,6 +14,7 @@ import (
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/testenv"
 	"github.com/siyul-park/minivm/interp"
+	"github.com/siyul-park/minivm/optimize"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -29,6 +30,15 @@ type trackedValue struct {
 
 // panicCloser is a host value whose Close panics.
 type panicCloser struct{ trackedValue }
+
+// writerCloser is a host value whose Close tries to write the caller's local 1
+// and global 1, recording what it got back.
+type writerCloser struct {
+	trackedValue
+	vm     *interp.Interpreter
+	local  error
+	global error
+}
 
 type structGetHostFields struct {
 	Count  int32
@@ -1958,6 +1968,13 @@ func (v *trackedValue) Close() error {
 
 func (*panicCloser) Close() error {
 	panic("close")
+}
+
+func (c *writerCloser) Close() error {
+	c.closed++
+	c.local = c.vm.SetLocal(1, types.BoxI32(100))
+	c.global = c.vm.SetGlobal(1, types.BoxI32(7))
+	return nil
 }
 
 func (h *structGetHostFields) Bump(n int32) int32 {
@@ -7131,6 +7148,69 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, want, result)
 	})
 
+	t.Run("reads back array contents a called function mutates, as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		arrayType := types.NewArrayType(types.TypeI32())
+		mutate := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{arrayType}, Returns: []types.Type{types.TypeI32()}})
+		mutate.Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_ADD),
+			instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_GET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.I32_ADD),
+			instr.MustNew(instr.ARRAY_SET),
+			// Appending past the capacity moves the array's storage, so a slice of
+			// the old storage held across the call reads stale elements.
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_APPEND), instr.MustNew(instr.DROP),
+			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.RETURN),
+		)
+
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		b.Emit(instr.CONST_GET, 1).Emit(instr.LOCAL_SET, 2)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 4000).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 1)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32(), types.TypeI32(), arrayType),
+			program.WithConstants(mutate.MustBuild(), types.TypedArray[int32]{0, 0}))
+
+		compareNative(t, prog)
+	})
+
+	t.Run("reads back array contents a loop reallocates, as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		arrayType := types.NewArrayType(types.TypeI32())
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		b.Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 4000).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 0)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.I32_CONST, 3).Emit(instr.I32_ADD).Emit(instr.ARRAY_SET)
+		// Appending past the capacity moves the array's storage, so a slice of
+		// the old storage held across the append reads stale elements.
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_APPEND).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 1)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32(), types.TypeI32(), arrayType),
+			program.WithConstants(types.TypedArray[int32]{0, 0}))
+
+		compareNative(t, prog)
+	})
+
 	t.Run("reads and writes a ref array element", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 
@@ -9676,6 +9756,113 @@ func TestNew(t *testing.T) {
 }
 
 func TestInterpreter_Run(t *testing.T) {
+	t.Run("runs a finalizer as host code that writes no local or global", func(t *testing.T) {
+		const n = 200000
+		b := instr.NewBuilder()
+		loop, done, keep := b.Label(), b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_SET, 1)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, n).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, n/2).Emit(instr.I32_NE).BrIf(keep)
+		b.Emit(instr.REF_NULL).Emit(instr.GLOBAL_SET, 0)
+		b.Bind(keep)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 2)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code,
+			program.WithLocals(types.TypeI32(), types.TypeI32(), types.TypeI32()),
+			program.WithGlobals(types.TypeAny(), types.TypeI32()))
+		optimized, err := optimize.New(optimize.O3).Optimize(prog)
+		require.NoError(t, err)
+
+		// run holds a closer in global 0 that the loop drops at n/2, and
+		// returns the sum with the closer.
+		run := func(t *testing.T, vm *interp.Interpreter) (types.Value, *writerCloser) {
+			t.Helper()
+			closer := &writerCloser{vm: vm}
+			addr, err := vm.Alloc(closer)
+			require.NoError(t, err)
+			require.NoError(t, vm.SetGlobal(0, types.BoxRef(addr)))
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			return got, closer
+		}
+
+		for name, prog := range map[string]*program.Program{"threaded": prog, "optimized": optimized} {
+			t.Run(name, func(t *testing.T) {
+				vm := interp.MustNew(prog, interp.WithThreshold(-1))
+				defer vm.Close()
+				got, closer := run(t, vm)
+				require.Equal(t, types.I32(n), got)
+				require.Equal(t, 1, closer.closed)
+				require.ErrorIs(t, closer.local, interp.ErrHostCall)
+				require.ErrorIs(t, closer.global, interp.ErrHostCall)
+			})
+		}
+
+		t.Run("native", func(t *testing.T) {
+			testenv.MustHaveJIT(t)
+			profiler := prof.New()
+			vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+			defer vm.Close()
+			poll(t, func() bool {
+				got, closer := run(t, vm)
+				require.Equal(t, types.I32(n), got)
+				require.ErrorIs(t, closer.local, interp.ErrHostCall)
+				require.ErrorIs(t, closer.global, interp.ErrHostCall)
+				vm.Reset()
+				vm.Flush()
+				return nativeEntries(profiler) > 0
+			})
+		})
+
+		t.Run("restores the host count when Close panics", func(t *testing.T) {
+			vm := interp.MustNew(program.New(nil, program.WithLocals(types.TypeAny()), program.WithGlobals(types.TypeI32())), interp.WithThreshold(-1))
+			defer vm.Close()
+			addr, err := vm.Alloc(&panicCloser{})
+			require.NoError(t, err)
+			require.NoError(t, vm.SetLocal(0, types.BoxRef(addr)))
+			require.Panics(t, func() { _ = vm.SetLocal(0, types.BoxI32(0)) })
+			require.NoError(t, vm.SetLocal(0, types.BoxI32(1)))
+			require.NoError(t, vm.SetGlobal(0, types.BoxI32(1)))
+		})
+	})
+
+	t.Run("clears the host count when a handler catches a host panic", func(t *testing.T) {
+		fired := false
+		boom := interp.NewHostFunction(&types.FunctionType{}, func(*interp.Interpreter, []types.Boxed) ([]types.Boxed, error) {
+			fired = true
+			panic(errors.New("boom"))
+		})
+		b := instr.NewBuilder()
+		start, end, catch, next := b.Label(), b.Label(), b.Label(), b.Label()
+		b.Bind(start).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		b.Bind(end).Emit(instr.I32_CONST, 0).Br(next)
+		b.Bind(catch).Emit(instr.DROP).Emit(instr.I32_CONST, 0)
+		b.Bind(next).Emit(instr.NOP).Emit(instr.NOP)
+		b.Try(start, end, catch, 1)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithConstants(boom), program.WithHandlers(b.Handlers()...))
+
+		var writes []error
+		vm := interp.MustNew(prog, interp.WithThreshold(-1), interp.WithTick(1), interp.WithHook(func(vm *interp.Interpreter) error {
+			if fired {
+				writes = append(writes, vm.SetLocal(0, types.BoxI32(1)))
+			}
+			return nil
+		}))
+		defer vm.Close()
+		require.NoError(t, vm.Run(context.Background()))
+		require.NotEmpty(t, writes)
+		for _, err := range writes {
+			require.NoError(t, err)
+		}
+	})
+
 	t.Run("runs struct and map constants", func(t *testing.T) {
 		structType := types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeString()))
 		first := &types.StructLiteral{Typ: structType, Fields: []types.Value{types.I32(10), types.String("ten")}}
@@ -11423,6 +11610,29 @@ func TestInterpreter_SetLocal(t *testing.T) {
 		require.Equal(t, types.String("value"), v)
 	})
 
+	t.Run("rejects a write from a host function", func(t *testing.T) {
+		var got error
+		hostFn := interp.NewHostFunction(&types.FunctionType{},
+			func(i *interp.Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+				got = i.SetLocal(0, types.BoxI32(9))
+				return nil, nil
+			})
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL),
+			instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.YIELD),
+		}, program.WithLocals(types.TypeI32()), program.WithConstants(hostFn))
+		i := interp.MustNew(prog)
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), interp.ErrYield)
+		require.ErrorIs(t, got, interp.ErrHostCall)
+		v, err := i.Local(0)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(1), v)
+		require.NoError(t, i.SetLocal(0, types.BoxI32(3)))
+	})
+
 	t.Run("rejects invalid reference", func(t *testing.T) {
 		prog := program.New(nil, program.WithLocals(types.TypeAny()))
 		i := interp.MustNew(prog)
@@ -11468,11 +11678,12 @@ func TestInterpreter_Store(t *testing.T) {
 		old := &trackedValue{}
 		addr, err := i.Alloc(old)
 		require.NoError(t, err)
-		require.NoError(t, i.Store(addr, types.I32(9)))
+		next := &trackedValue{}
+		require.NoError(t, i.Store(addr, next))
 		require.Equal(t, 1, old.closed)
 		v, err := i.Load(addr)
 		require.NoError(t, err)
-		require.Equal(t, types.I32(9), v)
+		require.Same(t, next, v)
 	})
 
 	t.Run("releases replaced child", func(t *testing.T) {
@@ -11487,7 +11698,7 @@ func TestInterpreter_Store(t *testing.T) {
 		addr, err := i.Alloc(parent)
 		require.NoError(t, err)
 		require.NoError(t, i.Release(child))
-		require.NoError(t, i.Store(addr, types.I32(9)))
+		require.NoError(t, i.Store(addr, &trackedValue{}))
 		_, err = i.Load(child)
 		require.ErrorIs(t, err, interp.ErrSegmentationFault)
 	})
@@ -11569,6 +11780,76 @@ func TestInterpreter_Store(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(5), v)
 		}
+	})
+
+	t.Run("rejects representation change", func(t *testing.T) {
+		structU := types.NewStructType(types.NewStructField(types.TypeI32()))
+		structT := types.NewStructType(types.NewStructField(types.TypeF64()))
+		cases := []struct {
+			name string
+			old  types.Value
+			val  types.Value
+		}{
+			{"struct to string", types.NewStruct(structU, types.BoxI32(1)), types.String("s")},
+			{"struct T to struct U", types.NewStruct(structU, types.BoxI32(1)), types.NewStruct(structT, types.BoxF64(1))},
+			{"i32 array to f64 array", types.TypedArray[int32]{1}, types.TypedArray[float64]{1}},
+			{"map type to map type", types.NewMap(types.NewMapType(types.TypeString(), types.TypeI32())), types.NewMap(types.NewMapType(types.TypeString(), types.TypeF64()))},
+			{"string to scalar", types.String("s"), types.I32(1)},
+			{"scalar to string", types.I32(1), types.String("s")},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				i := interp.MustNew(program.New(nil))
+				defer i.Close()
+
+				addr, err := i.Alloc(tc.old)
+				require.NoError(t, err)
+				require.ErrorIs(t, i.Store(addr, tc.val), interp.ErrTypeMismatch)
+				v, err := i.Load(addr)
+				require.NoError(t, err)
+				require.Equal(t, tc.old, v)
+			})
+		}
+	})
+
+	t.Run("stores same representation", func(t *testing.T) {
+		typ := types.NewStructType(types.NewStructField(types.TypeI32()))
+		mapTyp := types.NewMapType(types.TypeString(), types.TypeI32())
+		cases := []struct {
+			name string
+			old  types.Value
+			val  types.Value
+		}{
+			{"struct", types.NewStruct(typ, types.BoxI32(1)), types.NewStruct(typ, types.BoxI32(2))},
+			{"array", types.TypedArray[int32]{1}, types.TypedArray[int32]{2, 3}},
+			{"map", types.NewMap(mapTyp), types.NewMap(mapTyp)},
+			{"string", types.String("a"), types.String("b")},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				i := interp.MustNew(program.New(nil))
+				defer i.Close()
+
+				addr, err := i.Alloc(tc.old)
+				require.NoError(t, err)
+				require.NoError(t, i.Store(addr, tc.val))
+				v, err := i.Load(addr)
+				require.NoError(t, err)
+				require.Equal(t, tc.val, v)
+			})
+		}
+	})
+
+	t.Run("changes cell scalar kind like REF_SET", func(t *testing.T) {
+		i := interp.MustNew(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.I32(5))
+		require.NoError(t, err)
+		require.NoError(t, i.Store(addr, types.F64(1.5)))
+		v, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Equal(t, types.F64(1.5), v)
 	})
 }
 

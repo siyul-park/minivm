@@ -41,6 +41,42 @@ func TestCSEPass_Run(t *testing.T) {
 		require.Equal(t, "func f\nblk0: (v1:i32, v2:i32)\n\tv3:state = state {addr=1 base=0 ip=0 returns=0 stack=[]}\n\tv4:i32 = i32.add v1, v2 state v3\n\tv5:state = state {addr=1 base=0 ip=0 returns=0 stack=[]}\n\treturn v4, v4\n", out)
 	})
 
+	t.Run("collapses a commutative computation with swapped operands but not a subtraction", func(t *testing.T) {
+		for _, c := range []struct {
+			code instr.Opcode
+			typ  ssa.Type
+			want int
+		}{
+			{instr.I32_MUL, ssa.TypeI32, 1},
+			{instr.I64_ADD, ssa.TypeI64, 1},
+			{instr.I32_EQ, ssa.TypeI32, 1},
+			{instr.I32_SUB, ssa.TypeI32, 2},
+			{instr.I64_LT_S, ssa.TypeI64, 2},
+		} {
+			t.Run(instr.TypeOf(c.code).Mnemonic, func(t *testing.T) {
+				b := ssa.New("f")
+				entry := b.Block()
+				x, y := b.Param(entry, c.typ), b.Param(entry, c.typ)
+				rt := c.typ
+				if c.code == instr.I32_EQ || c.code == instr.I64_LT_S {
+					rt = ssa.TypeI1
+				}
+				first, second := b.Value(rt), b.Value(rt)
+				b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{first}})
+				b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: []ssa.Value{y, x}, State: deoptState(b, entry), Results: []ssa.Value{second}})
+				b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{first, second}})
+				fn := b.Build()
+				require.NoError(t, ssa.Verify(fn))
+
+				_, err := transform.NewCSEPass().Run(pass.NewManager(), fn)
+
+				require.NoError(t, err)
+				require.NoError(t, ssa.Verify(fn))
+				require.Equal(t, c.want, strings.Count(ssa.Format(fn), instr.TypeOf(c.code).Mnemonic))
+			})
+		}
+	})
+
 	t.Run("collapses a computation a dominated block repeats", func(t *testing.T) {
 		b := ssa.New("f")
 		entry, next := b.Block(), b.Block()

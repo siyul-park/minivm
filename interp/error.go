@@ -79,7 +79,11 @@ var (
 	// ErrInterpreterBusy is returned by a func Unmarshal bound to a VM function
 	// when Run is active and no host function is running, such as from another
 	// goroutine or a hook. Inside a host function the call runs nested instead.
-	ErrInterpreterBusy   = errors.New("interpreter busy")
+	ErrInterpreterBusy = errors.New("interpreter busy")
+	// ErrHostCall is returned by SetLocal while a host function runs, and by
+	// SetLocal and SetGlobal while a finalizer runs: host code MUST NOT write
+	// its caller's locals, and a finalizer MUST NOT write globals either.
+	ErrHostCall          = errors.New("host call writes caller state")
 	ErrUncaughtException = errors.New("uncaught exception")
 
 	// errYield is the panic value a root-frame YIELD raises to unwind the Run loop.
