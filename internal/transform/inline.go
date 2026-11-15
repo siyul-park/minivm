@@ -34,14 +34,7 @@ func NewInlinePass(module Module) *InlinePass {
 
 // Run applies the pass to one SSA function.
 func (p *InlinePass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
-	consts := map[ssa.Value]uint64{}
-	for b := range function.Len() {
-		for _, operation := range function.Block(b).Operations {
-			if operation.Op == ssa.OpConst {
-				consts[operation.Results[0]] = operation.Const
-			}
-		}
-	}
+	consts := constants(function)
 	bodies := map[int]*ssa.Function{}
 	callee := func(operation ssa.Operation) *ssa.Function {
 		if operation.Op != ssa.OpExec || operation.Code != instr.CALL || operation.Shape != (ssa.Shape{}) ||
@@ -53,7 +46,7 @@ func (p *InlinePass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) 
 			return nil
 		}
 		ref := types.Boxed(word).Ref()
-		target := p.module.Objects.function(ref)
+		target := p.module.Objects[ref].Function
 		if target == nil || target.Typ == nil || len(target.Typ.Params) != len(operation.Args)-1 ||
 			len(target.Typ.Returns) != len(operation.Results) {
 			return nil
@@ -128,14 +121,7 @@ func (p *InlinePass) body(ref int, target *types.Function) *ssa.Function {
 // traps reports whether body runs an operation that may trap: a division or
 // remainder whose divisor is not a nonzero constant.
 func traps(body *ssa.Function) bool {
-	consts := map[ssa.Value]uint64{}
-	for b := range body.Len() {
-		for _, operation := range body.Block(b).Operations {
-			if operation.Op == ssa.OpConst {
-				consts[operation.Results[0]] = operation.Const
-			}
-		}
-	}
+	consts := constants(body)
 	for b := range body.Len() {
 		for _, operation := range body.Block(b).Operations {
 			if operation.Op != ssa.OpExec || !operation.Code.Traps() {
@@ -152,17 +138,26 @@ func traps(body *ssa.Function) bool {
 	return false
 }
 
-// leaf reports whether a call of target can be replaced by body, its
-// translation with locals promoted: a pure scalar leaf. It runs no call, no
-// handler, and no write or allocation; its params, locals and results are
-// scalars (i64 and refs excluded); it has at most sizeMax instructions and no
-// backward branch. body holds only constants, reads of a local's entry value,
-// and pure operations on scalars, and ends in jumps, branches, tables and
-// returns.
-func leaf(target *types.Function, body *ssa.Function) bool {
-	if !shaped(target) {
-		return false
+// constants maps each constant value of function to its word.
+func constants(function *ssa.Function) map[ssa.Value]uint64 {
+	consts := map[ssa.Value]uint64{}
+	for b := range function.Len() {
+		for _, operation := range function.Block(b).Operations {
+			if operation.Op == ssa.OpConst {
+				consts[operation.Results[0]] = operation.Const
+			}
+		}
 	}
+	return consts
+}
+
+// leaf reports whether a call of target, which is shaped, can be replaced by
+// body, its translation with locals promoted: a pure scalar leaf. It runs no
+// call, no handler, and no write or allocation; its params, locals and results
+// are scalars (i64 and refs excluded). body holds only constants, reads of a
+// local's entry value, and pure operations on scalars, and ends in jumps,
+// branches, tables and returns.
+func leaf(target *types.Function, body *ssa.Function) bool {
 	slots := target.Declared()
 	for b := range body.Len() {
 		block := body.Block(b)

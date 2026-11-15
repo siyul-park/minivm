@@ -10,11 +10,6 @@ import (
 // nothing reads.
 type DCEPass struct{}
 
-type site struct {
-	block int
-	index int
-}
-
 var _ pass.Pass[*ssa.Function] = (*DCEPass)(nil)
 
 // NewDCEPass returns the pass.
@@ -46,17 +41,7 @@ func (p *DCEPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 			}
 			r.builder.Add(id, r.define(r.operation(operation)))
 		}
-		term := r.terminator(b.Terminator)
-		for i, e := range b.Terminator.Edges {
-			var kept []ssa.Value
-			for j, param := range function.Block(e.Block).Params {
-				if params[param] {
-					kept = append(kept, term.Edges[i].Args[j])
-				}
-			}
-			term.Edges[i].Args = kept
-		}
-		r.builder.Term(id, term)
+		r.builder.Term(id, r.prune(b.Terminator, func(param ssa.Value) bool { return !params[param] }))
 	}
 
 	if !changed {
@@ -79,14 +64,14 @@ func liveness(function *ssa.Function, blocks []int) (map[site]bool, map[ssa.Valu
 		}
 	}
 
-	where, incoming := map[ssa.Value][2]int{}, map[int][]ssa.Edge{}
+	where, incoming := map[ssa.Value]site{}, map[int][]ssa.Edge{}
 	params := map[ssa.Value]bool{}
 	for _, b := range blocks {
 		for i, param := range function.Block(b).Params {
 			if b == 0 {
 				params[param] = true
 			} else {
-				where[param] = [2]int{b, i}
+				where[param] = site{b, i}
 			}
 		}
 		for _, e := range function.Block(b).Terminator.Edges {
@@ -120,8 +105,8 @@ func liveness(function *ssa.Function, blocks []int) (map[site]bool, map[ssa.Valu
 	}
 
 	for _, b := range blocks {
-		currentBlock := function.Block(b)
-		for i, operation := range currentBlock.Operations {
+		block := function.Block(b)
+		for i, operation := range block.Operations {
 			effectful := false
 			switch operation.Op {
 			case ssa.OpStore, ssa.OpGuardKind, ssa.OpGuardShape, ssa.OpGuardBounds, ssa.OpGuardValue,
@@ -134,10 +119,10 @@ func liveness(function *ssa.Function, blocks []int) (map[site]bool, map[ssa.Valu
 				mark(site{b, i}, operation)
 			}
 		}
-		for _, a := range currentBlock.Terminator.Args {
+		for _, a := range block.Terminator.Args {
 			push(a)
 		}
-		push(currentBlock.Terminator.State)
+		push(block.Terminator.State)
 	}
 	for i := range function.Block(0).Params {
 		for _, e := range incoming[0] {
@@ -151,8 +136,8 @@ func liveness(function *ssa.Function, blocks []int) (map[site]bool, map[ssa.Valu
 		if at, ok := where[v]; ok {
 			if !params[v] {
 				params[v] = true
-				for _, e := range incoming[at[0]] {
-					push(e.Args[at[1]])
+				for _, e := range incoming[at.block] {
+					push(e.Args[at.index])
 				}
 			}
 			continue

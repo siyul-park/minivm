@@ -84,9 +84,7 @@ func emit(function *ssa.Function, constants *pool, module bool, source *types.Fu
 	e.liveness()
 	for range len(e.uses) + 1 {
 		e.params()
-		if !e.provision() {
-			return nil, nil, false
-		}
+		e.provision()
 		walked := e.walk()
 		if e.failed {
 			return nil, nil, false
@@ -126,11 +124,11 @@ func (e *emitter) collect() bool {
 	e.ops, e.terms = make([][]ssa.Operation, e.function.Len()), make([]ssa.Terminator, e.function.Len())
 
 	for id := range e.function.Len() {
-		currentBlock := e.function.Block(id)
-		for _, p := range currentBlock.Params {
+		block := e.function.Block(id)
+		for _, p := range block.Params {
 			e.defined[p] = id
 		}
-		for _, operation := range currentBlock.Operations {
+		for _, operation := range block.Operations {
 			if !e.accept(id, operation) {
 				return false
 			}
@@ -138,7 +136,7 @@ func (e *emitter) collect() bool {
 				e.source[operation.Results[0]] = operation
 			}
 		}
-		term := currentBlock.Terminator
+		term := block.Terminator
 		term.Args = e.values(term.Args)
 		if len(term.Edges) > 0 {
 			edges := make([]ssa.Edge, len(term.Edges))
@@ -408,13 +406,12 @@ func (e *emitter) params() {
 // the retries that discover the homed set skip the costly assignment. The
 // placeholders say nothing about which values share a local, so a walk before
 // assign skips only moves that cannot change.
-func (e *emitter) provision() bool {
+func (e *emitter) provision() {
 	e.placed = false
 	e.home = make(map[ssa.Value]int, len(e.homed))
 	for v := range e.homed {
 		e.home[v] = 0
 	}
-	return true
 }
 
 func (e *emitter) assign() bool {

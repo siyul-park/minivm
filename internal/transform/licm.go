@@ -30,7 +30,8 @@ func NewLICMPass() *LICMPass {
 
 // Run applies the pass to one SSA function.
 func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
-	dominance := graph.NewDominance(function)
+	l := newLoops(function)
+	dominance := l.dominance
 	headers := graph.Headers(function, dominance)
 	if len(headers) == 0 {
 		return true, nil
@@ -50,20 +51,6 @@ func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	})
 
 	blocks := graph.Order(function)
-	defSite := map[ssa.Value]site{}
-	paramOf := map[ssa.Value]int{}
-	for _, b := range blocks {
-		currentBlock := function.Block(b)
-		for _, v := range currentBlock.Params {
-			paramOf[v] = b
-		}
-		for i, operation := range currentBlock.Operations {
-			for _, r := range operation.Results {
-				defSite[r] = site{b, i}
-			}
-		}
-	}
-
 	calling := make(map[int]bool, len(headers))
 	quiets := make(map[int]bool, len(headers))
 	stored := make(map[int]map[ssa.Slot]bool, len(headers))
@@ -91,10 +78,10 @@ func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 		return s.block
 	}
 	location := func(v ssa.Value) (int, bool) {
-		if b, ok := paramOf[v]; ok {
+		if b, ok := l.params[v]; ok {
 			return b, true
 		}
-		if s, ok := defSite[v]; ok {
+		if s, ok := l.sites[v]; ok {
 			return current(s), true
 		}
 		return 0, false
@@ -135,12 +122,12 @@ func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 					}) {
 						continue
 					}
-					entry, ok := inlet(function, defSite, h, preheader, invariant)
+					entry, ok := inlet(function, l.sites, h, preheader, invariant)
 					if !ok {
 						continue
 					}
 					frames[h], entries[s] = entry, h
-				case sliceable(function, defSite, operation):
+				case sliceable(function, l.sites, operation):
 					if quiets[h] && invariant(operation.Args[0]) {
 						sliced[s] = h
 						changed = true
@@ -172,7 +159,7 @@ func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 
 	r := newRebuilder(function)
 	states := map[int]ssa.Value{}
-	slices := map[[2]int]ssa.Value{}
+	views := map[[2]int]ssa.Value{}
 	for _, b := range blocks {
 		id := r.open(b)
 		for i, operation := range function.Block(b).Operations {
@@ -181,12 +168,12 @@ func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 			operation = r.operation(operation)
 			if h, ok := sliced[site{b, i}]; ok {
 				key := [2]int{int(args[0]), h}
-				if _, ok := slices[key]; !ok {
+				if _, ok := views[key]; !ok {
 					v := r.builder.Value(ssa.TypeRef)
 					r.builder.Add(r.block(preheaders[h]), ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{operation.Args[0]}, Results: []ssa.Value{v}})
-					slices[key] = v
+					views[key] = v
 				}
-				operation.Args[0] = slices[key]
+				operation.Args[0] = views[key]
 			}
 			if h, ok := entries[site{b, i}]; ok {
 				state, ok := states[h]

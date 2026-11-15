@@ -5,7 +5,7 @@ import (
 	"github.com/siyul-park/minivm/pass"
 )
 
-// O1 folds constants and removes dead code. It is the JIT's Baseline tier.
+// O1 folds constants, simplifies block params and merges, and removes dead code. It is the JIT's Baseline tier.
 func O1() []pass.Pass[*ssa.Function] {
 	return []pass.Pass[*ssa.Function]{NewFoldPass(), NewSimplifyPass(), NewDCEPass()}
 }

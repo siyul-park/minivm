@@ -21,8 +21,14 @@ func NewSimplifyPass() *SimplifyPass {
 // Run applies the pass to one SSA function.
 func (p *SimplifyPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	blocks := graph.Order(function)
-	same := trivial(function, blocks)
-	next := merges(function, blocks, same)
+	incoming := map[int][]ssa.Edge{}
+	for _, b := range blocks {
+		for _, e := range function.Block(b).Terminator.Edges {
+			incoming[e.Block] = append(incoming[e.Block], e)
+		}
+	}
+	same := trivial(function, blocks, incoming)
+	next := merges(function, blocks, same, incoming)
 	if len(same) == 0 && len(next) == 0 && len(blocks) == function.Len() {
 		return true, nil
 	}
@@ -55,17 +61,10 @@ func (p *SimplifyPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error
 				block = to
 				continue
 			}
-			term := r.terminator(b.Terminator)
-			for i, e := range b.Terminator.Edges {
-				var kept []ssa.Value
-				for j, param := range function.Block(e.Block).Params {
-					if _, ok := same[param]; !ok {
-						kept = append(kept, term.Edges[i].Args[j])
-					}
-				}
-				term.Edges[i].Args = kept
-			}
-			r.builder.Term(id, term)
+			r.builder.Term(id, r.prune(b.Terminator, func(param ssa.Value) bool {
+				_, ok := same[param]
+				return ok
+			}))
 			break
 		}
 	}
@@ -75,15 +74,8 @@ func (p *SimplifyPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error
 
 // trivial maps each non-entry block param whose incoming edges, from the given
 // blocks, feed one value of its type and possibly itself to that value, which
-// is never itself a replaced param.
-func trivial(function *ssa.Function, blocks []int) map[ssa.Value]ssa.Value {
-	incoming := map[int][]ssa.Edge{}
-	for _, b := range blocks {
-		for _, e := range function.Block(b).Terminator.Edges {
-			incoming[e.Block] = append(incoming[e.Block], e)
-		}
-	}
-
+// is never itself a replaced param. incoming holds each block's edges.
+func trivial(function *ssa.Function, blocks []int, incoming map[int][]ssa.Edge) map[ssa.Value]ssa.Value {
 	same := map[ssa.Value]ssa.Value{}
 	find := func(v ssa.Value) ssa.Value {
 		root := v
@@ -138,14 +130,7 @@ func trivial(function *ssa.Function, blocks []int) map[ssa.Value]ssa.Value {
 
 // merges maps each block that jumps to a non-entry block, itself reached by no
 // other edge from the given blocks and with every param in same, to that block.
-func merges(function *ssa.Function, blocks []int, same map[ssa.Value]ssa.Value) map[int]int {
-	preds := map[int]int{}
-	for _, b := range blocks {
-		for _, e := range function.Block(b).Terminator.Edges {
-			preds[e.Block]++
-		}
-	}
-
+func merges(function *ssa.Function, blocks []int, same map[ssa.Value]ssa.Value, incoming map[int][]ssa.Edge) map[int]int {
 	next := map[int]int{}
 	for _, b := range blocks {
 		term := function.Block(b).Terminator
@@ -153,7 +138,7 @@ func merges(function *ssa.Function, blocks []int, same map[ssa.Value]ssa.Value) 
 			continue
 		}
 		to := term.Edges[0].Block
-		if to == 0 || to == b || preds[to] != 1 {
+		if to == 0 || to == b || len(incoming[to]) != 1 {
 			continue
 		}
 		merged := true

@@ -7,16 +7,6 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-type activation struct {
-	function *types.Function
-	address  int
-	slots    []types.Type
-	// first is the index of the function's first span.
-	first int
-	// profile is the feedback recorded for the function.
-	profile Profile
-}
-
 // facts is what a span's entry knows: its operand stack, and, per
 // slot, the function of the closure this unit stored there, 0 when unknown.
 type facts struct {
@@ -55,13 +45,6 @@ const (
 	backingGlobal                // deferred to a global slot
 	backingUpval                 // deferred to a closure upval slot
 )
-
-func (a activation) returns() int {
-	if a.function.Typ == nil {
-		return 0
-	}
-	return len(a.function.Typ.Returns)
-}
 
 // merge joins src into f and reports whether f changed; a stack shape
 // mismatch cannot join.
@@ -144,9 +127,4 @@ func holds(t types.Type) fact {
 	f.arrayType, _ = t.(*types.ArrayType)
 	f.mapType, _ = t.(*types.MapType)
 	return f
-}
-
-func typ(kind types.Kind) (ssa.Type, bool) {
-	t := ssa.TypeOf(kind)
-	return t, t != 0
 }
