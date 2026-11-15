@@ -38,7 +38,7 @@ type Interpreter struct {
 	hosts int
 	// closing counts the finalizers running. A Close is host code that may
 	// write neither a local nor a global, but a host call may write globals,
-	// so SetGlobal needs its own marker.
+	// so SetGlobal and calls into VM code need their own marker.
 	closing  int
 	hook     func(*Interpreter) error
 	codec    Codec
@@ -812,8 +812,12 @@ func build(prog *program.Program, opts ...Option) (*Interpreter, error) {
 
 // invoke calls val with params. Outside Run it runs val as the root of a Run;
 // inside a running host function it runs val nested on the same interpreter.
-// Any other call during Run is ErrInterpreterBusy.
+// Inside a finalizer it is ErrHostCall, since VM code may write a global, and
+// any other call during Run is ErrInterpreterBusy.
 func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []types.Boxed) (returns []types.Boxed, err error) {
+	if i.closing > 0 {
+		return nil, ErrHostCall
+	}
 	nested := i.ctx != nil
 	if nested && i.hosts == 0 || !nested && i.fp != 1 {
 		return nil, ErrInterpreterBusy

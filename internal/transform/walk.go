@@ -311,7 +311,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		if !capture.referenceKnown || capture.reference <= 0 {
 			return false
 		}
-		target := w.Objects.function(capture.reference)
+		target := w.Objects[capture.reference].Function
 		if target == nil {
 			return false
 		}
@@ -458,7 +458,7 @@ func (w *walker) speculate(at int) *types.Function {
 		return nil
 	}
 	ref := callee.Function
-	target := w.Objects.function(ref)
+	target := w.Objects[ref].Function
 	if target == nil || target.Typ == nil {
 		return nil
 	}
@@ -676,7 +676,7 @@ func (w *walker) callee(at int) *types.Function {
 	if ref <= 0 {
 		return nil
 	}
-	target := w.Objects.function(ref)
+	target := w.Objects[ref].Function
 	if target == nil || target.Typ == nil {
 		return nil
 	}
@@ -890,4 +890,9 @@ func values(stack []operand) []ssa.Value {
 		out[i] = o.value
 	}
 	return out
+}
+
+func typ(kind types.Kind) (ssa.Type, bool) {
+	t := ssa.TypeOf(kind)
+	return t, t != 0
 }

@@ -35,9 +35,14 @@ type induction struct {
 type loops struct {
 	function  *ssa.Function
 	dominance *graph.Dominance
-	profiles  Profiles
 	sites     map[ssa.Value]site
 	params    map[ssa.Value]int
+}
+
+// site is the operation at index of a block.
+type site struct {
+	block int
+	index int
 }
 
 var _ pass.Pass[*ssa.Function] = (*BCEPass)(nil)
@@ -50,16 +55,39 @@ func NewBCEPass(profiles Profiles) *BCEPass {
 
 // Run applies the pass to one SSA function.
 func (p *BCEPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
-	bounded, guards := newLoops(function, p.profiles).bounds()
+	bounded, guards := newLoops(function).bounds(p.profiles)
 	if len(bounded) == 0 {
 		return true, nil
 	}
-	*function = *rebuild(function, bounded, guards)
+
+	r := newRebuilder(function)
+	for _, b := range graph.Order(function) {
+		id := r.open(b)
+		for i, operation := range function.Block(b).Operations {
+			operation = r.operation(operation)
+			if bounded[site{b, i}] {
+				v := r.builder.Value(ssa.TypeI32)
+				r.builder.Add(id, ssa.Operation{Op: ssa.OpBound, Args: []ssa.Value{operation.Args[1], operation.Args[0]}, Results: []ssa.Value{v}})
+				operation.Args[1] = v
+			}
+			r.builder.Add(id, r.define(operation))
+		}
+		// Each guard reads the array's length under the loop's entry state,
+		// then compares it against the limit.
+		for _, guard := range guards[b] {
+			state, length := r.builder.Value(ssa.TypeState), r.builder.Value(ssa.TypeI32)
+			r.builder.Add(id, r.operation(ssa.Operation{Op: ssa.OpState, Frames: guard.Frames, Results: []ssa.Value{state}}))
+			r.builder.Add(id, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{r.value(guard.Args[1])}, State: state, Results: []ssa.Value{length}})
+			r.builder.Add(id, ssa.Operation{Op: ssa.OpGuardBounds, Args: []ssa.Value{r.value(guard.Args[0]), length}, State: state})
+		}
+		r.builder.Term(id, r.terminator(function.Block(b).Terminator))
+	}
+	*function = *r.builder.Build()
 	return false, nil
 }
 
-func newLoops(function *ssa.Function, profiles Profiles) *loops {
-	l := &loops{function: function, dominance: graph.NewDominance(function), profiles: profiles, sites: map[ssa.Value]site{}, params: map[ssa.Value]int{}}
+func newLoops(function *ssa.Function) *loops {
+	l := &loops{function: function, dominance: graph.NewDominance(function), sites: map[ssa.Value]site{}, params: map[ssa.Value]int{}}
 	for b := 0; b < function.Len(); b++ {
 		for _, v := range function.Block(b).Params {
 			l.params[v] = b
@@ -75,12 +103,12 @@ func newLoops(function *ssa.Function, profiles Profiles) *loops {
 
 // bounds reports the array ops whose index becomes an OpBound and, per
 // preheader, the guards that make it sound.
-func (l *loops) bounds() (map[site]bool, map[int][]ssa.Operation) {
+func (l *loops) bounds(profiles Profiles) (map[site]bool, map[int][]ssa.Operation) {
 	bounded := map[site]bool{}
 	guards := map[int][]ssa.Operation{}
 	for _, h := range graph.Headers(l.function, l.dominance) {
 		body := graph.Body(l.function, l.dominance, h)
-		loop, ok := l.induction(body, h)
+		loop, ok := l.induction(body, h, profiles)
 		if !ok {
 			continue
 		}
@@ -110,7 +138,7 @@ func (l *loops) indexed(loop induction, operation ssa.Operation) bool {
 	if operation.Op != ssa.OpExec || (operation.Code != instr.ARRAY_GET && operation.Code != instr.ARRAY_SET) || operation.Args[1] != loop.index {
 		return false
 	}
-	slice, ok := l.define(operation.Args[0])
+	slice, ok := l.op(operation.Args[0])
 	return ok && slice.Op == ssa.OpSlice && loop.frames != nil && l.dominance.Dominates(l.sites[operation.Args[0]].block, loop.preheader)
 }
 
@@ -119,7 +147,7 @@ func (l *loops) indexed(loop induction, operation ssa.Operation) bool {
 // along every latch, n is loop-invariant, and no step wraps i past n.
 // frames is the header's entry state, nil when it has none usable or its
 // offset is refuted: the loop then keeps its checks.
-func (l *loops) induction(body map[int]bool, h int) (induction, bool) {
+func (l *loops) induction(body map[int]bool, h int, profiles Profiles) (induction, bool) {
 	preheader, ok := graph.Preheader(l.function, body, h)
 	if !ok {
 		return induction{}, false
@@ -128,7 +156,7 @@ func (l *loops) induction(body map[int]bool, h int) (induction, bool) {
 	if t.Op != ssa.OpBranch || len(t.Edges) != 2 {
 		return induction{}, false
 	}
-	test, ok := l.define(t.Args[0])
+	test, ok := l.op(t.Args[0])
 	if !ok || l.sites[t.Args[0]].block != h || test.Op != ssa.OpExec {
 		return induction{}, false
 	}
@@ -166,7 +194,7 @@ func (l *loops) induction(body map[int]bool, h int) (induction, bool) {
 		k++
 	}
 	constant := func(v ssa.Value) (int64, bool) {
-		op, ok := l.define(v)
+		op, ok := l.op(v)
 		return int64(int32(op.Const)), ok && op.Op == ssa.OpConst
 	}
 	step := int64(0)
@@ -182,7 +210,7 @@ func (l *loops) induction(body map[int]bool, h int) (induction, bool) {
 				}
 				continue
 			}
-			add, ok := l.define(v)
+			add, ok := l.op(v)
 			if !ok || add.Op != ssa.OpExec || add.Code != instr.I32_ADD || !l.dominance.Dominates(loop.stay, l.sites[v].block) {
 				return induction{}, false
 			}
@@ -209,47 +237,18 @@ func (l *loops) induction(body map[int]bool, h int) (induction, bool) {
 	}
 
 	if frames, ok := inlet(l.function, l.sites, h, preheader, invariant); ok {
-		if at := frames[len(frames)-1]; !l.profiles.Of(at.Address).Refuted[at.IP] {
+		if at := frames[len(frames)-1]; !profiles.Of(at.Address).Refuted[at.IP] {
 			loop.frames = frames
 		}
 	}
 	return loop, true
 }
 
-func (l *loops) define(v ssa.Value) (ssa.Operation, bool) {
+// op is the operation that defines v.
+func (l *loops) op(v ssa.Value) (ssa.Operation, bool) {
 	at, ok := l.sites[v]
 	if !ok {
 		return ssa.Operation{}, false
 	}
 	return l.function.Block(at.block).Operations[at.index], true
-}
-
-func rebuild(function *ssa.Function, bounded map[site]bool, guards map[int][]ssa.Operation) *ssa.Function {
-	r := newRebuilder(function)
-	for _, b := range graph.Order(function) {
-		id := r.open(b)
-		for i, operation := range function.Block(b).Operations {
-			operation = r.operation(operation)
-			if bounded[site{b, i}] {
-				v := r.builder.Value(ssa.TypeI32)
-				r.builder.Add(id, ssa.Operation{Op: ssa.OpBound, Args: []ssa.Value{operation.Args[1], operation.Args[0]}, Results: []ssa.Value{v}})
-				operation.Args[1] = v
-			}
-			r.builder.Add(id, r.define(operation))
-		}
-		for _, guard := range guards[b] {
-			check(r, id, guard)
-		}
-		r.builder.Term(id, r.terminator(function.Block(b).Terminator))
-	}
-	return r.builder.Build()
-}
-
-// check adds guard to block id: the array's length is read under the loop's
-// entry state, then compared against the limit.
-func check(r *rebuilder, id int, guard ssa.Operation) {
-	state, length := r.builder.Value(ssa.TypeState), r.builder.Value(ssa.TypeI32)
-	r.builder.Add(id, r.operation(ssa.Operation{Op: ssa.OpState, Frames: guard.Frames, Results: []ssa.Value{state}}))
-	r.builder.Add(id, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{r.value(guard.Args[1])}, State: state, Results: []ssa.Value{length}})
-	r.builder.Add(id, ssa.Operation{Op: ssa.OpGuardBounds, Args: []ssa.Value{r.value(guard.Args[0]), length}, State: state})
 }

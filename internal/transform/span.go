@@ -57,8 +57,8 @@ func split(code []byte, blocks []*analysis.BasicBlock) ([]span, map[int]int) {
 		for _, succ := range block.Succs {
 			spans[last[i]].flow = append(spans[last[i]].flow, first[succ])
 		}
-		spans[last[i]].succs = successors(code, block, at)
 		inst, ip := final(code, block)
+		spans[last[i]].succs = successors(code, block, inst, ip, at)
 		spans[last[i]].tail = ip >= 0 && inst.Opcode() == instr.RETURN_CALL
 		for _, succ := range spans[last[i]].succs {
 			if succ == exit {
@@ -81,11 +81,12 @@ func past(code []byte) bool {
 	return false
 }
 
-// successors lists the spans block's last instruction can continue into. A
-// RETURN_CALL has none here: the tail call the walker lowers as a loop
-// continues into the first span of the function it names.
-func successors(code []byte, block *analysis.BasicBlock, at map[int]int) []int {
-	if inst, last := final(code, block); last >= 0 {
+// successors lists the spans block's last instruction, inst at offset last
+// (-1 for an empty block), can continue into. A RETURN_CALL has none here: the
+// tail call the walker lowers as a loop continues into the first span of the
+// function it names.
+func successors(code []byte, block *analysis.BasicBlock, inst instr.Instruction, last int, at map[int]int) []int {
+	if last >= 0 {
 		switch inst.Opcode() {
 		case instr.RETURN, instr.RETURN_CALL:
 			return nil

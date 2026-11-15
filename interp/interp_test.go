@@ -32,12 +32,14 @@ type trackedValue struct {
 type panicCloser struct{ trackedValue }
 
 // writerCloser is a host value whose Close tries to write the caller's local 1
-// and global 1, recording what it got back.
+// and global 1, and to call call when set, recording what it got back.
 type writerCloser struct {
 	trackedValue
 	vm     *interp.Interpreter
+	call   func() error
 	local  error
 	global error
+	called error
 }
 
 type structGetHostFields struct {
@@ -1974,6 +1976,9 @@ func (c *writerCloser) Close() error {
 	c.closed++
 	c.local = c.vm.SetLocal(1, types.BoxI32(100))
 	c.global = c.vm.SetGlobal(1, types.BoxI32(7))
+	if c.call != nil {
+		c.called = c.call()
+	}
 	return nil
 }
 
@@ -9817,6 +9822,27 @@ func TestInterpreter_Run(t *testing.T) {
 				vm.Flush()
 				return nativeEntries(profiler) > 0
 			})
+		})
+
+		t.Run("rejects a VM function Close calls", func(t *testing.T) {
+			write := types.NewFunctionBuilder(&types.FunctionType{}).Append(
+				instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.GLOBAL_SET, 1), instr.MustNew(instr.RETURN)).MustBuild()
+			prog := program.New([]instr.Instruction{instr.MustNew(instr.REF_NULL), instr.MustNew(instr.GLOBAL_SET, 0)},
+				program.WithGlobals(types.TypeAny(), types.TypeI32()))
+			vm := interp.MustNew(prog, interp.WithThreshold(-1))
+			defer vm.Close()
+			closer := &writerCloser{vm: vm}
+			require.NoError(t, interp.NewRegistry().Unmarshal(vm, write, &closer.call))
+			addr, err := vm.Alloc(closer)
+			require.NoError(t, err)
+			require.NoError(t, vm.SetGlobal(0, types.BoxRef(addr)))
+
+			require.NoError(t, vm.Run(context.Background()))
+			require.Equal(t, 1, closer.closed)
+			require.ErrorIs(t, closer.called, interp.ErrHostCall)
+			got, err := vm.Global(1)
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(0), got)
 		})
 
 		t.Run("restores the host count when Close panics", func(t *testing.T) {

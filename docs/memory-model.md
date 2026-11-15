@@ -66,7 +66,7 @@ Iteration order (`Range`, `map.keys`, `map.iter`) is unspecified; for numeric ke
 
 A heap object keeps its Go representation type for its lifetime and, for a struct, array, or map, its declared type (`Type().Equals`). The one exception is a `REF_NEW` cell, whose scalar kind `REF_SET` may change. `Interpreter.Store` returns `ErrTypeMismatch` for a value that would change the slot's representation; a scalar replacing a scalar cell is allowed, as with `REF_SET`. Optimizer guards on a shape rely on this. A value borrowed by `Load` keeps it too: the host `MUST NOT` change its type or storage except through `Store`.
 
-A finalizer (`io.Closer.Close`) runs as host code with the VM mid-instruction: it `MUST NOT` write a local or a global (`SetLocal` and `SetGlobal` return `ErrHostCall`), since optimized code holds both across a release.
+A finalizer (`io.Closer.Close`) runs as host code with the VM mid-instruction: it `MUST NOT` write a local or a global (`SetLocal`, `SetGlobal`, and a call of a VM function return `ErrHostCall`), since optimized code holds both across a release.
 
 ## Reference Counting
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/internal/transform"
@@ -16,6 +17,18 @@ import (
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
+
+// probe reads the CFG of the program's first constant function, as a pass
+// added through Optimizer.Add would.
+type probe struct {
+	blocks []*analysis.BasicBlock
+}
+
+func (p *probe) Run(m *pass.Manager, prog *program.Program) (bool, error) {
+	blocks, err := pass.GetResult[[]*analysis.BasicBlock](m, prog.Constants[0])
+	p.blocks = blocks
+	return true, err
+}
 
 func TestNew(t *testing.T) {
 	optimizer := optimize.New(optimize.O2)
@@ -491,21 +504,38 @@ func TestOptimizer_Level(t *testing.T) {
 }
 
 func TestOptimizer_Add(t *testing.T) {
-	pipeline := pass.NewPipeline[*ssa.Function]()
-	pipeline.Add(transform.NewFoldPass())
+	t.Run("runs the added pass", func(t *testing.T) {
+		pipeline := pass.NewPipeline[*ssa.Function]()
+		pipeline.Add(transform.NewFoldPass())
 
-	o := optimize.New(optimize.O0)
-	o.Add(transform.NewSSAPass(pipeline, false))
+		o := optimize.New(optimize.O0)
+		o.Add(transform.NewSSAPass(pipeline, false))
 
-	prog := program.New([]instr.Instruction{
-		instr.MustNew(instr.I32_CONST, 1),
-		instr.MustNew(instr.I32_CONST, 2),
-		instr.MustNew(instr.I32_ADD)})
-	before := prog.String()
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.I32_CONST, 2),
+			instr.MustNew(instr.I32_ADD)})
+		before := prog.String()
 
-	got, err := o.Optimize(prog)
-	require.NoError(t, err)
-	require.NotEqual(t, before, got.String())
+		got, err := o.Optimize(prog)
+		require.NoError(t, err)
+		require.NotEqual(t, before, got.String())
+	})
+
+	t.Run("reads the analyses registered by New", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.RETURN)).MustBuild()
+		prog := program.New([]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(fn))
+
+		p := &probe{}
+		o := optimize.New(optimize.O0)
+		o.Add(p)
+
+		_, err := o.Optimize(prog)
+		require.NoError(t, err)
+		require.Len(t, p.blocks, 1)
+	})
 }
 
 func FuzzOptimizerParity(f *testing.F) {

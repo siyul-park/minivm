@@ -14,7 +14,9 @@ import (
 
 func TestNewInlinePass(t *testing.T) {
 	var _ pass.Pass[*ssa.Function] = transform.NewInlinePass(transform.Module{})
+}
 
+func TestInlinePass_Run(t *testing.T) {
 	i32 := func(params ...types.Type) *types.FunctionType {
 		return &types.FunctionType{Params: params, Returns: []types.Type{types.TypeI32()}}
 	}

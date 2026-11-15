@@ -87,6 +87,16 @@ type translation struct {
 // members are a translation's functions, root first.
 type members []activation
 
+type activation struct {
+	function *types.Function
+	address  int
+	slots    []types.Type
+	// first is the index of the function's first span.
+	first int
+	// profile is the feedback recorded for the function.
+	profile Profile
+}
+
 // reach is what analysis learned: the facts live at each span's entry, which
 // spans were reached, the tail call targets it proved, and, per tail span
 // whose call loops, the member span it jumps to.
@@ -202,10 +212,6 @@ func (p Profiles) Of(address int) Profile {
 		return Profile{}
 	}
 	return *p[address]
-}
-
-func (o Objects) function(reference int) *types.Function {
-	return o[reference].Function
 }
 
 // rotate prepends an empty block ahead of f's own block 0 when it has a
@@ -406,6 +412,13 @@ func (t *translation) build(r reach, root int) *ssa.Function {
 		b.Term(ids[id], term)
 	}
 	return b.Build()
+}
+
+func (a activation) returns() int {
+	if a.function.Typ == nil {
+		return 0
+	}
+	return len(a.function.Typ.Returns)
 }
 
 // flow is the spans facts at s's end flow into: for a tail span, the member

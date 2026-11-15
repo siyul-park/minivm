@@ -84,9 +84,7 @@ func emit(function *ssa.Function, constants *pool, module bool, source *types.Fu
 	e.liveness()
 	for range len(e.uses) + 1 {
 		e.params()
-		if !e.provision() {
-			return nil, nil, false
-		}
+		e.provision()
 		walked := e.walk()
 		if e.failed {
 			return nil, nil, false
@@ -122,23 +120,22 @@ func (e *emitter) collect() bool {
 	e.subst, e.uses, e.defined, e.homed = map[ssa.Value]ssa.Value{}, map[ssa.Value]int{}, map[ssa.Value]int{}, map[ssa.Value]bool{}
 	e.source, e.remat = map[ssa.Value]ssa.Operation{}, map[ssa.Value]bool{}
 	e.spare, e.produced = map[ssa.Value]bool{}, map[ssa.Value]bool{}
-	stored := e.stored()
 	e.ops, e.terms = make([][]ssa.Operation, e.function.Len()), make([]ssa.Terminator, e.function.Len())
 
 	for id := range e.function.Len() {
-		currentBlock := e.function.Block(id)
-		for _, p := range currentBlock.Params {
+		block := e.function.Block(id)
+		for _, p := range block.Params {
 			e.defined[p] = id
 		}
-		for _, operation := range currentBlock.Operations {
+		for _, operation := range block.Operations {
 			if !e.accept(id, operation) {
 				return false
 			}
-			if operation.Op == ssa.OpConst || (operation.Op == ssa.OpLoad && operation.Slot.Space == ssa.SpaceLocal && stored != nil && !stored[operation.Slot.Index]) {
+			if operation.Op == ssa.OpConst {
 				e.source[operation.Results[0]] = operation
 			}
 		}
-		term := currentBlock.Terminator
+		term := block.Terminator
 		term.Args = e.values(term.Args)
 		if len(term.Edges) > 0 {
 			edges := make([]ssa.Edge, len(term.Edges))
@@ -150,6 +147,7 @@ func (e *emitter) collect() bool {
 		}
 		e.terms[id] = term
 	}
+	e.loads()
 
 	for id := range e.function.Len() {
 		for _, operation := range e.ops[id] {
@@ -328,21 +326,72 @@ func (e *emitter) headers() {
 	}
 }
 
-// stored reports the local slots some operation may write, or nil when an
-// opcode writes locals the IR does not name.
-func (e *emitter) stored() map[int]bool {
-	stored := map[int]bool{}
-	for id := range e.function.Len() {
-		for _, operation := range e.function.Block(id).Operations {
-			switch {
-			case operation.Op == ssa.OpStore && operation.Slot.Space == ssa.SpaceLocal:
-				stored[operation.Slot.Index] = true
-			case operation.Op == ssa.OpExec && operation.Code.Writes(instr.Local):
-				return nil
+// loads makes each load of a local slot a source when no store to the slot can
+// run between the load and any use of its result, so the use rereads the slot
+// and the value is never homed. A use in another block than the load's is
+// reached through the blocks that precede it, back to the load's block, which
+// the load dominates. Nothing is a source when an opcode writes locals the IR
+// does not name.
+func (e *emitter) loads() {
+	type site struct{ block, at int }
+	stores, uses := map[int]map[int][]int{}, map[ssa.Value][]site{}
+	for id, ops := range e.ops {
+		for at, operation := range ops {
+			if operation.Op == ssa.OpExec && operation.Code.Writes(instr.Local) {
+				return
+			}
+			if operation.Op == ssa.OpStore && operation.Slot.Space == ssa.SpaceLocal {
+				if stores[operation.Slot.Index] == nil {
+					stores[operation.Slot.Index] = map[int][]int{}
+				}
+				stores[operation.Slot.Index][id] = append(stores[operation.Slot.Index][id], at)
+			}
+			for _, v := range operation.Args {
+				uses[v] = append(uses[v], site{id, at})
+			}
+		}
+		term := e.terms[id]
+		for _, v := range term.Args {
+			uses[v] = append(uses[v], site{id, len(ops)})
+		}
+		for _, edge := range term.Edges {
+			for _, v := range edge.Args {
+				uses[v] = append(uses[v], site{id, len(ops)})
 			}
 		}
 	}
-	return stored
+	between := func(writes []int, from, to int) bool {
+		return slices.ContainsFunc(writes, func(at int) bool { return at > from && at < to })
+	}
+	for id, ops := range e.ops {
+		for at, operation := range ops {
+			if operation.Op != ssa.OpLoad || operation.Slot.Space != ssa.SpaceLocal {
+				continue
+			}
+			writes, intact := stores[operation.Slot.Index], true
+			for _, use := range uses[operation.Results[0]] {
+				if use.block == id {
+					intact = intact && !between(writes[id], at, use.at)
+					continue
+				}
+				intact = intact && !between(writes[id], at, len(ops)) && !between(writes[use.block], -1, use.at)
+				reached, walk := map[int]bool{}, slices.Clone(e.function.Pred(use.block))
+				for len(walk) > 0 && intact {
+					block := walk[len(walk)-1]
+					walk = walk[:len(walk)-1]
+					if block == id || reached[block] {
+						continue
+					}
+					reached[block] = true
+					intact = len(writes[block]) == 0
+					walk = append(walk, e.function.Pred(block)...)
+				}
+			}
+			if intact {
+				e.source[operation.Results[0]] = operation
+			}
+		}
+	}
 }
 
 func (e *emitter) accept(id int, operation ssa.Operation) bool {
@@ -408,13 +457,12 @@ func (e *emitter) params() {
 // the retries that discover the homed set skip the costly assignment. The
 // placeholders say nothing about which values share a local, so a walk before
 // assign skips only moves that cannot change.
-func (e *emitter) provision() bool {
+func (e *emitter) provision() {
 	e.placed = false
 	e.home = make(map[ssa.Value]int, len(e.homed))
 	for v := range e.homed {
 		e.home[v] = 0
 	}
-	return true
 }
 
 func (e *emitter) assign() bool {

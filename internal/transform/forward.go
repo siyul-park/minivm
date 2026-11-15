@@ -12,7 +12,7 @@ import (
 // ForwardPass replaces a load of a slot by the value an earlier load read from
 // it, or an earlier store wrote to it, when the slot is unchanged and the types
 // agree. A stored reference is not forwarded, because the slot owns it, nor is
-// a stored i64, because its load is guarded.
+// a stored i64, because its load is guarded. A held local is dropped at a CALL.
 type ForwardPass struct{}
 
 var _ pass.Pass[*ssa.Function] = (*ForwardPass)(nil)

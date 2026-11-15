@@ -13,7 +13,8 @@ import (
 )
 
 // FoldPass evaluates pure operations with constant operands, reduces integer
-// identities and same-operand forms, and turns a branch or table whose
+// identities and same-operand forms, rewrites a multiply or unsigned divide by
+// a power of two into a shift, and turns a branch or table whose
 // successor is decided into a jump, which drops the blocks it leaves
 // unreachable. A block param that every surviving edge into its block feeds
 // the same constant is that constant; a block a retreating edge also enters

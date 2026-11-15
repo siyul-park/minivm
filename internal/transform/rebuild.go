@@ -112,6 +112,21 @@ func (r *rebuilder) locals(locals []ssa.Local) []ssa.Local {
 	return out
 }
 
+// prune is terminator without the edge args that feed a param dead reports.
+func (r *rebuilder) prune(t ssa.Terminator, dead func(ssa.Value) bool) ssa.Terminator {
+	term := r.terminator(t)
+	for i, e := range t.Edges {
+		var kept []ssa.Value
+		for j, param := range r.from.Block(e.Block).Params {
+			if !dead(param) {
+				kept = append(kept, term.Edges[i].Args[j])
+			}
+		}
+		term.Edges[i].Args = kept
+	}
+	return term
+}
+
 func (r *rebuilder) terminator(t ssa.Terminator) ssa.Terminator {
 	t.Args = r.list(t.Args)
 	if len(t.Edges) > 0 {
