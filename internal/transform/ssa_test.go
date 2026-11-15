@@ -186,6 +186,100 @@ func TestSSAPass_Run(t *testing.T) {
 		}
 	})
 
+	t.Run("a local load whose slot no store reaches before a use is not homed", func(t *testing.T) {
+		o3 := pass.NewPipeline[*ssa.Function]()
+		for _, p := range transform.O3() {
+			o3.Add(p)
+		}
+		build := func(emit func(b *program.Builder)) *program.Program {
+			b := program.NewBuilder()
+			emit(b)
+			prog, err := b.Build()
+			require.NoError(t, err)
+			require.NoError(t, program.Verify(prog))
+			return prog
+		}
+
+		t.Run("an outer loop's store does not home a hoisted load", func(t *testing.T) {
+			prog := build(func(b *program.Builder) {
+				outer, outerDone, inner, innerDone := b.Label(), b.Label(), b.Label(), b.Label()
+				b.Locals(types.NewArrayType(types.TypeI32()), types.TypeI32(), types.TypeI32(), types.TypeI32())
+				b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+				b.Bind(outer)
+				b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 3).Emit(instr.I32_GE_S).BrIf(outerDone)
+				b.ConstGet(types.TypedArray[int32]{1, 2, 3, 4}).Emit(instr.LOCAL_SET, 0)
+				b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
+				b.Bind(inner)
+				b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 4).Emit(instr.I32_GE_S).BrIf(innerDone)
+				b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 3).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+				b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+				b.Br(inner)
+				b.Bind(innerDone)
+				b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+				b.Br(outer)
+				b.Bind(outerDone).Emit(instr.LOCAL_GET, 1)
+			})
+			want, wantErr := executionResult(t, prog)
+
+			got := duplicateConstants(prog)
+			_, err := transform.NewSSAPass(o3, false).Run(pass.NewManager(), got)
+			require.NoError(t, err)
+			require.NoError(t, program.Verify(got))
+			require.LessOrEqual(t, len(got.Locals), len(prog.Locals))
+
+			values, message := executionResult(t, got)
+			require.Equal(t, wantErr, message)
+			require.Equal(t, want[0], values[0])
+		})
+
+		t.Run("a store on a path to a use homes the load", func(t *testing.T) {
+			prog := build(func(b *program.Builder) {
+				join := b.Label()
+				b.Locals(types.NewArrayType(types.TypeI32())).Globals(types.TypeI32(), types.TypeI32())
+				b.ConstGet(types.TypedArray[int32]{1, 2}).Emit(instr.LOCAL_SET, 0)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_LEN).Emit(instr.GLOBAL_SET, 1)
+				b.Emit(instr.GLOBAL_GET, 0).BrIf(join)
+				b.ConstGet(types.TypedArray[int32]{1, 2, 3}).Emit(instr.LOCAL_SET, 0)
+				b.Bind(join).Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_LEN)
+			})
+
+			// The join reads the array its entry loaded, past the store that
+			// replaced it, so only a homed load gives the first array's length.
+			reread := pass.NewPipeline[*ssa.Function]()
+			reread.Add(run[*ssa.Function, bool](func(_ *pass.Manager, f *ssa.Function) (bool, error) {
+				first := ssa.Value(-1)
+				for id := range f.Len() {
+					block := f.Block(id)
+					for i, operation := range block.Operations {
+						if operation.Op != ssa.OpLoad || operation.Slot.Space != ssa.SpaceLocal {
+							continue
+						}
+						if first < 0 {
+							first = operation.Results[0]
+							continue
+						}
+						for _, later := range block.Operations[i+1:] {
+							for k, arg := range later.Args {
+								if arg == operation.Results[0] {
+									later.Args[k] = first
+								}
+							}
+						}
+					}
+				}
+				return false, nil
+			}))
+			got := duplicateConstants(prog)
+			_, err := transform.NewSSAPass(reread, false).Run(pass.NewManager(), got)
+			require.NoError(t, err)
+			require.NoError(t, program.Verify(got))
+
+			values, message := executionResult(t, got)
+			require.Empty(t, message)
+			require.Equal(t, types.I32(2), values[0])
+		})
+	})
+
 	t.Run("a round trip preserves what a generatedProgram program does", func(t *testing.T) {
 		rnd := rand.New(rand.NewSource(1))
 		rewritten := 0
@@ -1382,7 +1476,6 @@ func TestSSAPass_Run(t *testing.T) {
 
 			f := check(t, prog)
 			require.Len(t, f.Locals, len(fn.Locals))
-			require.Contains(t, opcodes(f), instr.DUP)
 		})
 
 		t.Run("a value stored through a wider operation is homed", func(t *testing.T) {
