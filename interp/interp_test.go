@@ -42,6 +42,21 @@ type writerCloser struct {
 	called error
 }
 
+// sinkCloser is a host value whose Close calls sink, the way a host object that
+// shut down calls a Go func the VM bound to one of its functions.
+type sinkCloser struct {
+	trackedValue
+	sink  func(string) error
+	calls int
+	err   error
+}
+
+func (c *sinkCloser) Close() error {
+	c.calls++
+	c.err = c.sink("closed")
+	return nil
+}
+
 type structGetHostFields struct {
 	Count  int32
 	hidden int32
@@ -9843,6 +9858,40 @@ func TestInterpreter_Run(t *testing.T) {
 			got, err := vm.Global(1)
 			require.NoError(t, err)
 			require.Equal(t, types.BoxI32(0), got)
+		})
+
+		t.Run("releases the argument a rejected finalizer call encoded", func(t *testing.T) {
+			// A string argument reaches the heap, so one the call leaves behind
+			// stays live.
+			sink := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString()}}).
+				Append(instr.MustNew(instr.RETURN)).MustBuild()
+			prog := program.New([]instr.Instruction{instr.MustNew(instr.REF_NULL), instr.MustNew(instr.GLOBAL_SET, 0)},
+				program.WithGlobals(types.TypeAny()))
+			vm := interp.MustNew(prog, interp.WithThreshold(-1))
+			defer vm.Close()
+			closer := &sinkCloser{}
+			require.NoError(t, interp.NewRegistry().Unmarshal(vm, sink, &closer.sink))
+			addr, err := vm.Alloc(closer)
+			require.NoError(t, err)
+			require.NoError(t, vm.SetGlobal(0, types.BoxRef(addr)))
+
+			live := func() int {
+				n := 0
+				for addr := 1; addr < vm.HeapLen(); addr++ {
+					if count, err := vm.RefCount(addr); err == nil && count > 0 {
+						n++
+					}
+				}
+				return n
+			}
+			before := live()
+
+			// The guard rejects the call before the argument reaches the stack,
+			// so the rejected call releases it.
+			require.NoError(t, vm.Run(context.Background()))
+			require.Equal(t, 1, closer.calls)
+			require.ErrorIs(t, closer.err, interp.ErrHostCall)
+			require.Equal(t, before-1, live(), "the closer is freed and the argument is not left live")
 		})
 
 		t.Run("restores the host count when Close panics", func(t *testing.T) {

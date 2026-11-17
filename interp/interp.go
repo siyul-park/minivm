@@ -814,42 +814,49 @@ func build(prog *program.Program, opts ...Option) (*Interpreter, error) {
 // inside a running host function it runs val nested on the same interpreter.
 // Inside a finalizer it is ErrHostCall, since VM code may write a global, and
 // any other call during Run is ErrInterpreterBusy.
+//
+// invoke takes params: a call it starts releases them with the stack, and a
+// refused one releases them here, so the caller hands them over and releases
+// nothing itself.
 func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []types.Boxed) (returns []types.Boxed, err error) {
-	if i.closing > 0 {
-		return nil, ErrHostCall
-	}
 	nested := i.ctx != nil
-	if nested && i.hosts == 0 || !nested && i.fp != 1 {
-		return nil, ErrInterpreterBusy
-	}
-	if nested && i.fp == len(i.frames) {
-		return nil, ErrFrameOverflow
-	}
-	target, ok := i.callable(val)
-	if !ok {
-		return nil, ErrTypeMismatch
-	}
+	target, found := i.callable(val)
 	base := i.sp
-	if base+len(params)+1 > len(i.stack) {
-		return nil, ErrStackOverflow
-	}
-	copy(i.stack[base:], params)
-	i.sp += len(params)
 
-	// Take a reference to the heap address val already names or target
-	// already owns, else to a new one.
 	var addr int
-	if boxed, ok := val.(types.Boxed); ok {
-		addr = boxed.Ref()
-		i.retain(addr)
-	} else if addr = i.owner(target); addr >= 0 {
-		i.retain(addr)
-	} else if addr, err = i.Alloc(target); err != nil {
-		i.sp = base
+	switch {
+	case i.closing > 0:
+		err = ErrHostCall
+	case nested && i.hosts == 0 || !nested && i.fp != 1:
+		err = ErrInterpreterBusy
+	case nested && i.fp == len(i.frames):
+		err = ErrFrameOverflow
+	case !found:
+		err = ErrTypeMismatch
+	case base+len(params)+1 > len(i.stack):
+		err = ErrStackOverflow
+	default:
+		// Take a reference to the heap address val already names or target
+		// already owns, else to a new one.
+		if boxed, ok := val.(types.Boxed); ok {
+			addr = boxed.Ref()
+			i.retain(addr)
+		} else if addr = i.owner(target); addr >= 0 {
+			i.retain(addr)
+		} else {
+			addr, err = i.Alloc(target)
+		}
+	}
+	if err != nil {
+		for _, param := range params {
+			i.releaseBox(param)
+		}
 		return nil, err
 	}
-	i.stack[i.sp] = types.BoxRef(addr)
-	i.sp++
+
+	copy(i.stack[base:], params)
+	i.stack[base+len(params)] = types.BoxRef(addr)
+	i.sp = base + len(params) + 1
 
 	call := []func(*Interpreter){threaded[instr.CALL](&threader{})}
 	if nested {

@@ -575,7 +575,6 @@ func (r *Registry) unmarshalFunc(t reflect.Type, fn *types.FunctionType) Unmarsh
 				}
 				boxed, err := enc.slot(arg, fn.Params[len(params)])
 				if err != nil {
-
 					enc.discard()
 					return fail(fmt.Errorf("function param %d: %w", len(params), err))
 				}
