@@ -823,6 +823,7 @@ func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []type
 	target, found := i.callable(val)
 	base := i.sp
 
+	var addr int
 	switch {
 	case i.closing > 0:
 		err = ErrHostCall
@@ -834,12 +835,9 @@ func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []type
 		err = ErrTypeMismatch
 	case base+len(params)+1 > len(i.stack):
 		err = ErrStackOverflow
-	}
-
-	// Take a reference to the heap address val already names or target
-	// already owns, else to a new one.
-	var addr int
-	if err == nil {
+	default:
+		// Take a reference to the heap address val already names or target
+		// already owns, else to a new one.
 		if boxed, ok := val.(types.Boxed); ok {
 			addr = boxed.Ref()
 			i.retain(addr)
