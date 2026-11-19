@@ -106,7 +106,7 @@ func (p *InlinePass) body(ref int, target *types.Function) *ssa.Function {
 		return nil
 	}
 	body, _, err := Translate(p.module, nil, ref, target, 0)
-	if err != nil || body == nil {
+	if err != nil {
 		return nil
 	}
 	if _, err := NewPromotePass().Run(nil, body); err != nil {

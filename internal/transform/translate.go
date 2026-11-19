@@ -116,17 +116,22 @@ type proof struct {
 // memberMax caps a translation's functions, the root included.
 const memberMax = 4
 
-// ErrEntry reports an entry offset that does not start a basic block.
-var ErrEntry = errors.New("entry starts no block")
+var (
+	// ErrEntry reports an entry offset that does not start a basic block.
+	ErrEntry = errors.New("entry starts no block")
+	// ErrUnsupported reports bytecode that translation does not express.
+	ErrUnsupported = errors.New("unsupported translation")
+)
 
 // Translate converts one bytecode function from entry to SSA, together with
 // every function a static tail call from it proves can share its frame (see
 // newTranslation), and returns the addresses of those functions, root
 // first: the code depends on each one's profile.
-// It returns ErrEntry for a non-block entry and nil when translation is unsupported.
+// It returns ErrEntry for a non-block entry and ErrUnsupported for code it
+// does not express.
 func Translate(module Module, profiles Profiles, address int, function *types.Function, entry int) (*ssa.Function, []int, error) {
 	if function == nil || len(function.Code) == 0 {
-		return nil, nil, nil
+		return nil, nil, fmt.Errorf("%w: no code", ErrUnsupported)
 	}
 	blocks, err := analysis.Blocks(function)
 	if err != nil {
@@ -138,27 +143,30 @@ func Translate(module Module, profiles Profiles, address int, function *types.Fu
 		return nil, nil, fmt.Errorf("%w: entry %d starts no block", ErrEntry, entry)
 	}
 	if spans[0].start != 0 {
-		return nil, nil, nil
+		return nil, nil, fmt.Errorf("%w: code before the first block", ErrUnsupported)
 	}
 	t, ok := newTranslation(module, activation{function: function, address: address, slots: function.Declared(), profile: profiles.Of(address)}, spans, profiles)
 	if !ok {
-		return nil, nil, nil
+		return nil, nil, fmt.Errorf("%w: analysis", ErrUnsupported)
 	}
 	reached, ok := t.analyze(0, facts{closures: make([]int, len(t.acts[0].slots))})
 	if !ok {
-		return nil, nil, nil
+		return nil, nil, fmt.Errorf("%w: analysis", ErrUnsupported)
 	}
 	if root != 0 {
 		if !reached.seen[root] {
-			return nil, nil, nil
+			return nil, nil, fmt.Errorf("%w: entry %d unreached", ErrUnsupported, entry)
 		}
 		reached, ok = t.analyze(root, reached.states[root].owning())
 		if !ok {
-			return nil, nil, nil
+			return nil, nil, fmt.Errorf("%w: analysis at entry %d", ErrUnsupported, entry)
 		}
 	}
 	built := t.build(reached, root)
-	if built != nil && len(built.Pred(0)) > 0 {
+	if built == nil {
+		return nil, nil, fmt.Errorf("%w: operation", ErrUnsupported)
+	}
+	if len(built.Pred(0)) > 0 {
 		built = rotate(built)
 	}
 	addresses := make([]int, len(t.acts))

@@ -231,14 +231,14 @@ blk3: (v6:ref) <-- (blk1)
 
 		fn := &types.Function{Code: instr.Marshal(code)}
 		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, headerOffset)
-		require.NoError(t, err)
+		require.ErrorIs(t, err, transform.ErrUnsupported)
 		require.Nil(t, out)
 	})
 
 	t.Run("declines what bytecode alone cannot resolve/no code", func(t *testing.T) {
 		fn := &types.Function{Typ: &types.FunctionType{}}
 		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
-		require.NoError(t, err)
+		require.ErrorIs(t, err, transform.ErrUnsupported)
 		require.Nil(t, out)
 	})
 
@@ -265,7 +265,7 @@ blk1: (v5:i32) <-- (blk0)
 		fn, catch := protectedFunction(t)
 
 		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, catch)
-		require.NoError(t, err)
+		require.ErrorIs(t, err, transform.ErrUnsupported)
 		require.Nil(t, out)
 	})
 
@@ -277,7 +277,7 @@ blk1: (v5:i32) <-- (blk0)
 			})}
 		m := transform.Module{Constants: []types.Boxed{types.BoxRef(2)}, Objects: transform.Objects{}}
 		out, _, err := transform.Translate(m, nil, 1, fn, 0)
-		require.NoError(t, err)
+		require.ErrorIs(t, err, transform.ErrUnsupported)
 		require.Nil(t, out)
 	})
 
@@ -289,7 +289,7 @@ blk1: (v5:i32) <-- (blk0)
 			})}
 		m := transform.Module{Types: []types.Type{types.NewStructType()}}
 		out, _, err := transform.Translate(m, nil, 1, fn, 0)
-		require.NoError(t, err)
+		require.ErrorIs(t, err, transform.ErrUnsupported)
 		require.Nil(t, out)
 	})
 
@@ -302,7 +302,7 @@ blk1: (v5:i32) <-- (blk0)
 				})}
 			m := transform.Module{Types: []types.Type{types.NewStructType()}}
 			out, _, err := transform.Translate(m, nil, 1, fn, 0)
-			require.NoError(t, err, name)
+			require.ErrorIs(t, err, transform.ErrUnsupported, name)
 			require.Nil(t, out, name)
 		}
 	})
@@ -312,7 +312,7 @@ blk1: (v5:i32) <-- (blk0)
 			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32()}},
 			Code: assemble(t, func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.YIELD).Emit(instr.RETURN) })}
 		out, _, err := transform.Translate(transform.Module{}, nil, 1, fn, 0)
-		require.NoError(t, err)
+		require.ErrorIs(t, err, transform.ErrUnsupported)
 		require.Nil(t, out)
 	})
 
@@ -1124,7 +1124,7 @@ blk4: () <-- (blk1)
 		fn, ip := coldCallFunction(t)
 		profiles := transform.Profiles{1: {Callees: map[int]transform.Callee{ip: {}}}}
 		out, _, err := transform.Translate(transform.Module{}, profiles, 1, fn, 0)
-		require.NoError(t, err)
+		require.ErrorIs(t, err, transform.ErrUnsupported)
 		require.Nil(t, out)
 	})
 
@@ -1137,7 +1137,7 @@ blk4: () <-- (blk1)
 		profiles := transform.Profiles{1: {Callees: map[int]transform.Callee{ips[0]: {Function: 7}, ips[1]: {Function: 7}}}}
 
 		out, _, err := transform.Translate(m, profiles, 1, fn, 0)
-		require.NoError(t, err)
+		require.ErrorIs(t, err, transform.ErrUnsupported)
 		require.Nil(t, out)
 	})
 
@@ -1159,7 +1159,7 @@ blk4: () <-- (blk1)
 		profiles := transform.Profiles{0: {Callees: map[int]transform.Callee{ip: {Function: 1}}}}
 
 		out, _, err := transform.Translate(m, profiles, 0, fn, 0)
-		require.NoError(t, err)
+		require.ErrorIs(t, err, transform.ErrUnsupported)
 		require.Nil(t, out)
 	})
 

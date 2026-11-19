@@ -1,6 +1,7 @@
 package transform
 
 import (
+	"errors"
 	"slices"
 
 	"github.com/siyul-park/minivm/instr"
@@ -157,7 +158,10 @@ func (p *SSAPass) roundtrip(manager *pass.Manager, constants *pool, address int,
 		return false, nil
 	}
 	f, _, err := Translate(constants.module(), nil, address, function, 0)
-	if err != nil || f == nil {
+	if errors.Is(err, ErrUnsupported) {
+		return false, nil
+	}
+	if err != nil {
 		return false, err
 	}
 	if p.inline {
