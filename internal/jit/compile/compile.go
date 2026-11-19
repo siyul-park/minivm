@@ -132,6 +132,12 @@ type stall struct {
 	v  ssa.Value
 }
 
+// laid is f with the successors layout visits in its order.
+type laid struct {
+	*ssa.Function
+	succs [][]int
+}
+
 // Lower emits code for f and its exit maps. address is the unit's own
 // function address: a call to it is its own recursion. count requests its
 // function-entry hotness counter. An OSR unit's block
@@ -264,6 +270,11 @@ func (l *lowering) Release(ref asm.VReg) (exit, resume asm.Label) {
 // Box places a box stub for word, a wide i64.
 func (l *lowering) Box(word asm.VReg) (exit, resume asm.Label) {
 	return l.word(jit.ExitBox, types.KindI64, word)
+}
+
+// Succ returns block's successors in layout's visiting order.
+func (g laid) Succ(block int) []int {
+	return g.succs[block]
 }
 
 // Type is v's static type.
@@ -1054,38 +1065,14 @@ func convention(ts []types.Type) []types.Kind {
 // visits that successor last.
 func (l *lowering) layout() []int {
 	f := l.f
-	if f.Len() == 0 {
-		return nil
-	}
-	visited := make([]bool, f.Len())
-	post := make([]int, 0, f.Len())
-	type frame struct {
-		block int
-		succ  []int
-	}
-	push := func(stack []frame, block int) []frame {
-		visited[block] = true
+	succs := make([][]int, f.Len())
+	for block := range succs {
 		succ := f.Succ(block)
 		loop := l.inner[block]
 		if f.Block(block).Terminator.Op == ssa.OpBranch && len(succ) == 2 && loop != nil && loop[succ[0]] && !loop[succ[1]] {
 			succ = []int{succ[1], succ[0]}
 		}
-		return append(stack, frame{block, succ})
+		succs[block] = succ
 	}
-	stack := push(nil, 0)
-	for len(stack) > 0 {
-		top := &stack[len(stack)-1]
-		if len(top.succ) > 0 {
-			next := top.succ[0]
-			top.succ = top.succ[1:]
-			if !visited[next] {
-				stack = push(stack, next)
-			}
-			continue
-		}
-		post = append(post, top.block)
-		stack = stack[:len(stack)-1]
-	}
-	slices.Reverse(post)
-	return post
+	return graph.Order(laid{f, succs})
 }
