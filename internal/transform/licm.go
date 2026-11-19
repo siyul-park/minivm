@@ -246,7 +246,18 @@ func hoistable(operation ssa.Operation) bool {
 	case ssa.OpConst:
 		return true
 	case ssa.OpExec:
-		return operation.Code.IsPure() && !operation.Code.Traps() && !ssa.OverflowsI64(operation.Code)
+		return operation.Code.IsPure() && !operation.Code.Traps() && !overflows(operation.Code)
+	default:
+		return false
+	}
+}
+
+// overflows reports opcodes that can exceed the boxed i64 payload.
+func overflows(code instr.Opcode) bool {
+	switch code {
+	case instr.I64_ADD, instr.I64_SUB, instr.I64_MUL, instr.I64_SHL, instr.I64_SHR_U,
+		instr.I64_DIV_S, instr.I64_DIV_U:
+		return true
 	default:
 		return false
 	}

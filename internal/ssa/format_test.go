@@ -2,7 +2,6 @@ package ssa_test
 
 import (
 	"math"
-	"reflect"
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
@@ -212,7 +211,7 @@ func TestFormat(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Shape: ssa.Shape{Type: 0x50}, Args: []ssa.Value{callee, three}, State: state, Results: []ssa.Value{returned}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_NEW_DEFAULT, Args: []ssa.Value{returned}, State: state, Results: []ssa.Value{fresh}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{fresh}, State: state})
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Struct: true, Type: 0x40, Host: reflect.Int16}, Args: []ssa.Value{target}, State: state, Results: []ssa.Value{record}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Struct: true, Type: 0x40}, Args: []ssa.Value{target}, State: state, Results: []ssa.Value{record}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_GET, Args: []ssa.Value{record, three}, State: state, Results: []ssa.Value{field}})
 		b.Term(entry, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{field}, Edges: []ssa.Edge{{Block: stop}, {Block: give}, {Block: end}}})
 
@@ -237,7 +236,7 @@ func TestFormat(t *testing.T) {
 			"\tv8:i32 = call v2, v6 callee type 0x50 state v1\n"+
 			"\tv9:ref = array.new_default v8 state v1\n"+
 			"\trelease v9 state v1\n"+
-			"\tv11:ref = guard.shape v4 struct type 0x40 host int16 state v1\n"+
+			"\tv11:ref = guard.shape v4 struct type 0x40 state v1\n"+
 			"\tv10:i32 = struct.get v11, v6 state v1\n"+
 			"\ttable v10, blk1(), blk2(), blk3()\n"+
 			"blk1: () <-- (blk0)\n"+
