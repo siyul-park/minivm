@@ -469,7 +469,7 @@ func TestNew(t *testing.T) {
 		fib, module := fibonacci(t)
 		f, _, err := transform.Translate(module, nil, 2, fib, 0)
 		require.NoError(t, err)
-		assembly, err := compile.Lower(f, arm64.New(), fib, module.Objects, 0, false, true)
+		assembly, err := compile.Lower(f, compile.Unit{Function: fib, Module: transform.Module{Objects: module.Objects}, Tier: jit.Baseline}, arm64.New())
 		require.NoError(t, err)
 		buffer, err := asm.NewBuffer(target.New(), len(assembly.Bytes))
 		require.NoError(t, err)
@@ -626,7 +626,7 @@ func TestNew(t *testing.T) {
 		at := state(b, entry)
 		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{v}, State: at})
 		// natives[address] holds the body, not the Go entry stub.
-		calleeAssembly, err := compile.Lower(b.Build(), arm64.New(), callee, nil, 7, false, true)
+		calleeAssembly, err := compile.Lower(b.Build(), compile.Unit{Function: callee, Address: 7, Tier: jit.Baseline}, arm64.New())
 		require.NoError(t, err)
 		calleeBuffer, err := asm.NewBuffer(target.New(), len(calleeAssembly.Bytes))
 		require.NoError(t, err)
@@ -4135,7 +4135,7 @@ func translate(t *testing.T, fn *types.Function) *ssa.Function {
 // call: see the "records a nested native call" case, which links directly).
 func lower(t *testing.T, m compile.Machine, f *ssa.Function, fn *types.Function, objects transform.Objects, address int, osr bool) (uintptr, []jit.Exit) {
 	t.Helper()
-	assembly, err := compile.Lower(f, m, fn, objects, address, osr, !osr)
+	assembly, err := compile.Lower(f, compile.Unit{Function: fn, Module: transform.Module{Objects: objects}, Address: address, OSR: osr, Tier: jit.Baseline}, m)
 	require.NoError(t, err)
 	buffer, err := asm.NewBuffer(target.New(), len(assembly.Bytes))
 	require.NoError(t, err)
