@@ -42,11 +42,11 @@ func Compile(u Unit, m Machine) (*jit.Code, error) {
 
 func build(u Unit, m Machine, inline bool) (*jit.Code, error) {
 	f, members, err := transform.Translate(u.Module, u.Profiles, u.Address, u.Function, u.IP)
+	if errors.Is(err, transform.ErrUnsupported) {
+		return nil, fmt.Errorf("%w: %w", ErrUnsupported, err)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("compile: translate: %w", err)
-	}
-	if f == nil {
-		return nil, fmt.Errorf("%w: translate", ErrUnsupported)
 	}
 	if err := ssa.Verify(f); err != nil {
 		return nil, fmt.Errorf("compile: verify: %w", err)
