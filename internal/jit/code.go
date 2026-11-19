@@ -55,13 +55,25 @@ type Code struct {
 }
 
 // Assembly is one unit's machine code before NewCode links it: the bytes,
-// the exit maps their exits index, and the Go entry stub's byte offset.
+// the exit maps their exits index, the Go entry stub's byte offset, and the
+// signature kinds Prologue was laid out with.
 type Assembly struct {
 	Bytes []byte
 	Exits []Exit
 	// Sites are the native call sites by ascending Offset.
 	Sites []Site
 	Entry int
+	// Results is the value count a TrapReturn leaves: module code's own
+	// OpComplete carries it on the operand stack past the locals, since it
+	// has no Typ.Returns to read it from otherwise.
+	Results int
+	// Registers is the function's register-convention result kinds, nil
+	// when Return boxes to the frame. An i64 one reaches its frame slot as
+	// a raw word the caller must box.
+	Registers []types.Kind
+	// Arguments is the function's register-convention parameter kinds, nil
+	// when Prologue reads only slots.
+	Arguments []types.Kind
 }
 
 // Site is one native call: Offset is its return address as a byte offset
@@ -89,7 +101,7 @@ const (
 
 // NewCode links code into a new Buffer and returns one native code value with
 // its identity, signature metadata, exits, and Go entry stub.
-func NewCode(address, ip int, osr bool, tier Tier, results int, registers, arguments []types.Kind, a Assembly) (*Code, error) {
+func NewCode(address, ip int, osr bool, tier Tier, a Assembly) (*Code, error) {
 	if a.Entry < 0 || a.Entry > len(a.Bytes) {
 		return nil, fmt.Errorf("%w: entry stub offset %d", asm.ErrInvalidArgs, a.Entry)
 	}
@@ -102,8 +114,8 @@ func NewCode(address, ip int, osr bool, tier Tier, results int, registers, argum
 		return nil, errors.Join(err, buffer.Free())
 	}
 	return &Code{
-		Address: address, IP: ip, OSR: osr, Tier: tier, Results: results,
-		Registers: slices.Clone(registers), Arguments: slices.Clone(arguments), Exits: slices.Clone(a.Exits), Sites: slices.Clone(a.Sites),
+		Address: address, IP: ip, OSR: osr, Tier: tier, Results: a.Results,
+		Registers: slices.Clone(a.Registers), Arguments: slices.Clone(a.Arguments), Exits: slices.Clone(a.Exits), Sites: slices.Clone(a.Sites),
 		native: native, entry: native + uintptr(a.Entry), size: len(a.Bytes), buffer: buffer,
 	}, nil
 }

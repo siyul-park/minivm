@@ -25,6 +25,8 @@ type lowering struct {
 	// its function's own entry.
 	osr   bool
 	count bool
+	// prologue is the layout Prologue and Enter were handed.
+	prologue Layout
 	// headers are f's loop headers and inner maps every block in a loop
 	// body to the body of its innermost loop; gate rejects a bridge or box
 	// exit outside them (see scan); block is the block being lowered.
@@ -144,8 +146,8 @@ type laid struct {
 // 0 may carry parameters, the operand stack the interpreter left at its
 // header (transform.Translate roots there); Lower loads them itself (see
 // preload) instead of rejecting them.
-func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects, address int, osr, count bool) (jit.Assembly, error) {
-	l, err := newLowering(f, m, fn, objects, address, osr, count)
+func Lower(f *ssa.Function, u Unit, m Machine) (jit.Assembly, error) {
+	l, err := newLowering(f, u, m)
 	if err != nil {
 		return jit.Assembly{}, err
 	}
@@ -180,7 +182,10 @@ func Lower(f *ssa.Function, m Machine, fn *types.Function, objects transform.Obj
 		}
 		exits[id] = *o.exit
 	}
-	return jit.Assembly{Bytes: code, Exits: exits, Sites: sites, Entry: entry}, nil
+	return jit.Assembly{
+		Bytes: code, Exits: exits, Sites: sites, Entry: entry,
+		Results: completion(f), Registers: l.prologue.Registers, Arguments: l.prologue.Arguments,
+	}, nil
 }
 
 // Reg is v's virtual register, typed by its static representation; for a
@@ -284,7 +289,8 @@ func (l *lowering) Type(v ssa.Value) ssa.Type {
 
 // newLowering rejects shapes the backend does not lower and scans f for what
 // lowering consults: homes, loops, uses, and remat constants.
-func newLowering(f *ssa.Function, m Machine, fn *types.Function, objects transform.Objects, address int, osr, count bool) (*lowering, error) {
+func newLowering(f *ssa.Function, u Unit, m Machine) (*lowering, error) {
+	osr := u.OSR
 	if f.Len() == 0 {
 		return nil, fmt.Errorf("%w: function shape", ErrUnsupported)
 	}
@@ -316,7 +322,8 @@ func newLowering(f *ssa.Function, m Machine, fn *types.Function, objects transfo
 		}
 	}
 	l := &lowering{
-		f: f, m: m, a: asm.New(m.Arch()), fn: fn, address: address, osr: osr, count: count, objects: objects,
+		f: f, m: m, a: asm.New(m.Arch()), fn: u.Function, address: u.Address, osr: osr,
+		count: u.Tier == jit.Baseline && !osr, objects: u.Module.Objects,
 		states: map[ssa.Value]ssa.Operation{}, consts: map[ssa.Value]uint64{}, raw: map[ssa.Value]bool{},
 		homes: homes, tmp: int32(f.Values()) + 4,
 		remats: map[ssa.Value]bool{},
@@ -425,12 +432,12 @@ func (l *lowering) function() error {
 		args = arguments(l.fn)
 		borrows = transform.Borrows(l.fn)
 	}
-	layout := Layout{Kinds: l.fn.Slots(), Zeros: zeros, Arguments: args, Registers: registers(l.fn), Borrows: borrows, Upvals: l.upvals}
+	l.prologue = Layout{Kinds: l.fn.Slots(), Zeros: zeros, Arguments: args, Registers: registers(l.fn), Borrows: borrows, Upvals: l.upvals}
 	l.args = make([]asm.VReg, len(args))
 	for i, k := range args {
 		l.args[i] = l.fresh(ssa.TypeOf(k))
 	}
-	l.m.Prologue(l.a, l.address, l.count, layout, l.args)
+	l.m.Prologue(l.a, l.address, l.count, l.prologue, l.args)
 	if l.osr {
 		if err := l.preload(); err != nil {
 			return err
@@ -484,7 +491,7 @@ func (l *lowering) function() error {
 		}
 	}
 	l.m.Epilogue(l.a)
-	l.enter = l.m.Enter(l.a, layout)
+	l.enter = l.m.Enter(l.a, l.prologue)
 	return l.err
 }
 
@@ -1075,4 +1082,16 @@ func (l *lowering) layout() []int {
 		succs[block] = succ
 	}
 	return graph.Order(laid{f, succs})
+}
+
+// completion is the value count a TrapReturn from f's own OpComplete
+// leaves, 0 when f never completes (an ordinary function's RETURN count
+// comes from its own Typ.Returns instead).
+func completion(f *ssa.Function) int {
+	for id := 0; id < f.Len(); id++ {
+		if t := f.Block(id).Terminator; t.Op == ssa.OpComplete {
+			return len(t.Args)
+		}
+	}
+	return 0
 }

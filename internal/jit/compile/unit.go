@@ -67,18 +67,11 @@ func build(u Unit, m Machine, inline bool) (*jit.Code, error) {
 		return nil, fmt.Errorf("compile: verify: %w", err)
 	}
 
-	assembly, err := Lower(f, m, u.Function, u.Module.Objects, u.Address, u.OSR, u.Tier == jit.Baseline && !u.OSR)
+	assembly, err := Lower(f, u, m)
 	if err != nil {
 		return nil, err
 	}
-	var args []types.Kind
-	if !u.OSR {
-		args = arguments(u.Function)
-	}
-	c, err := jit.NewCode(
-		u.Address, u.IP, u.OSR, u.Tier, completion(f),
-		registers(u.Function), args, assembly,
-	)
+	c, err := jit.NewCode(u.Address, u.IP, u.OSR, u.Tier, assembly)
 	if err != nil {
 		return nil, fmt.Errorf("compile: code: %w", err)
 	}
@@ -86,18 +79,6 @@ func build(u Unit, m Machine, inline bool) (*jit.Code, error) {
 		c.Deps = append(c.Deps, jit.Dep{Address: address, Generation: u.Profiles.Of(address).Generation})
 	}
 	return c, nil
-}
-
-// completion is the value count a TrapReturn from f's own OpComplete
-// leaves, 0 when f never completes (an ordinary function's RETURN count
-// comes from its own Typ.Returns instead).
-func completion(f *ssa.Function) int {
-	for id := 0; id < f.Len(); id++ {
-		if t := f.Block(id).Terminator; t.Op == ssa.OpComplete {
-			return len(t.Args)
-		}
-	}
-	return 0
 }
 
 // passes is the tier's pipeline. Optimized also inlines leaf callees, when
