@@ -124,7 +124,9 @@ func TestFunction_Pred(t *testing.T) {
 		dom := graph.NewDominance(f)
 		require.True(t, dom.Dominates(entry, done))
 		require.False(t, dom.Dominates(done, header))
-		require.Equal(t, []int{header}, graph.Headers(f, dom))
+		loops := graph.Loops(f, dom)
+		require.Len(t, loops, 1)
+		require.Equal(t, header, loops[0].Header)
 	})
 }
 

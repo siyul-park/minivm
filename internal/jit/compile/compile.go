@@ -332,13 +332,13 @@ func (l *lowering) word(k jit.Kind, kind types.Kind, reg asm.VReg) (exit, resume
 func (l *lowering) scan() {
 	f := l.f
 	dom := graph.NewDominance(f)
-	l.headers = graph.Headers(f, dom)
+	l.headers = nil
 	l.inner = make([]map[int]bool, f.Len())
-	for _, h := range l.headers {
-		body := graph.Body(f, dom, h)
-		for block := range body {
-			if l.inner[block] == nil || len(body) < len(l.inner[block]) {
-				l.inner[block] = body
+	for _, loop := range graph.Loops(f, dom) {
+		l.headers = append(l.headers, loop.Header)
+		for block := range loop.Body {
+			if l.inner[block] == nil {
+				l.inner[block] = loop.Body
 			}
 		}
 	}
