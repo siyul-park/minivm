@@ -26,7 +26,7 @@ bytecode → transform.Translate → SSA passes (per tier) → compile.Lower →
 
 ## Policy
 
-The interpreter's `engine` owns the policy (`policy`); the interpreter builds it at its first Run (a `Pool` member when it joins the pool), never in `New`.
+The interpreter's `engine` holds the policy (`policy`) as a named field and reaches its state only through `policy`'s methods; the interpreter builds it at its first Run (a `Pool` member when it joins the pool), never in `New`.
 
 | Setting | Lifecycle | Thresholds |
 |---|---|---|
@@ -39,7 +39,7 @@ The interpreter's `engine` owns the policy (`policy`); the interpreter builds it
 | Dormant | No JIT state but `Interpreter.heat` (`dormancy`, 2^21 units, ~30 ms threaded): no analysis, observers, or code. Threaded code spends one unit at every frame entry (CALL, closure call, tail call) and every taken back edge (`BR`, `BR_IF`, `BR_TABLE` to an offset ≤ its own), whatever the Run's context; a Run start spends `dormancy/32`. The unit that runs heat out parks its frame at ip `park`; dispatch leaves its loop, restores the ip, and wakes the JIT, so no handler calls or writes a pointer. |
 | Off | A program whose code is all trivial (below) has nothing to repay a Go entry: waking leaves it without a JIT. |
 | Wake | `heat` reaching 0 builds the live runtime in place: cache, queue, OSR observers of every function bound at construction. A `Pool` member wakes on joining. |
-| Trivial | Code whose every run executes fewer than `short` (32) instructions, its constant callees' included (no loop, no other call, no tail call, no recursion), is never entered from Go: a Go entry's ~15 ns round trip outweighs ~0.5 ns saved per instruction. Module code that is trivial gets no entry site; a trivial function's CALL hook is gated (`policy.gates`), so only its native callers' served calls count it (`replay`) and it compiles for them. |
+| Trivial | Code whose every run executes fewer than `short` (32) instructions, its constant callees' included (no loop, no other call, no tail call, no recursion), is never entered from Go: a Go entry's ~15 ns round trip outweighs ~0.5 ns saved per instruction. Module code that is trivial gets no entry site; a trivial function's CALL hook is gated (`policy.gates`), so only its native callers' served calls count it (`policy.reached`, from `engine.replay`) and it compiles for them. |
 | Back-off | Each invalidation of an address's code raises its call and promotion thresholds 4×, at most `steps` (4) times: `ceiling` = 65536. An OSR re-arm raises its site's threshold 4×, at most `ceiling`. Thresholds never fall. |
 | Bound | Recompiles stay bounded by monotone feedback and failed tiers (Exit policy); back-off spaces them geometrically. |
 | Cost | Dormant: one decrement per frame entry and taken back edge, one subtraction per Run. Live, fixed, or off: one compare of `heat` against zero at each frame entry and back-edge handler (forward branches are compiled without it). Thresholds are read only where counts are compared. |
@@ -48,7 +48,7 @@ One wake (analysis, the first compiles, their garbage) costs ~0.3–0.6 ms of in
 
 ## Owners
 
-`architecture.md`'s Package Ownership table owns package boundaries. Within `interp/`, native execution and exit handling live in `jit.go` (`engine`), tier decisions in `policy.go` (`policy`), runtime feedback in `feedback.go` (`feedback`), and the default structs built ahead for native code in `tcache.go` (`tcache`).
+`architecture.md`'s Package Ownership table owns package boundaries. Within `interp/`, native execution and exit handling live in `jit.go` (`engine`: native context, entries, exit service, frame materialization, and the pool-shareable `shared` runtime's lifecycle); tier decisions and all their state live in `policy.go` (`policy`: thresholds, back-off, trivial gating, entry counts, refutations, ledgers, failed and built tiers, OSR sites and their submit, re-arm, and disable decisions), which reaches `shared` and its `feedback` (`feedback.go`: runtime profiles) through named fields; the default structs built ahead for native code live in `tcache.go` (`tcache`). No type embeds another.
 
 ## Runtime contract
 
@@ -218,7 +218,7 @@ A batch is stored so native code takes its lowest address first, so a single-typ
 
 | Rule | Contract |
 |---|---|
-| Ledger | Per Go-entered address (`policy.ledgers`) and per OSR site, in work units (`Budget`'s back edges, calls, returns), credited on every exit and return. `Charge` adds the class price (bridge 2.4, callout 1.75, release 0.75, call 3.5 units; guard and trap 0) and reports whether debt ≤ 64 units; credit is floored at −64 units. A bridge, callout, box, or call is charged before it is served; a refusal deopts (replaying a call) and invalidates the run's code. A release cannot deopt: its charge takes effect at the next bridge or call. |
+| Ledger | Per Go-entered address (`policy.ledgers`, charged through `policy.ledger`) and per OSR site, in work units (`Budget`'s back edges, calls, returns), credited on every exit and return. `Charge` adds the class price (bridge 2.4, callout 1.75, release 0.75, call 3.5 units; guard and trap 0) and reports whether debt ≤ 64 units; credit is floored at −64 units. A bridge, callout, box, or call is charged before it is served; a refusal deopts (replaying a call) and invalidates the run's code. A release cannot deopt: its charge takes effect at the next bridge or call. |
 | Prices | Time one served exit adds over threaded code (bridge ~53 ns, release ~17 ns, call ~76 ns on the reference arm64 machine; a callout 0.75 of a bridge measured side by side) divided by native time saved per work unit (~22 ns in exiting kernels). |
 | Guard | Deopts. An `ExitDeopt` guard records its site in its frame's function's `transform.Profile.Refuted` (`feedback.record`). It is judged against the code that took it: the run's own code, or a native callee's still-published code, invalidated in place. That code is invalidated at once when its feedback moved since it was built, else on the `tolerance` (8)th refutation. |
 | Generic site | The translator emits no container `guard.shape` at a refuted offset: the op bridges. Call sites become generic through `Callees` (replay records the new callee). |

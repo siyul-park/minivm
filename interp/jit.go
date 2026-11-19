@@ -7,7 +7,6 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/internal/jit/compile"
@@ -20,7 +19,9 @@ import (
 // engine is one interpreter's JIT: it enters native code, serves its exits, and
 // materializes its frames, under policy's decisions.
 type engine struct {
-	policy
+	// policy decides the tiers and owns the shared runtime; the engine reaches
+	// its state only through its methods.
+	policy policy
 
 	// ctx is built by the first entry: its native stack is the largest
 	// allocation a JIT makes, and most programs never enter native code.
@@ -91,63 +92,6 @@ type shared struct {
 
 	refs atomic.Int64
 }
-
-// key identifies one OSR site by its loop header's (address, ip): how drain
-// looks a site up to restore it once its unit's compile permanently fails.
-type key struct {
-	address, ip int
-}
-
-// site is one OSR entry's observation state — a loop header, or loop-free
-// module code's ip 0 — owned by the wrapper closure that replaces its
-// threaded handler when the JIT is constructed.
-type site struct {
-	address, ip int
-	fn          *types.Function
-	// module reports whether fn completes through OpComplete instead of
-	// returning through OpReturn.
-	module bool
-	// inner is s's own threaded handler, restored in place of the observer
-	// once s is known to never resolve.
-	inner func(*Interpreter)
-	// entry reports that s observes module code's ip 0, once per Run.
-	entry bool
-	// headers lists addr's own loop headers, set only on an entry site:
-	// empty for loop-free module code, which has no safepoint, so entry
-	// declines a cancelled Run instead; non-empty for module code with
-	// loops, which reaches one at each header, so entry need not. Submit
-	// also reads it, waiting for every one of addr's header sites to
-	// resolve before competing with them for addr's one queue slot.
-	headers []int
-	// threshold is s's submit count; cadence is how often past it s retries
-	// submission, looks up published code, and drains on a cached entry.
-	threshold, cadence int64
-
-	count int64
-	// total is s's pool-wide entry counter while unsubmitted. It is looked
-	// up on first observation: observe runs before Pool.share replaces the
-	// native's shared runtime.
-	total     *atomic.Int64
-	submitted bool
-	// code is the published code once a cache lookup has found it; nil
-	// until then, and again once the site fails.
-	code *jit.Code
-	// built is the profiles s's published code was compiled from.
-	built []jit.Dep
-	// refutes counts s's refuted speculations and re-arms: never reset, so
-	// they bound s's recompiles.
-	refutes int
-	// ledger weighs s's native work against its exits' cost, independently
-	// of native CALL entries at the same address.
-	ledger jit.Ledger
-}
-
-// interval is how many back edges pass — once a header site has crossed
-// the submit threshold — between its cache lookups (and, while unsubmitted,
-// its Queue.Submit retries): rare enough that the lock CodeAt and Submit
-// take never runs on the per-iteration path. An entry site observes Runs
-// and uses 1.
-const interval = 256
 
 // nativeStack is the native stack size per interpreter.
 const nativeStack = 1 << 20
@@ -224,92 +168,50 @@ func newEngine(i *Interpreter, threshold int) *engine {
 	if i.gas >= 0 || i.hook != nil {
 		quota = int64(i.tick)
 	}
-	if threshold == 0 {
-		return &engine{policy: policy{auto: true, threshold: floor}, quota: quota, compile: i.compile}
+	e := &engine{policy: newPolicy(threshold), quota: quota, compile: i.compile}
+	if threshold != 0 {
+		e.wake(i)
 	}
-	e := &engine{policy: policy{threshold: threshold}, quota: quota, compile: i.compile}
-	e.wake(i)
 	return e
 }
 
-// wake builds the engine's live state, once, and reports whether it is live. Under the
-// automatic policy a program whose code is all trivial has nothing a Go entry
-// could repay: it stays without a JIT.
+// wake builds the engine's live state, once, and reports whether it is live. A
+// program the policy leaves dormant for good stays without a JIT.
 func (e *engine) wake(i *Interpreter) bool {
-	if e.shared != nil {
+	if e.policy.live() {
 		return true
 	}
-	trivial := make([]bool, len(i.code))
-	if e.auto {
-		lengths := map[int]int{}
-		trivial[0] = e.length(i, 0, lengths) < short
-		all := trivial[0]
-		for _, c := range i.constants {
-			if c.Kind() != types.KindRef {
-				continue
-			}
-			if _, ok := i.heap[c.Ref()].(*types.Function); ok {
-				trivial[c.Ref()] = e.length(i, c.Ref(), lengths) < short
-				all = all && trivial[c.Ref()]
-			}
-		}
-		if all {
-			return false
-		}
+	if !e.policy.wake(i) {
+		return false
 	}
-	r := newShared(i)
-	e.shared = r
-	e.reader = r.cache.Attach()
-	e.backoffs = make([]uint8, len(i.code))
-	e.entries = make([]int64, len(i.code))
-	e.refutes = make([]int, len(i.code))
-	e.ledgers = make([]jit.Ledger, len(i.code))
-	e.failed = make([][2]bool, len(i.code))
-	e.built = make([][2][]jit.Dep, len(i.code))
+	e.reader = e.policy.cache().Attach()
 	e.unfused = make([][]func(*Interpreter), len(i.code))
 	e.borrows = make([][]bool, len(i.code))
-	e.sites = map[key]*site{}
-	e.profiles = make([]*transform.Profile, len(i.code))
-	e.trivial = trivial
-	e.gates = slices.Clone(trivial)
 
-	e.observe(i, 0, i.module)
-	for addr, obj := range e.module.Objects {
+	e.policy.observe(i, 0, i.module, e.enter)
+	for addr, obj := range e.policy.runtime().module.Objects {
 		if obj.Function != nil {
-			e.observe(i, addr, obj.Function)
+			e.policy.observe(i, addr, obj.Function, e.enter)
 		}
 	}
 	return true
 }
 
-// newShared builds a fresh, unshared JIT runtime for i's program: a Cache
-// sized to i's code, a single-worker compile Queue, and i's constant module.
-func newShared(i *Interpreter) *shared {
-	r := &shared{
-		cache:  jit.NewCache(len(i.code)),
-		queue:  compile.NewQueue(func() compile.Machine { m, _ := host.New(); return m }, 1),
-		module: newModule(i),
-		calls:  make([]atomic.Int64, len(i.code)),
-	}
-	r.refs.Store(1)
-	return r
-}
-
 // close releases the engine's reference to its shared runtime.
 func (e *engine) close() error {
-	if e.shared == nil {
+	if !e.policy.live() {
 		return nil
 	}
 	e.reader.Detach()
-	return errors.Join(e.freeErr, e.shared.release())
+	return errors.Join(e.freeErr, e.policy.release())
 }
 
 // join moves the engine onto r, a Pool's runtime, releasing its own; it has never
 // entered native code.
 func (e *engine) join(r *shared) error {
 	e.reader.Detach()
-	own := e.shared
-	e.shared, e.reader = r, r.cache.Attach()
+	own := e.policy.join(r)
+	e.reader = e.policy.cache().Attach()
 	return own.release()
 }
 
@@ -321,7 +223,7 @@ func (e *engine) join(r *shared) error {
 // would.
 func (e *engine) call(i *Interpreter, addr int, fn *types.Function, release bool, advance int) bool {
 
-	if addr >= len(e.gates) || e.gates[addr] {
+	if addr >= len(e.policy.gates) || e.policy.gates[addr] {
 		return false
 	}
 	return e.attempt(i, addr, fn, release, advance)
@@ -331,16 +233,8 @@ func (e *engine) call(i *Interpreter, addr int, fn *types.Function, release bool
 // threaded CALL handlers. Only a direct call reaches it, which carries no
 // upvals: a function with captures runs natively only through its closure.
 func (e *engine) attempt(i *Interpreter, addr int, fn *types.Function, release bool, advance int) bool {
-	if release {
-		e.see(i, transform.Callee{Function: addr})
-	}
-	if len(fn.Captures) > 0 || e.depth >= uint64(len(e.ctx.Records)) {
-		return false
-	}
-	e.drain(i)
-	code := e.cache.Code(addr)
+	code := e.policy.admit(i, addr, fn, release, e.depth >= uint64(len(e.ctx.Records)))
 	if code == nil {
-		e.count(i, addr, fn)
 		return false
 	}
 
@@ -358,7 +252,7 @@ func (e *engine) attempt(i *Interpreter, addr int, fn *types.Function, release b
 		panic(fault)
 	}
 	if invalidate {
-		e.invalidate(addr, code.Tier)
+		e.policy.invalidate(addr, code.Tier)
 	}
 	return true
 }
@@ -391,10 +285,10 @@ func (e *engine) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 
 	if trap := jit.Enter(code.Entry(), ctx); trap != jit.TrapReturn {
 		start := i.fp
-		ok, invalidate, fault := e.settle(i, code, trap, &e.ledgers[addr], mark, start,
+		ok, invalidate, fault := e.settle(i, code, trap, e.policy.ledger(addr), mark, start,
 
 			func(exit *jit.Exit) { i.fr.ip += advance; e.materialize(i, exit, start, addr, release) },
-			func() bool { return e.refute(addr, code.Tier) },
+			func() bool { return e.policy.refute(addr, code.Tier) },
 		)
 		if e.depth == 0 && e.tcache.dirty {
 			e.tcache.flush(i)
@@ -403,7 +297,7 @@ func (e *engine) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 			return invalidate, fault
 		}
 	} else {
-		e.ledgers[addr].Spend(mark - ctx.Budget)
+		e.policy.ledger(addr).Spend(mark - ctx.Budget)
 		if e.depth == 0 && e.tcache.dirty {
 			e.tcache.flush(i)
 		}
@@ -420,121 +314,22 @@ func (e *engine) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	return false, nil
 }
 
-// observe wraps every loop header's threaded handler of fn at addr with OSR
-// observation, address 0 (module code) included. A header a fusion
-// absorbed (code[ip] == nil) is left alone: nothing runs there to observe.
-//
-// Module code is also observed at ip 0, whether or not it has loops: its
-// entry site's submit waits for every header site of the same address to
-// resolve first (resolved), so it never takes the queue's one address-0
-// slot ahead of them.
-func (e *engine) observe(i *Interpreter, addr int, fn *types.Function) {
-	headers, err := analysis.Headers(fn)
-	if err != nil {
-		metric(i, metricCompiles, 1, prof.Label{Key: "tier", Value: jit.Optimized.String()}, prof.Label{Key: "outcome", Value: outcomeFailed})
-		return
-	}
-	code := i.code[addr]
-
-	install := func(ip int, entry bool) {
-		if ip < 0 || ip >= len(code) || code[ip] == nil {
-			return
-		}
-		threshold, cadence := int64(e.threshold), int64(interval)
-		var own []int
-		if entry {
-
-			threshold, cadence = max(threshold, 2), 1
-			own = headers
-			if len(headers) > 0 {
-				cadence = interval
-			}
-		}
-		s := &site{address: addr, ip: ip, fn: fn, module: addr == 0, inner: code[ip], entry: entry, headers: own, threshold: threshold, cadence: cadence}
-		e.sites[key{addr, ip}] = s
-		code[ip] = e.observer(s, code, s.inner)
-	}
-	for _, ip := range headers {
-		install(ip, false)
-	}
-
-	if addr == 0 && !slices.Contains(headers, 0) && !e.trivial[0] {
-		install(0, true)
-	}
-}
-
-// observer wraps inner, the threaded handler at s's own header. Once
-// resolved (s.code set), its steady cost is one field read and a call
-// either into native code or straight through to inner; a site that enters
-// native code never falls through to inner itself, since native code
-// always leaves the interpreter at the right next instruction, materialized
-// or not.
-func (e *engine) observer(s *site, code []func(*Interpreter), inner func(*Interpreter)) func(*Interpreter) {
-	return func(i *Interpreter) {
-		if s.code != nil && e.enter(i, s, code, inner) {
-			return
-		}
-		due := s.onCadence()
-		switch {
-		case !s.submitted:
-			if s.total == nil {
-				s.total = e.total(key{s.address, s.ip})
-			}
-			total := s.total.Add(1)
-			if total >= s.threshold && (total-s.threshold)%s.cadence == 0 && e.resolved(s.address, s.headers) {
-
-				e.drain(i)
-				u := compile.Unit{Address: s.address, Function: s.fn, Module: e.module, Profiles: e.snapshot(), Tier: jit.Optimized, IP: s.ip, OSR: true}
-				s.submitted = e.queue.Submit(u)
-			}
-		case due:
-			e.drain(i)
-			s.code = e.cache.CodeAt(s.address, s.ip)
-		}
-		inner(i)
-	}
-}
-
-// resolved reports whether every one of addr's header sites at ips has
-// published, permanently failed, or disabled: an entry site's submit waits
-// for this instead of competing with them for addr's one queue slot. A
-// header absent from sites has already failed or disabled (drain and enter
-// delete it on either); one still present is resolved once the cache holds
-// its published code.
-func (e *engine) resolved(addr int, ips []int) bool {
-	for _, ip := range ips {
-		if _, ok := e.sites[key{addr, ip}]; ok && e.cache.CodeAt(addr, ip) == nil {
-			return false
-		}
-	}
-	return true
-}
-
-// enter runs the current frame as s's cached OSR activation. It drains at
-// s's lookup cadence, counting entries: a callee called only from native
-// code would otherwise tier up only at a safepoint. Loop-free module code
-// reaches no safepoint, so an entry site with no headers declines a
+// enter runs the current frame as s's cached OSR activation. Loop-free
+// module code reaches no safepoint, so an entry site with no headers declines a
 // cancelled Run, leaving threaded code to report it; an entry site whose
 // module has loops reaches one at each header, so settle already reports
 // cancellation there. Native code reads a word per capture without a
 // bounds check, so a frame without its captures declines too.
-func (e *engine) enter(i *Interpreter, s *site, code []func(*Interpreter), inner func(*Interpreter)) bool {
+func (e *engine) enter(i *Interpreter, s *site) bool {
 	if (s.entry && len(s.headers) == 0 && cancelled(i)) || len(i.fr.upvals) < len(s.fn.Captures) || e.depth >= uint64(len(e.ctx.Records)) {
 		return false
 	}
-	if s.onCadence() {
-		e.drain(i)
-		if e.depth == 0 {
-			e.quiesce()
-		}
+	if e.policy.tick(i, s) && e.depth == 0 {
+		e.quiesce()
 	}
-	c := s.code
-	if c.Invalidated() {
-		if c = e.cache.CodeAt(s.address, s.ip); c == nil {
-			s.code = nil
-			return false
-		}
-		s.code = c
+	c := e.policy.refresh(s)
+	if c == nil {
+		return false
 	}
 
 	e.load(i, i.fr.bp, 1)
@@ -544,24 +339,19 @@ func (e *engine) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 
 	e.metricEntry(i, c)
 
+	ledger := e.policy.siteLedger(s)
 	ok, invalidate := true, false
 	var fault any
 	if trap := jit.Enter(c.Entry(), ctx); trap != jit.TrapReturn {
 
 		start := i.fp - 1
 		f := i.fr
-		ok, invalidate, fault = e.settle(i, c, trap, &s.ledger, mark, start,
+		ok, invalidate, fault = e.settle(i, c, trap, ledger, mark, start,
 			func(exit *jit.Exit) { e.materialize(i, exit, start, f.ref, f.release) },
-			func() bool {
-				if e.stale(s.built) {
-					return true
-				}
-				s.refutes++
-				return s.refutes >= tolerance
-			},
+			func() bool { return e.policy.refuteSite(s) },
 		)
 	} else {
-		s.ledger.Spend(mark - ctx.Budget)
+		ledger.Spend(mark - ctx.Budget)
 	}
 	if e.depth == 0 && e.tcache.dirty {
 		e.tcache.flush(i)
@@ -570,20 +360,7 @@ func (e *engine) enter(i *Interpreter, s *site, code []func(*Interpreter), inner
 		e.finish(i, s, c)
 	}
 	if invalidate {
-		e.cache.InvalidateAt(s.address, s.ip)
-		s.code = nil
-		if s.refutes < tolerance && e.stale(s.built) {
-
-			s.refutes++
-			s.submitted = false
-			s.ledger = jit.Ledger{}
-			if e.auto {
-				s.threshold = min(s.threshold<<2, ceiling)
-			}
-		} else {
-			code[s.ip] = inner
-			delete(e.sites, key{s.address, s.ip})
-		}
+		e.policy.invalidateSite(i, s)
 	}
 	if fault != nil {
 		panic(fault)
@@ -608,7 +385,7 @@ func (e *engine) materialize(i *Interpreter, exit *jit.Exit, start, ref int, rel
 	refs[0], owns[0] = ref, release
 	for k := depth - 2; k >= floor; k-- {
 		pc := ctx.Records[k+1].PC
-		code := e.cache.Find(pc)
+		code := e.policy.cache().Find(pc)
 		id, ok := code.Site(pc)
 		if !ok {
 			panic("interp: native return address with no call site")
@@ -706,11 +483,11 @@ func entered(i *Interpreter, ref int) int {
 // quiesce marks a quiescent point, where the engine runs no native activation and
 // holds no code it read before, then frees what every reader has passed.
 func (e *engine) quiesce() {
-	if e.shared == nil {
+	if !e.policy.live() {
 		return
 	}
 	e.reader.Quiesce()
-	e.freeErr = errors.Join(e.freeErr, e.cache.Reclaim())
+	e.freeErr = errors.Join(e.freeErr, e.policy.cache().Reclaim())
 }
 
 // settle serves exits from trap through safepoints, releases, bridges, and
@@ -734,7 +511,7 @@ func (e *engine) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 
 		entered := code
 		if ctx.Level() != int(e.depth)+1 {
-			entered = e.cache.Find(ctx.PC())
+			entered = e.policy.cache().Find(ctx.PC())
 		}
 		exit := &entered.Exits[ctx.Exit()]
 		if i.profiler != nil {
@@ -760,7 +537,7 @@ func (e *engine) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 			}
 			e.sync(i)
 			mark = ctx.Budget
-			e.drain(i)
+			e.policy.drain(i)
 			trap = jit.Resume(ctx)
 		case jit.ExitRelease:
 
@@ -802,7 +579,7 @@ func (e *engine) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 				return false, false, nil
 			}
 			deopt(exit)
-			return false, e.judge(entered, code, refute), nil
+			return false, e.policy.judge(entered, code, refute), nil
 		case jit.ExitCall:
 			ref := e.callee(ctx.Level()-1, exit)
 			if i.hook != nil {
@@ -816,9 +593,9 @@ func (e *engine) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 			if !ok || !e.nests(i, exit, addr) {
 				deopt(exit)
 				e.replay(i, exit, ref)
-				return false, e.judge(entered, code, refute), nil
+				return false, e.policy.judge(entered, code, refute), nil
 			}
-			if !e.pending(addr) && !ledger.Charge(jit.ClassCall) {
+			if !e.policy.pending(addr) && !ledger.Charge(jit.ClassCall) {
 				deopt(exit)
 				e.replay(i, exit, ref)
 				return false, true, nil
@@ -834,8 +611,7 @@ func (e *engine) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 			if exit.Trap {
 				return false, false, nil
 			}
-			e.record(exit)
-			return false, e.judge(entered, code, refute), nil
+			return false, e.policy.reject(exit, entered, code, refute), nil
 		}
 	}
 }
@@ -869,8 +645,8 @@ func (e *engine) load(i *Interpreter, bp, spare int) {
 	ctx := e.ctx
 	e.sync(i)
 	ctx.Globals = base(i.globals)
-	ctx.Natives = e.cache.Natives()
-	ctx.Entries = base(e.entries)
+	ctx.Natives = e.policy.cache().Natives()
+	ctx.Entries = e.policy.counters()
 	ctx.Top = end(i.stack)
 	ctx.FB = base(i.stack[bp:])
 	ctx.SetEdge(min(len(ctx.Records), int(e.depth)+len(i.frames)-i.fp+spare))
@@ -1111,9 +887,7 @@ func (e *engine) frameBase(i *Interpreter, k int) int {
 
 // replay pushes exit's callee over its arguments at i.fr's CALL, which the
 // interpreter then runs: it retains each lent argument and a borrowed ref,
-// since the CALL adopts both. A closure callee is counted and recorded here,
-// since the threaded closure CALL has no native hook; so is trivial code, whose
-// hook is gated.
+// since the CALL adopts both. The policy counts the callee (reached).
 func (e *engine) replay(i *Interpreter, exit *jit.Exit, ref int) {
 	for _, p := range exit.Lent {
 		i.retainBox(i.stack[i.sp+p])
@@ -1127,20 +901,7 @@ func (e *engine) replay(i *Interpreter, exit *jit.Exit, ref int) {
 	i.sp++
 
 	i.fr.ip--
-	if ref > 0 && ref < len(i.heap) {
-		switch callee := i.heap[ref].(type) {
-		case *types.Closure:
-			addr := int(callee.Fn)
-			e.see(i, transform.Callee{Function: addr, Closure: true})
-			if e.cache.Code(addr) == nil {
-				e.count(i, addr, i.function(addr))
-			}
-		case *types.Function:
-			if ref < len(e.trivial) && e.trivial[ref] && e.cache.Code(ref) == nil {
-				e.count(i, ref, callee)
-			}
-		}
-	}
+	e.policy.reached(i, ref)
 }
 
 // callee is the reference activation k's ExitCall call goes through: the
@@ -1168,6 +929,19 @@ func (e *engine) finish(i *Interpreter, s *site, c *jit.Code) {
 	}
 	boxRegisters(i, c, f.bp)
 	i.leave(f, f.bp+len(s.fn.Typ.Returns))
+}
+
+// newShared builds a fresh, unshared JIT runtime for i's program: a Cache
+// sized to i's code, a single-worker compile Queue, and i's constant module.
+func newShared(i *Interpreter) *shared {
+	r := &shared{
+		cache:  jit.NewCache(len(i.code)),
+		queue:  compile.NewQueue(func() compile.Machine { m, _ := host.New(); return m }, 1),
+		module: newModule(i),
+		calls:  make([]atomic.Int64, len(i.code)),
+	}
+	r.refs.Store(1)
+	return r
 }
 
 // total returns r's pool-wide entry counter for the OSR/entry site k,
@@ -1236,11 +1010,6 @@ func (r *shared) sweep(visit func(addr int) (live bool)) {
 	}
 	r.candidates = live
 	r.nominated.Store(int64(len(live)))
-}
-
-func (s *site) onCadence() bool {
-	s.count++
-	return s.count%s.cadence == 0
 }
 
 // rollback releases each held operand back down to its saved count.
