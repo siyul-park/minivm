@@ -179,10 +179,10 @@ func (p *Pool) share(i *Interpreter) {
 	defer p.sharedMu.Unlock()
 
 	if p.shared == nil {
-		p.shared = i.jit.shared.retain()
+		p.shared = i.jit.policy.runtime().retain()
 		return
 	}
-	if !reflect.DeepEqual(i.jit.shared.module, p.shared.module) {
+	if !reflect.DeepEqual(i.jit.policy.runtime().module, p.shared.module) {
 		return
 	}
 
