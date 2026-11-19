@@ -163,6 +163,24 @@ func TestLICMPass_Run(t *testing.T) {
 		require.True(t, hasCode(fn.Block(l.body).Operations, instr.I32_DIV_S))
 	})
 
+	t.Run("does not hoist a loop-invariant i64 operation whose result can exceed the boxed payload", func(t *testing.T) {
+		l := newCountedLoop()
+		x, y := l.b.Value(ssa.TypeI64), l.b.Value(ssa.TypeI64)
+		l.b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: 2, Results: []ssa.Value{x}})
+		l.b.Add(l.pre, ssa.Operation{Op: ssa.OpConst, Const: 3, Results: []ssa.Value{y}})
+		sum := l.b.Value(ssa.TypeI64)
+		l.b.Add(l.body, ssa.Operation{Op: ssa.OpExec, Code: instr.I64_ADD, Args: []ssa.Value{x, y}, State: deoptState(l.b, l.pre), Results: []ssa.Value{sum}})
+		fn := l.close()
+		require.NoError(t, ssa.Verify(fn))
+
+		_, err := transform.NewLICMPass().Run(pass.NewManager(), fn)
+
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(fn))
+		require.True(t, hasCode(fn.Block(l.body).Operations, instr.I64_ADD))
+		require.False(t, hasCode(fn.Block(l.pre).Operations, instr.I64_ADD))
+	})
+
 	t.Run("does not hoist out of a loop with no suitable preheader", func(t *testing.T) {
 		b := ssa.New("f")
 		entry, left, right, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block(), b.Block(), b.Block()

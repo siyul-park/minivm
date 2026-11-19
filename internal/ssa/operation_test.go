@@ -9,12 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOverflowsI64(t *testing.T) {
-	require.True(t, ssa.OverflowsI64(instr.I64_ADD))
-	require.True(t, ssa.OverflowsI64(instr.I64_DIV_U))
-	require.False(t, ssa.OverflowsI64(instr.I64_AND))
-}
-
 func TestShape_Serves(t *testing.T) {
 	i32 := ssa.Shape{Map: true, Kind: types.KindI32, Elem: types.KindRef}
 	i64 := ssa.Shape{Map: true, Kind: types.KindI64, Elem: types.KindI64}

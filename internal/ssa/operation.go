@@ -1,8 +1,6 @@
 package ssa
 
 import (
-	"reflect"
-
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/types"
 )
@@ -93,8 +91,6 @@ type Shape struct {
 	Function int
 	// Captures is the upvals count an admitted closure holds at least.
 	Captures int
-	// Host identifies the host field kind, when applicable.
-	Host reflect.Kind
 }
 
 // Frame materializes one interpreter frame for deoptimization.
@@ -168,17 +164,6 @@ const (
 	SpaceGlobal
 	SpaceUpval
 )
-
-// OverflowsI64 reports opcodes that can exceed the boxed i64 payload.
-func OverflowsI64(code instr.Opcode) bool {
-	switch code {
-	case instr.I64_ADD, instr.I64_SUB, instr.I64_MUL, instr.I64_SHL, instr.I64_SHR_U,
-		instr.I64_DIV_S, instr.I64_DIV_U:
-		return true
-	default:
-		return false
-	}
-}
 
 // Serves reports whether native code lowers code on a map this shape admits,
 // given the kinds of its key and value operands (ignored by an operation without

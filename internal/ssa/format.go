@@ -3,7 +3,6 @@ package ssa
 import (
 	"fmt"
 	"math"
-	"reflect"
 	"strings"
 
 	"github.com/siyul-park/minivm/types"
@@ -131,9 +130,6 @@ func shape(o Operation) string {
 		fmt.Fprintf(&sb, " map key %s elem %s", s.Kind, s.Elem)
 	default:
 		fmt.Fprintf(&sb, " kind %s", s.Kind)
-	}
-	if s.Host != reflect.Invalid {
-		fmt.Fprintf(&sb, " host %s", s.Host)
 	}
 	return sb.String()
 }
