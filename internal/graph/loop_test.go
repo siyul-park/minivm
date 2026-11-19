@@ -8,103 +8,86 @@ import (
 	"github.com/siyul-park/minivm/internal/graph"
 )
 
-func TestHeaders(t *testing.T) {
-	t.Run("finds no headers in an acyclic graph", func(t *testing.T) {
-		// 0 -> 1, 0 -> 2, 1 -> 3, 2 -> 3.
+func TestLoops(t *testing.T) {
+	t.Run("finds none in an acyclic graph", func(t *testing.T) {
 		g := newFixture(4, [][2]int{{0, 1}, {0, 2}, {1, 3}, {2, 3}})
-		d := graph.NewDominance(g)
 
-		require.Empty(t, graph.Headers(g, d))
+		require.Empty(t, graph.Loops(g, graph.NewDominance(g)))
 	})
 
-	t.Run("names the target of a natural loop back edge", func(t *testing.T) {
-		// 0 -> 1 (header), 1 -> 2 (body), 2 -> 1 (back edge), 2 -> 3 (exit).
-		g := newFixture(4, [][2]int{{0, 1}, {1, 2}, {2, 1}, {2, 3}})
-		d := graph.NewDominance(g)
+	t.Run("returns the header and body of a natural loop", func(t *testing.T) {
+		g := newFixture(5, [][2]int{{0, 1}, {1, 2}, {2, 1}, {2, 3}, {3, 4}})
 
-		require.ElementsMatch(t, []int{1}, graph.Headers(g, d))
+		loops := graph.Loops(g, graph.NewDominance(g))
+
+		require.Len(t, loops, 1)
+		require.Equal(t, 1, loops[0].Header)
+		require.Equal(t, map[int]bool{1: true, 2: true}, loops[0].Body)
 	})
 
-	t.Run("names every header of nested loops", func(t *testing.T) {
+	t.Run("orders nested loops innermost first", func(t *testing.T) {
 		// 0 -> 1 (outer header), 1 -> 2 (inner header), 2 -> 3 (inner body),
 		// 3 -> 2 (inner back edge), 3 -> 1 (outer back edge), 3 -> 4 (exit).
 		g := newFixture(5, [][2]int{{0, 1}, {1, 2}, {2, 3}, {3, 2}, {3, 1}, {3, 4}})
-		d := graph.NewDominance(g)
 
-		require.ElementsMatch(t, []int{1, 2}, graph.Headers(g, d))
-	})
+		loops := graph.Loops(g, graph.NewDominance(g))
 
-	t.Run("excludes a backward edge whose target does not dominate its source", func(t *testing.T) {
-		// 0 -> 1, 0 -> 2, 1 -> 3, 2 -> 3, and 3 -> 1: a lower-numbered
-		// backward edge, but 1 does not dominate 3 (the sibling arm
-		// through 2 bypasses it), so it is not a natural loop.
-		g := newFixture(4, [][2]int{{0, 1}, {0, 2}, {1, 3}, {2, 3}, {3, 1}})
-		d := graph.NewDominance(g)
-
-		require.Empty(t, graph.Headers(g, d))
-	})
-}
-
-func TestBody(t *testing.T) {
-	t.Run("returns the natural loop nodes including the header", func(t *testing.T) {
-		g := newFixture(5, [][2]int{{0, 1}, {1, 2}, {2, 1}, {2, 3}, {3, 4}})
-		d := graph.NewDominance(g)
-
-		require.Equal(t, map[int]bool{1: true, 2: true}, graph.Body(g, d, 1))
+		require.Len(t, loops, 2)
+		require.Equal(t, 2, loops[0].Header)
+		require.Equal(t, map[int]bool{2: true, 3: true}, loops[0].Body)
+		require.Equal(t, 1, loops[1].Header)
+		require.Equal(t, map[int]bool{1: true, 2: true, 3: true}, loops[1].Body)
 	})
 
 	t.Run("merges all back edges targeting the same header", func(t *testing.T) {
-		g := newFixture(6, [][2]int{
-			{0, 1}, {1, 2}, {2, 3}, {3, 1}, {2, 4}, {4, 5}, {5, 1},
-		})
-		d := graph.NewDominance(g)
+		g := newFixture(6, [][2]int{{0, 1}, {1, 2}, {2, 3}, {3, 1}, {2, 4}, {4, 5}, {5, 1}})
 
-		require.Equal(t, map[int]bool{1: true, 2: true, 3: true, 4: true, 5: true}, graph.Body(g, d, 1))
+		loops := graph.Loops(g, graph.NewDominance(g))
+
+		require.Len(t, loops, 1)
+		require.Equal(t, map[int]bool{1: true, 2: true, 3: true, 4: true, 5: true}, loops[0].Body)
 	})
-}
 
-func TestPreheader(t *testing.T) {
-	t.Run("returns the unique predecessor outside the loop", func(t *testing.T) {
+	t.Run("excludes a backward edge whose target does not dominate its source", func(t *testing.T) {
+		// 1 does not dominate 3: the sibling arm through 2 bypasses it.
+		g := newFixture(4, [][2]int{{0, 1}, {0, 2}, {1, 3}, {2, 3}, {3, 1}})
+
+		require.Empty(t, graph.Loops(g, graph.NewDominance(g)))
+	})
+
+	t.Run("names the unique outside predecessor as preheader", func(t *testing.T) {
 		g := newFixture(4, [][2]int{{0, 1}, {1, 2}, {2, 1}, {2, 3}})
-		d := graph.NewDominance(g)
-		body := graph.Body(g, d, 1)
 
-		preheader, ok := graph.Preheader(g, body, 1)
+		loops := graph.Loops(g, graph.NewDominance(g))
 
-		require.True(t, ok)
-		require.Equal(t, 0, preheader)
+		require.Len(t, loops, 1)
+		require.Equal(t, 0, loops[0].Preheader)
 	})
 
-	t.Run("returns no preheader when the header has multiple outside predecessors", func(t *testing.T) {
+	t.Run("has no preheader with multiple outside predecessors", func(t *testing.T) {
 		g := newFixture(6, [][2]int{{0, 1}, {0, 2}, {1, 3}, {2, 3}, {3, 4}, {4, 3}})
-		d := graph.NewDominance(g)
-		body := graph.Body(g, d, 3)
 
-		preheader, ok := graph.Preheader(g, body, 3)
+		loops := graph.Loops(g, graph.NewDominance(g))
 
-		require.False(t, ok)
-		require.Equal(t, -1, preheader)
+		require.Len(t, loops, 1)
+		require.Equal(t, -1, loops[0].Preheader)
 	})
 
-	t.Run("returns no preheader when the outside predecessor branches elsewhere", func(t *testing.T) {
+	t.Run("has no preheader when the outside predecessor branches elsewhere", func(t *testing.T) {
 		g := newFixture(5, [][2]int{{0, 2}, {2, 1}, {2, 3}, {1, 4}, {4, 1}})
-		d := graph.NewDominance(g)
-		body := graph.Body(g, d, 1)
 
-		preheader, ok := graph.Preheader(g, body, 1)
+		loops := graph.Loops(g, graph.NewDominance(g))
 
-		require.False(t, ok)
-		require.Equal(t, -1, preheader)
+		require.Len(t, loops, 1)
+		require.Equal(t, -1, loops[0].Preheader)
 	})
 
-	t.Run("returns no preheader for a loop rooted at the entry", func(t *testing.T) {
+	t.Run("has no preheader for a loop rooted at the entry", func(t *testing.T) {
 		g := newFixture(1, [][2]int{{0, 0}})
-		d := graph.NewDominance(g)
-		body := graph.Body(g, d, 0)
 
-		preheader, ok := graph.Preheader(g, body, 0)
+		loops := graph.Loops(g, graph.NewDominance(g))
 
-		require.False(t, ok)
-		require.Equal(t, -1, preheader)
+		require.Len(t, loops, 1)
+		require.Equal(t, -1, loops[0].Preheader)
 	})
 }

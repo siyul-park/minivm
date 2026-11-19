@@ -792,8 +792,8 @@ func (e *emitter) layout() {
 	e.order, e.after = nil, make([]int, n)
 	dominance := graph.NewDominance(e.function)
 	e.bodies = map[int]map[int]bool{}
-	for _, header := range graph.Headers(e.function, dominance) {
-		e.bodies[header] = graph.Body(e.function, dominance, header)
+	for _, loop := range graph.Loops(e.function, dominance) {
+		e.bodies[loop.Header] = loop.Body
 	}
 	for len(e.order) < n {
 		next := -1

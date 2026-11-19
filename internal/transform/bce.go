@@ -31,20 +31,6 @@ type induction struct {
 	frames       []ssa.Frame
 }
 
-// loops indexes one function's definitions for the loop analysis.
-type loops struct {
-	function  *ssa.Function
-	dominance *graph.Dominance
-	sites     map[ssa.Value]site
-	params    map[ssa.Value]int
-}
-
-// site is the operation at index of a block.
-type site struct {
-	block int
-	index int
-}
-
 var _ pass.Pass[*ssa.Function] = (*BCEPass)(nil)
 
 // NewBCEPass returns the pass; profiles holds, per function, the offsets
@@ -55,7 +41,7 @@ func NewBCEPass(profiles Profiles) *BCEPass {
 
 // Run applies the pass to one SSA function.
 func (p *BCEPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
-	bounded, guards := newLoops(function).bounds(p.profiles)
+	bounded, guards := newNest(function).bounds(p.profiles)
 	if len(bounded) == 0 {
 		return true, nil
 	}
@@ -86,39 +72,24 @@ func (p *BCEPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	return false, nil
 }
 
-func newLoops(function *ssa.Function) *loops {
-	l := &loops{function: function, dominance: graph.NewDominance(function), sites: map[ssa.Value]site{}, params: map[ssa.Value]int{}}
-	for b := 0; b < function.Len(); b++ {
-		for _, v := range function.Block(b).Params {
-			l.params[v] = b
-		}
-		for i, operation := range function.Block(b).Operations {
-			for _, r := range operation.Results {
-				l.sites[r] = site{b, i}
-			}
-		}
-	}
-	return l
-}
-
 // bounds reports the array ops whose index becomes an OpBound and, per
 // preheader, the guards that make it sound.
-func (l *loops) bounds(profiles Profiles) (map[site]bool, map[int][]ssa.Operation) {
+func (n *nest) bounds(profiles Profiles) (map[site]bool, map[int][]ssa.Operation) {
 	bounded := map[site]bool{}
 	guards := map[int][]ssa.Operation{}
-	for _, h := range graph.Headers(l.function, l.dominance) {
-		body := graph.Body(l.function, l.dominance, h)
-		loop, ok := l.induction(body, h, profiles)
+	for _, natural := range n.loops {
+		body := natural.Body
+		loop, ok := n.induction(natural, profiles)
 		if !ok {
 			continue
 		}
 		guarded := map[ssa.Value]bool{}
 		for b := range body {
-			if !l.dominance.Dominates(loop.stay, b) {
+			if !n.dominance.Dominates(loop.stay, b) {
 				continue
 			}
-			for i, operation := range l.function.Block(b).Operations {
-				if !l.indexed(loop, operation) {
+			for i, operation := range n.function.Block(b).Operations {
+				if !n.indexed(loop, operation) {
 					continue
 				}
 				if !guarded[operation.Args[0]] {
@@ -134,12 +105,12 @@ func (l *loops) bounds(profiles Profiles) (map[site]bool, map[int][]ssa.Operatio
 
 // indexed reports that operation reads or writes, at the loop's induction
 // variable, a slice defined before the loop's preheader.
-func (l *loops) indexed(loop induction, operation ssa.Operation) bool {
+func (n *nest) indexed(loop induction, operation ssa.Operation) bool {
 	if operation.Op != ssa.OpExec || (operation.Code != instr.ARRAY_GET && operation.Code != instr.ARRAY_SET) || operation.Args[1] != loop.index {
 		return false
 	}
-	slice, ok := l.op(operation.Args[0])
-	return ok && slice.Op == ssa.OpSlice && loop.frames != nil && l.dominance.Dominates(l.sites[operation.Args[0]].block, loop.preheader)
+	slice, ok := n.op(operation.Args[0])
+	return ok && slice.Op == ssa.OpSlice && loop.frames != nil && n.dominance.Dominates(n.sites[operation.Args[0]].block, loop.preheader)
 }
 
 // induction reports the loop at header h when its branch tests i <s n on a
@@ -147,17 +118,17 @@ func (l *loops) indexed(loop induction, operation ssa.Operation) bool {
 // along every latch, n is loop-invariant, and no step wraps i past n.
 // frames is the header's entry state, nil when it has none usable or its
 // offset is refuted: the loop then keeps its checks.
-func (l *loops) induction(body map[int]bool, h int, profiles Profiles) (induction, bool) {
-	preheader, ok := graph.Preheader(l.function, body, h)
-	if !ok {
+func (n *nest) induction(natural graph.Loop, profiles Profiles) (induction, bool) {
+	body, h, preheader := natural.Body, natural.Header, natural.Preheader
+	if preheader < 0 {
 		return induction{}, false
 	}
-	t := l.function.Block(h).Terminator
+	t := n.function.Block(h).Terminator
 	if t.Op != ssa.OpBranch || len(t.Edges) != 2 {
 		return induction{}, false
 	}
-	test, ok := l.op(t.Args[0])
-	if !ok || l.sites[t.Args[0]].block != h || test.Op != ssa.OpExec {
+	test, ok := n.op(t.Args[0])
+	if !ok || n.sites[t.Args[0]].block != h || test.Op != ssa.OpExec {
 		return induction{}, false
 	}
 	loop := induction{preheader: preheader}
@@ -175,14 +146,14 @@ func (l *loops) induction(body map[int]bool, h int, profiles Profiles) (inductio
 		return induction{}, false
 	}
 	loop.stay = t.Edges[stay].Block
-	if l.params[loop.index] != h || l.function.Type(loop.index) != ssa.TypeI32 || !body[loop.stay] || len(l.function.Pred(loop.stay)) != 1 {
+	if n.params[loop.index] != h || n.function.Type(loop.index) != ssa.TypeI32 || !body[loop.stay] || len(n.function.Pred(loop.stay)) != 1 {
 		return induction{}, false
 	}
 	invariant := func(v ssa.Value) bool {
-		if b, ok := l.params[v]; ok {
+		if b, ok := n.params[v]; ok {
 			return !body[b]
 		}
-		s, ok := l.sites[v]
+		s, ok := n.sites[v]
 		return ok && !body[s.block]
 	}
 	if !invariant(loop.limit) {
@@ -190,16 +161,16 @@ func (l *loops) induction(body map[int]bool, h int, profiles Profiles) (inductio
 	}
 
 	k := 0
-	for k < len(l.function.Block(h).Params) && l.function.Block(h).Params[k] != loop.index {
+	for k < len(n.function.Block(h).Params) && n.function.Block(h).Params[k] != loop.index {
 		k++
 	}
 	constant := func(v ssa.Value) (int64, bool) {
-		op, ok := l.op(v)
+		op, ok := n.op(v)
 		return int64(int32(op.Const)), ok && op.Op == ssa.OpConst
 	}
 	step := int64(0)
-	for _, pred := range l.function.Pred(h) {
-		for _, e := range l.function.Block(pred).Terminator.Edges {
+	for _, pred := range n.function.Pred(h) {
+		for _, e := range n.function.Block(pred).Terminator.Edges {
 			if e.Block != h {
 				continue
 			}
@@ -210,8 +181,8 @@ func (l *loops) induction(body map[int]bool, h int, profiles Profiles) (inductio
 				}
 				continue
 			}
-			add, ok := l.op(v)
-			if !ok || add.Op != ssa.OpExec || add.Code != instr.I32_ADD || !l.dominance.Dominates(loop.stay, l.sites[v].block) {
+			add, ok := n.op(v)
+			if !ok || add.Op != ssa.OpExec || add.Code != instr.I32_ADD || !n.dominance.Dominates(loop.stay, n.sites[v].block) {
 				return induction{}, false
 			}
 			by := add.Args[1]
@@ -228,27 +199,18 @@ func (l *loops) induction(body map[int]bool, h int, profiles Profiles) (inductio
 			step = max(step, s)
 		}
 	}
-	if n, ok := constant(loop.limit); ok {
-		if n-1+step > math.MaxInt32 {
+	if c, ok := constant(loop.limit); ok {
+		if c-1+step > math.MaxInt32 {
 			return induction{}, false
 		}
 	} else if step != 1 {
 		return induction{}, false
 	}
 
-	if frames, ok := inlet(l.function, l.sites, h, preheader, invariant); ok {
+	if frames, ok := inlet(n.function, n.sites, h, preheader, invariant); ok {
 		if at := frames[len(frames)-1]; !profiles.Of(at.Address).Refuted[at.IP] {
 			loop.frames = frames
 		}
 	}
 	return loop, true
-}
-
-// op is the operation that defines v.
-func (l *loops) op(v ssa.Value) (ssa.Operation, bool) {
-	at, ok := l.sites[v]
-	if !ok {
-		return ssa.Operation{}, false
-	}
-	return l.function.Block(at.block).Operations[at.index], true
 }

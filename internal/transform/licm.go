@@ -2,7 +2,6 @@ package transform
 
 import (
 	"slices"
-	"sort"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/graph"
@@ -30,38 +29,25 @@ func NewLICMPass() *LICMPass {
 
 // Run applies the pass to one SSA function.
 func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
-	l := newLoops(function)
-	dominance := l.dominance
-	headers := graph.Headers(function, dominance)
-	if len(headers) == 0 {
+	nest := newNest(function)
+	dominance := nest.dominance
+	loops := nest.loops
+	if len(loops) == 0 {
 		return true, nil
 	}
 
-	bodies := make(map[int]map[int]bool, len(headers))
-	preheaders := make(map[int]int, len(headers))
-	for _, h := range headers {
-		b := graph.Body(function, dominance, h)
-		bodies[h] = b
-		if p, ok := graph.Preheader(function, b, h); ok {
-			preheaders[h] = p
-		}
-	}
-	sort.Slice(headers, func(i, j int) bool {
-		return len(bodies[headers[i]]) < len(bodies[headers[j]])
-	})
-
 	blocks := graph.Order(function)
-	calling := make(map[int]bool, len(headers))
-	quiets := make(map[int]bool, len(headers))
-	stored := make(map[int]map[ssa.Slot]bool, len(headers))
-	for _, h := range headers {
-		quiets[h], stored[h] = true, map[ssa.Slot]bool{}
-		for b := range bodies[h] {
+	calling := make([]bool, len(loops))
+	quiets := make([]bool, len(loops))
+	stored := make([]map[ssa.Slot]bool, len(loops))
+	for k, loop := range loops {
+		quiets[k], stored[k] = true, map[ssa.Slot]bool{}
+		for b := range loop.Body {
 			for _, operation := range function.Block(b).Operations {
-				quiets[h] = quiets[h] && quiet(function, operation)
-				calling[h] = calling[h] || operation.Op == ssa.OpExec && operation.Code == instr.CALL
+				quiets[k] = quiets[k] && quiet(function, operation)
+				calling[k] = calling[k] || operation.Op == ssa.OpExec && operation.Code == instr.CALL
 				if operation.Op == ssa.OpStore {
-					stored[h][operation.Slot] = true
+					stored[k][operation.Slot] = true
 				}
 			}
 		}
@@ -78,10 +64,10 @@ func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 		return s.block
 	}
 	location := func(v ssa.Value) (int, bool) {
-		if b, ok := l.params[v]; ok {
+		if b, ok := nest.params[v]; ok {
 			return b, true
 		}
-		if s, ok := l.sites[v]; ok {
+		if s, ok := nest.sites[v]; ok {
 			return current(s), true
 		}
 		return 0, false
@@ -92,12 +78,11 @@ func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	}
 
 	changed := false
-	for _, h := range headers {
-		preheader, ok := preheaders[h]
-		if !ok {
+	for k, loop := range loops {
+		preheader, body := loop.Preheader, loop.Body
+		if preheader < 0 {
 			continue
 		}
-		body := bodies[h]
 		invariant := func(v ssa.Value) bool { return outside(v, body) }
 		for _, b := range blocks {
 			if !body[b] {
@@ -111,30 +96,30 @@ func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 				}
 				switch {
 				case operation.Op == ssa.OpGuardShape:
-					if calling[h] || !invariant(operation.Args[0]) {
+					if calling[k] || !invariant(operation.Args[0]) {
 						continue
 					}
 					// Only a guard every completed iteration runs: one under a
 					// condition may never run, and hoisted it would deopt at
 					// each loop entry and refute the unit.
-					if slices.ContainsFunc(function.Pred(h), func(latch int) bool {
+					if slices.ContainsFunc(function.Pred(loop.Header), func(latch int) bool {
 						return body[latch] && !dominance.Dominates(current(s), latch)
 					}) {
 						continue
 					}
-					entry, ok := inlet(function, l.sites, h, preheader, invariant)
+					entry, ok := inlet(function, nest.sites, loop.Header, preheader, invariant)
 					if !ok {
 						continue
 					}
-					frames[h], entries[s] = entry, h
-				case sliceable(function, l.sites, operation):
-					if quiets[h] && invariant(operation.Args[0]) {
-						sliced[s] = h
+					frames[k], entries[s] = entry, k
+				case sliceable(function, nest.sites, operation):
+					if quiets[k] && invariant(operation.Args[0]) {
+						sliced[s] = k
 						changed = true
 					}
 					continue
 				case operation.Op == ssa.OpLoad:
-					if stored[h][operation.Slot] || !quiets[h] && (calling[h] || operation.Slot.Space != ssa.SpaceLocal || operation.Slot.Base != 0) {
+					if stored[k][operation.Slot] || !quiets[k] && (calling[k] || operation.Slot.Space != ssa.SpaceLocal || operation.Slot.Base != 0) {
 						continue
 					}
 				case hoistable(operation):
@@ -166,21 +151,21 @@ func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 			target := r.block(current(site{b, i}))
 			args := operation.Args
 			operation = r.operation(operation)
-			if h, ok := sliced[site{b, i}]; ok {
-				key := [2]int{int(args[0]), h}
+			if k, ok := sliced[site{b, i}]; ok {
+				key := [2]int{int(args[0]), k}
 				if _, ok := views[key]; !ok {
 					v := r.builder.Value(ssa.TypeRef)
-					r.builder.Add(r.block(preheaders[h]), ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{operation.Args[0]}, Results: []ssa.Value{v}})
+					r.builder.Add(r.block(loops[k].Preheader), ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{operation.Args[0]}, Results: []ssa.Value{v}})
 					views[key] = v
 				}
 				operation.Args[0] = views[key]
 			}
-			if h, ok := entries[site{b, i}]; ok {
-				state, ok := states[h]
+			if k, ok := entries[site{b, i}]; ok {
+				state, ok := states[k]
 				if !ok {
 					state = r.builder.Value(ssa.TypeState)
-					r.builder.Add(target, r.operation(ssa.Operation{Op: ssa.OpState, Frames: frames[h], Results: []ssa.Value{state}}))
-					states[h] = state
+					r.builder.Add(target, r.operation(ssa.Operation{Op: ssa.OpState, Frames: frames[k], Results: []ssa.Value{state}}))
+					states[k] = state
 				}
 				operation.State = state
 			}
@@ -261,57 +246,4 @@ func overflows(code instr.Opcode) bool {
 	default:
 		return false
 	}
-}
-
-// inlet is the deopt state at loop header's entry, as seen from preheader:
-// the state of header's first operation that has one, with header's params
-// replaced by preheader's edge arguments. It fails when an effect precedes
-// that operation in header or the state names a value invariant rejects.
-func inlet(function *ssa.Function, sites map[ssa.Value]site, header, preheader int, invariant func(ssa.Value) bool) ([]ssa.Frame, bool) {
-	block := function.Block(header)
-	args := map[ssa.Value]ssa.Value{}
-	for i, param := range block.Params {
-		args[param] = function.Block(preheader).Terminator.Edges[0].Args[i]
-	}
-	at := ssa.NoValue
-	for _, operation := range block.Operations {
-		if operation.State != ssa.NoValue {
-			at = operation.State
-			break
-		}
-		if operation.Op != ssa.OpConst && operation.Op != ssa.OpLoad && operation.Op != ssa.OpState {
-			return nil, false
-		}
-	}
-	s, ok := sites[at]
-	if !ok {
-		return nil, false
-	}
-	state := function.Block(s.block).Operations[s.index]
-	substitute := func(v ssa.Value) (ssa.Value, bool) {
-		if arg, ok := args[v]; ok {
-			return arg, true
-		}
-		return v, invariant(v)
-	}
-	frames := make([]ssa.Frame, len(state.Frames))
-	for i, frame := range state.Frames {
-		stack := make([]ssa.Operand, len(frame.Stack))
-		for j, operand := range frame.Stack {
-			if stack[j].Value, ok = substitute(operand.Value); !ok {
-				return nil, false
-			}
-			stack[j].Owned = operand.Owned
-		}
-		locals := make([]ssa.Local, len(frame.Locals))
-		for j, local := range frame.Locals {
-			if locals[j].Value, ok = substitute(local.Value); !ok {
-				return nil, false
-			}
-			locals[j].Index = local.Index
-		}
-		frame.Stack, frame.Locals = stack, locals
-		frames[i] = frame
-	}
-	return frames, true
 }

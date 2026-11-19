@@ -10,17 +10,17 @@ import (
 type cfg []*BasicBlock
 
 // Headers returns the bytecode offset of every loop header in function: a block
-// some back edge targets, in the sense internal/graph.Headers defines it.
+// some back edge targets, in the sense internal/graph.Loops defines it.
 func Headers(function *types.Function) ([]int, error) {
 	blocks, err := Blocks(function)
 	if err != nil {
 		return nil, err
 	}
 	g := cfg(blocks)
-	headers := graph.Headers(g, graph.NewDominance(g))
-	out := make([]int, len(headers))
-	for i, h := range headers {
-		out[i] = blocks[h].Start
+	loops := graph.Loops(g, graph.NewDominance(g))
+	out := make([]int, len(loops))
+	for i, loop := range loops {
+		out[i] = blocks[loop.Header].Start
 	}
 	return out, nil
 }
