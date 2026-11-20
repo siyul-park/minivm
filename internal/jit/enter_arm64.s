@@ -4,7 +4,7 @@
 // The jit runtime's native stack trampoline. R26 holds the *State (the
 // Context, which State leads) for as long as native code runs and native code
 // never writes it; it must be the context register internal/jit/arm64 pins
-// (internal/asm/arm64.Ctx). R16 and R17 are scratch. Go's
+// (internal/jit/arm64.Ctx). R16 and R17 are scratch. Go's
 // SP, FP, and LR live in the state from the moment control leaves Go until
 // the moment it returns, so nothing below ever touches the goroutine stack.
 

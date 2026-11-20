@@ -12,11 +12,12 @@ type Arch struct{}
 // skipDisp skips the single 4-byte B after the inverted conditional branch.
 const skipDisp = 8
 
-// ints are the allocatable general registers. The omitted registers are
-// reserved by the native runtime or the Go ABI.
+// ints are the allocatable general registers: all but the intra-procedure
+// scratch registers X16 and X17, the platform register X18, FP, and LR. A
+// caller reserves whatever its own runtime pins.
 var ints = []asm.PReg{
 	X0, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15,
-	X19, X20, X21, X22, X23, X24, X25, X27,
+	X19, X20, X21, X22, X23, X24, X25, X26, X27, X28,
 }
 
 // floats are all scalar floating-point registers.

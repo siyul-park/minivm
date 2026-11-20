@@ -60,6 +60,11 @@ type table struct {
 	data, ctrl, slots, mask asm.VReg
 }
 
+// Ctx holds the *jit.Context for as long as native code runs: the trampoline
+// (internal/jit/enter_arm64.s) hands it over in R26 and reads it back on every
+// exit, so native code never writes it.
+const Ctx = target.X26
+
 // imm12 is the largest immediate the lowerings place in one 12-bit field.
 const imm12 = 0xFFF
 
@@ -99,9 +104,11 @@ func (m *Machine) Arch() asm.Arch {
 	return target.New()
 }
 
-// Reserve returns the scratch, budget, frame-base, and record-pointer registers.
+// Reserve returns the scratch, budget, frame-base, context, and record-pointer
+// registers, and Go's goroutine register X28, which the trampoline does not
+// restore on its way back to Go.
 func (m *Machine) Reserve() []asm.PReg {
-	return []asm.PReg{target.X16, target.X17, target.X24, target.X25, target.X27}
+	return []asm.PReg{target.X16, target.X17, target.X24, target.X25, Ctx, target.X27, target.X28}
 }
 
 // Prologue builds the frame, records the activation (its caller's spill base
@@ -125,7 +132,7 @@ func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.
 		target.ADDI(target.X27, target.X27, uint16(jit.SizeofRecord)),
 	)
 	if count {
-		a.Emit(target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)))
+		a.Emit(target.LDR(target.X16, Ctx, int16(jit.OffsetEntries)))
 		off := int16(8 * address)
 		if 8*address > imm12 {
 			a.Emit(target.LDI(target.X17, uint64(8*address))...)
@@ -162,7 +169,7 @@ func (m *Machine) Prologue(a *asm.Assembler, address int, count bool, l compile.
 	}
 	if l.Upvals {
 		m.upvals = m.vreg()
-		a.Emit(target.LDR(m.upvals, target.Ctx, int16(jit.OffsetUpvals)))
+		a.Emit(target.LDR(m.upvals, Ctx, int16(jit.OffsetUpvals)))
 	}
 }
 
@@ -186,9 +193,9 @@ func (m *Machine) Enter(a *asm.Assembler, l compile.Layout) asm.Label {
 	label := a.Label()
 	a.Bind(label)
 	a.Emit(
-		target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
-		target.LDR(target.X27, target.Ctx, int16(jit.OffsetNext)),
-		target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+		target.LDR(target.X25, Ctx, int16(jit.OffsetFB)),
+		target.LDR(target.X27, Ctx, int16(jit.OffsetNext)),
+		target.LDR(target.X24, Ctx, int16(jit.OffsetBudget)),
 	)
 	for i, k := range l.Arguments {
 		dst := register(i)
@@ -206,7 +213,7 @@ func (m *Machine) Enter(a *asm.Assembler, l compile.Layout) asm.Label {
 		target.SUBI(target.SP, target.SP, 16),
 		target.STR(target.LR, target.SP, 8),
 		target.BLLabel(m.entry),
-		target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+		target.STR(target.X24, Ctx, int16(jit.OffsetBudget)),
 	)
 	for i, k := range l.Registers {
 		src := register(i)
@@ -320,7 +327,7 @@ func (m *Machine) Return(a *asm.Assembler, t ssa.Terminator, s compile.Site) {
 		if slices.Contains(m.borrows, true) {
 			skip := a.Label()
 			a.Emit(
-				target.ADDI(target.X16, target.Ctx, uint16(jit.OffsetRecords+jit.SizeofRecord)),
+				target.ADDI(target.X16, Ctx, uint16(jit.OffsetRecords+jit.SizeofRecord)),
 				target.CMP(target.X27, target.X16),
 				target.BCondLabel(target.OpBNE, skip),
 			)
@@ -387,15 +394,15 @@ func (m *Machine) Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg) {
 		trap = jit.TrapDeopt
 	}
 	a.Emit(
-		target.STR(target.X27, target.Ctx, int16(jit.OffsetNext)),
-		target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+		target.STR(target.X27, Ctx, int16(jit.OffsetNext)),
+		target.STR(target.X24, Ctx, int16(jit.OffsetBudget)),
 	)
 	a.Emit(target.LDI(target.X16, uint64(id))...)
-	a.Emit(target.STR(target.X16, target.Ctx, int16(jit.OffsetExit)))
+	a.Emit(target.STR(target.X16, Ctx, int16(jit.OffsetExit)))
 	a.Emit(target.LDI(target.X16, uint64(trap))...)
 	a.Emit(
-		target.STR(target.X16, target.Ctx, int16(jit.OffsetTrap)),
-		target.LDR(target.X16, target.Ctx, int16(jit.OffsetStub)),
+		target.STR(target.X16, Ctx, int16(jit.OffsetTrap)),
+		target.LDR(target.X16, Ctx, int16(jit.OffsetStub)),
 		target.EXIT(target.X16),
 	)
 	for _, u := range uses {
@@ -405,9 +412,9 @@ func (m *Machine) Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg) {
 		a.Emit(target.BRK(0))
 		return
 	}
-	a.Emit(target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)))
+	a.Emit(target.LDR(target.X24, Ctx, int16(jit.OffsetBudget)))
 	if k == jit.ExitBox {
-		a.Emit(target.LDR(target.X16, target.Ctx, int16(jit.OffsetResults)))
+		a.Emit(target.LDR(target.X16, Ctx, int16(jit.OffsetResults)))
 	}
 }
 
@@ -419,7 +426,7 @@ func (m *Machine) Spill(a *asm.Assembler, reg asm.VReg, slot int) {
 // Results loads each exit result from Context.Results.
 func (m *Machine) Results(a *asm.Assembler, regs []asm.VReg) {
 	for i, r := range regs {
-		a.Emit(target.LDR(r, target.Ctx, int16(int(jit.OffsetResults)+8*i)))
+		a.Emit(target.LDR(r, Ctx, int16(int(jit.OffsetResults)+8*i)))
 	}
 }
 
@@ -445,16 +452,16 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 	var code asm.VReg
 	if !c.Self {
 		code = m.vreg()
-		a.Emit(target.LDR(code, target.Ctx, int16(jit.OffsetNatives)))
+		a.Emit(target.LDR(code, Ctx, int16(jit.OffsetNatives)))
 		a.Emit(target.LDI(target.X16, uint64(c.Callee))...)
 		a.Emit(target.LDRR(code, code, target.X16), target.CBZLabel(code, c.Stub))
 	}
 	a.Emit(
 		target.ADDI(target.X16, target.X25, uint16(8*(c.Base+c.Size))),
-		target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
+		target.LDR(target.X17, Ctx, int16(jit.OffsetTop)),
 		target.CMP(target.X16, target.X17),
 		target.BCondLabel(target.OpBHI, c.Stub),
-		target.LDR(target.X17, target.Ctx, int16(jit.OffsetEdge)),
+		target.LDR(target.X17, Ctx, int16(jit.OffsetEdge)),
 		target.CMP(target.X27, target.X17),
 		target.BCondLabel(target.OpBCS, c.Stub),
 	)
@@ -464,7 +471,7 @@ func (m *Machine) Call(a *asm.Assembler, c compile.Call, s compile.Site) bool {
 		upvals := m.container(a, s.Reg(c.Target))
 		a.Emit(
 			target.LDR(upvals, upvals, int16(jit.OffsetClosureUpvals)),
-			target.STR(upvals, target.Ctx, int16(jit.OffsetUpvals)),
+			target.STR(upvals, Ctx, int16(jit.OffsetUpvals)),
 		)
 	}
 	a.Emit(target.ADDI(target.X25, target.X25, uint16(8*c.Base)))
@@ -584,7 +591,7 @@ func (m *Machine) base(a *asm.Assembler, slot ssa.Slot) (asm.Reg, bool) {
 		return target.X25, true
 	case slot.Space == ssa.SpaceGlobal:
 		base := m.vreg()
-		a.Emit(target.LDR(base, target.Ctx, int16(jit.OffsetGlobals)))
+		a.Emit(target.LDR(base, Ctx, int16(jit.OffsetGlobals)))
 		return base, true
 	case slot.Space == ssa.SpaceUpval && m.upvals != asm.VReg{}:
 		return m.upvals, true
@@ -1192,7 +1199,7 @@ func (m *Machine) reserve(a *asm.Assembler, op ssa.Operation, s compile.Site, ar
 	empty, resume := s.Bridge()
 
 	entry, n, refs := m.vreg(), m.vreg(), m.vreg()
-	a.Emit(target.LDR(entry, target.Ctx, int16(jit.OffsetBins)))
+	a.Emit(target.LDR(entry, Ctx, int16(jit.OffsetBins)))
 	at := index * jit.Classes * int(jit.SizeofBin)
 	if at+int(jit.OffsetBinLen) > 8*imm12 {
 		a.Emit(target.LDI(target.X16, uint64(at))...)
@@ -1599,7 +1606,7 @@ func (m *Machine) container(a *asm.Assembler, ref asm.Reg) asm.VReg {
 func (m *Machine) heap(a *asm.Assembler, ref asm.Reg) asm.VReg {
 	addr := m.vreg()
 	a.Emit(target.SBFX(addr, ref, 0, 32), target.LSLI(addr, addr, 4))
-	a.Emit(target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)))
+	a.Emit(target.LDR(target.X16, Ctx, int16(jit.OffsetHeap)))
 	a.Emit(target.ADD(addr, target.X16, addr))
 	return addr
 }
@@ -1673,7 +1680,7 @@ func (m *Machine) count(a *asm.Assembler, ref asm.VReg, skip asm.Label, null boo
 		a.Emit(target.CBZLabel(target.X17, skip))
 	}
 	a.Emit(
-		target.LDR(target.X16, target.Ctx, int16(jit.OffsetRC)),
+		target.LDR(target.X16, Ctx, int16(jit.OffsetRC)),
 		target.LSLI(target.X17, target.X17, 3),
 		target.ADD(target.X16, target.X16, target.X17),
 		target.LDR(target.X17, target.X16, 0),

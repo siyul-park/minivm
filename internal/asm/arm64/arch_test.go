@@ -127,7 +127,7 @@ func TestArch_Registers(t *testing.T) {
 	require.Equal(t, []asm.PReg{
 		arm64.X0, arm64.X1, arm64.X2, arm64.X3, arm64.X4, arm64.X5, arm64.X6, arm64.X7,
 		arm64.X8, arm64.X9, arm64.X10, arm64.X11, arm64.X12, arm64.X13, arm64.X14, arm64.X15,
-		arm64.X19, arm64.X20, arm64.X21, arm64.X22, arm64.X23, arm64.X24, arm64.X25, arm64.X27,
+		arm64.X19, arm64.X20, arm64.X21, arm64.X22, arm64.X23, arm64.X24, arm64.X25, arm64.X26, arm64.X27, arm64.X28,
 	}, frame.Registers(asm.RegTypeInt))
 	require.Equal(t, []asm.PReg{
 		arm64.D0, arm64.D1, arm64.D2, arm64.D3, arm64.D4, arm64.D5, arm64.D6, arm64.D7,

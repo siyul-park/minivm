@@ -52,7 +52,7 @@ func TestAssembler_Reserve(t *testing.T) {
 		arm64.MOVI(vint(0), 1),
 		arm64.MOVI(vint(1), 2),
 		arm64.ADD(vint(2), vint(0), vint(1)),
-		arm64.STR(vint(2), arm64.Ctx, 0),
+		arm64.STR(vint(2), arm64.X17, 0),
 	)
 	a.Reserve(arm64.X0)
 
@@ -89,7 +89,7 @@ func TestAssembler_Loc(t *testing.T) {
 			arm64.MOVI(vint(1), 2),
 			arm64.BLR(arm64.X1),
 			arm64.ADD(vint(2), vint(0), vint(1)),
-			arm64.STR(vint(2), arm64.Ctx, 0),
+			arm64.STR(vint(2), arm64.X17, 0),
 			slots(arm64.OpADDI),
 			arm64.RET(),
 		)

@@ -9,6 +9,7 @@ import (
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/siyul-park/minivm/internal/jit"
+	machine "github.com/siyul-park/minivm/internal/jit/arm64"
 	"github.com/siyul-park/minivm/internal/testenv"
 	"github.com/stretchr/testify/require"
 )
@@ -18,10 +19,10 @@ import (
 func exit(id int64, trap jit.Trap) []asm.Instruction {
 	return []asm.Instruction{
 		arm64.MOVI(arm64.X16, id),
-		arm64.STR(arm64.X16, arm64.Ctx, int16(jit.OffsetExit)),
+		arm64.STR(arm64.X16, machine.Ctx, int16(jit.OffsetExit)),
 		arm64.MOVI(arm64.X16, int64(trap)),
-		arm64.STR(arm64.X16, arm64.Ctx, int16(jit.OffsetTrap)),
-		arm64.LDR(arm64.X16, arm64.Ctx, int16(jit.OffsetStub)),
+		arm64.STR(arm64.X16, machine.Ctx, int16(jit.OffsetTrap)),
+		arm64.LDR(arm64.X16, machine.Ctx, int16(jit.OffsetStub)),
 		arm64.BLR(arm64.X16),
 	}
 }
@@ -242,7 +243,7 @@ func TestNewContext(t *testing.T) {
 		testenv.MustHaveArch(t, "arm64")
 		ctx, err := jit.NewContext(4096)
 		require.NoError(t, err)
-		code := link(t, append([]asm.Instruction{arm64.LDR(arm64.X0, arm64.Ctx, int16(jit.OffsetStub))}, exit(1, jit.TrapBridge)...)...)
+		code := link(t, append([]asm.Instruction{arm64.LDR(arm64.X0, machine.Ctx, int16(jit.OffsetStub))}, exit(1, jit.TrapBridge)...)...)
 
 		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
 		require.NotZero(t, ctx.Reg(arm64.X0))
@@ -312,7 +313,7 @@ func TestContext_Read(t *testing.T) {
 			arm64.MOVI(arm64.X1, 99),
 			arm64.STR(arm64.X1, arm64.SP, 16),
 			arm64.ADDI(arm64.X0, arm64.SP, 0),
-			arm64.LDR(arm64.X16, arm64.Ctx, int16(jit.OffsetStub)),
+			arm64.LDR(arm64.X16, machine.Ctx, int16(jit.OffsetStub)),
 			arm64.BLR(arm64.X16),
 		)
 		code, err := a.Build()
@@ -348,7 +349,7 @@ func TestContext_Read(t *testing.T) {
 		a.Emit(
 			arm64.MOVI(arm64.X0, 7),
 			arm64.STR(arm64.X0, arm64.SP, 0),
-			arm64.LDR(arm64.X16, arm64.Ctx, int16(jit.OffsetStub)),
+			arm64.LDR(arm64.X16, machine.Ctx, int16(jit.OffsetStub)),
 			arm64.BLR(arm64.X16),
 		)
 		code, err := a.Build()

@@ -36,11 +36,8 @@ const (
 	X29 = asm.Int64 + 29 // FP (Frame Pointer)
 	X30 = asm.Int64 + 30 // LR (Link Register)
 
-	FP = X29
-	LR = X30
-	// Ctx is the register the jit runtime pins to its context for as long
-	// as native code runs; native code never writes it.
-	Ctx = X26
+	FP  = X29
+	LR  = X30
 	XZR = asm.Int64 + 31
 	// SP shares register id 31 with XZR. In data-processing instructions
 	// field 31 reads as the zero register; in add/subtract-immediate and
