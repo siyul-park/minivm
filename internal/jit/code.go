@@ -7,7 +7,6 @@ import (
 	"sync/atomic"
 
 	"github.com/siyul-park/minivm/internal/asm"
-	"github.com/siyul-park/minivm/internal/asm/host"
 	"github.com/siyul-park/minivm/types"
 )
 
@@ -99,13 +98,13 @@ const (
 	Optimized
 )
 
-// NewCode links code into a new Buffer and returns one native code value with
-// its identity, signature metadata, exits, and Go entry stub.
-func NewCode(address, ip int, osr bool, tier Tier, a Assembly) (*Code, error) {
+// NewCode links code into a new Buffer for arch and returns one native code
+// value with its identity, signature metadata, exits, and Go entry stub.
+func NewCode(arch asm.Arch, address, ip int, osr bool, tier Tier, a Assembly) (*Code, error) {
 	if a.Entry < 0 || a.Entry > len(a.Bytes) {
 		return nil, fmt.Errorf("%w: entry stub offset %d", asm.ErrInvalidArgs, a.Entry)
 	}
-	buffer, err := asm.NewBuffer(host.Arch{}, len(a.Bytes))
+	buffer, err := asm.NewBuffer(arch, len(a.Bytes))
 	if err != nil {
 		return nil, err
 	}

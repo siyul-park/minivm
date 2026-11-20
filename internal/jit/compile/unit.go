@@ -71,7 +71,7 @@ func build(u Unit, m Machine, inline bool) (*jit.Code, error) {
 	if err != nil {
 		return nil, err
 	}
-	c, err := jit.NewCode(u.Address, u.IP, u.OSR, u.Tier, assembly)
+	c, err := jit.NewCode(m.Arch(), u.Address, u.IP, u.OSR, u.Tier, assembly)
 	if err != nil {
 		return nil, fmt.Errorf("compile: code: %w", err)
 	}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/types"
 )
@@ -21,7 +22,7 @@ func TestNewCode(t *testing.T) {
 		registers := []types.Kind{types.KindI32}
 		arguments := []types.Kind{types.KindRef}
 		exits := []jit.Exit{{Kind: jit.ExitDeopt}}
-		c, err := jit.NewCode(3, 0, false, jit.Baseline, jit.Assembly{Bytes: ret(), Exits: exits, Results: 1, Registers: registers, Arguments: arguments})
+		c, err := jit.NewCode(arm64.New(), 3, 0, false, jit.Baseline, jit.Assembly{Bytes: ret(), Exits: exits, Results: 1, Registers: registers, Arguments: arguments})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, c.Free()) })
 
@@ -46,7 +47,7 @@ func TestNewCode(t *testing.T) {
 
 	t.Run("places the entry stub at a byte offset from the body", func(t *testing.T) {
 		code := append(ret(), ret()...)
-		c, err := jit.NewCode(3, 0, false, jit.Baseline, jit.Assembly{Bytes: code, Entry: 4})
+		c, err := jit.NewCode(arm64.New(), 3, 0, false, jit.Baseline, jit.Assembly{Bytes: code, Entry: 4})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, c.Free()) })
 
@@ -54,7 +55,7 @@ func TestNewCode(t *testing.T) {
 	})
 
 	t.Run("keeps an OSR unit's entry IP", func(t *testing.T) {
-		c, err := jit.NewCode(3, 12, true, jit.Optimized, jit.Assembly{Bytes: ret()})
+		c, err := jit.NewCode(arm64.New(), 3, 12, true, jit.Optimized, jit.Assembly{Bytes: ret()})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, c.Free()) })
 
@@ -63,7 +64,7 @@ func TestNewCode(t *testing.T) {
 	})
 
 	t.Run("keeps OSR true at IP 0: OSR is its own field, never inferred from IP", func(t *testing.T) {
-		c, err := jit.NewCode(3, 0, true, jit.Baseline, jit.Assembly{Bytes: ret()})
+		c, err := jit.NewCode(arm64.New(), 3, 0, true, jit.Baseline, jit.Assembly{Bytes: ret()})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, c.Free()) })
 
@@ -72,12 +73,12 @@ func TestNewCode(t *testing.T) {
 	})
 
 	t.Run("rejects empty code", func(t *testing.T) {
-		_, err := jit.NewCode(0, 0, false, jit.Baseline, jit.Assembly{})
+		_, err := jit.NewCode(arm64.New(), 0, 0, false, jit.Baseline, jit.Assembly{})
 		require.Error(t, err)
 	})
 
 	t.Run("rejects an entry stub offset outside the code", func(t *testing.T) {
-		_, err := jit.NewCode(0, 0, false, jit.Baseline, jit.Assembly{Bytes: ret(), Entry: len(ret()) + 1})
+		_, err := jit.NewCode(arm64.New(), 0, 0, false, jit.Baseline, jit.Assembly{Bytes: ret(), Entry: len(ret()) + 1})
 		require.Error(t, err)
 	})
 }
@@ -85,7 +86,7 @@ func TestNewCode(t *testing.T) {
 func TestCode_Site(t *testing.T) {
 	code := slices.Concat(ret(), ret(), ret(), ret())
 	sites := []jit.Site{{Offset: 4, Exit: 7}, {Offset: 12, Exit: 2}}
-	c, err := jit.NewCode(3, 0, false, jit.Baseline, jit.Assembly{Bytes: code, Sites: sites})
+	c, err := jit.NewCode(arm64.New(), 3, 0, false, jit.Baseline, jit.Assembly{Bytes: code, Sites: sites})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, c.Free()) })
 
@@ -155,7 +156,7 @@ func TestCode_Invalidated(t *testing.T) {
 }
 
 func TestCode_Free(t *testing.T) {
-	c, err := jit.NewCode(0, 0, false, jit.Baseline, jit.Assembly{Bytes: ret()})
+	c, err := jit.NewCode(arm64.New(), 0, 0, false, jit.Baseline, jit.Assembly{Bytes: ret()})
 	require.NoError(t, err)
 
 	require.NoError(t, c.Free())

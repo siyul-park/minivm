@@ -38,6 +38,9 @@ var (
 // NewBuffer allocates an executable buffer for arch's code with the given
 // initial mapping capacity, rounded up to a page boundary.
 func NewBuffer(arch Arch, size int) (*Buffer, error) {
+	if arch == nil {
+		return nil, fmt.Errorf("%w: nil architecture", ErrInvalidArgs)
+	}
 	mem, err := allocMemory(size)
 	if err != nil {
 		return nil, err
