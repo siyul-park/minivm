@@ -6,10 +6,21 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/types"
 )
+
+type flushArch struct {
+	asm.Arch
+	flushed []byte
+}
+
+func (a *flushArch) Flush(code []byte) {
+	a.flushed = slices.Clone(code[:len(ret())])
+	a.Arch.Flush(code)
+}
 
 // ret is a 4-byte ARM64 RET instruction: valid to link on darwin or linux
 // but never run, so tests never branch to it.
@@ -18,6 +29,28 @@ func ret() []byte {
 }
 
 func TestNewCode(t *testing.T) {
+	t.Run("publishes through the supplied architecture", func(t *testing.T) {
+		arch := &flushArch{Arch: arm64.New()}
+		c, err := jit.NewCode(arch, 0, 0, false, jit.Baseline, jit.Assembly{Bytes: ret()})
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, c.Free()) })
+
+		require.Equal(t, ret(), arch.flushed)
+		require.NotZero(t, c.Native())
+	})
+
+	t.Run("rejects a missing architecture", func(t *testing.T) {
+		c, err := jit.NewCode(nil, 0, 0, false, jit.Baseline, jit.Assembly{Bytes: ret()})
+		require.ErrorIs(t, err, asm.ErrInvalidArgs)
+		require.Nil(t, c)
+	})
+
+	t.Run("rejects a negative entry offset", func(t *testing.T) {
+		c, err := jit.NewCode(arm64.New(), 0, 0, false, jit.Baseline, jit.Assembly{Bytes: ret(), Entry: -1})
+		require.ErrorIs(t, err, asm.ErrInvalidArgs)
+		require.Nil(t, c)
+	})
+
 	t.Run("links code and keeps its metadata", func(t *testing.T) {
 		registers := []types.Kind{types.KindI32}
 		arguments := []types.Kind{types.KindRef}

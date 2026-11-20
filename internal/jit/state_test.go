@@ -75,36 +75,56 @@ func TestState_Reg(t *testing.T) {
 	ctx, err := jit.NewContext(4096)
 	require.NoError(t, err)
 
-	intReg := asm.NewPReg(3, asm.RegTypeInt, asm.Width64)
-	floatReg := asm.NewPReg(3, asm.RegTypeFloat, asm.Width64)
-	ctx.SetReg(intReg, 42)
-	ctx.SetReg(floatReg, 84)
-
-	require.Equal(t, uint64(42), ctx.Reg(intReg))
-	require.Equal(t, uint64(84), ctx.Reg(floatReg))
+	for id := range 32 {
+		ctx.SetReg(asm.NewPReg(uint8(id), asm.RegTypeInt, asm.Width64), uint64(id)+1)
+		ctx.SetReg(asm.NewPReg(uint8(id), asm.RegTypeFloat, asm.Width64), ^uint64(id))
+	}
+	for id := range 32 {
+		require.Equal(t, uint64(id)+1, ctx.Reg(asm.NewPReg(uint8(id), asm.RegTypeInt, asm.Width64)))
+		require.Equal(t, ^uint64(id), ctx.Reg(asm.NewPReg(uint8(id), asm.RegTypeFloat, asm.Width64)))
+	}
 }
 
 func TestState_SetReg(t *testing.T) {
-	ctx, err := jit.NewContext(4096)
-	require.NoError(t, err)
+	t.Run("widths share the same saved register", func(t *testing.T) {
+		ctx, err := jit.NewContext(4096)
+		require.NoError(t, err)
+		ctx.SetReg(arm64.X3, ^uint64(0))
+		require.Equal(t, ^uint64(0), ctx.Reg(arm64.W3))
+		ctx.SetReg(arm64.W3, 0)
+		require.Zero(t, ctx.Reg(arm64.X3))
+	})
 
-	reg := asm.NewPReg(3, asm.RegTypeInt, asm.Width64)
-	ctx.SetReg(reg, 42)
-
-	require.Equal(t, uint64(42), ctx.Reg(reg))
+	t.Run("register files belong to their context", func(t *testing.T) {
+		first, err := jit.NewContext(4096)
+		require.NoError(t, err)
+		second, err := jit.NewContext(4096)
+		require.NoError(t, err)
+		first.SetReg(arm64.X3, 42)
+		require.Zero(t, second.Reg(arm64.X3))
+		second.SetReg(arm64.X3, 84)
+		require.Equal(t, uint64(42), first.Reg(arm64.X3))
+	})
 }
 
 func TestState_Slot(t *testing.T) {
-	testenv.MustHaveArch(t, "arm64")
-	ctx, err := jit.NewContext(4096)
-	require.NoError(t, err)
-	code := link(t, append([]asm.Instruction{
-		arm64.MOVI(arm64.X0, 42),
-		arm64.STR(arm64.X0, arm64.SP, 0),
-	}, exit(1, jit.TrapBridge)...)...)
+	t.Run("rejects a negative spill slot", func(t *testing.T) {
+		ctx, err := jit.NewContext(4096)
+		require.NoError(t, err)
+		require.Panics(t, func() { ctx.Slot(-1) })
+	})
+	t.Run("reads a suspended spill slot", func(t *testing.T) {
+		testenv.MustHaveArch(t, "arm64")
+		ctx, err := jit.NewContext(4096)
+		require.NoError(t, err)
+		code := link(t, append([]asm.Instruction{
+			arm64.MOVI(arm64.X0, 42),
+			arm64.STR(arm64.X0, arm64.SP, 0),
+		}, exit(1, jit.TrapBridge)...)...)
 
-	require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
-	require.Equal(t, uint64(42), ctx.Slot(0))
+		require.Equal(t, jit.TrapBridge, jit.Enter(code, ctx))
+		require.Equal(t, uint64(42), ctx.Slot(0))
+	})
 }
 
 func TestState_Word(t *testing.T) {

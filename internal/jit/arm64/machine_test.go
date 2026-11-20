@@ -1175,7 +1175,37 @@ func TestMachine_Arch(t *testing.T) {
 }
 
 func TestMachine_Reserve(t *testing.T) {
-	require.Equal(t, []asm.PReg{target.X16, target.X17, target.X24, target.X25, arm64.Ctx, target.X27, target.X28}, arm64.New().Reserve())
+	t.Run("reserves the runtime and Go registers", func(t *testing.T) {
+		require.Equal(t, target.X26, arm64.Ctx)
+		require.Equal(t, []asm.PReg{target.X16, target.X17, target.X24, target.X25, target.X26, target.X27, target.X28}, arm64.New().Reserve())
+	})
+
+	t.Run("preserves the allocatable register bank and preference order", func(t *testing.T) {
+		m := arm64.New()
+		reserved := m.Reserve()
+		var available []asm.PReg
+		for _, r := range target.New().Registers(asm.RegTypeInt) {
+			if !slices.Contains(reserved, r) {
+				available = append(available, r)
+			}
+		}
+		require.Equal(t, []asm.PReg{
+			target.X0, target.X1, target.X2, target.X3, target.X4, target.X5, target.X6, target.X7,
+			target.X8, target.X9, target.X10, target.X11, target.X12, target.X13, target.X14, target.X15,
+			target.X19, target.X20, target.X21, target.X22, target.X23,
+		}, available)
+		for _, r := range target.New().Registers(asm.RegTypeFloat) {
+			require.NotContains(t, reserved, r)
+		}
+	})
+
+	t.Run("returns independently owned reservations", func(t *testing.T) {
+		m := arm64.New()
+		reserved := m.Reserve()
+		reserved[0] = target.X0
+		require.NotContains(t, m.Reserve(), target.X0)
+		require.Contains(t, m.Reserve(), target.X16)
+	})
 }
 
 func TestMachine_Prologue(t *testing.T) {
