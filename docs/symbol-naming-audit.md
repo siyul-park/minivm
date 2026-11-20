@@ -36,7 +36,7 @@ New compiler or target terms `MUST` be introduced by the owning package or topic
 | Term | Meaning |
 |---|---|
 | `Op` | an operation named `domain.verb` (`int.add`, `array.get`); `exec` carries an unmodelled opcode |
-| `Term` | a block terminator: jump, branch, return, complete, exit |
+| `Term` | a block terminator: `jump`, `brif`, `br_table`, `return`, `complete`, `exit` |
 | `Cond` | the condition of a compare operation |
 | `Form` | the container kind a `Shape` guards: array, map, struct, closure, signature |
 | `Effect` | a machine part an operation reads or writes beyond its operands |

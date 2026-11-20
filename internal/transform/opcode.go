@@ -32,7 +32,7 @@ type key struct {
 // only ones whose meaning SSA owns. An opcode absent from it stays OpExec. Where
 // several opcodes share one operation, the key of the row decides: i1, i8, and
 // i32 operands all perform the I32 opcode, and I32_EQZ is the one opcode with
-// no row of its own in reverse, since int.cmp eq against a zero constant is
+// no row of its own in performers, since int.cmp eq against a zero constant is
 // emitted as it.
 var rows = func() []row {
 	var out []row
@@ -172,19 +172,18 @@ var rows = func() []row {
 	return out
 }()
 
-// forward finds the row of a modelled opcode; reverse the row that performs
+// models finds the row of a modelled opcode; performers the row that performs
 // the operations with a key, never one of the zero rows, which share their key
 // with the plain compare.
 var (
-	forward = func() map[instr.Opcode]row {
+	models = func() map[instr.Opcode]row {
 		m := make(map[instr.Opcode]row, len(rows))
 		for _, r := range rows {
 			m[r.code] = r
 		}
 		return m
 	}()
-	eqz     = map[ssa.Type]instr.Opcode{ssa.TypeI32: instr.I32_EQZ, ssa.TypeI64: instr.I64_EQZ}
-	reverse = func() map[key]row {
+	performers = func() map[key]row {
 		m := make(map[key]row, len(rows))
 		for _, r := range rows {
 			if !r.zero {
@@ -203,7 +202,7 @@ func Performs(f *ssa.Function, o ssa.Operation, code instr.Opcode) bool {
 	if o.Op == ssa.OpExec {
 		return o.Code == code
 	}
-	r, ok := forward[code]
+	r, ok := models[code]
 	if !ok || r.zero || r.op != o.Op || r.cond != o.Cond {
 		return false
 	}
@@ -213,17 +212,13 @@ func Performs(f *ssa.Function, o ssa.Operation, code instr.Opcode) bool {
 	return keyOf(f, o) == key{r.op, r.cond, r.arg, r.res}
 }
 
-// opcode returns the guest opcode that performs operation o of f: its own for
+// codeOf returns the guest opcode that performs operation o of f: its own for
 // OpExec, else the row it keys, which has no operand to carry.
-func opcode(f *ssa.Function, o ssa.Operation) (instr.Opcode, bool) {
+func codeOf(f *ssa.Function, o ssa.Operation) (instr.Opcode, bool) {
 	if o.Op == ssa.OpExec {
 		return o.Code, true
 	}
-	if o.Op == ssa.OpIntCmp && len(o.Args) == 1 {
-		code, ok := eqz[f.Type(o.Args[0]).Lane()]
-		return code, ok
-	}
-	r, ok := reverse[keyOf(f, o)]
+	r, ok := performers[keyOf(f, o)]
 	return r.code, ok
 }
 
@@ -240,10 +235,10 @@ func keyOf(f *ssa.Function, o ssa.Operation) key {
 // one exists: an integer compare always has one, and a float compare only
 // for equality, since the bytecode has no unordered form of the others.
 func invert(code instr.Opcode) (instr.Opcode, bool) {
-	r, ok := forward[code]
+	r, ok := models[code]
 	if !ok || r.zero || r.cond == 0 || r.op == ssa.OpRefCmp || r.op == ssa.OpStringCmp {
 		return 0, false
 	}
-	inverse, ok := reverse[key{r.op, r.cond.Invert(), r.arg, r.res}]
+	inverse, ok := performers[key{r.op, r.cond.Invert(), r.arg, r.res}]
 	return inverse.code, ok
 }

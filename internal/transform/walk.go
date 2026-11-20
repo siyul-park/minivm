@@ -384,7 +384,7 @@ func (w *walker) guardMap(operation instr.Opcode, m *types.MapType, pops int) {
 		value = w.stack[top-1].kind
 	}
 	shape := ssa.Shape{Form: ssa.FormMap, Key: m.KeyKind, Elem: m.ElemKind}
-	if shape.Serves(forward[operation].op, key, value) {
+	if shape.Serves(models[operation].op, key, value) {
 		w.guard(top-pops, shape)
 	}
 }
@@ -568,7 +568,7 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 	w.stack = w.stack[:len(w.stack)-pops]
 
 	operation := ssa.Operation{Op: ssa.OpExec, Code: opcode, Shape: shape, Args: args, Results: out}
-	if r, ok := forward[opcode]; ok {
+	if r, ok := models[opcode]; ok {
 		operation.Op, operation.Code, operation.Cond = r.op, 0, r.cond
 		if r.zero {
 			zero := w.builder.Value(w.builder.Type(args[0]))

@@ -354,14 +354,14 @@ func TestSSAPass_Run(t *testing.T) {
 				return nil, false
 			}
 		}
-		windowOf := func(op instr.Opcode, right float64) ([]instr.Instruction, bool) {
+		windowOf := func(op instr.Opcode, left, right float64) ([]instr.Instruction, bool) {
 			typ := instr.TypeOf(op)
 			if len(typ.Widths) > 0 || len(typ.Pop) == 0 {
 				return nil, false
 			}
 			code := make([]instr.Instruction, 0, len(typ.Pop)+1)
 			for i := len(typ.Pop) - 1; i >= 0; i-- {
-				value := 6.0
+				value := left
 				if i == 0 {
 					value = right
 				}
@@ -382,8 +382,9 @@ func TestSSAPass_Run(t *testing.T) {
 			if !instr.Valid(op) || !op.IsPure() {
 				continue
 			}
-			for _, right := range []float64{3, 0} {
-				if code, ok := windowOf(op, right); ok {
+			// Equal and negative operands tell a compare from its neighbours: lt from le, signed from unsigned.
+			for _, operands := range [][2]float64{{6, 3}, {6, 0}, {6, 6}, {6, -3}, {-3, 6}} {
+				if code, ok := windowOf(op, operands[0], operands[1]); ok {
 					out = append(out, struct {
 						op   instr.Opcode
 						code []instr.Instruction
@@ -407,7 +408,8 @@ func TestSSAPass_Run(t *testing.T) {
 
 			routed, routedMessage := executionResult(t, got)
 			require.Equal(t, message, routedMessage)
-			require.Equal(t, values, routed)
+			// NaN is not equal to itself, so compare the printed values.
+			require.Equal(t, fmt.Sprint(values), fmt.Sprint(routed))
 		}
 		for _, op := range []instr.Opcode{
 			instr.I32_XOR, instr.I32_AND, instr.I32_OR,
@@ -641,8 +643,8 @@ func TestSSAPass_Run(t *testing.T) {
 
 	t.Run("declines a branch its own layout would put out of range", func(t *testing.T) {
 		// The emitted branch spans the filler and the tail, whose dup becomes a second constant.
-		four := []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_EQZ), instr.MustNew(instr.DROP)}
-		five := []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_EQZ), instr.MustNew(instr.I32_EQZ), instr.MustNew(instr.DROP)}
+		four := []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CLZ), instr.MustNew(instr.DROP)}
+		five := []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CLZ), instr.MustNew(instr.I32_CLZ), instr.MustNew(instr.DROP)}
 		tail := []instr.Instruction{instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.DUP), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.DROP)}
 		tailWidth := 0
 		for _, in := range tail {
@@ -689,6 +691,35 @@ func TestSSAPass_Run(t *testing.T) {
 			values, message := executionResult(t, input)
 			require.Equal(t, wantErr, message)
 			require.Equal(t, want, values)
+		}
+	})
+
+	t.Run("emits a zero compare as a compare against a zero constant", func(t *testing.T) {
+		for eqz, want := range map[instr.Opcode][]string{
+			instr.I32_EQZ: {"i32.const 0", "i32.eq"},
+			instr.I64_EQZ: {"i64.const 0", "i64.eq"},
+		} {
+			kind, ret := types.TypeI32(), types.TypeI32()
+			if eqz == instr.I64_EQZ {
+				kind = types.TypeI64()
+			}
+			fn := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{kind}, Returns: []types.Type{ret}})
+			fn.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(eqz), instr.MustNew(instr.RETURN))
+			prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(fn.MustBuild()))
+			if eqz == instr.I64_EQZ {
+				prog = program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 1), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(fn.MustBuild()))
+			}
+			require.NoError(t, program.Verify(prog))
+
+			_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), false).Run(pass.NewManager(), prog)
+
+			require.NoError(t, err)
+			require.NoError(t, program.Verify(prog))
+			code := instr.Format(prog.Constants[0].(*types.Function).Code)
+			for _, w := range want {
+				require.Contains(t, code, w)
+			}
+			require.NotContains(t, code, "eqz")
 		}
 	})
 

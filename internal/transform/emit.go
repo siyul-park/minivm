@@ -26,7 +26,6 @@ type emitter struct {
 	home     map[ssa.Value]int
 	source   map[ssa.Value]ssa.Operation
 	remat    map[ssa.Value]bool
-	zeros    map[ssa.Value]bool
 	loops    map[int]bool
 	bodies   map[int]map[int]bool
 	liveIn   []map[ssa.Value]bool
@@ -107,15 +106,6 @@ func (e *emitter) collect() bool {
 	e.source, e.remat = map[ssa.Value]ssa.Operation{}, map[ssa.Value]bool{}
 	e.spare, e.produced = map[ssa.Value]bool{}, map[ssa.Value]bool{}
 	e.ops, e.terms = make([][]ssa.Operation, e.function.Len()), make([]ssa.Terminator, e.function.Len())
-
-	e.zeros = map[ssa.Value]bool{}
-	for id := range e.function.Len() {
-		for _, operation := range e.function.Block(id).Operations {
-			if operation.Op == ssa.OpConst && operation.Const == 0 && e.function.Type(operation.Results[0]) != ssa.TypeRef {
-				e.zeros[operation.Results[0]] = true
-			}
-		}
-	}
 
 	for id := range e.function.Len() {
 		block := e.function.Block(id)
@@ -413,10 +403,6 @@ func (e *emitter) accept(id int, operation ssa.Operation) bool {
 		}
 	}
 	operation.Args = e.values(operation.Args)
-	if operation.Op == ssa.OpIntCmp && operation.Cond == ssa.CondEQ && len(operation.Args) == 2 && e.zeros[operation.Args[1]] {
-		// A compare with zero is the one-operand eqz.
-		operation.Args = operation.Args[:1]
-	}
 	for _, v := range operation.Results {
 		e.defined[v] = id
 		e.produced[v] = true
@@ -864,7 +850,7 @@ func (e *emitter) inverts(id int) bool {
 		return false
 	}
 	last := ops[len(ops)-1]
-	code, ok := opcode(e.function, last)
+	code, ok := codeOf(e.function, last)
 	if _, inverse := invert(code); !ok || !inverse {
 		return false
 	}
@@ -1057,7 +1043,7 @@ func (e *emitter) perform(operation ssa.Operation) bool {
 	case ssa.OpStore:
 		e.write(spaceOps[operation.Slot.Space].write, uint64(operation.Slot.Index))
 	default:
-		code, ok := opcode(e.function, operation)
+		code, ok := codeOf(e.function, operation)
 		if !ok {
 			e.failed = true
 			return false

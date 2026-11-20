@@ -248,8 +248,11 @@ func attributes(o Operation) error {
 }
 
 // modelled checks the operand and result types of a data operation, which
-// every exit-capable translation of a guest opcode carries a State for.
-// OpExec of an opcode one of these models is not yet rejected.
+// every exit-capable translation of a guest opcode carries a State for. It
+// cannot reject an OpExec of an opcode one of these models: the opcode table
+// lives in internal/transform, which imports this package. The table's owner
+// guarantees translation never emits that exec, and transform's TestPerforms
+// pins it.
 func modelled(function *Function, o Operation) error {
 	arg := func(i int) Type { return function.Type(o.Args[i]) }
 	res := func(i int) Type { return function.Type(o.Results[i]) }

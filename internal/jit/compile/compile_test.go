@@ -318,6 +318,30 @@ func TestLower(t *testing.T) {
 		}
 	})
 
+	t.Run("never loads a zero that only an int.cmp takes as its second operand", func(t *testing.T) {
+		b := ssa.New("f")
+		entry, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header}}})
+		x, zero, cond := constant(b, header, types.BoxI32(5)), constant(b, header, types.BoxI32(0)), b.Value(ssa.TypeI1)
+		at := state(b, header, 9, ssa.Operand{Value: x}, ssa.Operand{Value: zero})
+		b.Add(header, ssa.Operation{Op: ssa.OpIntCmp, Cond: ssa.CondEQ, Args: []ssa.Value{x, zero}, State: at, Results: []ssa.Value{cond}})
+		b.Term(header, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: exit}, {Block: body}}})
+		b.Term(body, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header}}})
+		b.Term(exit, ssa.Terminator{Term: ssa.TermReturn})
+
+		m := new(machine)
+		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, m)
+
+		require.NoError(t, err)
+		loads := 0
+		for _, call := range m.calls[:slices.Index(m.calls, "brif")] {
+			if call == "const" {
+				loads++
+			}
+		}
+		require.Equal(t, 1, loads)
+	})
+
 	t.Run("keeps a loop table's default next, the only target a table falls through to", func(t *testing.T) {
 		b := ssa.New("f")
 		entry, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()

@@ -324,7 +324,9 @@ func (l *lowering) word(k jit.Kind, kind types.Kind, reg asm.VReg) (exit, resume
 
 // scan fills headers, inner, gate, upvals, uses, and remats. A scalar or ref
 // constant is rematerialized when f has a call and no loop block uses it: a
-// loop keeps its constants in registers.
+// loop keeps its constants in registers. An integer zero that only int.cmp
+// takes as its second operand is always rematerialized, since the machine
+// encodes it as an immediate and never loads it.
 func (l *lowering) scan() {
 	f := l.f
 	dom := graph.NewDominance(f)
@@ -348,11 +350,14 @@ func (l *lowering) scan() {
 	}
 	caller := false
 	looped := map[ssa.Value]bool{}
+	loaded, immediate := map[ssa.Value]bool{}, map[ssa.Value]bool{}
 	for id := 0; id < f.Len(); id++ {
 		b := f.Block(id)
-		mark := func(args []ssa.Value) {
-			for _, v := range args {
+		mark := func(args []ssa.Value, imm int) {
+			for i, v := range args {
 				l.uses[v]++
+				loaded[v] = loaded[v] || i != imm
+				immediate[v] = immediate[v] || i == imm
 				if l.inner[id] != nil {
 					looped[v] = true
 				}
@@ -361,7 +366,11 @@ func (l *lowering) scan() {
 		for _, op := range b.Operations {
 			caller = caller || op.Op == ssa.OpCall
 			l.upvals = l.upvals || (op.Op == ssa.OpLoad || op.Op == ssa.OpStore) && op.Slot.Space == ssa.SpaceUpval
-			mark(op.Args)
+			if op.Op == ssa.OpIntCmp && len(op.Args) == 2 {
+				mark(op.Args, 1)
+			} else {
+				mark(op.Args, -1)
+			}
 			for _, frame := range op.Frames {
 				for _, o := range frame.Stack {
 					l.uses[o.Value]++
@@ -371,17 +380,21 @@ func (l *lowering) scan() {
 				}
 			}
 		}
-		mark(b.Terminator.Args)
+		mark(b.Terminator.Args, -1)
 		for _, e := range b.Terminator.Edges {
-			mark(e.Args)
+			mark(e.Args, -1)
 		}
-	}
-	if !caller {
-		return
 	}
 	for id := 0; id < f.Len(); id++ {
 		for _, op := range f.Block(id).Operations {
-			if op.Op != ssa.OpConst || looped[op.Results[0]] {
+			if op.Op != ssa.OpConst {
+				continue
+			}
+			if op.Const == 0 && immediate[op.Results[0]] && !loaded[op.Results[0]] && (f.Type(op.Results[0]).Lane() == ssa.TypeI32 || f.Type(op.Results[0]) == ssa.TypeI64) {
+				l.remats[op.Results[0]] = true
+				continue
+			}
+			if !caller || looped[op.Results[0]] {
 				continue
 			}
 			switch f.Type(op.Results[0]) {
