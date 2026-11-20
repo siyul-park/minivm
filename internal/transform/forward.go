@@ -3,7 +3,6 @@ package transform
 import (
 	"maps"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/graph"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/pass"
@@ -17,10 +16,10 @@ type ForwardPass struct{}
 
 var _ pass.Pass[*ssa.Function] = (*ForwardPass)(nil)
 
-var effects = [...]instr.Effect{
-	ssa.SpaceLocal:  instr.Local,
-	ssa.SpaceGlobal: instr.Global,
-	ssa.SpaceUpval:  instr.Upval,
+var effects = [...]ssa.Effect{
+	ssa.SpaceLocal:  ssa.EffectLocal,
+	ssa.SpaceGlobal: ssa.EffectGlobal,
+	ssa.SpaceUpval:  ssa.EffectUpval,
 }
 
 // NewForwardPass returns the pass.
@@ -59,12 +58,12 @@ func (p *ForwardPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error)
 				if at := operation.Args[0]; r.builder.Type(at) != ssa.TypeRef && r.builder.Type(at) != ssa.TypeI64 {
 					held[operation.Slot] = at
 				}
-			case ssa.OpExec:
-				// Drop the held values the code may overwrite.
+			default:
+				// Drop the held values the operation may overwrite.
 				for slot := range held {
-					// A local is reloaded after CALL: a load is cheaper than a
+					// A local is reloaded after a call: a load is cheaper than a
 					// value kept live, and so spilled, across the call.
-					if operation.Code.Writes(effects[slot.Space]) || (slot.Space == ssa.SpaceLocal && operation.Code == instr.CALL) {
+					if operation.Writes()&effects[slot.Space] != 0 || (slot.Space == ssa.SpaceLocal && operation.Op == ssa.OpCall) {
 						delete(held, slot)
 					}
 				}

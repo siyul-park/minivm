@@ -134,7 +134,7 @@ func merges(function *ssa.Function, blocks []int, same map[ssa.Value]ssa.Value, 
 	next := map[int]int{}
 	for _, b := range blocks {
 		term := function.Block(b).Terminator
-		if term.Op != ssa.OpJump {
+		if term.Term != ssa.TermJump {
 			continue
 		}
 		to := term.Edges[0].Block

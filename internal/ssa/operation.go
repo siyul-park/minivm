@@ -9,6 +9,8 @@ import (
 type Operation struct {
 	// Op identifies the IR operation.
 	Op Op
+	// Cond is the condition of a compare operation.
+	Cond Cond
 	// Code identifies the guest opcode for OpExec.
 	Code instr.Opcode
 	// Slot identifies storage for OpLoad/OpStore.
@@ -32,8 +34,8 @@ type Operation struct {
 
 // Terminator ends a block and selects successors.
 type Terminator struct {
-	// Op identifies the terminator.
-	Op Op
+	// Term identifies the terminator.
+	Term Term
 	// Args are values passed to the successor.
 	Args []Value
 	// State identifies the resume state.
@@ -50,8 +52,19 @@ type Edge struct {
 	Args []Value
 }
 
-// Op identifies an SSA operation or terminator.
+// Op identifies an SSA operation.
 type Op uint8
+
+// Term identifies a block terminator.
+type Term uint8
+
+// Cond identifies the relation a compare operation tests; the zero Cond is
+// none.
+type Cond uint8
+
+// Effect is a set of the machine parts an operation touches beyond its
+// operands and results. Its bits mirror instr.Effect.
+type Effect uint8
 
 // Slot identifies one interpreter storage location.
 type Slot struct {
@@ -63,35 +76,38 @@ type Slot struct {
 	Index int
 }
 
-// Shape describes the specialization a guard admits: an array whose
-// elements are of Kind in its canonical representation
-// (types.TypedArray[T] for a scalar Kind, *types.Array for KindRef); when
-// Struct is set, a *types.Struct of struct type Type; when Function is set,
-// a *types.Closure over that function of function type Type holding at
-// least Captures upvals; when Map is set, a *types.TypedMap of key kind Kind.
-// A CALL carries the closure Shape its callee is
-// known to have, or, when its callee is unknown, Type alone: the function
-// type every callee shares.
+// Shape describes the specialization a guard admits, a call carries, or a
+// container allocation names. Form selects which fields apply: FormArray an
+// array whose elements are of Elem in its canonical representation
+// (types.TypedArray[T] for a scalar kind, *types.Array for KindRef);
+// FormMap a *types.TypedMap of key kind Key and element kind Elem;
+// FormStruct a *types.Struct of struct type Type; FormClosure a
+// *types.Closure over Function of function type Type holding at least
+// Captures upvals. An array.new_default or struct.new_default names the
+// declared type it allocates by a FormArray or FormStruct. A call whose
+// callee is unknown carries FormSignature: Type alone, the function type
+// every callee shares. The zero Shape is none.
 type Shape struct {
-	// Kind is the admitted array element kind, or the key kind when Map;
-	// meaningless when Struct or Function.
-	Kind types.Kind
-	// Map reports whether the admitted representation is a numeric-keyed
-	// map: a *types.TypedMap whose key kind is Kind.
-	Map bool
-	// Elem is the declared element kind of the admitted map, when Map.
+	// Form identifies the admitted representation.
+	Form Form
+	// Key is the key kind of a FormMap.
+	Key types.Kind
+	// Elem is the element kind of a FormArray or FormMap.
 	Elem types.Kind
-	// Struct reports whether the admitted representation is a struct of
-	// type Type instead of an array of Kind.
-	Struct bool
-	// Type identifies the admitted struct type, when Struct, or function
-	// type, when Function.
+	// Type identifies the struct type of a FormStruct or the function type
+	// of a FormClosure or FormSignature.
 	Type uintptr
-	// Function is the address of the function an admitted closure calls.
+	// Function is the address of the function a FormClosure calls.
 	Function int
-	// Captures is the upvals count an admitted closure holds at least.
+	// Captures is the upvals count a FormClosure holds at least.
 	Captures int
+	// Index is the index of the declared type in the program's type table,
+	// for the FormArray or FormStruct an allocation names.
+	Index int
 }
+
+// Form identifies the representation a Shape admits.
+type Form uint8
 
 // Frame materializes one interpreter frame for deoptimization.
 type Frame struct {
@@ -128,8 +144,16 @@ type Operand struct {
 // Space identifies interpreter storage.
 type Space uint8
 
+// effect is what a modelled operation touches; OpExec answers from its opcode.
+type effect struct {
+	reads, writes Effect
+	traps         bool
+}
+
 const (
+	// OpConst yields its Const word.
 	OpConst Op = iota
+	// OpExec performs the guest opcode Code, which no other operation models.
 	OpExec
 	OpLoad
 	OpStore
@@ -139,24 +163,157 @@ const (
 	// signed: the bound a loop keeps its indexes below fits an array length.
 	OpGuardBounds
 	OpGuardValue
-	OpRetain
-	OpRelease
+	OpRefRetain
+	OpRefRelease
 	OpState
-	// OpSlice is its argument, a guarded array, whose element pointer and
-	// length array ops naming the result read as of the slice: nothing
+	// OpArrayView is its argument, a guarded array, whose element pointer and
+	// length array ops naming the result read as of the view: nothing
 	// between them may resize or replace the array.
-	OpSlice
-	// OpBound is its first argument, an index proven within [0, length) of
-	// the slice its second argument names; array ops indexed by the result
+	OpArrayView
+	// OpArrayBound is its first argument, an index proven within [0, length) of
+	// the view its second argument names; array ops indexed by the result
 	// check no bounds.
-	OpBound
+	OpArrayBound
 
-	OpJump
-	OpBranch
-	OpTable
-	OpReturn
-	OpComplete
-	OpExit
+	OpSelect
+	OpCall
+
+	OpIntAdd
+	OpIntSub
+	OpIntMul
+	OpIntSDiv
+	OpIntUDiv
+	OpIntSRem
+	OpIntURem
+	OpIntAnd
+	OpIntOr
+	OpIntXor
+	OpIntShl
+	OpIntAShr
+	OpIntLShr
+	OpIntRotl
+	OpIntRotr
+	OpIntClz
+	OpIntCtz
+	OpIntPopcnt
+	OpIntSExt8
+	OpIntSExt16
+	OpIntSExt32
+	OpIntCmp
+	OpIntSExt
+	OpIntZExt
+	OpIntWrap
+	OpIntSIToFP
+	OpIntUIToFP
+	OpIntBitcast
+
+	OpFloatAdd
+	OpFloatSub
+	OpFloatMul
+	OpFloatDiv
+	OpFloatMin
+	OpFloatMax
+	OpFloatCopysign
+	OpFloatNeg
+	OpFloatAbs
+	OpFloatSqrt
+	OpFloatCeil
+	OpFloatFloor
+	OpFloatTrunc
+	OpFloatNearest
+	OpFloatCmp
+	OpFloatFPExt
+	OpFloatFPTrunc
+	OpFloatFPToSISat
+	OpFloatFPToUISat
+	OpFloatBitcast
+
+	OpRefCmp
+	OpRefIsNull
+
+	OpStringCmp
+	OpStringLen
+
+	OpArrayNewDefault
+	OpArrayGet
+	OpArraySet
+	OpArrayLen
+
+	OpStructNewDefault
+	OpStructGet
+	OpStructSet
+
+	OpMapLen
+	OpMapGet
+	OpMapLookup
+	OpMapSet
+	OpMapDelete
+)
+
+const (
+	TermJump Term = iota
+	TermBrIf
+	TermBrTable
+	TermReturn
+	TermComplete
+	TermExit
+)
+
+const (
+	// CondEQ and the following integer conditions compare lanes; the S
+	// conditions read them signed and the U conditions unsigned.
+	CondEQ Cond = iota + 1
+	CondNE
+	CondSLT
+	CondSLE
+	CondSGT
+	CondSGE
+	CondULT
+	CondULE
+	CondUGT
+	CondUGE
+
+	// CondOEQ and the following float conditions are ordered: false when
+	// either operand is NaN.
+	CondOEQ
+	CondONE
+	CondOLT
+	CondOLE
+	CondOGT
+	CondOGE
+	// CondUEQ and the following float conditions are unordered: true when
+	// either operand is NaN. They exist so every condition has an inverse.
+	CondUEQ
+	CondUNE
+	CondUNLT
+	CondUNLE
+	CondUNGT
+	CondUNGE
+)
+
+const (
+	FormNone Form = iota
+	FormArray
+	FormMap
+	FormStruct
+	FormClosure
+	FormSignature
+)
+
+const (
+	// EffectLocal is the running frame's local slots.
+	EffectLocal Effect = 1 << iota
+	// EffectGlobal is the module's globals.
+	EffectGlobal
+	// EffectUpval is the running closure's captured upvalues.
+	EffectUpval
+	// EffectHeap is the contents of a heap container; allocating one writes it.
+	EffectHeap
+	// EffectFrame is the call frame chain: a call pushes a frame.
+	EffectFrame
+	// EffectBranch is the instruction pointer, moved other than by falling
+	// through.
+	EffectBranch
 )
 
 const (
@@ -165,25 +322,152 @@ const (
 	SpaceUpval
 )
 
-// Serves reports whether native code lowers code on a map this shape admits,
+var opNames = [...]string{
+	OpConst: "const", OpExec: "exec", OpLoad: "load", OpStore: "store",
+	OpGuardKind: "guard.kind", OpGuardShape: "guard.shape", OpGuardBounds: "guard.bounds", OpGuardValue: "guard.value",
+	OpRefRetain: "ref.retain", OpRefRelease: "ref.release", OpState: "state",
+	OpArrayView: "array.view", OpArrayBound: "array.bound",
+	OpSelect: "select", OpCall: "call",
+	OpIntAdd: "int.add", OpIntSub: "int.sub", OpIntMul: "int.mul", OpIntSDiv: "int.sdiv", OpIntUDiv: "int.udiv",
+	OpIntSRem: "int.srem", OpIntURem: "int.urem", OpIntAnd: "int.and", OpIntOr: "int.or", OpIntXor: "int.xor",
+	OpIntShl: "int.shl", OpIntAShr: "int.ashr", OpIntLShr: "int.lshr", OpIntRotl: "int.rotl", OpIntRotr: "int.rotr",
+	OpIntClz: "int.clz", OpIntCtz: "int.ctz", OpIntPopcnt: "int.popcnt",
+	OpIntSExt8: "int.sext8", OpIntSExt16: "int.sext16", OpIntSExt32: "int.sext32",
+	OpIntCmp: "int.cmp", OpIntSExt: "int.sext", OpIntZExt: "int.zext", OpIntWrap: "int.wrap",
+	OpIntSIToFP: "int.sitofp", OpIntUIToFP: "int.uitofp", OpIntBitcast: "int.bitcast",
+	OpFloatAdd: "float.add", OpFloatSub: "float.sub", OpFloatMul: "float.mul", OpFloatDiv: "float.div",
+	OpFloatMin: "float.min", OpFloatMax: "float.max", OpFloatCopysign: "float.copysign",
+	OpFloatNeg: "float.neg", OpFloatAbs: "float.abs", OpFloatSqrt: "float.sqrt",
+	OpFloatCeil: "float.ceil", OpFloatFloor: "float.floor", OpFloatTrunc: "float.trunc", OpFloatNearest: "float.nearest",
+	OpFloatCmp: "float.cmp", OpFloatFPExt: "float.fpext", OpFloatFPTrunc: "float.fptrunc",
+	OpFloatFPToSISat: "float.fptosi.sat", OpFloatFPToUISat: "float.fptoui.sat", OpFloatBitcast: "float.bitcast",
+	OpRefCmp: "ref.cmp", OpRefIsNull: "ref.is_null",
+	OpStringCmp: "string.cmp", OpStringLen: "string.len",
+	OpArrayNewDefault: "array.new_default", OpArrayGet: "array.get", OpArraySet: "array.set", OpArrayLen: "array.len",
+	OpStructNewDefault: "struct.new_default", OpStructGet: "struct.get", OpStructSet: "struct.set",
+	OpMapLen: "map.len", OpMapGet: "map.get", OpMapLookup: "map.lookup", OpMapSet: "map.set", OpMapDelete: "map.delete",
+}
+
+var termNames = [...]string{
+	TermJump: "jump", TermBrIf: "brif", TermBrTable: "br_table",
+	TermReturn: "return", TermComplete: "complete", TermExit: "exit",
+}
+
+var condNames = [...]string{
+	CondEQ: "eq", CondNE: "ne", CondSLT: "slt", CondSLE: "sle", CondSGT: "sgt", CondSGE: "sge",
+	CondULT: "ult", CondULE: "ule", CondUGT: "ugt", CondUGE: "uge",
+	CondOEQ: "oeq", CondONE: "one", CondOLT: "olt", CondOLE: "ole", CondOGT: "ogt", CondOGE: "oge",
+	CondUEQ: "ueq", CondUNE: "une", CondUNLT: "ult", CondUNLE: "ule", CondUNGT: "ugt", CondUNGE: "uge",
+}
+
+// inverses maps each condition to the one true exactly when it is false,
+// NaN operands included.
+var inverses = [...]Cond{
+	CondEQ: CondNE, CondNE: CondEQ,
+	CondSLT: CondSGE, CondSGE: CondSLT, CondSLE: CondSGT, CondSGT: CondSLE,
+	CondULT: CondUGE, CondUGE: CondULT, CondULE: CondUGT, CondUGT: CondULE,
+	CondOEQ: CondUNE, CondUNE: CondOEQ, CondONE: CondUEQ, CondUEQ: CondONE,
+	CondOLT: CondUNGE, CondUNGE: CondOLT, CondOLE: CondUNGT, CondUNGT: CondOLE,
+	CondOGT: CondUNLE, CondUNLE: CondOGT, CondOGE: CondUNLT, CondUNLT: CondOGE,
+}
+
+var effects = map[Op]effect{
+	OpIntSDiv: {traps: true}, OpIntUDiv: {traps: true}, OpIntSRem: {traps: true}, OpIntURem: {traps: true},
+	OpCall:             {reads: EffectGlobal | EffectUpval | EffectHeap, writes: EffectGlobal | EffectUpval | EffectHeap | EffectFrame | EffectBranch},
+	OpStringCmp:        {reads: EffectHeap},
+	OpStringLen:        {reads: EffectHeap},
+	OpArrayNewDefault:  {writes: EffectHeap},
+	OpArrayGet:         {reads: EffectHeap},
+	OpArraySet:         {reads: EffectHeap, writes: EffectHeap},
+	OpArrayLen:         {reads: EffectHeap},
+	OpStructNewDefault: {writes: EffectHeap},
+	OpStructGet:        {reads: EffectHeap},
+	OpStructSet:        {reads: EffectHeap, writes: EffectHeap},
+	OpMapLen:           {reads: EffectHeap},
+	OpMapGet:           {reads: EffectHeap},
+	OpMapLookup:        {reads: EffectHeap},
+	OpMapSet:           {reads: EffectHeap, writes: EffectHeap},
+	OpMapDelete:        {reads: EffectHeap, writes: EffectHeap},
+}
+
+// Reads returns the machine parts o reads. OpLoad and OpStore touch the
+// storage their Slot names, which Reads and Writes leave out.
+func (o Operation) Reads() Effect {
+	switch o.Op {
+	case OpExec:
+		return Effect(instr.TypeOf(o.Code).Reads)
+	default:
+		return effects[o.Op].reads
+	}
+}
+
+// Writes returns the machine parts o writes.
+func (o Operation) Writes() Effect {
+	switch o.Op {
+	case OpExec:
+		return Effect(instr.TypeOf(o.Code).Writes)
+	default:
+		return effects[o.Op].writes
+	}
+}
+
+// Traps reports whether o raises a trap for some operand values.
+func (o Operation) Traps() bool {
+	if o.Op == OpExec {
+		return o.Code.Traps()
+	}
+	return effects[o.Op].traps
+}
+
+// Pure reports whether o computes its results from its operands alone: it
+// touches no other part of the machine, yields a value, and observes no
+// position, so two occurrences with equal operands compute equal results. A
+// trapping operation can be pure; Traps tells whether it may be removed.
+func (o Operation) Pure() bool {
+	switch o.Op {
+	case OpExec:
+		return o.Code.IsPure()
+	case OpGuardKind, OpGuardShape, OpGuardBounds, OpGuardValue, OpRefRetain, OpRefRelease, OpState, OpLoad, OpStore, OpArrayView, OpArrayBound:
+		return false
+	default:
+		return len(o.Results) > 0 && o.Reads() == 0 && o.Writes() == 0
+	}
+}
+
+// Data reports whether o is a data operation: OpSelect, OpCall, or one of the
+// int, float, ref, string, array, struct, or map operations that mirror a guest
+// opcode. OpExec performs the opcodes none of them models.
+func (o Op) Data() bool {
+	return o >= OpSelect && o <= OpMapDelete
+}
+
+// Invert returns the condition true exactly when c is false.
+func (c Cond) Invert() Cond {
+	if int(c) >= len(inverses) || inverses[c] == 0 {
+		return c
+	}
+	return inverses[c]
+}
+
+// Serves reports whether native code lowers op on a map this shape admits,
 // given the kinds of its key and value operands (ignored by an operation without
 // them): the key is an integer held in its key kind's register class, and an
 // element or value fits one register, which excludes an i64, whose boxed word
 // may be a reference to a heap-promoted value. Translation guards a map only for
 // an operation Serves accepts, and the lowering lowers exactly those.
-func (s Shape) Serves(code instr.Opcode, key, value types.Kind) bool {
-	if !s.Map {
+func (s Shape) Serves(op Op, key, value types.Kind) bool {
+	if s.Form != FormMap {
 		return false
 	}
-	switch s.Kind {
+	switch s.Key {
 	case types.KindI1, types.KindI8, types.KindI32, types.KindI64:
 	default:
 		return false
 	}
-	if code == instr.MAP_LEN {
+	if op == OpMapLen {
 		return true
 	}
-	if s.Kind == types.KindI64 {
+	if s.Key == types.KindI64 {
 		if key != types.KindI64 {
 			return false
 		}
@@ -191,10 +475,10 @@ func (s Shape) Serves(code instr.Opcode, key, value types.Kind) bool {
 		return false
 	}
 	var held types.Kind
-	switch code {
-	case instr.MAP_GET, instr.MAP_LOOKUP:
+	switch op {
+	case OpMapGet, OpMapLookup:
 		held = s.Elem
-	case instr.MAP_SET:
+	case OpMapSet:
 		held = value
 	default:
 		return true
@@ -208,45 +492,43 @@ func (s Shape) Serves(code instr.Opcode, key, value types.Kind) bool {
 
 // String returns the operation name.
 func (o Op) String() string {
-	switch o {
-	case OpConst:
-		return "const"
-	case OpExec:
-		return "exec"
-	case OpLoad:
-		return "load"
-	case OpStore:
-		return "store"
-	case OpGuardKind:
-		return "guard.kind"
-	case OpGuardShape:
-		return "guard.shape"
-	case OpGuardBounds:
-		return "guard.bounds"
-	case OpGuardValue:
-		return "guard.value"
-	case OpRetain:
-		return "retain"
-	case OpRelease:
-		return "release"
-	case OpState:
-		return "state"
-	case OpSlice:
-		return "slice"
-	case OpBound:
-		return "bound"
-	case OpJump:
-		return "jump"
-	case OpBranch:
-		return "br"
-	case OpTable:
-		return "table"
-	case OpReturn:
-		return "return"
-	case OpComplete:
-		return "complete"
-	case OpExit:
-		return "exit"
+	if int(o) >= len(opNames) || opNames[o] == "" {
+		return "invalid"
+	}
+	return opNames[o]
+}
+
+// String returns the terminator name.
+func (t Term) String() string {
+	if int(t) >= len(termNames) {
+		return "invalid"
+	}
+	return termNames[t]
+}
+
+// String returns the condition name.
+func (c Cond) String() string {
+	if int(c) >= len(condNames) || condNames[c] == "" {
+		return "invalid"
+	}
+	return condNames[c]
+}
+
+// String returns the form name.
+func (f Form) String() string {
+	switch f {
+	case FormNone:
+		return "none"
+	case FormArray:
+		return "array"
+	case FormMap:
+		return "map"
+	case FormStruct:
+		return "struct"
+	case FormClosure:
+		return "closure"
+	case FormSignature:
+		return "signature"
 	default:
 		return "invalid"
 	}
@@ -266,10 +548,17 @@ func (s Space) String() string {
 	}
 }
 
+// float reports whether c compares floats.
+func (c Cond) float() bool {
+	return c >= CondOEQ && c <= CondUNGE
+}
+
 func (o Operation) name() string {
 	switch o.Op {
 	case OpExec:
-		return instr.TypeOf(o.Code).Mnemonic
+		return "exec " + instr.TypeOf(o.Code).Mnemonic
+	case OpIntCmp, OpFloatCmp, OpRefCmp, OpStringCmp:
+		return o.Op.String() + " " + o.Cond.String()
 	default:
 		return o.Op.String()
 	}

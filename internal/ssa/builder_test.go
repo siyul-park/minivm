@@ -3,7 +3,6 @@ package ssa_test
 import (
 	"testing"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/stretchr/testify/require"
 )
@@ -21,8 +20,8 @@ func TestBuilder_Block(t *testing.T) {
 		require.Equal(t, 0, entry)
 		require.Equal(t, 1, second)
 
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: second}}})
-		b.Term(second, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: second}}})
+		b.Term(second, ssa.Terminator{Term: ssa.TermComplete})
 		require.Equal(t, "func f\nblk0: ()\n\tjump blk1()\nblk1: () <-- (blk0)\n\tcomplete\n", ssa.Format(b.Build()))
 	})
 }
@@ -33,7 +32,7 @@ func TestBuilder_Param(t *testing.T) {
 		entry := b.Block()
 		first := b.Param(entry, ssa.TypeI32)
 		second := b.Param(entry, ssa.TypeRef)
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{first, second}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{first, second}})
 
 		f := b.Build()
 		require.Equal(t, []ssa.Value{first, second}, f.Block(entry).Params)
@@ -62,11 +61,11 @@ func TestBuilder_Add(t *testing.T) {
 		one := b.Value(ssa.TypeI32)
 		doubled := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{one, one}, Results: []ssa.Value{doubled}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{doubled}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{one, one}, Results: []ssa.Value{doubled}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{doubled}})
 
 		require.Equal(t,
-			"func f\nblk0: ()\n\tv1:i32 = const 1\n\tv2:i32 = i32.add v1, v1\n\treturn v2\n",
+			"func f\nblk0: ()\n\tv1:i32 = const 1\n\tv2:i32 = int.add v1, v1\n\treturn v2\n",
 			ssa.Format(b.Build()))
 	})
 }
@@ -75,8 +74,8 @@ func TestBuilder_Term(t *testing.T) {
 	t.Run("replaces the terminator already set", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 		require.Equal(t, "func f\nblk0: ()\n\treturn\n", ssa.Format(b.Build()))
 	})
 }
@@ -84,7 +83,7 @@ func TestBuilder_Term(t *testing.T) {
 func TestBuilder_Entry(t *testing.T) {
 	t.Run("carries the frame Build copies onto the function", func(t *testing.T) {
 		b := ssa.New("f")
-		b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(b.Block(), ssa.Terminator{Term: ssa.TermComplete})
 		b.Entry(ssa.Frame{Address: 3, IP: 7, Returns: 2})
 
 		require.Equal(t, ssa.Frame{Address: 3, IP: 7, Returns: 2}, b.Build().Entry())
@@ -92,11 +91,11 @@ func TestBuilder_Entry(t *testing.T) {
 
 	t.Run("resets after Build, like every other builder field", func(t *testing.T) {
 		b := ssa.New("f")
-		b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(b.Block(), ssa.Terminator{Term: ssa.TermComplete})
 		b.Entry(ssa.Frame{Address: 3, IP: 7, Returns: 2})
 		b.Build()
 
-		b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(b.Block(), ssa.Terminator{Term: ssa.TermComplete})
 		require.Zero(t, b.Build().Entry())
 	})
 }
@@ -105,8 +104,8 @@ func TestBuilder_Build(t *testing.T) {
 	t.Run("resolves successors and predecessors", func(t *testing.T) {
 		b := ssa.New("f")
 		entry, join := b.Block(), b.Block()
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
-		b.Term(join, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: join}}})
+		b.Term(join, ssa.Terminator{Term: ssa.TermComplete})
 
 		f := b.Build()
 		require.Equal(t, []int{join}, f.Succ(entry))
@@ -116,11 +115,11 @@ func TestBuilder_Build(t *testing.T) {
 	t.Run("hands over its storage and starts over", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
 
 		built := b.Build()
 		next := b.Block()
-		b.Term(next, ssa.Terminator{Op: ssa.OpReturn})
+		b.Term(next, ssa.Terminator{Term: ssa.TermReturn})
 
 		require.Equal(t, "func f\nblk0: ()\n\tcomplete\n", ssa.Format(built))
 		require.Equal(t, "func f\nblk0: ()\n\treturn\n", ssa.Format(b.Build()))

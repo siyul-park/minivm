@@ -47,6 +47,17 @@ func TypeOf(kind types.Kind) Type {
 	}
 }
 
+// Lane returns the type of the register lane t occupies: i1, i8, and i32 share
+// the 32-bit lane, which an i8 holds sign-extended; every other type is its own.
+func (t Type) Lane() Type {
+	switch t {
+	case TypeI1, TypeI8:
+		return TypeI32
+	default:
+		return t
+	}
+}
+
 // Kind returns the guest kind t represents, KindAny for none.
 func (t Type) Kind() types.Kind {
 	switch t {

@@ -37,7 +37,7 @@ func (p *InlinePass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) 
 	consts := constants(function)
 	bodies := map[int]*ssa.Function{}
 	callee := func(operation ssa.Operation) *ssa.Function {
-		if operation.Op != ssa.OpExec || operation.Code != instr.CALL || operation.Shape != (ssa.Shape{}) ||
+		if operation.Op != ssa.OpCall || operation.Shape != (ssa.Shape{}) ||
 			operation.State == ssa.NoValue || len(operation.Args) == 0 {
 			return nil
 		}
@@ -124,7 +124,7 @@ func traps(body *ssa.Function) bool {
 	consts := constants(body)
 	for b := range body.Len() {
 		for _, operation := range body.Block(b).Operations {
-			if operation.Op != ssa.OpExec || !operation.Code.Traps() {
+			if !operation.Traps() {
 				continue
 			}
 			if len(operation.Args) != 2 {
@@ -177,12 +177,10 @@ func leaf(target *types.Function, body *ssa.Function) bool {
 					body.Type(operation.Results[0]) != ssa.TypeOf(slots[s.Index].Kind()) {
 					return false
 				}
-			case ssa.OpExec:
-				if !operation.Code.IsPure() {
+			default:
+				if (operation.Op != ssa.OpExec && !operation.Op.Data()) || !operation.Pure() {
 					return false
 				}
-			default:
-				return false
 			}
 			for _, result := range operation.Results {
 				if !scalar(body.Type(result)) {
@@ -190,9 +188,9 @@ func leaf(target *types.Function, body *ssa.Function) bool {
 				}
 			}
 		}
-		switch block.Terminator.Op {
-		case ssa.OpJump, ssa.OpBranch, ssa.OpTable:
-		case ssa.OpReturn:
+		switch block.Terminator.Term {
+		case ssa.TermJump, ssa.TermBrIf, ssa.TermBrTable:
+		case ssa.TermReturn:
 			if len(block.Terminator.Args) != len(target.Typ.Returns) {
 				return false
 			}

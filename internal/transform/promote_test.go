@@ -21,28 +21,28 @@ func slotFunction() *ssa.Function {
 	state := b.Value(ssa.TypeState)
 	b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 1}}, Results: []ssa.Value{state}})
 	b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Index: 0}, Args: []ssa.Value{zero}, State: state})
-	b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+	b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header}}})
 
 	held := b.Value(ssa.TypeI32)
 	b.Add(header, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
 	bound := b.Value(ssa.TypeI32)
 	b.Add(header, ssa.Operation{Op: ssa.OpConst, Const: 10, Results: []ssa.Value{bound}})
 	cond := b.Value(ssa.TypeI1)
-	b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{held, bound}, State: deoptState(b, entry), Results: []ssa.Value{cond}})
-	b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
+	b.Add(header, ssa.Operation{Op: ssa.OpIntCmp, Cond: ssa.CondSLT, Args: []ssa.Value{held, bound}, State: deoptState(b, entry), Results: []ssa.Value{cond}})
+	b.Term(header, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
 
 	counter := b.Value(ssa.TypeI32)
 	b.Add(body, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{counter}})
 	one := b.Value(ssa.TypeI32)
 	b.Add(body, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
 	next := b.Value(ssa.TypeI32)
-	b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{counter, one}, State: deoptState(b, entry), Results: []ssa.Value{next}})
+	b.Add(body, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{counter, one}, State: deoptState(b, entry), Results: []ssa.Value{next}})
 	advanced := b.Value(ssa.TypeState)
 	b.Add(body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 9}}, Results: []ssa.Value{advanced}})
 	b.Add(body, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Index: 0}, Args: []ssa.Value{next}, State: advanced})
-	b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+	b.Term(body, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header}}})
 
-	b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
+	b.Term(exit, ssa.Terminator{Term: ssa.TermReturn})
 	return b.Build()
 }
 
@@ -61,7 +61,7 @@ func i64SlotFunction() *ssa.Function {
 	state := b.Value(ssa.TypeState)
 	b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 1}}, Results: []ssa.Value{state}})
 	b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Index: 0}, Args: []ssa.Value{basis}, State: state})
-	b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+	b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header}}})
 
 	held := b.Value(ssa.TypeI64)
 	b.Add(header, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
@@ -70,8 +70,8 @@ func i64SlotFunction() *ssa.Function {
 	bound := b.Value(ssa.TypeI64)
 	b.Add(header, ssa.Operation{Op: ssa.OpConst, Const: uint64(10), Results: []ssa.Value{bound}})
 	cond := b.Value(ssa.TypeI1)
-	b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I64_LT_S, Args: []ssa.Value{guarded, bound}, State: deoptState(b, entry), Results: []ssa.Value{cond}})
-	b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
+	b.Add(header, ssa.Operation{Op: ssa.OpIntCmp, Cond: ssa.CondSLT, Args: []ssa.Value{guarded, bound}, State: deoptState(b, entry), Results: []ssa.Value{cond}})
+	b.Term(header, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
 
 	counter := b.Value(ssa.TypeI64)
 	b.Add(body, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{counter}})
@@ -80,13 +80,13 @@ func i64SlotFunction() *ssa.Function {
 	one := b.Value(ssa.TypeI64)
 	b.Add(body, ssa.Operation{Op: ssa.OpConst, Const: uint64(1), Results: []ssa.Value{one}})
 	next := b.Value(ssa.TypeI64)
-	b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I64_XOR, Args: []ssa.Value{guardedCounter, one}, State: deoptState(b, entry), Results: []ssa.Value{next}})
+	b.Add(body, ssa.Operation{Op: ssa.OpIntXor, Args: []ssa.Value{guardedCounter, one}, State: deoptState(b, entry), Results: []ssa.Value{next}})
 	advanced := b.Value(ssa.TypeState)
 	b.Add(body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 9}}, Results: []ssa.Value{advanced}})
 	b.Add(body, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Index: 0}, Args: []ssa.Value{next}, State: advanced})
-	b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+	b.Term(body, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header}}})
 
-	b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
+	b.Term(exit, ssa.Terminator{Term: ssa.TermReturn})
 	return b.Build()
 }
 
@@ -165,11 +165,11 @@ func TestPromotePass_Run(t *testing.T) {
 		counter := fn.Block(header).Params[0]
 		require.Equal(t, ssa.TypeI32, fn.Type(counter))
 
-		body, advanced := findBlock(fn, func(blk ssa.Block) bool { return hasCode(blk.Operations, instr.I32_ADD) })
+		body, advanced := findBlock(fn, func(blk ssa.Block) bool { return hasOp(blk.Operations, ssa.OpIntAdd) })
 		require.NotEqual(t, -1, body)
 		var next ssa.Value
 		for _, op := range advanced.Operations {
-			if op.Op == ssa.OpExec && op.Code == instr.I32_ADD {
+			if op.Op == ssa.OpIntAdd {
 				next = op.Results[0]
 				require.Equal(t, []ssa.Value{counter, op.Args[1]}, op.Args)
 			}
@@ -186,7 +186,7 @@ func TestPromotePass_Run(t *testing.T) {
 		header, _ := findBlock(fn, func(blk ssa.Block) bool { return len(blk.Params) == 1 })
 		counter := fn.Block(header).Params[0]
 
-		_, body := findBlock(fn, func(blk ssa.Block) bool { return hasCode(blk.Operations, instr.I32_ADD) })
+		_, body := findBlock(fn, func(blk ssa.Block) bool { return hasOp(blk.Operations, ssa.OpIntAdd) })
 		state, ok := deoptStateOf(body)
 		require.True(t, ok)
 		require.Equal(t, []ssa.Frame{{Address: 1, IP: 9, Locals: []ssa.Local{{Index: 0, Value: counter}}}}, state.Frames)
@@ -231,11 +231,11 @@ blk0: ()
 	jump blk1(v4)
 blk1: (v10:i64) <-- (blk0, blk2)
 	v11:i64 = const 10
-	v12:i1 = i64.lt_s v10, v11 state v7
-	br v12, blk2(), blk3()
+	v12:i1 = int.cmp slt v10, v11 state v7
+	brif v12, blk2(), blk3()
 blk2: () <-- (blk1)
 	v13:i64 = const 1
-	v14:i64 = i64.xor v10, v13 state v9
+	v14:i64 = int.xor v10, v13 state v9
 	v15:state = state {addr=1 base=0 ip=9 returns=0 stack=[] locals=[0=v10]}
 	jump blk1(v14)
 blk3: () <-- (blk1)
@@ -260,7 +260,7 @@ blk3: () <-- (blk1)
 		entry := b.Block()
 		held := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{held}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{held}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 		before := ssa.Format(fn)
@@ -279,7 +279,7 @@ blk3: () <-- (blk1)
 		addStore(b, entry, ssa.Slot{Index: 0}, stored)
 		held := b.Value(ssa.TypeF64)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{held}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{held}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 		before := ssa.Format(fn)
@@ -298,7 +298,7 @@ blk3: () <-- (blk1)
 		addStore(b, entry, ssa.Slot{Index: 0}, stored)
 		held := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{held}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{held}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 		before := ssa.Format(fn)
@@ -317,7 +317,7 @@ blk3: () <-- (blk1)
 		addStore(b, entry, ssa.Slot{Index: 0, Base: 4}, stored)
 		held := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0, Base: 4}, Results: []ssa.Value{held}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{held}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{held}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 		before := ssa.Format(fn)
@@ -336,7 +336,7 @@ blk3: () <-- (blk1)
 		addStore(b, entry, ssa.Slot{Space: ssa.SpaceGlobal}, stored)
 		held := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal}, Results: []ssa.Value{held}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{held}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{held}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 		before := ssa.Format(fn)
@@ -358,7 +358,7 @@ blk3: () <-- (blk1)
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.LOCAL_GET, State: state})
 		held := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{held}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{held}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{held}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 		before := ssa.Format(fn)

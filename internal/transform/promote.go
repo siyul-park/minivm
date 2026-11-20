@@ -4,7 +4,6 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/graph"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/pass"
@@ -37,7 +36,7 @@ func promotable(function *ssa.Function) map[int]ssa.Type {
 			var held ssa.Value
 			switch operation.Op {
 			case ssa.OpExec:
-				if operation.Code.Reads(instr.Local) || operation.Code.Writes(instr.Local) {
+				if (operation.Reads()|operation.Writes())&ssa.EffectLocal != 0 {
 					return nil
 				}
 				continue

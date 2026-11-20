@@ -10,7 +10,7 @@ Package ownership, dependencies, execution flow, and the current threaded runtim
 | SSA | `internal/ssa` | compiler state and control flow |
 | Machine | `internal/asm/<arch>` | target instructions |
 
-Semantics originate in bytecode; SSA and machine forms refine representation, not meaning.
+Bytecode is what the VM executes, SSA is the meaning to optimize, and the machine form lowers SSA meaning to target instructions. Semantics originate in bytecode; SSA and machine forms refine representation, not meaning.
 
 ## Package Ownership
 

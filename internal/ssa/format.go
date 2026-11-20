@@ -67,7 +67,7 @@ func op(function *Function, o Operation) string {
 
 func term(t Terminator) string {
 	var sb strings.Builder
-	sb.WriteString(t.Op.String())
+	sb.WriteString(t.Term.String())
 	args := references(t.Args)
 	for _, edge := range t.Edges {
 		args = append(args, fmt.Sprintf("blk%d(%s)", edge.Block, strings.Join(references(edge.Args), ", ")))
@@ -111,27 +111,23 @@ func slot(s Slot) string {
 	return fmt.Sprintf("%s[%d]", s.Space, s.Index)
 }
 
-// shape renders an OpGuardShape's Shape, or the Shape a CALL carries; no
-// other operation carries one.
+// shape renders the Shape an operation carries, nothing for the zero Shape.
 func shape(o Operation) string {
 	s := o.Shape
-	if o.Op != OpGuardShape && s.Function == 0 && s.Type == 0 {
+	switch s.Form {
+	case FormSignature:
+		return fmt.Sprintf(" callee type 0x%x", s.Type)
+	case FormClosure:
+		return fmt.Sprintf(" closure %d type 0x%x captures %d", s.Function, s.Type, s.Captures)
+	case FormStruct:
+		return fmt.Sprintf(" struct type 0x%x", s.Type)
+	case FormMap:
+		return fmt.Sprintf(" map key %s elem %s", s.Key, s.Elem)
+	case FormArray:
+		return fmt.Sprintf(" kind %s", s.Elem)
+	default:
 		return ""
 	}
-	var sb strings.Builder
-	switch {
-	case o.Op != OpGuardShape && s.Function == 0:
-		fmt.Fprintf(&sb, " callee type 0x%x", s.Type)
-	case s.Function != 0:
-		fmt.Fprintf(&sb, " closure %d type 0x%x captures %d", s.Function, s.Type, s.Captures)
-	case s.Struct:
-		fmt.Fprintf(&sb, " struct type 0x%x", s.Type)
-	case s.Map:
-		fmt.Fprintf(&sb, " map key %s elem %s", s.Kind, s.Elem)
-	default:
-		fmt.Fprintf(&sb, " kind %s", s.Kind)
-	}
-	return sb.String()
 }
 
 func definitions(function *Function, values []Value) string {

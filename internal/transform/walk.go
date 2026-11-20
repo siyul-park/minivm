@@ -50,7 +50,7 @@ func (w *walker) translate(s span) (ssa.Terminator, bool) {
 		w.begin(ip)
 		switch inst.Opcode() {
 		case instr.BR:
-			return ssa.Terminator{Op: ssa.OpJump}, true
+			return ssa.Terminator{Term: ssa.TermJump}, true
 		case instr.BR_IF, instr.BR_TABLE:
 			if len(w.stack) == 0 {
 				return ssa.Terminator{}, false
@@ -58,9 +58,9 @@ func (w *walker) translate(s span) (ssa.Terminator, bool) {
 			args := []ssa.Value{w.stack[len(w.stack)-1].value}
 			w.stack = w.stack[:len(w.stack)-1]
 			if inst.Opcode() == instr.BR_TABLE {
-				return ssa.Terminator{Op: ssa.OpTable, Args: args}, true
+				return ssa.Terminator{Term: ssa.TermBrTable, Args: args}, true
 			}
-			return ssa.Terminator{Op: ssa.OpBranch, Args: args}, true
+			return ssa.Terminator{Term: ssa.TermBrIf, Args: args}, true
 		case instr.RETURN:
 			if len(w.stack) < w.activation.returns() {
 				return ssa.Terminator{}, false
@@ -81,7 +81,7 @@ func (w *walker) translate(s span) (ssa.Terminator, bool) {
 		ip += inst.Width()
 	}
 	if len(s.succs) > 0 {
-		return ssa.Terminator{Op: ssa.OpJump}, true
+		return ssa.Terminator{Term: ssa.TermJump}, true
 	}
 	if w.activation.address == 0 {
 		return w.complete(s.end), true
@@ -198,7 +198,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 			return false
 		}
 		if operation == instr.ARRAY_GET {
-			w.guard(len(w.stack)-2, ssa.Shape{Kind: kind})
+			w.guard(len(w.stack)-2, ssa.Shape{Form: ssa.FormArray, Elem: kind})
 		}
 		return w.emit(operation, 2, []fact{{kind: kind}})
 	case instr.ARRAY_LEN:
@@ -207,7 +207,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		}
 
 		if kind, ok := w.element(w.stack[len(w.stack)-1].fact); ok {
-			w.guard(len(w.stack)-1, ssa.Shape{Kind: kind})
+			w.guard(len(w.stack)-1, ssa.Shape{Form: ssa.FormArray, Elem: kind})
 		}
 		return w.emit(operation, 1, []fact{{kind: types.KindI32}})
 	case instr.ARRAY_SET:
@@ -226,7 +226,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		if !kind.IsNumeric() && kind != types.KindRef {
 			return false
 		}
-		w.guard(len(w.stack)-3, ssa.Shape{Kind: kind})
+		w.guard(len(w.stack)-3, ssa.Shape{Form: ssa.FormArray, Elem: kind})
 		return w.emit(operation, 3, nil)
 	case instr.STRUCT_GET:
 		if len(w.stack) < 2 {
@@ -242,7 +242,7 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 		if len(w.stack) < 3 {
 			return false
 		}
-		w.guard(len(w.stack)-3, ssa.Shape{Struct: true})
+		w.guard(len(w.stack)-3, ssa.Shape{Form: ssa.FormStruct})
 		return w.emit(operation, 3, nil)
 	case instr.REF_CAST:
 		if len(w.stack) == 0 {
@@ -383,8 +383,8 @@ func (w *walker) guardMap(operation instr.Opcode, m *types.MapType, pops int) {
 	if pops > 2 {
 		value = w.stack[top-1].kind
 	}
-	shape := ssa.Shape{Map: true, Kind: m.KeyKind, Elem: m.ElemKind}
-	if shape.Serves(operation, key, value) {
+	shape := ssa.Shape{Form: ssa.FormMap, Key: m.KeyKind, Elem: m.ElemKind}
+	if shape.Serves(models[operation].op, key, value) {
 		w.guard(top-pops, shape)
 	}
 }
@@ -432,7 +432,7 @@ func (w *walker) field(container, index fact) (types.Kind, ssa.Shape, bool) {
 	if record == nil || !index.valueKnown || index.value < 0 || int(index.value) >= len(record.Fields) {
 		return 0, ssa.Shape{}, false
 	}
-	return record.Fields[index.value].Kind, ssa.Shape{Struct: true, Type: uintptr(unsafe.Pointer(record))}, true
+	return record.Fields[index.value].Kind, ssa.Shape{Form: ssa.FormStruct, Type: uintptr(unsafe.Pointer(record))}, true
 }
 
 // unseen reports whether the CALL at w.ip has no resolvable callee at a site
@@ -567,7 +567,19 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 	consumed := append([]operand(nil), w.stack[len(w.stack)-pops:]...)
 	w.stack = w.stack[:len(w.stack)-pops]
 
-	operation := ssa.Operation{Op: ssa.OpExec, Code: opcode, Shape: shape, Args: args, State: w.deopt(), Results: out}
+	operation := ssa.Operation{Op: ssa.OpExec, Code: opcode, Shape: shape, Args: args, Results: out}
+	if r, ok := models[opcode]; ok {
+		operation.Op, operation.Code, operation.Cond = r.op, 0, r.cond
+		if r.zero {
+			zero := w.builder.Value(w.builder.Type(args[0]))
+			w.builder.Add(w.block, ssa.Operation{Op: ssa.OpConst, Results: []ssa.Value{zero}})
+			operation.Args = append(args, zero)
+		}
+		if r.op == ssa.OpArrayNewDefault || r.op == ssa.OpStructNewDefault {
+			operation.Shape = w.allocation(results[0])
+		}
+	}
+	operation.State = w.deopt()
 	w.builder.Add(w.block, operation)
 
 	for i, r := range results {
@@ -589,6 +601,17 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 	return true
 }
 
+// allocation is the Shape of the object a default allocation at the current
+// instruction yields: the declared type it names, and the type's index, which
+// native code addresses its free bin by.
+func (w *walker) allocation(result fact) ssa.Shape {
+	index := int(instr.Instruction(w.activation.function.Code[w.ip:]).Operand(0))
+	if result.structType != nil {
+		return ssa.Shape{Form: ssa.FormStruct, Type: uintptr(unsafe.Pointer(result.structType)), Index: index}
+	}
+	return ssa.Shape{Form: ssa.FormArray, Elem: result.arrayType.ElemKind, Type: uintptr(unsafe.Pointer(result.arrayType)), Index: index}
+}
+
 // call adopts every stack entry a CALL pops except a callee and an argument
 // in a borrowed position (Borrows) backed by a local or a constant: the
 // caller's own local cannot change during the call, and the constant pool is
@@ -603,7 +626,7 @@ func (w *walker) call() ([]bool, ssa.Shape) {
 	target := w.callee(top)
 	if target == nil {
 		w.adopt()
-		return nil, ssa.Shape{Type: uintptr(unsafe.Pointer(w.activation.profile.Callees[w.ip].Type))}
+		return nil, ssa.Shape{Form: ssa.FormSignature, Type: uintptr(unsafe.Pointer(w.activation.profile.Callees[w.ip].Type))}
 	}
 	var shape ssa.Shape
 	if ref := w.stack[top].closure; ref != 0 {
@@ -634,7 +657,7 @@ func (w *walker) lent(i int) bool {
 func (w *walker) complete(ip int) ssa.Terminator {
 	w.begin(ip)
 	w.adopt()
-	return ssa.Terminator{Op: ssa.OpComplete, Args: values(w.stack), State: w.deopt()}
+	return ssa.Terminator{Term: ssa.TermComplete, Args: values(w.stack), State: w.deopt()}
 }
 
 func (w *walker) leave(ip int) ssa.Terminator {
@@ -645,7 +668,7 @@ func (w *walker) leave(ip int) ssa.Terminator {
 		w.own(i)
 		args = append(args, w.stack[i].value)
 	}
-	return ssa.Terminator{Op: ssa.OpReturn, Args: args, State: w.deopt()}
+	return ssa.Terminator{Term: ssa.TermReturn, Args: args, State: w.deopt()}
 }
 
 // tail ends a RETURN_CALL: a call whose frame a member of the translation can reuse loops to
@@ -728,14 +751,14 @@ func (w *walker) loop(ip, member int) ssa.Terminator {
 		w.constant(word, fact{kind: kind})
 		w.store(ssa.SpaceLocal, slot)
 	}
-	return ssa.Terminator{Op: ssa.OpJump}
+	return ssa.Terminator{Term: ssa.TermJump}
 }
 
 func (w *walker) release(o operand) {
 	if o.kind != types.KindRef || o.backing != backingStack {
 		return
 	}
-	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{o.value}, State: w.deopt()})
+	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpRefRelease, Args: []ssa.Value{o.value}, State: w.deopt()})
 }
 
 func (w *walker) store(space ssa.Space, index int) bool {
@@ -815,7 +838,7 @@ func (w *walker) push(value ssa.Value, out fact) {
 func (w *walker) exit(ip int) ssa.Terminator {
 	w.begin(ip)
 	w.adopt()
-	return ssa.Terminator{Op: ssa.OpExit, State: w.deopt()}
+	return ssa.Terminator{Term: ssa.TermExit, State: w.deopt()}
 }
 
 func (w *walker) adopt() {
@@ -838,7 +861,7 @@ func (w *walker) own(at int) {
 }
 
 func (w *walker) retain(value ssa.Value) {
-	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{value}})
+	w.builder.Add(w.block, ssa.Operation{Op: ssa.OpRefRetain, Args: []ssa.Value{value}})
 }
 
 func (w *walker) begin(ip int) {
@@ -881,7 +904,7 @@ func (w *walker) deopt() ssa.Value {
 // closure is the Shape of a closure over target, the function at ref, as
 // CLOSURE_NEW builds it: of target's type, holding its captures.
 func closure(ref int, target *types.Function) ssa.Shape {
-	return ssa.Shape{Function: ref, Type: uintptr(unsafe.Pointer(target.Typ)), Captures: len(target.Captures)}
+	return ssa.Shape{Form: ssa.FormClosure, Function: ref, Type: uintptr(unsafe.Pointer(target.Typ)), Captures: len(target.Captures)}
 }
 
 func values(stack []operand) []ssa.Value {

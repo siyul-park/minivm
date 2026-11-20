@@ -3,7 +3,6 @@ package transform
 import (
 	"slices"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/graph"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/pass"
@@ -15,7 +14,7 @@ import (
 // writes a local or runs host code. A call is excluded because a hoisted value
 // live across it spills for its whole life, and its reload costs more than the
 // load and guard it replaced. An array op of a quiet loop whose container is a
-// loop-invariant array guard reads it through one OpSlice in the preheader of
+// loop-invariant array guard reads it through one OpArrayView in the preheader of
 // the outermost such loop: nothing in a quiet loop resizes or replaces a
 // container.
 type LICMPass struct{}
@@ -45,7 +44,7 @@ func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 		for b := range loop.Body {
 			for _, operation := range function.Block(b).Operations {
 				quiets[k] = quiets[k] && quiet(function, operation)
-				calling[k] = calling[k] || operation.Op == ssa.OpExec && operation.Code == instr.CALL
+				calling[k] = calling[k] || operation.Op == ssa.OpCall
 				if operation.Op == ssa.OpStore {
 					stored[k][operation.Slot] = true
 				}
@@ -122,7 +121,7 @@ func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 					if stored[k][operation.Slot] || !quiets[k] && (calling[k] || operation.Slot.Space != ssa.SpaceLocal || operation.Slot.Base != 0) {
 						continue
 					}
-				case hoistable(operation):
+				case hoistable(function, operation):
 					if slices.ContainsFunc(operation.Args, func(v ssa.Value) bool { return !invariant(v) }) {
 						continue
 					}
@@ -155,7 +154,7 @@ func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 				key := [2]int{int(args[0]), k}
 				if _, ok := views[key]; !ok {
 					v := r.builder.Value(ssa.TypeRef)
-					r.builder.Add(r.block(loops[k].Preheader), ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{operation.Args[0]}, Results: []ssa.Value{v}})
+					r.builder.Add(r.block(loops[k].Preheader), ssa.Operation{Op: ssa.OpArrayView, Args: []ssa.Value{operation.Args[0]}, Results: []ssa.Value{v}})
 					views[key] = v
 				}
 				operation.Args[0] = views[key]
@@ -186,23 +185,21 @@ func (p *LICMPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 // writes storage only through its own OpStores.
 func quiet(function *ssa.Function, operation ssa.Operation) bool {
 	switch operation.Op {
-	case ssa.OpRelease:
+	case ssa.OpRefRelease:
 		return false
 	case ssa.OpStore:
 		t := function.Type(operation.Args[0])
 		return t != ssa.TypeRef && t != ssa.TypeI64
-	case ssa.OpExec:
+	default:
 		switch {
-		case instr.TypeOf(operation.Code).Writes == 0:
+		case operation.Writes() == 0:
 			return true
-		case operation.Code == instr.ARRAY_SET, operation.Code == instr.STRUCT_SET:
+		case operation.Op == ssa.OpArraySet, operation.Op == ssa.OpStructSet:
 			t := function.Type(operation.Args[len(operation.Args)-1])
 			return t != ssa.TypeRef && t != ssa.TypeI64
 		default:
 			return false
 		}
-	default:
-		return true
 	}
 }
 
@@ -210,11 +207,8 @@ func quiet(function *ssa.Function, operation ssa.Operation) bool {
 // guard admitting an array: it reads the container only through the array's
 // element pointer and length.
 func sliceable(function *ssa.Function, sites map[ssa.Value]site, operation ssa.Operation) bool {
-	if operation.Op != ssa.OpExec {
-		return false
-	}
-	switch operation.Code {
-	case instr.ARRAY_GET, instr.ARRAY_SET, instr.ARRAY_LEN:
+	switch operation.Op {
+	case ssa.OpArrayGet, ssa.OpArraySet, ssa.OpArrayLen:
 	default:
 		return false
 	}
@@ -223,26 +217,25 @@ func sliceable(function *ssa.Function, sites map[ssa.Value]site, operation ssa.O
 		return false
 	}
 	guard := function.Block(s.block).Operations[s.index]
-	return guard.Op == ssa.OpGuardShape && !guard.Shape.Struct && guard.Shape.Function == 0
+	return guard.Op == ssa.OpGuardShape && guard.Shape.Form == ssa.FormArray
 }
 
-func hoistable(operation ssa.Operation) bool {
-	switch operation.Op {
-	case ssa.OpConst:
+func hoistable(function *ssa.Function, operation ssa.Operation) bool {
+	switch {
+	case operation.Op == ssa.OpConst:
 		return true
-	case ssa.OpExec:
-		return operation.Code.IsPure() && !operation.Code.Traps() && !overflows(operation.Code)
+	case operation.Op == ssa.OpExec || operation.Op.Data():
+		return operation.Pure() && !operation.Traps() && !overflows(function, operation)
 	default:
 		return false
 	}
 }
 
-// overflows reports opcodes that can exceed the boxed i64 payload.
-func overflows(code instr.Opcode) bool {
-	switch code {
-	case instr.I64_ADD, instr.I64_SUB, instr.I64_MUL, instr.I64_SHL, instr.I64_SHR_U,
-		instr.I64_DIV_S, instr.I64_DIV_U:
-		return true
+// overflows reports i64 operations whose result can exceed the boxed i64 payload.
+func overflows(function *ssa.Function, operation ssa.Operation) bool {
+	switch operation.Op {
+	case ssa.OpIntAdd, ssa.OpIntSub, ssa.OpIntMul, ssa.OpIntShl, ssa.OpIntLShr, ssa.OpIntSDiv, ssa.OpIntUDiv:
+		return function.Type(operation.Results[0]) == ssa.TypeI64
 	default:
 		return false
 	}

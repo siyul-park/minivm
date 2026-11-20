@@ -71,7 +71,7 @@ func (m *machine) Enter(a *asm.Assembler, l compile.Layout) asm.Label {
 }
 
 func (m *machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	if op.Op == ssa.OpExec && (op.Code == instr.MAP_GET || op.Code == instr.MAP_SET && !m.native || op.Code == instr.MAP_NEW_DEFAULT) {
+	if op.Op == ssa.OpMapGet || op.Op == ssa.OpMapSet && !m.native || op.Op == ssa.OpExec && op.Code == instr.MAP_NEW_DEFAULT {
 		return false
 	}
 	m.calls = append(m.calls, op.Op.String())
@@ -82,20 +82,18 @@ func (m *machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 	case op.Op == ssa.OpGuardShape:
 		m.shapes = append(m.shapes, op.Shape)
 		a.Emit(arm64.CBZLabel(s.Reg(op.Args[0]), s.Deopt()))
-	case op.Op == ssa.OpExec && op.Code == instr.MAP_SET:
+	case op.Op == ssa.OpMapSet:
 		exit, resume := s.Bridge()
 		a.Emit(arm64.CBZLabel(s.Reg(op.Args[1]), exit))
 		a.Bind(resume)
-	case op.Op == ssa.OpExec && op.Code == instr.I32_DIV_S:
+	case op.Op == ssa.OpIntSDiv:
 		a.Emit(arm64.CBZLabel(s.Reg(op.Args[1]), s.Trap()))
-	case op.Op == ssa.OpExec && op.Code == instr.STRUCT_NEW_DEFAULT:
-		if operand, ok := s.Operand(); ok {
-			m.operands = append(m.operands, operand)
-		}
+	case op.Op == ssa.OpStructNewDefault || op.Op == ssa.OpArrayNewDefault:
+		m.operands = append(m.operands, op.Shape.Index)
 		exit, resume := s.Bridge()
 		a.Emit(arm64.CBZLabel(s.Reg(op.Results[0]), exit))
 		a.Bind(resume)
-	case op.Op == ssa.OpRelease:
+	case op.Op == ssa.OpRefRelease:
 		exit, resume := s.Release(s.Reg(op.Args[0]))
 		a.Emit(arm64.CBZLabel(s.Reg(op.Args[0]), exit))
 		a.Bind(resume)
@@ -115,9 +113,9 @@ func (m *machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 }
 
 func (m *machine) Branch(a *asm.Assembler, t ssa.Terminator, s compile.Site, labels []asm.Label, next asm.Label) {
-	m.calls = append(m.calls, t.Op.String())
+	m.calls = append(m.calls, t.Term.String())
 	m.falls = append(m.falls, slices.Contains(labels, next))
-	if t.Op != ssa.OpJump {
+	if t.Term != ssa.TermJump {
 		a.Emit(arm64.CBNZLabel(s.Reg(t.Args[0]), labels[0]))
 		labels = labels[1:]
 	}
@@ -125,7 +123,7 @@ func (m *machine) Branch(a *asm.Assembler, t ssa.Terminator, s compile.Site, lab
 }
 
 func (m *machine) Return(a *asm.Assembler, t ssa.Terminator, _ compile.Site) {
-	m.calls = append(m.calls, t.Op.String())
+	m.calls = append(m.calls, t.Term.String())
 	a.Emit(arm64.RET())
 }
 
@@ -228,8 +226,8 @@ func TestLower(t *testing.T) {
 		one := constant(b, entry, types.BoxI32(1))
 		result := b.Value(ssa.TypeI32)
 		dividend := constant(b, entry, types.BoxI32(8))
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_DIV_S, Args: []ssa.Value{dividend, one}, State: state, Results: []ssa.Value{result}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntSDiv, Args: []ssa.Value{dividend, one}, State: state, Results: []ssa.Value{result}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 
 		m := new(machine)
 		assembly, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 1), Tier: jit.Baseline}, m)
@@ -241,6 +239,32 @@ func TestLower(t *testing.T) {
 		require.Equal(t, []jit.Local{{Index: 0, Value: jit.Value{Kind: types.KindI32, Loc: asm.Loc{Slot: 0, Spilled: true}}}}, exits[0].Frame.Locals)
 	})
 
+	t.Run("materializes a zero local only in the division trap stub", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		zero := constant(b, entry, types.BoxI32(0))
+		x := constant(b, entry, types.BoxI32(5))
+		cond, result, at := b.Value(ssa.TypeI1), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Locals: []ssa.Local{{Index: 0, Value: zero}}}}, Results: []ssa.Value{at}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntCmp, Cond: ssa.CondEQ, Args: []ssa.Value{x, zero}, State: at, Results: []ssa.Value{cond}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntSDiv, Args: []ssa.Value{x, x}, State: at, Results: []ssa.Value{result}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{result}})
+		m := new(machine)
+		assembly, err := compile.Lower(b.Build(), compile.Unit{Function: function(1, 1), Tier: jit.Baseline}, m)
+		require.NoError(t, err)
+		require.Equal(t, 1, slices.Index(m.calls, "const"))
+		loads := 0
+		for _, call := range m.calls[:slices.Index(m.calls, "return")] {
+			if call == "const" {
+				loads++
+			}
+		}
+		require.Equal(t, 1, loads)
+		require.Equal(t, []uint64{0}, m.consts)
+		require.Equal(t, []int{0}, m.spills)
+		require.Equal(t, jit.Value{Kind: types.KindI32, Loc: asm.Loc{Slot: 0, Spilled: true}}, assembly.Exits[0].Frame.Locals[0].Value)
+	})
+
 	t.Run("keeps a deopt-only local live across a call that a callee deopt can materialize", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
@@ -250,8 +274,8 @@ func TestLower(t *testing.T) {
 		at := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 0, Returns: 1, Stack: []ssa.Operand{{Value: v}, {Value: arg}, {Value: callee}}, Locals: []ssa.Local{{Index: 0, Value: v}}}}, Results: []ssa.Value{at}})
 		got := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{v}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{v}})
 
 		m := new(machine)
 		assembly, err := compile.Lower(b.Build(), compile.Unit{Function: function(1, 1, instr.MustNew(instr.CALL)), Module: transform.Module{Objects: transform.Objects{9: {Function: function(1, 1)}}}, Tier: jit.Baseline}, m)
@@ -273,7 +297,7 @@ func TestLower(t *testing.T) {
 		} {
 			constant(b, entry, c)
 		}
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 
 		m := new(machine)
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, m)
@@ -285,15 +309,15 @@ func TestLower(t *testing.T) {
 		b := ssa.New("f")
 		entry, left, right, join := b.Block(), b.Block(), b.Block(), b.Block()
 		cond := constant(b, entry, types.BoxI32(0))
-		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
-		b.Term(left, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
-		b.Term(right, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
-		b.Term(join, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
+		b.Term(left, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: join}}})
+		b.Term(right, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: join}}})
+		b.Term(join, ssa.Terminator{Term: ssa.TermComplete})
 
 		m := new(machine)
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, m)
 		require.NoError(t, err)
-		require.Equal(t, []string{"prologue", "const", "br", "jump", "jump", "complete", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "const", "brif", "jump", "jump", "complete", "epilogue", "enter"}, m.calls)
 		require.Equal(t, []bool{true, false, true}, m.falls)
 	})
 
@@ -301,7 +325,7 @@ func TestLower(t *testing.T) {
 		for _, first := range []bool{true, false} {
 			b := ssa.New("f")
 			entry, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
-			b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+			b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header}}})
 			value := constant(b, header, types.BoxI32(1))
 			at := state(b, header, 9, ssa.Operand{Value: value})
 			b.Add(header, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{value}, State: at})
@@ -309,53 +333,79 @@ func TestLower(t *testing.T) {
 			if !first {
 				slices.Reverse(edges)
 			}
-			b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{value}, Edges: edges})
-			b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
-			b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
+			b.Term(header, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{value}, Edges: edges})
+			b.Term(body, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header}}})
+			b.Term(exit, ssa.Terminator{Term: ssa.TermReturn})
 
 			m := new(machine)
 			_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 1), Tier: jit.Baseline}, m)
 			require.NoError(t, err)
-			require.Equal(t, []string{"prologue", "jump", "const", "budget", "store", "br", "jump", "return", "exit 0 2", "jump", "epilogue", "enter"}, m.calls, "body first: %v", first)
+			require.Equal(t, []string{"prologue", "jump", "const", "budget", "store", "brif", "jump", "return", "exit 0 2", "jump", "epilogue", "enter"}, m.calls, "body first: %v", first)
 		}
+	})
+
+	t.Run("never loads a zero that only an int.cmp takes as its second operand", func(t *testing.T) {
+		b := ssa.New("f")
+		entry, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header}}})
+		x, zero, cond := constant(b, header, types.BoxI32(5)), constant(b, header, types.BoxI32(0)), b.Value(ssa.TypeI1)
+		at := state(b, header, 9, ssa.Operand{Value: x}, ssa.Operand{Value: zero})
+		b.Add(header, ssa.Operation{Op: ssa.OpIntCmp, Cond: ssa.CondEQ, Args: []ssa.Value{x, zero}, State: at, Results: []ssa.Value{cond}})
+		b.Term(header, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: exit}, {Block: body}}})
+		b.Term(body, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header}}})
+		b.Term(exit, ssa.Terminator{Term: ssa.TermReturn})
+
+		m := new(machine)
+		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, m)
+
+		require.NoError(t, err)
+		loads := 0
+		for _, call := range m.calls[:slices.Index(m.calls, "brif")] {
+			if call == "const" {
+				loads++
+			}
+		}
+		require.Equal(t, 1, loads)
+		require.Contains(t, m.regs, x)
+		require.NotContains(t, m.regs, zero)
 	})
 
 	t.Run("keeps a loop table's default next, the only target a table falls through to", func(t *testing.T) {
 		b := ssa.New("f")
 		entry, header, body, exit := b.Block(), b.Block(), b.Block(), b.Block()
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header}}})
 		value := constant(b, header, types.BoxI32(1))
 		at := state(b, header, 9, ssa.Operand{Value: value})
 		b.Add(header, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{value}, State: at})
-		b.Term(header, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
-		b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
-		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
+		b.Term(header, ssa.Terminator{Term: ssa.TermBrTable, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
+		b.Term(body, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header}}})
+		b.Term(exit, ssa.Terminator{Term: ssa.TermReturn})
 
 		m := new(machine)
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 1), Tier: jit.Baseline}, m)
 		require.NoError(t, err)
-		require.Equal(t, []string{"prologue", "jump", "const", "budget", "store", "table", "return", "jump", "exit 0 2", "jump", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "jump", "const", "budget", "store", "br_table", "return", "jump", "exit 0 2", "jump", "epilogue", "enter"}, m.calls)
 	})
 
 	t.Run("falls through into an inner loop's body before the outer loop's latch", func(t *testing.T) {
 		b := ssa.New("f")
 		entry, outer, inner, body, latch, exit := b.Block(), b.Block(), b.Block(), b.Block(), b.Block(), b.Block()
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: outer}}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: outer}}})
 		for _, header := range []struct{ block, in, out int }{{outer, inner, exit}, {inner, body, latch}} {
 			value := constant(b, header.block, types.BoxI32(1))
 			at := state(b, header.block, 9, ssa.Operand{Value: value})
 			b.Add(header.block, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{value}, State: at})
-			b.Term(header.block, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: header.in}, {Block: header.out}}})
+			b.Term(header.block, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: header.in}, {Block: header.out}}})
 		}
 		constant(b, body, types.BoxI32(2))
-		b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: inner}}})
-		b.Term(latch, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: outer}}})
-		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
+		b.Term(body, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: inner}}})
+		b.Term(latch, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: outer}}})
+		b.Term(exit, ssa.Terminator{Term: ssa.TermReturn})
 
 		m := new(machine)
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 1), Tier: jit.Baseline}, m)
 		require.NoError(t, err)
-		require.Equal(t, []string{"prologue", "jump", "const", "budget", "store", "br", "const", "budget", "store", "br", "const", "jump", "jump", "return", "exit 0 2", "jump", "exit 1 2", "jump", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "jump", "const", "budget", "store", "brif", "const", "budget", "store", "brif", "const", "jump", "jump", "return", "exit 0 2", "jump", "exit 1 2", "jump", "epilogue", "enter"}, m.calls)
 	})
 
 	t.Run("fuses a compare whose only use is the branch right after it", func(t *testing.T) {
@@ -365,10 +415,10 @@ func TestLower(t *testing.T) {
 		y := constant(b, entry, types.BoxI32(2))
 		at := state(b, entry, 0, ssa.Operand{Value: x}, ssa.Operand{Value: y})
 		less := b.Value(ssa.TypeI1)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{x, y}, State: at, Results: []ssa.Value{less}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{less}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
-		b.Term(left, ssa.Terminator{Op: ssa.OpComplete})
-		b.Term(right, ssa.Terminator{Op: ssa.OpComplete})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntCmp, Cond: ssa.CondSLT, Args: []ssa.Value{x, y}, State: at, Results: []ssa.Value{less}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{less}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
+		b.Term(left, ssa.Terminator{Term: ssa.TermComplete})
+		b.Term(right, ssa.Terminator{Term: ssa.TermComplete})
 
 		m := new(machine)
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, m)
@@ -383,11 +433,11 @@ func TestLower(t *testing.T) {
 		y := constant(b, entry, types.BoxI32(2))
 		at := state(b, entry, 0, ssa.Operand{Value: x}, ssa.Operand{Value: y})
 		less := b.Value(ssa.TypeI1)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{x, y}, State: at, Results: []ssa.Value{less}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{less}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
-		b.Term(left, ssa.Terminator{Op: ssa.OpComplete})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntCmp, Cond: ssa.CondSLT, Args: []ssa.Value{x, y}, State: at, Results: []ssa.Value{less}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{less}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
+		b.Term(left, ssa.Terminator{Term: ssa.TermComplete})
 		after := state(b, right, 4, ssa.Operand{Value: less})
-		b.Term(right, ssa.Terminator{Op: ssa.OpComplete, State: after})
+		b.Term(right, ssa.Terminator{Term: ssa.TermComplete, State: after})
 
 		m := new(machine)
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, m)
@@ -401,19 +451,19 @@ func TestLower(t *testing.T) {
 		l := b.Param(left, ssa.TypeI32)
 		r := b.Param(right, ssa.TypeI32)
 		value := constant(b, entry, types.BoxI32(1))
-		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{value}, Edges: []ssa.Edge{
+		b.Term(entry, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{value}, Edges: []ssa.Edge{
 			{Block: left, Args: []ssa.Value{value}},
 			{Block: right, Args: []ssa.Value{value}},
 		}})
-		b.Term(left, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{l}})
-		b.Term(right, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{r}})
+		b.Term(left, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{l}})
+		b.Term(right, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{r}})
 
 		m := new(machine)
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, m)
 		require.NoError(t, err)
 		require.Equal(t, [][2]asm.VReg{{i32(1), i32(3)}, {i32(2), i32(3)}}, m.moves)
 		require.Equal(t, []string{
-			"prologue", "const", "br", "return", "return",
+			"prologue", "const", "brif", "return", "return",
 			"move", "jump", "move", "jump", "epilogue", "enter",
 		}, m.calls)
 	})
@@ -425,10 +475,10 @@ func TestLower(t *testing.T) {
 		q := b.Param(loop, ssa.TypeI32)
 		x := constant(b, entry, types.BoxI32(1))
 		y := constant(b, entry, types.BoxI32(2))
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: loop, Args: []ssa.Value{x, y}}}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: loop, Args: []ssa.Value{x, y}}}})
 		at := state(b, loop, 0)
 		b.Add(loop, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{p}, State: at})
-		b.Term(loop, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: loop, Args: []ssa.Value{q, p}}}})
+		b.Term(loop, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: loop, Args: []ssa.Value{q, p}}}})
 
 		m := new(machine)
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 1), Tier: jit.Baseline}, m)
@@ -447,8 +497,8 @@ func TestLower(t *testing.T) {
 		key := constant(b, entry, types.BoxI32(2))
 		at := state(b, entry, 0, ssa.Operand{Value: m1, Owned: true}, ssa.Operand{Value: key})
 		got := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_GET, Args: []ssa.Value{m1, key}, State: at, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpMapGet, Args: []ssa.Value{m1, key}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
 		assembly, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0, instr.MustNew(instr.MAP_GET)), Tier: jit.Baseline}, m)
@@ -475,30 +525,60 @@ func TestLower(t *testing.T) {
 		key := constant(b, entry, types.BoxI32(2))
 		at := state(b, entry, 0, ssa.Operand{Value: m1}, ssa.Operand{Value: key})
 		got := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_GET, Args: []ssa.Value{m1, key}, State: at, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpMapGet, Args: []ssa.Value{m1, key}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0, instr.MustNew(instr.CALL)), Tier: jit.Baseline}, new(machine))
 		require.ErrorIs(t, err, compile.ErrInlined)
 	})
 
-	t.Run("places a resumable bridge stub and reads the operation's operand off its bytecode", func(t *testing.T) {
+	t.Run("places a resumable bridge stub and hands its shape's type index to the machine", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		at := state(b, entry, 0)
 		got := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_NEW_DEFAULT, State: at, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpStructNewDefault, Shape: ssa.Shape{Form: ssa.FormStruct, Index: 7}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
 		assembly, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0, instr.MustNew(instr.STRUCT_NEW_DEFAULT, 7)), Tier: jit.Baseline}, m)
 		require.NoError(t, err)
 		require.Equal(t, []int{7}, m.operands)
-		require.Equal(t, []string{"prologue", "exec", "return", "exit 0 1", "results", "jump", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "struct.new_default", "return", "exit 0 1", "results", "jump", "epilogue", "enter"}, m.calls)
 		require.Len(t, assembly.Exits, 1)
 		require.Equal(t, jit.ExitBridge, assembly.Exits[0].Kind)
 		require.Equal(t, instr.STRUCT_NEW_DEFAULT, assembly.Exits[0].Code)
 		require.Equal(t, []types.Kind{types.KindRef}, assembly.Exits[0].Results)
+	})
+
+	t.Run("admits default allocation bridges only for matching type indexes", func(t *testing.T) {
+		for _, op := range []ssa.Op{ssa.OpStructNewDefault, ssa.OpArrayNewDefault} {
+			for _, index := range []int{7, 8} {
+				b := ssa.New("f")
+				entry := b.Block()
+				operation := ssa.Operation{Op: op, Shape: ssa.Shape{Form: ssa.FormStruct, Index: 7}}
+				code := instr.STRUCT_NEW_DEFAULT
+				if op == ssa.OpArrayNewDefault {
+					operation.Shape.Form = ssa.FormArray
+					operation.Args = []ssa.Value{constant(b, entry, types.BoxI32(1))}
+					code = instr.ARRAY_NEW_DEFAULT
+				}
+				operands := []ssa.Operand{}
+				for _, v := range operation.Args {
+					operands = append(operands, ssa.Operand{Value: v})
+				}
+				operation.State = state(b, entry, 0, operands...)
+				operation.Results = []ssa.Value{b.Value(ssa.TypeRef)}
+				b.Add(entry, operation)
+				b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: operation.Results})
+				_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0, instr.MustNew(code, uint64(index))), Tier: jit.Baseline}, new(machine))
+				if index == 7 {
+					require.NoError(t, err)
+				} else {
+					require.ErrorIs(t, err, compile.ErrInlined)
+				}
+			}
+		}
 	})
 
 	t.Run("bridges a heap write with the stored value it adopts", func(t *testing.T) {
@@ -508,8 +588,8 @@ func TestLower(t *testing.T) {
 		key := constant(b, entry, types.BoxI32(2))
 		val := constant(b, entry, types.BoxRef(3))
 		at := state(b, entry, 0, ssa.Operand{Value: m1}, ssa.Operand{Value: key}, ssa.Operand{Value: val, Owned: true})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_SET, Args: []ssa.Value{m1, key, val}, State: at})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+		b.Add(entry, ssa.Operation{Op: ssa.OpMapSet, Args: []ssa.Value{m1, key, val}, State: at})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 
 		m := new(machine)
 		assembly, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0, instr.MustNew(instr.MAP_SET)), Tier: jit.Baseline}, m)
@@ -528,14 +608,14 @@ func TestLower(t *testing.T) {
 		y := constant(b, entry, types.BoxI32(0))
 		at := state(b, entry, 3, ssa.Operand{Value: x}, ssa.Operand{Value: y})
 		q := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_DIV_S, Args: []ssa.Value{x, y}, State: at, Results: []ssa.Value{q}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{q}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntSDiv, Args: []ssa.Value{x, y}, State: at, Results: []ssa.Value{q}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{q}})
 
 		m := new(machine)
 		assembly, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, m)
 		require.NoError(t, err)
 		exits := assembly.Exits
-		require.Equal(t, []string{"prologue", "const", "const", "exec", "return", "exit 0 0", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "const", "const", "int.sdiv", "return", "exit 0 0", "epilogue", "enter"}, m.calls)
 		require.Len(t, exits, 1)
 		require.Equal(t, jit.ExitDeopt, exits[0].Kind)
 		require.True(t, exits[0].Trap)
@@ -549,15 +629,15 @@ func TestLower(t *testing.T) {
 		y := constant(b, entry, types.BoxI32(0))
 		at := state(b, entry, 3, ssa.Operand{Value: x}, ssa.Operand{Value: y})
 		q := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_DIV_S, Args: []ssa.Value{x, y}, State: at, Results: []ssa.Value{q}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{q}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
-		b.Term(left, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{x}})
-		b.Term(right, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{y}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntSDiv, Args: []ssa.Value{x, y}, State: at, Results: []ssa.Value{q}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{q}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
+		b.Term(left, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{x}})
+		b.Term(right, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{y}})
 
 		m := new(machine)
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, m)
 		require.NoError(t, err)
-		require.Equal(t, []string{"prologue", "const", "const", "exec", "br", "return", "exit 0 0", "return", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "const", "const", "int.sdiv", "brif", "return", "exit 0 0", "return", "epilogue", "enter"}, m.calls)
 	})
 
 	t.Run("resumes after a release exit", func(t *testing.T) {
@@ -565,14 +645,14 @@ func TestLower(t *testing.T) {
 		entry := b.Block()
 		ref := constant(b, entry, types.BoxRef(3))
 		at := state(b, entry, 5)
-		b.Add(entry, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{ref}, State: at})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+		b.Add(entry, ssa.Operation{Op: ssa.OpRefRelease, Args: []ssa.Value{ref}, State: at})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 
 		m := new(machine)
 		assembly, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, m)
 		require.NoError(t, err)
 		exits := assembly.Exits
-		require.Equal(t, []string{"prologue", "const", "release", "return", "exit 0 3", "jump", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "const", "ref.release", "return", "exit 0 3", "jump", "epilogue", "enter"}, m.calls)
 		require.Equal(t, []jit.Exit{{
 			Kind: jit.ExitRelease,
 			Word: jit.Value{Kind: types.KindRef, Loc: asm.Loc{Reg: arm64.X0}},
@@ -585,7 +665,7 @@ func TestLower(t *testing.T) {
 		wide := constant(b, entry, types.BoxI64(1))
 		at := state(b, entry, 9, ssa.Operand{Value: wide})
 		b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{wide}, State: at})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 
 		assembly, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 1), Tier: jit.Baseline}, new(machine))
 		require.NoError(t, err)
@@ -608,8 +688,8 @@ func TestLower(t *testing.T) {
 		// map entry, materialized only at the exit stall.
 		at := state(b, entry, 0, ssa.Operand{Value: wide}, ssa.Operand{Value: arg}, ssa.Operand{Value: callee})
 		got := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
 		caller := function(1, 1, instr.MustNew(instr.CALL))
@@ -626,8 +706,8 @@ func TestLower(t *testing.T) {
 		callee := constant(b, entry, types.BoxRef(2))
 		at := state(b, entry, 0, ssa.Operand{Value: below}, ssa.Operand{Value: arg}, ssa.Operand{Value: callee})
 		got := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
 		caller := function(1, 1, instr.MustNew(instr.CALL))
@@ -680,8 +760,8 @@ func TestLower(t *testing.T) {
 		at := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 3, IP: 0, Returns: 1, Stack: []ssa.Operand{{Value: arg}, {Value: callee}}}}, Results: []ssa.Value{at}})
 		got := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 
 		root := function(1, 0, instr.MustNew(instr.I32_CONST, 0))
 		member := function(1, 0, instr.MustNew(instr.CALL))
@@ -701,8 +781,8 @@ func TestLower(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Results: []ssa.Value{closure}})
 		at := state(b, entry, 0, ssa.Operand{Value: closure})
 		got := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Shape: ssa.Shape{Function: 2, Captures: 1}, Args: []ssa.Value{closure}, State: at, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Shape: ssa.Shape{Form: ssa.FormClosure, Function: 2, Captures: 1}, Args: []ssa.Value{closure}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
 		caller := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeAny()}, Returns: []types.Type{types.TypeI32()}}, Code: instr.Marshal([]instr.Instruction{instr.MustNew(instr.CALL)})}
@@ -726,8 +806,8 @@ func TestLower(t *testing.T) {
 		callee := constant(b, entry, types.BoxRef(2))
 		at := state(b, entry, 0, ssa.Operand{Value: callee})
 		got := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: at, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Args: []ssa.Value{callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0, instr.MustNew(instr.CALL)), Module: transform.Module{Objects: transform.Objects{2: {Function: target}}}, Tier: jit.Baseline}, new(machine))
 		require.ErrorIs(t, err, compile.ErrUnsupported)
@@ -739,7 +819,7 @@ func TestLower(t *testing.T) {
 			entry := b.Block()
 			v := b.Value(ssa.TypeI32)
 			b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: space}, Results: []ssa.Value{v}})
-			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{v}})
+			b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{v}})
 
 			m := new(machine)
 			fn := function(1, 0)
@@ -765,8 +845,8 @@ func TestLower(t *testing.T) {
 			callee := constant(b, entry, types.BoxRef(2))
 			at := state(b, entry, 0, ssa.Operand{Value: n}, ssa.Operand{Value: self, Owned: argOwned}, ssa.Operand{Value: callee})
 			got := b.Value(ssa.TypeI32)
-			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{n, self, callee}, State: at, Results: []ssa.Value{got}})
-			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+			b.Add(entry, ssa.Operation{Op: ssa.OpCall, Args: []ssa.Value{n, self, callee}, State: at, Results: []ssa.Value{got}})
+			b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 
 			m := new(machine)
 			caller := function(0, 0, instr.MustNew(instr.CALL))
@@ -791,8 +871,8 @@ func TestLower(t *testing.T) {
 		callee := constant(b, entry, types.BoxRef(2))
 		at := state(b, entry, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee})
 		got := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
 		caller := function(0, 0, instr.MustNew(instr.CALL))
@@ -807,18 +887,18 @@ func TestLower(t *testing.T) {
 		entry := b.Block()
 		arg := constant(b, entry, types.BoxI32(7))
 		callee := constant(b, entry, types.BoxRef(2))
-		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{callee}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpRefRetain, Args: []ssa.Value{callee}})
 		at := state(b, entry, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee, Owned: true})
 		got := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
 		caller := function(1, 1, instr.MustNew(instr.CALL))
 		assembly, err := compile.Lower(b.Build(), compile.Unit{Function: caller, Module: transform.Module{Objects: transform.Objects{2: {Function: function(1, 2)}}}, Tier: jit.Baseline}, m)
 		require.NoError(t, err)
 		exits := assembly.Exits
-		require.Equal(t, []string{"prologue", "retain", "call", "return", "exit 0 4", "results", "jump", "const", "const", "exit 1 2", "jump", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "ref.retain", "call", "return", "exit 0 4", "results", "jump", "const", "const", "exit 1 2", "jump", "epilogue", "enter"}, m.calls)
 		require.True(t, m.sites[0].Owned)
 		require.True(t, exits[0].Owned)
 	})
@@ -830,8 +910,8 @@ func TestLower(t *testing.T) {
 		callee := constant(b, entry, types.BoxRef(9))
 		at := state(b, entry, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee})
 		got := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
 		caller := function(1, 1, instr.MustNew(instr.CALL))
@@ -849,8 +929,8 @@ func TestLower(t *testing.T) {
 		callee := constant(b, entry, types.BoxRef(9))
 		at := state(b, entry, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee})
 		got := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
 		caller := function(1, 1, instr.MustNew(instr.CALL))
@@ -863,7 +943,7 @@ func TestLower(t *testing.T) {
 	t.Run("hands the machine one register of each register-passed parameter's class", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 
 		m := new(machine)
 		fn := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI8(), types.TypeF64()}}}
@@ -878,7 +958,7 @@ func TestLower(t *testing.T) {
 	t.Run("hands the machine the kinds of its slots", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 
 		m := new(machine)
 		fn := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI64()}}, Locals: []types.Type{types.TypeString()}}
@@ -893,14 +973,14 @@ func TestLower(t *testing.T) {
 		value := constant(b, header, types.BoxI32(1))
 		at := state(b, header, 9, ssa.Operand{Value: value})
 		b.Add(header, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{value}, State: at})
-		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: header}, {Block: exit}}})
-		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
+		b.Term(header, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: header}, {Block: exit}}})
+		b.Term(exit, ssa.Terminator{Term: ssa.TermReturn})
 
 		m := new(machine)
 		assembly, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 1), Tier: jit.Baseline}, m)
 		require.NoError(t, err)
 		exits := assembly.Exits
-		require.Equal(t, []string{"prologue", "const", "budget", "store", "br", "return", "exit 0 2", "jump", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "const", "budget", "store", "brif", "return", "exit 0 2", "jump", "epilogue", "enter"}, m.calls)
 		require.Equal(t, jit.ExitSafepoint, exits[0].Kind)
 		require.Equal(t, 9, exits[0].Frame.IP)
 	})
@@ -911,27 +991,27 @@ func TestLower(t *testing.T) {
 		value := constant(b, header, types.BoxI32(1))
 		at := state(b, header, 9, ssa.Operand{Value: value})
 		b.Add(header, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{value}, State: at})
-		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: header}, {Block: exit}}})
+		b.Term(header, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: header}, {Block: exit}}})
 		arg := constant(b, exit, types.BoxI32(7))
 		callee := constant(b, exit, types.BoxRef(2))
 		call := state(b, exit, 0, ssa.Operand{Value: arg}, ssa.Operand{Value: callee})
 		got := b.Value(ssa.TypeI32)
-		b.Add(exit, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{arg, callee}, State: call, Results: []ssa.Value{got}})
-		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Add(exit, ssa.Operation{Op: ssa.OpCall, Args: []ssa.Value{arg, callee}, State: call, Results: []ssa.Value{got}})
+		b.Term(exit, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 1, instr.MustNew(instr.CALL)), Module: transform.Module{Objects: transform.Objects{2: {Function: function(1, 2)}}}, Tier: jit.Baseline}, m)
 		require.NoError(t, err)
 		// value is lowered once at its definition, not at the store and the
 		// branch; arg, outside the loop, is loaded at the call only.
-		require.Equal(t, []string{"prologue", "const", "budget", "store", "br", "call"}, m.calls[:6])
+		require.Equal(t, []string{"prologue", "const", "budget", "store", "brif", "call"}, m.calls[:6])
 	})
 
 	t.Run("deopts at an exit terminator as a refuted speculation, not a trap", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		at := state(b, entry, 4)
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: at})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: at})
 
 		m := new(machine)
 		assembly, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, m)
@@ -959,7 +1039,7 @@ func TestLower(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{word}, State: at, Results: []ssa.Value{value}})
 		again := b.Value(ssa.TypeI64)
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{value}, State: at, Results: []ssa.Value{again}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{again}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{again}})
 
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(1, 0), Tier: jit.Baseline}, new(machine))
 		require.ErrorIs(t, err, compile.ErrUnsupported)
@@ -973,7 +1053,7 @@ func TestLower(t *testing.T) {
 		at := state(b, entry, 0)
 		value := b.Value(ssa.TypeI64)
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{word}, State: at, Results: []ssa.Value{value}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{value}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{value}})
 
 		m := new(machine)
 		caller := &types.Function{Typ: &types.FunctionType{Params: []types.Type{types.TypeI64()}, Returns: []types.Type{types.TypeI64()}}}
@@ -987,7 +1067,7 @@ func TestLower(t *testing.T) {
 		entry := b.Block()
 		word := b.Value(ssa.TypeI64)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Results: []ssa.Value{word}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{word}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{word}})
 
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(1, 0), Tier: jit.Baseline}, new(machine))
 		require.ErrorIs(t, err, compile.ErrUnsupported)
@@ -998,8 +1078,8 @@ func TestLower(t *testing.T) {
 		entry := b.Block()
 		callee := constant(b, entry, types.BoxRef(2))
 		at := state(b, entry, 0, ssa.Operand{Value: callee})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: at})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Args: []ssa.Value{callee}, State: at})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0, instr.MustNew(instr.CALL)), Tier: jit.Baseline}, new(machine))
 		require.ErrorIs(t, err, compile.ErrUnsupported)
@@ -1013,8 +1093,8 @@ func TestLower(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 1}, Results: []ssa.Value{callee}})
 		at := state(b, entry, 0, ssa.Operand{Value: arg, Owned: false}, ssa.Operand{Value: callee, Owned: true})
 		got := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Shape: ssa.Shape{Type: 1}, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Shape: ssa.Shape{Form: ssa.FormSignature, Type: 1}, Args: []ssa.Value{arg, callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 
 		m := new(machine)
 		caller := &types.Function{
@@ -1048,8 +1128,8 @@ func TestLower(t *testing.T) {
 		callee := constant(b, entry, types.BoxRef(2))
 		at := state(b, entry, 0, ssa.Operand{Value: callee})
 		got := b.Value(ssa.TypeI64)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: at, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Args: []ssa.Value{callee}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 
 		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64()}}}
 		m := new(machine)
@@ -1065,8 +1145,8 @@ func TestLower(t *testing.T) {
 		callee := constant(b, entry, types.BoxRef(2))
 		at := state(b, entry, 0, ssa.Operand{Value: callee})
 		got := [3]ssa.Value{b.Value(ssa.TypeI64), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)}
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: at, Results: got[:]})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Args: []ssa.Value{callee}, State: at, Results: got[:]})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 
 		target := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI64(), types.TypeI32(), types.TypeI32()}}}
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0, instr.MustNew(instr.CALL)), Module: transform.Module{Objects: transform.Objects{2: {Function: target}}}, Tier: jit.Baseline}, new(machine))
@@ -1079,7 +1159,7 @@ func TestLower(t *testing.T) {
 		ref := constant(b, entry, types.BoxRef(2))
 		value := constant(b, entry, types.BoxI32(1))
 		at := state(b, entry, 0, ssa.Operand{Value: ref, Owned: true}, ssa.Operand{Value: value})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{value}, State: at})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{value}, State: at})
 
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, new(machine))
 		require.ErrorIs(t, err, compile.ErrUnsupported)
@@ -1095,7 +1175,7 @@ func TestLower(t *testing.T) {
 			{Address: 2, Stack: []ssa.Operand{{Value: ref, Owned: true}}},
 			{Address: 1, Stack: []ssa.Operand{{Value: value}}},
 		}, Results: []ssa.Value{at}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{value}, State: at})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{value}, State: at})
 
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, new(machine))
 		require.NoError(t, err)
@@ -1108,7 +1188,7 @@ func TestLower(t *testing.T) {
 		at := state(b, entry, 0)
 		guarded := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Args: []ssa.Value{ref}, State: at, Results: []ssa.Value{guarded}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 
 		m := new(machine)
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, m)
@@ -1122,9 +1202,9 @@ func TestLower(t *testing.T) {
 		ref := constant(b, entry, types.BoxRef(1))
 		at := state(b, entry, 4, ssa.Operand{Value: ref})
 		guarded := b.Value(ssa.TypeRef)
-		shape := ssa.Shape{Map: true, Kind: types.KindI32, Elem: types.KindRef}
+		shape := ssa.Shape{Form: ssa.FormMap, Key: types.KindI32, Elem: types.KindRef}
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: shape, Args: []ssa.Value{ref}, State: at, Results: []ssa.Value{guarded}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 
 		m := new(machine)
 		assembly, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, m)
@@ -1143,13 +1223,13 @@ func TestLower(t *testing.T) {
 		key := constant(b, entry, types.BoxI32(2))
 		val := constant(b, entry, types.BoxRef(3))
 		at := state(b, entry, 0, ssa.Operand{Value: m1}, ssa.Operand{Value: key}, ssa.Operand{Value: val, Owned: true})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_SET, Args: []ssa.Value{m1, key, val}, State: at})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+		b.Add(entry, ssa.Operation{Op: ssa.OpMapSet, Args: []ssa.Value{m1, key, val}, State: at})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 
 		m := &machine{native: true}
 		assembly, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0, instr.MustNew(instr.MAP_SET)), Tier: jit.Baseline}, m)
 		require.NoError(t, err)
-		require.Equal(t, []string{"prologue", "const", "const", "const", "exec", "return", "exit 0 1", "jump", "epilogue", "enter"}, m.calls)
+		require.Equal(t, []string{"prologue", "const", "const", "const", "map.set", "return", "exit 0 1", "jump", "epilogue", "enter"}, m.calls)
 		require.Equal(t, []jit.Exit{{
 			Kind:    jit.ExitBridge,
 			Code:    instr.MAP_SET,
@@ -1169,7 +1249,7 @@ func TestLower(t *testing.T) {
 		at := state(b, entry, 0, ssa.Operand{Value: capacity})
 		got := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_NEW_DEFAULT, Args: []ssa.Value{capacity}, State: at, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 
 		assembly, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0, instr.MustNew(instr.MAP_NEW_DEFAULT, 0)), Tier: jit.Baseline}, new(machine))
 		require.NoError(t, err)
@@ -1189,7 +1269,7 @@ func TestLower(t *testing.T) {
 		at := state(b, entry, 0)
 		guarded := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{v, c}, State: at, Results: []ssa.Value{guarded}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 
 		m := new(machine)
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, m)
@@ -1201,7 +1281,7 @@ func TestLower(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		at := state(b, entry, 0)
-		b.Term(entry, ssa.Terminator{Op: ssa.OpGuardKind, State: at})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit + 1, State: at})
 
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, new(machine))
 		require.ErrorIs(t, err, compile.ErrUnsupported)
@@ -1211,7 +1291,7 @@ func TestLower(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		b.Param(entry, ssa.TypeI32)
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(1, 0), Tier: jit.Baseline}, new(machine))
 		require.ErrorIs(t, err, compile.ErrUnsupported)
@@ -1221,7 +1301,7 @@ func TestLower(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		p := b.Param(entry, ssa.TypeI32)
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{p}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{p}})
 
 		m := new(machine)
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 1), OSR: true}, m)
@@ -1233,7 +1313,7 @@ func TestLower(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		p := b.Param(entry, ssa.TypeI64)
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{p}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{p}})
 
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 1), OSR: true}, new(machine))
 		require.ErrorIs(t, err, compile.ErrUnsupported)
@@ -1246,14 +1326,14 @@ func TestLower(t *testing.T) {
 		mkey := constant(b, entry, types.BoxI32(2))
 		at := state(b, entry, 7, ssa.Operand{Value: m1, Owned: true}, ssa.Operand{Value: mkey})
 		got := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.MAP_GET, Args: []ssa.Value{m1, mkey}, State: at, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpMapGet, Args: []ssa.Value{m1, mkey}, State: at, Results: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header}}})
 
 		value := constant(b, header, types.BoxI32(1))
 		hs := state(b, header, 9, ssa.Operand{Value: value})
 		b.Add(header, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{value}, State: hs})
-		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: header}, {Block: exit}}})
-		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
+		b.Term(header, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: header}, {Block: exit}}})
+		b.Term(exit, ssa.Terminator{Term: ssa.TermReturn})
 
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 1), OSR: true}, new(machine))
 		require.ErrorIs(t, err, compile.ErrUnsupported)
@@ -1262,13 +1342,13 @@ func TestLower(t *testing.T) {
 	t.Run("accepts an ip-0 OSR unit whose loop-free prefix has no bridge", func(t *testing.T) {
 		b := ssa.New("f")
 		entry, header, exit := b.Block(), b.Block(), b.Block()
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header}}})
 
 		value := constant(b, header, types.BoxI32(1))
 		hs := state(b, header, 9, ssa.Operand{Value: value})
 		b.Add(header, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Args: []ssa.Value{value}, State: hs})
-		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: header}, {Block: exit}}})
-		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn})
+		b.Term(header, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{value}, Edges: []ssa.Edge{{Block: header}, {Block: exit}}})
+		b.Term(exit, ssa.Terminator{Term: ssa.TermReturn})
 
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 1), OSR: true}, new(machine))
 		require.NoError(t, err)
@@ -1278,7 +1358,7 @@ func TestLower(t *testing.T) {
 		b := ssa.New("f")
 		header := b.Block()
 		constant(b, header, types.BoxI32(1))
-		b.Term(header, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+		b.Term(header, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header}}})
 
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, new(machine))
 		require.ErrorIs(t, err, compile.ErrUnsupported)
@@ -1288,8 +1368,8 @@ func TestLower(t *testing.T) {
 		b := ssa.New("f")
 		entry, target := b.Block(), b.Block()
 		b.Param(target, ssa.TypeI32)
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: target}}})
-		b.Term(target, ssa.Terminator{Op: ssa.OpReturn})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: target}}})
+		b.Term(target, ssa.Terminator{Term: ssa.TermReturn})
 
 		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Tier: jit.Baseline}, new(machine))
 		require.ErrorIs(t, err, compile.ErrUnsupported)

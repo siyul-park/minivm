@@ -125,6 +125,9 @@ func params(function *Function, block int) error {
 func operation(function *Function, sites []position, o Operation) error {
 	args, results := len(o.Args), len(o.Results)
 	deopts := false
+	if err := attributes(o); err != nil {
+		return err
+	}
 	switch o.Op {
 	case OpConst:
 		if args != 0 || results != 1 {
@@ -151,6 +154,9 @@ func operation(function *Function, sites []position, o Operation) error {
 		if args != 1 || results != 1 {
 			return counted(o.name(), args, results)
 		}
+		if o.Op == OpGuardShape && o.Shape.Form == FormSignature {
+			return fmt.Errorf("%w: %s admits a call signature", ErrForm, o.name())
+		}
 		deopts = true
 	case OpGuardBounds:
 		if args != 2 || results != 0 {
@@ -165,19 +171,19 @@ func operation(function *Function, sites []position, o Operation) error {
 			return fmt.Errorf("%w: %s admits v%d, which is no observation", ErrForm, o.name(), o.Args[1])
 		}
 		deopts = true
-	case OpSlice:
+	case OpArrayView:
 		if args != 1 || results != 1 {
 			return counted(o.name(), args, results)
 		}
-	case OpBound:
+	case OpArrayBound:
 		if args != 2 || results != 1 {
 			return counted(o.name(), args, results)
 		}
-	case OpRetain, OpRelease:
+	case OpRefRetain, OpRefRelease:
 		if args != 1 || results != 0 {
 			return counted(o.name(), args, results)
 		}
-		deopts = o.Op == OpRelease
+		deopts = o.Op == OpRefRelease
 	case OpState:
 		if args != 0 || results != 1 {
 			return counted(o.name(), args, results)
@@ -201,12 +207,207 @@ func operation(function *Function, sites []position, o Operation) error {
 			}
 		}
 	default:
-		return fmt.Errorf("%w: %s is not an operation", ErrForm, o.Op)
+		if !o.Op.Data() {
+			return fmt.Errorf("%w: %s is not an operation", ErrForm, o.Op)
+		}
+		if err := modelled(function, o); err != nil {
+			return err
+		}
+		deopts = true
 	}
 	if err := resume(function, sites, o.State, o.name(), deopts); err != nil {
 		return err
 	}
 	return typed(function, o)
+}
+
+// attributes rejects a field set on an operation that does not use it.
+func attributes(o Operation) error {
+	used := func(ok bool, field string) error {
+		if !ok {
+			return fmt.Errorf("%w: %s carries a stray %s", ErrForm, o.name(), field)
+		}
+		return nil
+	}
+	compares := o.Op == OpIntCmp || o.Op == OpFloatCmp || o.Op == OpRefCmp || o.Op == OpStringCmp
+	callee := o.Op == OpExec || o.Op == OpCall
+	shaped := o.Op == OpGuardShape || o.Op == OpArrayNewDefault || o.Op == OpStructNewDefault
+	for _, err := range []error{
+		used(compares || o.Cond == 0, "condition"),
+		used(o.Op == OpExec || o.Code == 0, "opcode"),
+		used(o.Op == OpLoad || o.Op == OpStore || o.Slot == Slot{}, "slot"),
+		used(o.Op == OpConst || o.Const == 0, "constant"),
+		used(o.Op == OpState || len(o.Frames) == 0, "frame"),
+		used(callee || shaped || o.Shape == Shape{}, "shape"),
+	} {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// modelled checks the operand and result types of a data operation, which
+// every exit-capable translation of a guest opcode carries a State for. It
+// cannot reject an OpExec of an opcode one of these models: the opcode table
+// lives in internal/transform, which imports this package. The table's owner
+// guarantees translation never emits that exec, and transform's TestPerforms
+// pins it.
+func modelled(function *Function, o Operation) error {
+	arg := func(i int) Type { return function.Type(o.Args[i]) }
+	res := func(i int) Type { return function.Type(o.Results[i]) }
+	bad := func(why string) error {
+		return fmt.Errorf("%w: %s %s", ErrType, o.name(), why)
+	}
+	in, out := 2, 1
+	switch {
+	case o.Op >= OpIntClz && o.Op <= OpIntSExt32, o.Op >= OpFloatNeg && o.Op <= OpFloatNearest,
+		o.Op == OpIntSExt, o.Op == OpIntZExt, o.Op == OpIntWrap, o.Op == OpIntSIToFP, o.Op == OpIntUIToFP, o.Op == OpIntBitcast,
+		o.Op >= OpFloatFPExt && o.Op <= OpFloatBitcast, o.Op == OpRefIsNull, o.Op == OpStringLen,
+		o.Op == OpArrayNewDefault, o.Op == OpArrayLen, o.Op == OpMapLen:
+		in = 1
+	case o.Op == OpSelect:
+		in = 3
+	case o.Op == OpCall:
+		in, out = -1, -1
+	case o.Op == OpStructNewDefault:
+		in = 0
+	case o.Op == OpArraySet, o.Op == OpStructSet, o.Op == OpMapSet:
+		in, out = 3, 0
+	case o.Op == OpMapDelete:
+		in, out = 2, 0
+	case o.Op == OpMapLookup:
+		out = 2
+	}
+	if in >= 0 && len(o.Args) != in || out >= 0 && len(o.Results) != out {
+		return counted(o.name(), len(o.Args), len(o.Results))
+	}
+	isInt := func(t Type) bool { return t >= TypeI1 && t <= TypeI64 }
+	isFloat := func(t Type) bool { return t == TypeF32 || t == TypeF64 }
+	switch {
+	case o.Op >= OpIntAdd && o.Op <= OpIntRotr:
+		if !isInt(arg(0)) || arg(0).Lane() != arg(1).Lane() || !isInt(arg(1)) || !isInt(res(0)) || res(0).Lane() != arg(0).Lane() {
+			return bad("takes lanes that differ or are not integers")
+		}
+	case o.Op >= OpIntClz && o.Op <= OpIntSExt32:
+		if o.Op == OpIntSExt32 && arg(0) != TypeI64 {
+			return bad("extends 32 bits in an i64 lane only")
+		}
+		if !isInt(arg(0)) || !isInt(res(0)) || res(0).Lane() != arg(0).Lane() {
+			return bad("changes the lane of an integer")
+		}
+	case o.Op == OpIntCmp:
+		if !isInt(arg(0)) || !isInt(arg(1)) || arg(0).Lane() != arg(1).Lane() || res(0) != TypeI1 {
+			return bad("compares lanes that differ or are not integers into a non-i1")
+		}
+		if o.Cond == 0 || o.Cond > CondUGE {
+			return bad("takes a float condition")
+		}
+	case o.Op == OpIntSExt, o.Op == OpIntZExt:
+		if !isInt(arg(0)) || arg(0).Lane() != TypeI32 || res(0) != TypeI64 {
+			return bad("extends a 32-bit lane into i64 only")
+		}
+	case o.Op == OpIntWrap:
+		if arg(0) != TypeI64 || !isInt(res(0)) || res(0).Lane() != TypeI32 {
+			return bad("wraps an i64 into a 32-bit lane only")
+		}
+	case o.Op == OpIntSIToFP, o.Op == OpIntUIToFP:
+		if !isInt(arg(0)) || !isFloat(res(0)) {
+			return bad("converts an integer into a float only")
+		}
+	case o.Op == OpIntBitcast:
+		if !isFloat(arg(0)) || !isInt(res(0)) || !sized(arg(0), res(0)) {
+			return bad("reinterprets a float as an integer of its width only")
+		}
+	case o.Op >= OpFloatAdd && o.Op <= OpFloatCopysign:
+		if !isFloat(arg(0)) || arg(0) != arg(1) || res(0) != arg(0) {
+			return bad("takes floats that differ or are not floats")
+		}
+	case o.Op >= OpFloatNeg && o.Op <= OpFloatNearest:
+		if !isFloat(arg(0)) || res(0) != arg(0) {
+			return bad("takes a non-float or changes its width")
+		}
+	case o.Op == OpFloatCmp:
+		if !isFloat(arg(0)) || arg(0) != arg(1) || res(0) != TypeI1 {
+			return bad("compares floats that differ or are not floats into a non-i1")
+		}
+		if !o.Cond.float() {
+			return bad("takes an integer condition")
+		}
+	case o.Op == OpFloatFPExt:
+		if arg(0) != TypeF32 || res(0) != TypeF64 {
+			return bad("widens f32 into f64 only")
+		}
+	case o.Op == OpFloatFPTrunc:
+		if arg(0) != TypeF64 || res(0) != TypeF32 {
+			return bad("narrows f64 into f32 only")
+		}
+	case o.Op == OpFloatFPToSISat, o.Op == OpFloatFPToUISat:
+		if !isFloat(arg(0)) || !isInt(res(0)) || res(0).Lane() == TypeI1 {
+			return bad("converts a float into an integer only")
+		}
+	case o.Op == OpFloatBitcast:
+		if !isInt(arg(0)) || !isFloat(res(0)) || !sized(res(0), arg(0)) {
+			return bad("reinterprets an integer as a float of its width only")
+		}
+	case o.Op == OpSelect:
+		if arg(2).Lane() != TypeI32 || arg(0) != arg(1) || res(0) != arg(0) {
+			return bad("selects between differing types on a non-lane condition")
+		}
+	case o.Op == OpCall:
+		if len(o.Args) == 0 || arg(len(o.Args)-1) != TypeRef {
+			return bad("takes no callee")
+		}
+	case o.Op == OpRefCmp:
+		if arg(0) != TypeRef || arg(1) != TypeRef || res(0) != TypeI1 {
+			return bad("compares non-refs into a non-i1")
+		}
+		if o.Cond != CondEQ && o.Cond != CondNE {
+			return bad("compares refs by identity only")
+		}
+	case o.Op == OpRefIsNull:
+		if arg(0) != TypeRef || res(0) != TypeI1 {
+			return bad("tests a non-ref into a non-i1")
+		}
+	case o.Op == OpStringCmp:
+		if arg(0) != TypeRef || arg(1) != TypeRef || res(0) != TypeI1 {
+			return bad("compares non-strings into a non-i1")
+		}
+		switch o.Cond {
+		case CondEQ, CondNE, CondULT, CondULE, CondUGT, CondUGE:
+		default:
+			return bad("compares bytes by equality or unsigned order only")
+		}
+	case o.Op == OpStringLen, o.Op == OpArrayLen, o.Op == OpMapLen:
+		if arg(0) != TypeRef || res(0).Lane() != TypeI32 {
+			return bad("measures a non-ref into a non-i32")
+		}
+	case o.Op == OpArrayNewDefault:
+		if arg(0).Lane() != TypeI32 || res(0) != TypeRef || o.Shape.Form != FormArray {
+			return bad("allocates an array of a non-array shape or length")
+		}
+	case o.Op == OpStructNewDefault:
+		if res(0) != TypeRef || o.Shape.Form != FormStruct {
+			return bad("allocates a struct of a non-struct shape")
+		}
+	case o.Op == OpArrayGet, o.Op == OpArraySet, o.Op == OpStructGet, o.Op == OpStructSet:
+		if arg(0) != TypeRef || arg(1).Lane() != TypeI32 {
+			return bad("addresses a non-ref or by a non-i32 index")
+		}
+	case o.Op == OpMapGet, o.Op == OpMapLookup, o.Op == OpMapSet, o.Op == OpMapDelete:
+		if arg(0) != TypeRef {
+			return bad("addresses a non-ref")
+		}
+		if o.Op == OpMapLookup && res(1) != TypeI1 {
+			return bad("reports presence as a non-i1")
+		}
+	}
+	return nil
+}
+
+// sized reports whether float f and integer i fill the same register width.
+func sized(f, i Type) bool {
+	return f == TypeF32 && i.Lane() == TypeI32 || f == TypeF64 && i == TypeI64
 }
 
 func performs(function *Function, o Operation) error {
@@ -270,11 +471,11 @@ func typed(function *Function, o Operation) error {
 		if function.Type(o.Results[0]) != function.Type(o.Args[0]) {
 			return fmt.Errorf("%w: %s refines %s into %s", ErrType, o.name(), function.Type(o.Args[0]), function.Type(o.Results[0]))
 		}
-	case OpSlice:
+	case OpArrayView:
 		if function.Type(o.Args[0]) != TypeRef || function.Type(o.Results[0]) != TypeRef {
 			return fmt.Errorf("%w: %s of %s", ErrType, o.name(), function.Type(o.Args[0]))
 		}
-	case OpBound:
+	case OpArrayBound:
 		if function.Type(o.Args[0]) != TypeI32 || function.Type(o.Args[1]) != TypeRef || function.Type(o.Results[0]) != TypeI32 {
 			return fmt.Errorf("%w: %s of %s within %s", ErrType, o.name(), function.Type(o.Args[0]), function.Type(o.Args[1]))
 		}
@@ -282,7 +483,7 @@ func typed(function *Function, o Operation) error {
 		if function.Type(o.Args[0]) != TypeI32 || function.Type(o.Args[1]) != TypeI32 {
 			return fmt.Errorf("%w: %s of %s and %s", ErrType, o.name(), function.Type(o.Args[0]), function.Type(o.Args[1]))
 		}
-	case OpRetain, OpRelease:
+	case OpRefRetain, OpRefRelease:
 		if function.Type(o.Args[0]) != TypeRef {
 			return fmt.Errorf("%w: %s owns %s", ErrType, o.name(), function.Type(o.Args[0]))
 		}
@@ -293,38 +494,38 @@ func typed(function *Function, o Operation) error {
 func terminator(function *Function, sites []position, t Terminator) error {
 	args, edges := len(t.Args), len(t.Edges)
 	deopts := false
-	switch t.Op {
-	case OpJump:
+	switch t.Term {
+	case TermJump:
 		if args != 0 || edges != 1 {
-			return counted(t.Op.String(), args, edges)
+			return counted(t.Term.String(), args, edges)
 		}
-	case OpBranch:
+	case TermBrIf:
 		if args != 1 || edges != 2 {
-			return counted(t.Op.String(), args, edges)
+			return counted(t.Term.String(), args, edges)
 		}
-	case OpTable:
+	case TermBrTable:
 		if args != 1 || edges == 0 {
-			return counted(t.Op.String(), args, edges)
+			return counted(t.Term.String(), args, edges)
 		}
-	case OpReturn, OpComplete:
+	case TermReturn, TermComplete:
 		if edges != 0 {
-			return counted(t.Op.String(), args, edges)
+			return counted(t.Term.String(), args, edges)
 		}
 		deopts = t.State != NoValue
-	case OpExit:
+	case TermExit:
 		if args != 0 || edges != 0 {
-			return counted(t.Op.String(), args, edges)
+			return counted(t.Term.String(), args, edges)
 		}
 		deopts = true
 	default:
-		return fmt.Errorf("%w: %s is not a terminator", ErrForm, t.Op)
+		return fmt.Errorf("%w: %s is not a terminator", ErrForm, t.Term)
 	}
 	for _, edge := range t.Edges {
 		if edge.Block < 0 || edge.Block >= function.Len() {
-			return fmt.Errorf("%w: %s names blk%d", ErrForm, t.Op, edge.Block)
+			return fmt.Errorf("%w: %s names blk%d", ErrForm, t.Term, edge.Block)
 		}
 	}
-	return resume(function, sites, t.State, t.Op.String(), deopts)
+	return resume(function, sites, t.State, t.Term.String(), deopts)
 }
 
 func resume(function *Function, sites []position, v Value, name string, deopts bool) error {
@@ -415,14 +616,7 @@ func ends(t Terminator) []Value {
 }
 
 func accepts(t Type, k instr.Kind) bool {
-	return k == instr.KindAny || representation(TypeOf(k)) == representation(t)
-}
-
-func representation(t Type) Type {
-	if t == TypeI1 || t == TypeI8 {
-		return TypeI32
-	}
-	return t
+	return k == instr.KindAny || TypeOf(k).Lane() == t.Lane()
 }
 
 func counted(name string, in, out int) error {

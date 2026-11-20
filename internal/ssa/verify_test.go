@@ -18,8 +18,8 @@ func TestVerify(t *testing.T) {
 		length := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{array}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{length}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Add(entry, ssa.Operation{Op: ssa.OpArrayLen, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{length}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 		require.NoError(t, ssa.Verify(b.Build()))
 	})
 
@@ -28,7 +28,7 @@ func TestVerify(t *testing.T) {
 		entry := b.Block()
 		value := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{value}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete, Args: []ssa.Value{value}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete, Args: []ssa.Value{value}})
 		require.NoError(t, ssa.Verify(b.Build()))
 	})
 
@@ -39,7 +39,7 @@ func TestVerify(t *testing.T) {
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(1), Results: []ssa.Value{value}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Stack: []ssa.Operand{{Value: value}}}}, Results: []ssa.Value{state}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{value}, State: state})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{value}, State: state})
 		require.NoError(t, ssa.Verify(b.Build()))
 	})
 
@@ -48,7 +48,7 @@ func TestVerify(t *testing.T) {
 		entry := b.Block()
 		value := b.Value(ssa.TypeI64)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(1), Results: []ssa.Value{value}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{value}, State: value})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{value}, State: value})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrState)
 	})
 
@@ -59,30 +59,30 @@ func TestVerify(t *testing.T) {
 	t.Run("rejects a block the entry cannot reach", func(t *testing.T) {
 		b := ssa.New("f")
 		entry, orphan := b.Block(), b.Block()
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
-		b.Term(orphan, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
+		b.Term(orphan, ssa.Terminator{Term: ssa.TermComplete})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
 	})
 
 	t.Run("rejects an edge naming a block that does not exist", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: 7}}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: 7}}})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
 	})
 
 	t.Run("rejects an edge count its terminator cannot have", func(t *testing.T) {
 		b := ssa.New("f")
 		entry, join := b.Block(), b.Block()
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}, {Block: join}}})
-		b.Term(join, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: join}, {Block: join}}})
+		b.Term(join, ssa.Terminator{Term: ssa.TermComplete})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
 	})
 
 	t.Run("rejects an operation used where a terminator belongs", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
-		b.Term(entry, ssa.Terminator{Op: ssa.OpConst})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit + 1})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
 	})
 
@@ -102,7 +102,7 @@ func TestVerify(t *testing.T) {
 			b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxRef(2)), Results: []ssa.Value{callee}})
 			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: []ssa.Value{callee}, State: state})
-			b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+			b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 			require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm, c.name)
 		}
 	})
@@ -113,7 +113,7 @@ func TestVerify(t *testing.T) {
 		one := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 2, Results: []ssa.Value{one}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{one}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{one}})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrDefine)
 	})
 
@@ -121,7 +121,7 @@ func TestVerify(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		b.Value(ssa.TypeI32)
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrDefine)
 	})
 
@@ -132,9 +132,9 @@ func TestVerify(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		one := b.Value(ssa.TypeI32)
 		doubled := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{one, one}, State: state, Results: []ssa.Value{doubled}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{one, one}, State: state, Results: []ssa.Value{doubled}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{doubled}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{doubled}})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrDominate)
 	})
 
@@ -147,20 +147,20 @@ func TestVerify(t *testing.T) {
 		one := b.Value(ssa.TypeI32)
 		doubled := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{cond}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
 		b.Add(left, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
-		b.Term(left, ssa.Terminator{Op: ssa.OpComplete})
-		b.Add(right, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{one, one}, State: state, Results: []ssa.Value{doubled}})
-		b.Term(right, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{doubled}})
+		b.Term(left, ssa.Terminator{Term: ssa.TermComplete})
+		b.Add(right, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{one, one}, State: state, Results: []ssa.Value{doubled}})
+		b.Term(right, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{doubled}})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrDominate)
 	})
 
 	t.Run("rejects an edge that misses a block parameter", func(t *testing.T) {
 		b := ssa.New("f")
 		entry, join := b.Block(), b.Block()
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: join}}})
 		param := b.Param(join, ssa.TypeI32)
-		b.Term(join, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{param}})
+		b.Term(join, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{param}})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
 	})
 
@@ -169,9 +169,9 @@ func TestVerify(t *testing.T) {
 		entry, join := b.Block(), b.Block()
 		null := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxedNull), Results: []ssa.Value{null}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join, Args: []ssa.Value{null}}}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: join, Args: []ssa.Value{null}}}})
 		param := b.Param(join, ssa.TypeI32)
-		b.Term(join, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{param}})
+		b.Term(join, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{param}})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
 	})
 
@@ -185,10 +185,10 @@ func TestVerify(t *testing.T) {
 		length := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{array}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{checked}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{checked}, Results: []ssa.Value{sliced}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{sliced}, State: state, Results: []ssa.Value{length}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormArray, Elem: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{checked}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpArrayView, Args: []ssa.Value{checked}, Results: []ssa.Value{sliced}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpArrayLen, Args: []ssa.Value{sliced}, State: state, Results: []ssa.Value{length}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 		require.NoError(t, ssa.Verify(b.Build()))
 	})
 
@@ -200,8 +200,8 @@ func TestVerify(t *testing.T) {
 		sliced := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{index}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{index}, Results: []ssa.Value{sliced}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Add(entry, ssa.Operation{Op: ssa.OpArrayView, Args: []ssa.Value{index}, Results: []ssa.Value{sliced}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
 	})
 
@@ -213,15 +213,15 @@ func TestVerify(t *testing.T) {
 		limit, length, index, bounded, element := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{array}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{checked}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{checked}, Results: []ssa.Value{sliced}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormArray, Elem: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{checked}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpArrayView, Args: []ssa.Value{checked}, Results: []ssa.Value{sliced}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 4, Results: []ssa.Value{limit}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{sliced}, State: state, Results: []ssa.Value{length}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpArrayLen, Args: []ssa.Value{sliced}, State: state, Results: []ssa.Value{length}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardBounds, Args: []ssa.Value{limit, length}, State: state})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{index}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpBound, Args: []ssa.Value{index, sliced}, Results: []ssa.Value{bounded}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{sliced, bounded}, State: state, Results: []ssa.Value{element}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Add(entry, ssa.Operation{Op: ssa.OpArrayBound, Args: []ssa.Value{index, sliced}, Results: []ssa.Value{bounded}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpArrayGet, Args: []ssa.Value{sliced, bounded}, State: state, Results: []ssa.Value{element}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 		require.NoError(t, ssa.Verify(b.Build()))
 	})
 
@@ -234,8 +234,8 @@ func TestVerify(t *testing.T) {
 			b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 			b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{index}})
 			b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 1}, Results: []ssa.Value{container}})
-			b.Add(entry, ssa.Operation{Op: ssa.OpBound, Args: []ssa.Value{index, container}, Results: []ssa.Value{bounded}})
-			b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+			b.Add(entry, ssa.Operation{Op: ssa.OpArrayBound, Args: []ssa.Value{index, container}, Results: []ssa.Value{bounded}})
+			b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 			require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
 		}
 	})
@@ -249,7 +249,7 @@ func TestVerify(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 4, Results: []ssa.Value{limit}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{array}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardBounds, Args: []ssa.Value{limit, array}, State: state})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
 	})
 
@@ -260,7 +260,7 @@ func TestVerify(t *testing.T) {
 		checked := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{array}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Args: []ssa.Value{array}, Results: []ssa.Value{checked}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{checked}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{checked}})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrState)
 	})
 
@@ -275,8 +275,8 @@ func TestVerify(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal}, Results: []ssa.Value{slot}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxRef(2)), Results: []ssa.Value{want}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{slot, want}, State: state, Results: []ssa.Value{callee}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: state})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Args: []ssa.Value{callee}, State: state})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 		require.NoError(t, ssa.Verify(b.Build()))
 	})
 
@@ -291,7 +291,7 @@ func TestVerify(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal}, Results: []ssa.Value{slot}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal, Index: 1}, Results: []ssa.Value{want}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{slot, want}, State: state, Results: []ssa.Value{callee}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{callee}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{callee}})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
 	})
 
@@ -302,7 +302,7 @@ func TestVerify(t *testing.T) {
 		one := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, State: state, Results: []ssa.Value{one}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{one}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{one}})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrState)
 	})
 
@@ -312,9 +312,9 @@ func TestVerify(t *testing.T) {
 		state := b.Value(ssa.TypeState)
 		array := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{array}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{array}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpRefRetain, Args: []ssa.Value{array}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Stack: []ssa.Operand{{Value: array, Owned: true}}}}, Results: []ssa.Value{state}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 		require.NoError(t, ssa.Verify(b.Build()))
 	})
 
@@ -325,7 +325,7 @@ func TestVerify(t *testing.T) {
 		count := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{count}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Stack: []ssa.Operand{{Value: count, Owned: true}}}}, Results: []ssa.Value{state}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
 	})
 
@@ -336,7 +336,7 @@ func TestVerify(t *testing.T) {
 		count := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{count}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Locals: []ssa.Local{{Index: 0, Value: count}}}}, Results: []ssa.Value{state}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 		require.NoError(t, ssa.Verify(b.Build()))
 	})
 
@@ -347,7 +347,7 @@ func TestVerify(t *testing.T) {
 		array := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{array}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Locals: []ssa.Local{{Index: 0, Value: array}}}}, Results: []ssa.Value{state}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
 	})
 
@@ -358,7 +358,7 @@ func TestVerify(t *testing.T) {
 		count := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{count}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Locals: []ssa.Local{{Index: -1, Value: count}}}}, Results: []ssa.Value{state}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrState)
 	})
 
@@ -367,13 +367,13 @@ func TestVerify(t *testing.T) {
 		entry, arm, join := b.Block(), b.Block(), b.Block()
 		cond := b.Value(ssa.TypeI1)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{cond}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: arm}, {Block: join}}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: arm}, {Block: join}}})
 		count := b.Value(ssa.TypeI32)
 		b.Add(arm, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{count}})
-		b.Term(arm, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
+		b.Term(arm, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: join}}})
 		state := b.Value(ssa.TypeState)
 		b.Add(join, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Locals: []ssa.Local{{Index: 0, Value: count}}}}, Results: []ssa.Value{state}})
-		b.Term(join, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Term(join, ssa.Terminator{Term: ssa.TermExit, State: state})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrDominate)
 	})
 
@@ -382,7 +382,7 @@ func TestVerify(t *testing.T) {
 		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Results: []ssa.Value{state}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrState)
 	})
 
@@ -391,7 +391,7 @@ func TestVerify(t *testing.T) {
 		entry := b.Block()
 		fake := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{fake}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
 	})
 
@@ -400,8 +400,8 @@ func TestVerify(t *testing.T) {
 		entry := b.Block()
 		one := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{one}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		b.Add(entry, ssa.Operation{Op: ssa.OpRefRetain, Args: []ssa.Value{one}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
 	})
 
@@ -413,8 +413,8 @@ func TestVerify(t *testing.T) {
 		one := b.Value(ssa.TypeI32)
 		sum := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{one}, State: state, Results: []ssa.Value{sum}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{sum}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{one}, State: state, Results: []ssa.Value{sum}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{sum}})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
 	})
 
@@ -424,7 +424,7 @@ func TestVerify(t *testing.T) {
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.Opcode(0xff), State: state})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrForm)
 	})
 
@@ -438,8 +438,8 @@ func TestVerify(t *testing.T) {
 		sum := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxedNull), Results: []ssa.Value{null}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{null, one}, State: state, Results: []ssa.Value{sum}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{sum}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{null, one}, State: state, Results: []ssa.Value{sum}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{sum}})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
 	})
 
@@ -451,8 +451,8 @@ func TestVerify(t *testing.T) {
 		one := b.Value(ssa.TypeI32)
 		sum := b.Value(ssa.TypeF64)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{one, one}, State: state, Results: []ssa.Value{sum}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{sum}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{one, one}, State: state, Results: []ssa.Value{sum}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{sum}})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
 	})
 
@@ -463,8 +463,8 @@ func TestVerify(t *testing.T) {
 		index := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Index: 0}, Results: []ssa.Value{array}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{index}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_SET, Args: []ssa.Value{array, index, index}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		b.Add(entry, ssa.Operation{Op: ssa.OpArraySet, Args: []ssa.Value{array, index, index}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrState)
 	})
 
@@ -478,8 +478,8 @@ func TestVerify(t *testing.T) {
 		picked := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{cond}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxedNull), Results: []ssa.Value{null}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.SELECT, Args: []ssa.Value{cond, cond, null}, State: state, Results: []ssa.Value{picked}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{picked}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpSelect, Args: []ssa.Value{cond, cond, null}, State: state, Results: []ssa.Value{picked}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{picked}})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType)
 	})
 
@@ -489,8 +489,8 @@ func TestVerify(t *testing.T) {
 		x, y, sum := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 2, Results: []ssa.Value{y}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, Results: []ssa.Value{sum}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{sum}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{x, y}, Results: []ssa.Value{sum}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{sum}})
 		require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrState)
 	})
 
@@ -502,8 +502,8 @@ func TestVerify(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 2, Results: []ssa.Value{y}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: state, Results: []ssa.Value{sum}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{sum}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{x, y}, State: state, Results: []ssa.Value{sum}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{sum}})
 		require.NoError(t, ssa.Verify(b.Build()))
 	})
 
@@ -520,8 +520,86 @@ func TestVerify(t *testing.T) {
 			entry := b.Block()
 			x := b.Value(c.typ)
 			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: c.value, Results: []ssa.Value{x}})
-			b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{x}})
+			b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{x}})
 			require.ErrorIs(t, ssa.Verify(b.Build()), ssa.ErrType, c.name)
 		}
+	})
+
+	// data builds entry with typed params, one data operation over them, and
+	// an exit, returning the verification error; state omits the resume state.
+	data := func(op ssa.Operation, params []ssa.Type, results []ssa.Type, state bool) error {
+		b := ssa.New("f")
+		entry := b.Block()
+		for _, typ := range params {
+			op.Args = append(op.Args, b.Param(entry, typ))
+		}
+		for _, typ := range results {
+			op.Results = append(op.Results, b.Value(typ))
+		}
+		at := b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{at}})
+		if state {
+			op.State = at
+		}
+		b.Add(entry, op)
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: at})
+		return ssa.Verify(b.Build())
+	}
+	i32, i64, f64, ref, i1 := ssa.TypeI32, ssa.TypeI64, ssa.TypeF64, ssa.TypeRef, ssa.TypeI1
+
+	t.Run("accepts well-typed data operations", func(t *testing.T) {
+		require.NoError(t, data(ssa.Operation{Op: ssa.OpIntAdd}, []ssa.Type{i32, ssa.TypeI8}, []ssa.Type{i32}, true))
+		require.NoError(t, data(ssa.Operation{Op: ssa.OpIntCmp, Cond: ssa.CondSLT}, []ssa.Type{i64, i64}, []ssa.Type{i1}, true))
+		require.NoError(t, data(ssa.Operation{Op: ssa.OpFloatCmp, Cond: ssa.CondOLT}, []ssa.Type{f64, f64}, []ssa.Type{i1}, true))
+		require.NoError(t, data(ssa.Operation{Op: ssa.OpFloatAdd}, []ssa.Type{f64, f64}, []ssa.Type{f64}, true))
+		require.NoError(t, data(ssa.Operation{Op: ssa.OpRefCmp, Cond: ssa.CondEQ}, []ssa.Type{ref, ref}, []ssa.Type{i1}, true))
+		require.NoError(t, data(ssa.Operation{Op: ssa.OpIntSExt}, []ssa.Type{i32}, []ssa.Type{i64}, true))
+		require.NoError(t, data(ssa.Operation{Op: ssa.OpSelect}, []ssa.Type{f64, f64, i32}, []ssa.Type{f64}, true))
+	})
+
+	t.Run("restricts int.sext32 to i64", func(t *testing.T) {
+		require.NoError(t, data(ssa.Operation{Op: ssa.OpIntSExt32}, []ssa.Type{i64}, []ssa.Type{i64}, true))
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntSExt32}, []ssa.Type{i32}, []ssa.Type{i32}, true), ssa.ErrType)
+	})
+
+	t.Run("rejects a data operation without a state", func(t *testing.T) {
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntAdd}, []ssa.Type{i32, i32}, []ssa.Type{i32}, false), ssa.ErrState)
+	})
+
+	t.Run("rejects float.add on i32", func(t *testing.T) {
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpFloatAdd}, []ssa.Type{i32, i32}, []ssa.Type{i32}, true), ssa.ErrType)
+	})
+
+	t.Run("rejects int.add on f64", func(t *testing.T) {
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntAdd}, []ssa.Type{f64, f64}, []ssa.Type{f64}, true), ssa.ErrType)
+	})
+
+	t.Run("rejects int.add across lanes", func(t *testing.T) {
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntAdd}, []ssa.Type{i32, i64}, []ssa.Type{i32}, true), ssa.ErrType)
+	})
+
+	t.Run("rejects int.cmp with a float condition", func(t *testing.T) {
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntCmp, Cond: ssa.CondOLT}, []ssa.Type{i32, i32}, []ssa.Type{i1}, true), ssa.ErrType)
+	})
+
+	t.Run("rejects float.cmp with an integer condition", func(t *testing.T) {
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpFloatCmp, Cond: ssa.CondSLT}, []ssa.Type{f64, f64}, []ssa.Type{i1}, true), ssa.ErrType)
+	})
+
+	t.Run("rejects ref.cmp slt", func(t *testing.T) {
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpRefCmp, Cond: ssa.CondSLT}, []ssa.Type{ref, ref}, []ssa.Type{i1}, true), ssa.ErrType)
+	})
+
+	t.Run("rejects a condition on a non-compare operation", func(t *testing.T) {
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntAdd, Cond: ssa.CondEQ}, []ssa.Type{i32, i32}, []ssa.Type{i32}, true), ssa.ErrForm)
+	})
+
+	t.Run("rejects a code on a non-exec operation", func(t *testing.T) {
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntAdd, Code: instr.I32_ADD}, []ssa.Type{i32, i32}, []ssa.Type{i32}, true), ssa.ErrForm)
+	})
+
+	t.Run("rejects a call signature admitted by guard.shape", func(t *testing.T) {
+		err := data(ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormSignature, Type: 1}}, []ssa.Type{ref}, []ssa.Type{ref}, true)
+		require.ErrorIs(t, err, ssa.ErrForm)
 	})
 }

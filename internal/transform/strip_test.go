@@ -5,7 +5,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/internal/transform"
 	"github.com/siyul-park/minivm/pass"
@@ -23,10 +22,10 @@ func TestStripPass_Run(t *testing.T) {
 		b := ssa.New("f")
 		entry, exit := b.Block(), b.Block()
 		x, y, quotient := b.Param(entry, ssa.TypeI32), b.Param(entry, ssa.TypeI32), b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_DIV_S, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{quotient}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, State: deoptState(b, entry), Edges: []ssa.Edge{{Block: exit, Args: []ssa.Value{quotient}}}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntSDiv, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{quotient}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, State: deoptState(b, entry), Edges: []ssa.Edge{{Block: exit, Args: []ssa.Value{quotient}}}})
 		result := b.Param(exit, ssa.TypeI32)
-		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
+		b.Term(exit, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{result}})
 		fn := b.Build()
 		require.Contains(t, ssa.Format(fn), "state")
 
@@ -35,7 +34,7 @@ func TestStripPass_Run(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, preserved)
 		require.NotContains(t, ssa.Format(fn), "state")
-		require.Contains(t, ssa.Format(fn), "i32.div_s")
+		require.Contains(t, ssa.Format(fn), "int.sdiv")
 		require.Contains(t, ssa.Format(fn), "return")
 	})
 
@@ -45,7 +44,7 @@ func TestStripPass_Run(t *testing.T) {
 		x, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Locals: []ssa.Local{{Index: 0, Value: x}}}}, Results: []ssa.Value{state}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
 		fn := b.Build()
 
 		_, err := transform.NewStripPass().Run(pass.NewManager(), fn)
@@ -60,7 +59,7 @@ func TestStripPass_Run(t *testing.T) {
 		entry := b.Block()
 		x := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{x}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{x}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{x}})
 		fn := b.Build()
 
 		preserved, err := transform.NewStripPass().Run(pass.NewManager(), fn)

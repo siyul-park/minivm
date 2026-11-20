@@ -20,7 +20,7 @@ type Machine interface {
 	// sequence (a Queue worker reuses one), so Prologue resets all
 	// per-function state. Prologue moves each l.Arguments entry's incoming
 	// value into args, one register of its class per entry, and keeps
-	// l.Registers for OpReturn to consult.
+	// l.Registers for TermReturn to consult.
 	Prologue(a *asm.Assembler, address int, count bool, l Layout, args []asm.VReg)
 	// Epilogue ends the native function.
 	Epilogue(a *asm.Assembler)
@@ -34,7 +34,7 @@ type Machine interface {
 	// Branch transfers control to labels, one per edge of t. next is the
 	// label bound right after the branch: an edge to it falls through.
 	Branch(a *asm.Assembler, t ssa.Terminator, s Site, labels []asm.Label, next asm.Label)
-	// Return ends the function with an OpReturn or OpComplete t.
+	// Return ends the function with an TermReturn or TermComplete t.
 	Return(a *asm.Assembler, t ssa.Terminator, s Site)
 	// Budget counts one loop iteration down and branches to safepoint when
 	// the budget is spent.
@@ -88,7 +88,7 @@ type Site interface {
 	Slot(slot ssa.Slot) ssa.Type
 	// Const reports the word of v when an OpConst defines it.
 	Const(v ssa.Value) (uint64, bool)
-	// Fuse reports whether v's only use is the condition of the OpBranch
+	// Fuse reports whether v's only use is the condition of the TermBrIf
 	// right after its operation, so the machine may leave v in condition
 	// flags instead of a register.
 	Fuse(v ssa.Value) bool
@@ -102,9 +102,6 @@ type Site interface {
 	// operation, whose results native code loads on resume, and the label the
 	// machine binds where native code resumes.
 	Bridge() (exit, resume asm.Label)
-	// Operand returns the first immediate operand of the operation, and
-	// false when it cannot be read.
-	Operand() (int, bool)
 	// Release returns the label of an exit that hands the interpreter ref,
 	// whose last reference native code drops, and the label the machine
 	// binds where native code resumes.

@@ -242,7 +242,7 @@ func rotate(f *ssa.Function) *ssa.Function {
 		}
 		r.builder.Term(id, r.terminator(b.Terminator))
 	}
-	r.builder.Term(first, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: r.block(0), Args: args}}})
+	r.builder.Term(first, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: r.block(0), Args: args}}})
 	return r.builder.Build()
 }
 
@@ -338,7 +338,7 @@ func (t *translation) analyze(root int, in facts) (reach, bool) {
 		if t.spans[id].tail && w.jump >= 0 {
 			r.jumps[id] = w.jump
 		}
-		if term.Op == ssa.OpExit {
+		if term.Term == ssa.TermExit {
 			continue
 		}
 		exit := facts{stack: make([]fact, len(w.stack)), closures: w.closures}
@@ -412,7 +412,7 @@ func (t *translation) build(r reach, root int) *ssa.Function {
 		if !ok {
 			return nil
 		}
-		if term.Op != ssa.OpExit {
+		if term.Term != ssa.TermExit {
 			if term.Edges, ok = w.edges(r.succs(t.spans[id], id), r.states, ids); !ok {
 				return nil
 			}

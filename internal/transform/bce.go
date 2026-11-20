@@ -3,7 +3,6 @@ package transform
 import (
 	"math"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/graph"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/pass"
@@ -12,7 +11,7 @@ import (
 // BCEPass drops the bounds check of an array op on a slice indexed by a
 // loop's induction variable i, which counts up from a constant c ≥ 0 by
 // constant steps and stays below the limit n the loop header tests, signed:
-// then 0 ≤ i < n holds in the loop. The index becomes an OpBound. n ≤ length
+// then 0 ≤ i < n holds in the loop. The index becomes an OpArrayBound. n ≤ length
 // is checked once by an OpGuardBounds in the loop's preheader that deopts at
 // the header's entry state, even when n is the array's own length: a
 // shrinking op between the two would leave n above it. A loop whose header
@@ -53,7 +52,7 @@ func (p *BCEPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 			operation = r.operation(operation)
 			if bounded[site{b, i}] {
 				v := r.builder.Value(ssa.TypeI32)
-				r.builder.Add(id, ssa.Operation{Op: ssa.OpBound, Args: []ssa.Value{operation.Args[1], operation.Args[0]}, Results: []ssa.Value{v}})
+				r.builder.Add(id, ssa.Operation{Op: ssa.OpArrayBound, Args: []ssa.Value{operation.Args[1], operation.Args[0]}, Results: []ssa.Value{v}})
 				operation.Args[1] = v
 			}
 			r.builder.Add(id, r.define(operation))
@@ -63,7 +62,7 @@ func (p *BCEPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 		for _, guard := range guards[b] {
 			state, length := r.builder.Value(ssa.TypeState), r.builder.Value(ssa.TypeI32)
 			r.builder.Add(id, r.operation(ssa.Operation{Op: ssa.OpState, Frames: guard.Frames, Results: []ssa.Value{state}}))
-			r.builder.Add(id, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{r.value(guard.Args[1])}, State: state, Results: []ssa.Value{length}})
+			r.builder.Add(id, ssa.Operation{Op: ssa.OpArrayLen, Args: []ssa.Value{r.value(guard.Args[1])}, State: state, Results: []ssa.Value{length}})
 			r.builder.Add(id, ssa.Operation{Op: ssa.OpGuardBounds, Args: []ssa.Value{r.value(guard.Args[0]), length}, State: state})
 		}
 		r.builder.Term(id, r.terminator(function.Block(b).Terminator))
@@ -72,7 +71,7 @@ func (p *BCEPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 	return false, nil
 }
 
-// bounds reports the array ops whose index becomes an OpBound and, per
+// bounds reports the array ops whose index becomes an OpArrayBound and, per
 // preheader, the guards that make it sound.
 func (n *nest) bounds(profiles Profiles) (map[site]bool, map[int][]ssa.Operation) {
 	bounded := map[site]bool{}
@@ -106,11 +105,11 @@ func (n *nest) bounds(profiles Profiles) (map[site]bool, map[int][]ssa.Operation
 // indexed reports that operation reads or writes, at the loop's induction
 // variable, a slice defined before the loop's preheader.
 func (n *nest) indexed(loop induction, operation ssa.Operation) bool {
-	if operation.Op != ssa.OpExec || (operation.Code != instr.ARRAY_GET && operation.Code != instr.ARRAY_SET) || operation.Args[1] != loop.index {
+	if (operation.Op != ssa.OpArrayGet && operation.Op != ssa.OpArraySet) || operation.Args[1] != loop.index {
 		return false
 	}
 	slice, ok := n.op(operation.Args[0])
-	return ok && slice.Op == ssa.OpSlice && loop.frames != nil && n.dominance.Dominates(n.sites[operation.Args[0]].block, loop.preheader)
+	return ok && slice.Op == ssa.OpArrayView && loop.frames != nil && n.dominance.Dominates(n.sites[operation.Args[0]].block, loop.preheader)
 }
 
 // induction reports the loop at header h when its branch tests i <s n on a
@@ -124,23 +123,23 @@ func (n *nest) induction(natural graph.Loop, profiles Profiles) (induction, bool
 		return induction{}, false
 	}
 	t := n.function.Block(h).Terminator
-	if t.Op != ssa.OpBranch || len(t.Edges) != 2 {
+	if t.Term != ssa.TermBrIf || len(t.Edges) != 2 {
 		return induction{}, false
 	}
 	test, ok := n.op(t.Args[0])
-	if !ok || n.sites[t.Args[0]].block != h || test.Op != ssa.OpExec {
+	if !ok || n.sites[t.Args[0]].block != h || test.Op != ssa.OpIntCmp {
 		return induction{}, false
 	}
 	loop := induction{preheader: preheader}
 	stay := 0
-	switch test.Code {
-	case instr.I32_GE_S:
+	switch test.Cond {
+	case ssa.CondSGE:
 		loop.index, loop.limit, stay = test.Args[0], test.Args[1], 1
-	case instr.I32_LT_S:
+	case ssa.CondSLT:
 		loop.index, loop.limit = test.Args[0], test.Args[1]
-	case instr.I32_LE_S:
+	case ssa.CondSLE:
 		loop.limit, loop.index, stay = test.Args[0], test.Args[1], 1
-	case instr.I32_GT_S:
+	case ssa.CondSGT:
 		loop.limit, loop.index = test.Args[0], test.Args[1]
 	default:
 		return induction{}, false
@@ -182,7 +181,7 @@ func (n *nest) induction(natural graph.Loop, profiles Profiles) (induction, bool
 				continue
 			}
 			add, ok := n.op(v)
-			if !ok || add.Op != ssa.OpExec || add.Code != instr.I32_ADD || !n.dominance.Dominates(loop.stay, n.sites[v].block) {
+			if !ok || add.Op != ssa.OpIntAdd || !n.dominance.Dominates(loop.stay, n.sites[v].block) {
 				return induction{}, false
 			}
 			by := add.Args[1]

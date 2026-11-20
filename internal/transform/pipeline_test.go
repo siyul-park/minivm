@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/internal/transform"
 	"github.com/siyul-park/minivm/pass"
@@ -39,9 +38,9 @@ func TestO2(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 2, Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 3, Results: []ssa.Value{y}})
 		sum1 := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{sum1}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{sum1}})
 		sum2 := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{sum2}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{sum2}})
 
 		unused := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 99, Results: []ssa.Value{unused}})
@@ -49,11 +48,11 @@ func TestO2(t *testing.T) {
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		first := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{first}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormArray, Elem: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{first}})
 		second := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{second}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormArray, Elem: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{second}})
 
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{sum1, sum2, second}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{sum1, sum2, second}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -68,7 +67,7 @@ func TestO2(t *testing.T) {
 		require.NoError(t, ssa.Verify(fn))
 
 		got := ssa.Format(fn)
-		require.NotContains(t, got, "i32.add")
+		require.NotContains(t, got, "int.add")
 		require.NotContains(t, got, "const 99")
 		require.Equal(t, 1, strings.Count(got, "guard.shape"))
 
@@ -102,28 +101,28 @@ func TestO3(t *testing.T) {
 		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: 10, Results: []ssa.Value{bound}})
 		zero := b.Value(ssa.TypeI32)
 		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{zero}})
-		b.Term(pre, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{zero}}}})
+		b.Term(pre, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{zero}}}})
 
 		counter := b.Param(header, ssa.TypeI32)
 		cond := b.Value(ssa.TypeI1)
-		b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{counter, bound}, State: deoptState(b, pre), Results: []ssa.Value{cond}})
-		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
+		b.Add(header, ssa.Operation{Op: ssa.OpIntCmp, Cond: ssa.CondSLT, Args: []ssa.Value{counter, bound}, State: deoptState(b, pre), Results: []ssa.Value{cond}})
+		b.Term(header, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
 
 		sum := b.Value(ssa.TypeI32)
-		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, pre), Results: []ssa.Value{sum}})
+		b.Add(body, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{x, y}, State: deoptState(b, pre), Results: []ssa.Value{sum}})
 		state := b.Value(ssa.TypeState)
 		b.Add(body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		guardA := b.Value(ssa.TypeRef)
-		b.Add(body, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{guardA}})
+		b.Add(body, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormArray, Elem: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{guardA}})
 		guardB := b.Value(ssa.TypeRef)
-		b.Add(body, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{guardB}})
+		b.Add(body, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormArray, Elem: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{guardB}})
 		length := b.Value(ssa.TypeI32)
-		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{guardB}, State: deoptState(b, pre), Results: []ssa.Value{length}})
+		b.Add(body, ssa.Operation{Op: ssa.OpArrayLen, Args: []ssa.Value{guardB}, State: deoptState(b, pre), Results: []ssa.Value{length}})
 		next := b.Value(ssa.TypeI32)
-		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{counter, sum}, State: deoptState(b, pre), Results: []ssa.Value{next}})
-		b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{next}}}})
+		b.Add(body, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{counter, sum}, State: deoptState(b, pre), Results: []ssa.Value{next}})
+		b.Term(body, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{next}}}})
 
-		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{counter}})
+		b.Term(exit, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{counter}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -139,7 +138,7 @@ func TestO3(t *testing.T) {
 
 		got := ssa.Format(fn)
 		require.Equal(t, 1, strings.Count(got, "guard.shape"))
-		require.Equal(t, 2, strings.Count(got, "i32.add"))
-		require.Equal(t, 1, strings.Count(blockChunk(got, 0), "i32.add"))
+		require.Equal(t, 2, strings.Count(got, "int.add"))
+		require.Equal(t, 1, strings.Count(blockChunk(got, 0), "int.add"))
 	})
 }

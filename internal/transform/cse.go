@@ -31,16 +31,28 @@ func cseKey(function *ssa.Function, operation ssa.Operation) (string, bool) {
 	switch operation.Op {
 	case ssa.OpConst:
 		return fmt.Sprintf("const %s %d", function.Type(operation.Results[0]), operation.Const), true
-	case ssa.OpExec:
-		if !operation.Code.IsPure() {
-			return "", false
-		}
-		args := operation.Args
-		if commutative(operation.Code) && len(args) == 2 && args[0] > args[1] {
-			args = []ssa.Value{args[1], args[0]}
-		}
-		return fmt.Sprintf("exec %d %v", operation.Code, args), true
 	default:
+		if operation.Op == ssa.OpExec || operation.Op.Data() {
+			return pure(function, operation)
+		}
 		return "", false
 	}
+}
+
+// pure keys a pure computation by what decides its results: its operation,
+// condition, operands, and the types it yields, since a conversion differs from
+// another by its result type alone.
+func pure(function *ssa.Function, operation ssa.Operation) (string, bool) {
+	if !operation.Pure() {
+		return "", false
+	}
+	args := operation.Args
+	if commutative(operation) && len(args) == 2 && args[0] > args[1] {
+		args = []ssa.Value{args[1], args[0]}
+	}
+	results := make([]ssa.Type, len(operation.Results))
+	for i, v := range operation.Results {
+		results[i] = function.Type(v)
+	}
+	return fmt.Sprintf("%s %d %s %v %v", operation.Op, operation.Code, operation.Cond, args, results), true
 }

@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/internal/transform"
 	"github.com/siyul-park/minivm/pass"
@@ -31,7 +30,7 @@ func TestForwardPass_Run(t *testing.T) {
 		first, second := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{first}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{second}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{first, second}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{first, second}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -48,9 +47,9 @@ func TestForwardPass_Run(t *testing.T) {
 		entry, next := b.Block(), b.Block()
 		first, second := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{first}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: next}}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: next}}})
 		b.Add(next, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{second}})
-		b.Term(next, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{first, second}})
+		b.Term(next, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{first, second}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -70,7 +69,7 @@ func TestForwardPass_Run(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: local(0), Args: []ssa.Value{first}, State: state})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{second}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{second}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{second}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -90,7 +89,7 @@ func TestForwardPass_Run(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: local(1), Args: []ssa.Value{first}, State: state})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{second}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{second}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{second}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -111,11 +110,11 @@ func TestForwardPass_Run(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{held}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{redundant}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: state})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Args: []ssa.Value{callee}, State: state})
 		again, local0 := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal}, Results: []ssa.Value{again}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{local0}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{global, held, redundant, again, local0}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{global, held, redundant, again, local0}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -135,16 +134,16 @@ func TestForwardPass_Run(t *testing.T) {
 		cond := b.Param(entry, ssa.TypeI1)
 		first := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{first}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
-		b.Term(left, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
+		b.Term(left, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: join}}})
 		stored, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
 		b.Add(right, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{stored}})
 		b.Add(right, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		b.Add(right, ssa.Operation{Op: ssa.OpStore, Slot: local(0), Args: []ssa.Value{stored}, State: state})
-		b.Term(right, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
+		b.Term(right, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: join}}})
 		second := b.Value(ssa.TypeI32)
 		b.Add(join, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{second}})
-		b.Term(join, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{first, second}})
+		b.Term(join, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{first, second}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -171,7 +170,7 @@ func TestForwardPass_Run(t *testing.T) {
 		v := store(b, entry, global, ssa.TypeI32)
 		got := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: global, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -190,7 +189,7 @@ func TestForwardPass_Run(t *testing.T) {
 		store(b, entry, local(0), ssa.TypeI32)
 		got := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -208,7 +207,7 @@ func TestForwardPass_Run(t *testing.T) {
 		store(b, entry, local(0), ssa.TypeI32)
 		got := b.Value(ssa.TypeI64)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -225,7 +224,7 @@ func TestForwardPass_Run(t *testing.T) {
 		store(b, entry, global, ssa.TypeI64)
 		got := b.Value(ssa.TypeI64)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: global, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -242,7 +241,7 @@ func TestForwardPass_Run(t *testing.T) {
 		store(b, entry, local(0), ssa.TypeRef)
 		got := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -260,9 +259,9 @@ func TestForwardPass_Run(t *testing.T) {
 		store(b, entry, global, ssa.TypeI32)
 		state, got := b.Value(ssa.TypeState), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: state})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Args: []ssa.Value{callee}, State: state})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: global, Results: []ssa.Value{got}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -277,10 +276,10 @@ func TestForwardPass_Run(t *testing.T) {
 		b := ssa.New("f")
 		entry, next := b.Block(), b.Block()
 		store(b, entry, local(0), ssa.TypeI32)
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: next}}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: next}}})
 		got := b.Value(ssa.TypeI32)
 		b.Add(next, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{got}})
-		b.Term(next, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Term(next, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -297,12 +296,12 @@ func TestForwardPass_Run(t *testing.T) {
 		entry, left, right, join := b.Block(), b.Block(), b.Block(), b.Block()
 		cond := b.Param(entry, ssa.TypeI1)
 		store(b, entry, local(0), ssa.TypeI32)
-		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
-		b.Term(left, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
-		b.Term(right, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
+		b.Term(left, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: join}}})
+		b.Term(right, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: join}}})
 		got := b.Value(ssa.TypeI32)
 		b.Add(join, ssa.Operation{Op: ssa.OpLoad, Slot: local(0), Results: []ssa.Value{got}})
-		b.Term(join, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{got}})
+		b.Term(join, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{got}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 

@@ -5,7 +5,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/internal/transform"
 	"github.com/siyul-park/minivm/pass"
@@ -26,7 +25,7 @@ func TestDCEPass_Run(t *testing.T) {
 		x, unused := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 2, Results: []ssa.Value{unused}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{x}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{x}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -43,8 +42,8 @@ func TestDCEPass_Run(t *testing.T) {
 		entry := b.Block()
 		array := b.Param(entry, ssa.TypeRef)
 		length := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{array}, State: deoptState(b, entry), Results: []ssa.Value{length}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		b.Add(entry, ssa.Operation{Op: ssa.OpArrayLen, Args: []ssa.Value{array}, State: deoptState(b, entry), Results: []ssa.Value{length}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -61,8 +60,8 @@ func TestDCEPass_Run(t *testing.T) {
 		entry := b.Block()
 		x, y := b.Param(entry, ssa.TypeI32), b.Param(entry, ssa.TypeI32)
 		quotient := b.Value(ssa.TypeI32)
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_DIV_S, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{quotient}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntSDiv, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{quotient}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -70,16 +69,16 @@ func TestDCEPass_Run(t *testing.T) {
 
 		require.NoError(t, err)
 		require.True(t, preserved)
-		require.Contains(t, ssa.Format(fn), "i32.div_s")
+		require.Contains(t, ssa.Format(fn), "int.sdiv")
 	})
 
 	t.Run("removes a block unreachable from the entry", func(t *testing.T) {
 		b := ssa.New("f")
 		entry, live := b.Block(), b.Block()
 		orphan := b.Block()
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: live}}})
-		b.Term(live, ssa.Terminator{Op: ssa.OpComplete})
-		b.Term(orphan, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: live}}})
+		b.Term(live, ssa.Terminator{Term: ssa.TermComplete})
+		b.Term(orphan, ssa.Terminator{Term: ssa.TermComplete})
 		fn := b.Build()
 		require.Equal(t, 3, fn.Len())
 
@@ -97,9 +96,9 @@ func TestDCEPass_Run(t *testing.T) {
 		x, y, sum, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 2, Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 3, Results: []ssa.Value{y}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{sum}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{sum}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Stack: []ssa.Operand{{Value: sum}}}}, Results: []ssa.Value{state}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -109,7 +108,7 @@ func TestDCEPass_Run(t *testing.T) {
 		require.True(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		out := ssa.Format(fn)
-		require.Contains(t, out, "i32.add")
+		require.Contains(t, out, "int.add")
 		require.Contains(t, out, "stack=[v3]")
 	})
 
@@ -119,9 +118,9 @@ func TestDCEPass_Run(t *testing.T) {
 		x, y, sum, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 2, Results: []ssa.Value{x}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 3, Results: []ssa.Value{y}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{sum}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{x, y}, State: deoptState(b, entry), Results: []ssa.Value{sum}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Locals: []ssa.Local{{Index: 0, Value: sum}}}}, Results: []ssa.Value{state}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -131,7 +130,7 @@ func TestDCEPass_Run(t *testing.T) {
 		require.True(t, preserved)
 		require.NoError(t, ssa.Verify(fn))
 		out := ssa.Format(fn)
-		require.Contains(t, out, "i32.add")
+		require.Contains(t, out, "int.add")
 		require.Contains(t, out, "locals=[0=v3]")
 	})
 
@@ -142,7 +141,7 @@ func TestDCEPass_Run(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxRef(3)), Results: []ssa.Value{array}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 9, Results: []ssa.Value{dead}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Stack: []ssa.Operand{{Value: array, Owned: true}}}}, Results: []ssa.Value{state}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -159,7 +158,7 @@ func TestDCEPass_Run(t *testing.T) {
 		entry := b.Block()
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -181,9 +180,9 @@ func TestDCEPass_Run(t *testing.T) {
 		refined := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{zero}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{array}, State: deoptState(b, entry), Results: []ssa.Value{length}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpArrayLen, Args: []ssa.Value{array}, State: deoptState(b, entry), Results: []ssa.Value{length}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{length, zero}, State: state, Results: []ssa.Value{refined}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -202,19 +201,19 @@ func TestDCEPass_Run(t *testing.T) {
 		zero, stale := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{zero}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 9, Results: []ssa.Value{stale}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: head, Args: []ssa.Value{zero, stale}}}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: head, Args: []ssa.Value{zero, stale}}}})
 
 		i, carried := b.Param(head, ssa.TypeI32), b.Param(head, ssa.TypeI32)
-		limit, below := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
+		limit, below := b.Value(ssa.TypeI32), b.Value(ssa.TypeI1)
 		b.Add(head, ssa.Operation{Op: ssa.OpConst, Const: 3, Results: []ssa.Value{limit}})
-		b.Add(head, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{i, limit}, State: deoptState(b, head), Results: []ssa.Value{below}})
-		b.Term(head, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{below}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
+		b.Add(head, ssa.Operation{Op: ssa.OpIntCmp, Cond: ssa.CondSLT, Args: []ssa.Value{i, limit}, State: deoptState(b, head), Results: []ssa.Value{below}})
+		b.Term(head, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{below}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
 
 		one, next := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(body, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
-		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{i, one}, State: deoptState(b, body), Results: []ssa.Value{next}})
-		b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: head, Args: []ssa.Value{next, carried}}}})
-		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{i}})
+		b.Add(body, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{i, one}, State: deoptState(b, body), Results: []ssa.Value{next}})
+		b.Term(body, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: head, Args: []ssa.Value{next, carried}}}})
+		b.Term(exit, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{i}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -235,10 +234,10 @@ func TestDCEPass_Run(t *testing.T) {
 		entry, head := b.Block(), b.Block()
 		zero := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{zero}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: head, Args: []ssa.Value{zero}}}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: head, Args: []ssa.Value{zero}}}})
 		kept, state := b.Param(head, ssa.TypeI32), b.Value(ssa.TypeState)
 		b.Add(head, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Locals: []ssa.Local{{Index: 0, Value: kept}}}}, Results: []ssa.Value{state}})
-		b.Term(head, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Term(head, ssa.Terminator{Term: ssa.TermExit, State: state})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -253,15 +252,15 @@ func TestDCEPass_Run(t *testing.T) {
 		b := ssa.New("f")
 		entry, body, exit := b.Block(), b.Block(), b.Block()
 		i := b.Param(entry, ssa.TypeI32)
-		limit, below := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
+		limit, below := b.Value(ssa.TypeI32), b.Value(ssa.TypeI1)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 3, Results: []ssa.Value{limit}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{i, limit}, State: deoptState(b, entry), Results: []ssa.Value{below}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{below}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntCmp, Cond: ssa.CondSLT, Args: []ssa.Value{i, limit}, State: deoptState(b, entry), Results: []ssa.Value{below}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{below}, Edges: []ssa.Edge{{Block: body}, {Block: exit}}})
 		one, next := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 		b.Add(body, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
-		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{i, one}, State: deoptState(b, body), Results: []ssa.Value{next}})
-		b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: entry, Args: []ssa.Value{next}}}})
-		b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{i}})
+		b.Add(body, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{i, one}, State: deoptState(b, body), Results: []ssa.Value{next}})
+		b.Term(body, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: entry, Args: []ssa.Value{next}}}})
+		b.Term(exit, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{i}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -269,6 +268,6 @@ func TestDCEPass_Run(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NoError(t, ssa.Verify(fn))
-		require.Contains(t, ssa.Format(fn), "i32.add")
+		require.Contains(t, ssa.Format(fn), "int.add")
 	})
 }

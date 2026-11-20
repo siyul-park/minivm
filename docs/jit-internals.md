@@ -1,3 +1,7 @@
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:1790b2e9179eaf4dbacbfc95fe71bd127788617b3527a42f60b9c0a50d350a49 -->
+
 # JIT Internals
 
 Native tier: ownership, runtime contract, lifecycle.
@@ -67,7 +71,7 @@ One wake (analysis, the first compiles, their garbage) costs ~0.3–0.6 ms of in
 
 - Native code never runs on a goroutine stack; async preemption cannot reach it, so back edges, calls, and returns spend `Budget` explicitly. Back edges and calls branch to safepoint on exhaustion; returns only credit the work. `Budget` carries across Go entries and served calls; each safepoint adds `engine.quota` (Ticks).
 - Native code writes no Go pointer. It reads heap interface words through `Context.Heap` and object fields at `jit.Offset*`, and writes only integer words: element and field words, reference counts, and the control bytes, slot words, `count`, and `used` of a numeric map table (Maps).
-- A slice (`ssa.OpSlice`, placed by LICM in a quiet loop's preheader: `pass-system.md`) loads a guarded array's element pointer and length once; the loop's array ops read them, not `Context.Heap`. They are never reloaded: a quiet loop resizes or replaces no container, and neither do the exits it resumes from (a safepoint, a bridge of an op that writes nothing), though a bridge may move `Context.Heap`. The pointer may sit in a register or a spill slot; it is no GC root, and its container, which a quiet loop never releases, keeps the array reachable.
+- An `array.view` (`ssa.OpArrayView`, placed by LICM in a quiet loop's preheader: `pass-system.md`) loads a guarded array's element pointer and length once; the loop's array ops read them, not `Context.Heap`. They are never reloaded: a quiet loop resizes or replaces no container, and neither do the exits it resumes from (a safepoint, a bridge of an op that writes nothing), though a bridge may move `Context.Heap`. The pointer may sit in a register or a spill slot; it is no GC root, and its container, which a quiet loop never releases, keeps the array reachable.
 - Registers: X24 budget, X25 frame base, X27 next record address, X26 context, X16/X17 scratch, X18/X28 untouched. Allocatable: X0–X15, X19–X23, D0–D31.
 - X24 mirrors `Context.Budget`: exits store it, resumed exits reload it, and a normal Go entry stores it back after native return.
 - Allocation: linear scan, no splitting; a value live across a call or under pressure spills for its whole life. Values whose live rows never meet share a register: a value does not hold its register through a block it is dead in, such as a later loop laid out before its out-of-line stubs. Calls clobber every allocatable register. Exit maps keep ordinary mapped values live through their stubs. Promoted locals are deopt-only state: calls and safepoints keep them live across resumption; other exits save a non-live one on their cold path into a fixed spill home.
@@ -77,7 +81,7 @@ One wake (analysis, the first compiles, their garbage) costs ~0.3–0.6 ms of in
 
 | Stage | Contract |
 |---|---|
-| Translate | bytecode → SSA; attach interpreter state to each `OpExec`, return, and completion; block 0 has no predecessors |
+| Translate | bytecode → SSA: the walker handles special cases such as `I32_CONST` → `OpConst` and `BR_IF` → `TermBrIf`; for opcodes that reach the generic mapping, `transform/opcode.go` maps each modelled opcode to its operation and any other opcode to `exec`; attach interpreter state to each operation that can exit, and to each return and completion; block 0 has no predecessors |
 | Baseline | fold → DCE |
 | Optimized | fold → forward → CSE → guard → DCE → promote → LICM → BCE → DCE |
 | Lower | assign registers by SSA type, including register-passed parameters the machine prologue fills, order blocks in reverse postorder with an edge to the next block falling through, a two-way branch inside a loop falling through, when it can, to the successor that stays in its innermost loop whichever polarity it tests, resolve block parameters with edge moves, fuse a compare into the branch right after it when nothing else uses it |
@@ -91,7 +95,7 @@ Translate never retains a constant callee: the pool keeps it alive, so its call 
 
 | Feedback | Translation |
 |---|---|
-| none: the site never ran | the block ends in `OpExit` at the `CALL`, with its operands owned; no span only reachable past it is translated |
+| none: the site never ran | the block ends in an `exit` terminator (`ssa.TermExit`) at the `CALL`, with its operands owned; no span only reachable past it is translated |
 | one function or closure | a guarded constant call, only for a callee operand its state does not own |
 | several callees of one function type | a generic call: every argument and the callee are owned, and `ssa.Shape.Type` carries the type |
 | several callees of differing types | the translator declines the whole unit |
@@ -113,7 +117,7 @@ A function with captures runs natively only through its closure:
 | OSR | declines unless the frame holds its captures |
 | Native call | lowering rejects a direct call of it |
 
-A static `RETURN_CALL` loops, as threaded frame reuse does, when its callee can share the frame; the unit then translates the callee's spans with the root's, and the loop jumps to the callee's first span. A callee joins the translation as a member (at most 4 functions, the root included) when it is a constant plain function with code, no captures or handlers, no `YIELD`/`RESUME`, the root's `Declared()` slots and `Returns`, and a call that has every argument on the stack and no `i64` slot. A self tail call is the one-member translation. Any other `RETURN_CALL` ends in `OpExit`.
+A static `RETURN_CALL` loops, as threaded frame reuse does, when its callee can share the frame; the unit then translates the callee's spans with the root's, and the loop jumps to the callee's first span. A callee joins the translation as a member (at most 4 functions, the root included) when it is a constant plain function with code, no captures or handlers, no `YIELD`/`RESUME`, the root's `Declared()` slots and `Returns`, and a call that has every argument on the stack and no `i64` slot. A self tail call is the one-member translation. Any other `RETURN_CALL` ends in an `exit` terminator.
 
 | Membership rule | Contract |
 |---|---|
@@ -131,7 +135,7 @@ A reference parameter its function never writes (`transform.Borrows`) is borrowe
 |---|---|
 | Prologue | Push the record at X27 (`Context.Next`, `&Records[depth]`): save `Record.FB`, `Record.PC` (the return address), and `Record.SP` (the caller's spill base, the stack pointer before the frame is built), count `Entries[address]` when enabled, start non-parameter locals at their zeros (`value-representation.md`), loading each distinct zero once; OSR starts none. A function that reads or writes its upvals loads their base from `Context.Upvals`. |
 | Store | Reference-capable `OpStore` releases the old slot value before overwrite, matching threaded `LOCAL_SET` and `UPVAL_SET`. |
-| Return | `OpReturn` releases reference slots; borrowed parameters only at depth 1 (the Go-entered activation), returns up to two register results in X0/X1, or stores boxed results; `OpComplete` writes past locals. |
+| Return | the `return` terminator releases reference slots; borrowed parameters only at depth 1 (the Go-entered activation), returns up to two register results in X0/X1, or stores boxed results; `complete` writes past locals. |
 | Call | Constant calls box arguments into the callee frame, then use `Context.Natives[addr]`; self-calls use the unit entry. A closure call to a function with captures writes the closure's upvals base to `Context.Upvals` after its budget check. Missing code, record space (`Edge`), or frame space takes `ExitCall`, which resumes past the callee release: slot results are read there, register results are loaded from `Context.Results` by the exit stub. A generic call (`Call.Generic`) stores its arguments, always takes `ExitCall`, has no budget check, and reads its slot results at the join; an i64 result is unsupported. A native call stores nothing in a record. `Assembly.Sites` maps each native call's return offset to the exit id of the caller's state there (`Code.Site`), so materialization resolves an outer activation's exit from the next record's `PC`, and reads its spilled values through the next record's `SP`. |
 
 ### Call convention
@@ -150,14 +154,14 @@ A reference parameter its function never writes (`transform.Borrows`) is borrowe
 
 | Kind | Taken at | Resumes native |
 |---|---|---|
-| `ExitDeopt` | failed check, `OpExit`; `Exit.Trap` marks a check the operation itself raises (zero divisor, index bounds) | no |
-| `ExitBridge` | unlowered `OpExec` | yes, unless denied or its handler traps |
+| `ExitDeopt` | failed check, `exit` terminator; `Exit.Trap` marks a check the operation itself raises (zero divisor, index bounds) | no |
+| `ExitBridge` | an `exec`, a modelled operation the machine declines, or a native slow path of an operation the machine lowers | yes, unless denied or its handler traps |
 | `ExitSafepoint` | loop header or native call when `Budget` is spent | yes, unless its tick runs threaded (Ticks) |
 | `ExitRelease` | dropping a last reference | yes |
 | `ExitCall` | `CALL` that cannot run natively, or a generic one | yes, unless the callee is a coroutine function, does not fit the stack, has another signature than a generic call's, or leaves by a trap, throw, or cancellation |
-| `ExitBox` | a wide (> 49-bit) i64 at a store, slot return, call argument, or `OpComplete` | yes |
+| `ExitBox` | a wide (> 49-bit) i64 at a store, slot return, call argument, or `complete` terminator | yes |
 
-A deopt stub sits out of line after the next terminator that does not fall through, so the values its map names stay live only that far. Safepoint, release, box, and call stubs follow the body; a bridge and `OpExit` exit inline.
+A deopt stub sits out of line after the next terminator that does not fall through, so the values its map names stay live only that far. Safepoint, release, box, call, and native slow-path bridge stubs follow the body; `exec` and declined-operation bridges and an `exit` terminator exit inline.
 
 `jit.Kind.Resumes` owns the "Resumes native" column above; `compile.stub`/`function` and `arm64.Machine.Exit` all read it instead of comparing kinds themselves. A non-resuming exit's stub ends in `BRK` and skips the `X24` (`Budget`) reload, since native code never runs past it; it materializes the run's native activations outermost-first, then continues threaded.
 
@@ -169,7 +173,7 @@ A deopt stub sits out of line after the next terminator that does not fall throu
 | Box | `Exit.Word` carries the wide i64; interpreter allocates a boxed value, then native resumes. |
 | Trap | A bridge whose handler panics restores each heap operand to the count it saved before the attempt, then deopts; threaded code runs the op again and reports its trap. The declined attempt leaves only heap and count storage growth, stack slots above the frame, and the scratch frame changed: no admitted handler writes heap contents, allocates, or retains anything but its operands before its last panic point. A box trap deopts the same way. |
 
-A bridge or callout runs the opcode at its state's IP with the state's stack, so `exit()` requires the opcode decoded at `Frame.IP` to equal the exiting op's `Code`; otherwise lowering fails with `compile.ErrInlined`. Code inlined by `InlinePass` (`pass-system.md`) carries its caller's `CALL` state, so an operation the machine declines would fail this way. `compile.Compile` then compiles the unit once more without the inline pass; that is its only retry.
+A bridge or callout runs the opcode at its state's IP with the state's stack, so a bridge is admitted only when the opcode decoded at `Frame.IP` performs the exiting operation (`transform.Performs`: the operation's own `Code` for `exec`, else the opcode its table row models, of the same operand count, and with a matching `Shape.Index` type index for `OpStructNewDefault` and `OpArrayNewDefault`); otherwise lowering fails with `compile.ErrInlined`. Code inlined by `InlinePass` (`pass-system.md`) carries its caller's `CALL` state, so an operation the machine declines would fail this way. `compile.Compile` then compiles the unit once more without the inline pass; that is its only retry.
 
 A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every admitted op are exactly the operands its handler pops; it uses a scratch stack and leaves native registers untouched. The bridge retains every ref operand for the handler, so none reaches zero during an attempt; a boxed wide i64 is a fresh heap value the handler owns. After a completed handler, the bridge releases its retain of each operand the op adopts (`transform.Adopts`: the stored value of a heap write with no result), since native code handed the op that operand's own reference; native code releases the other operands it owns. Result words are unboxed per kind; a heap-boxed i64 result is consumed into a raw word. The materializer retains borrowed refs.
 
@@ -214,7 +218,7 @@ A batch is stored so native code takes its lowest address first, so a single-typ
 | release | release | `jit.Ledger` price |
 | served `ExitCall` | call | `jit.Ledger` price; nothing while the callee has no code but may still compile (`pending`) |
 | `ExitDeopt` with `Exit.Trap`; a bridge or box whose handler panicked; a denied control-transfer bridge (`THROW`, `UNREACHABLE`); a cancelled safepoint; a safepoint whose tick runs threaded; an `ExitCall` under a hook; a trap, throw, or cancellation in a served call's callee | trap | none |
-| `ExitDeopt` without `Exit.Trap` (guards, `OpExit` at a cold dynamic `CALL` or a `RETURN_CALL` to a function outside the translation's members); any other declined bridge; an `ExitCall` not served | guard | refutation |
+| `ExitDeopt` without `Exit.Trap` (guards, `exit` at a cold dynamic `CALL` or a `RETURN_CALL` to a function outside the translation's members); any other declined bridge; an `ExitCall` not served | guard | refutation |
 
 | Rule | Contract |
 |---|---|
@@ -234,7 +238,7 @@ A batch is stored so native code takes its lowest address first, so a single-typ
 |---|---|
 | Frames | The caller's activations keep frame slots from the run's start; a stand-in frame for the innermost runs only its exact-code `CALL` (code cut past it), so `Interpreter.dispatch` stops when the callee returns to it. |
 | Handlers | `Interpreter.floor` hides the suspended slots from every handler search; a panic not caught above it re-panics from `dispatch` to `reenter`. |
-| Native entries | Start at `Context.Level` = the suspended depth (`engine.depth`), on the same native stack below the suspended frames. A nested activation that deopts abandons the stack only back to where its entry started (`asm.State.Abandon`), so later nested entries never overwrite the suspended frames; `Records` bounds the total depth, and no entry starts once they are full. `Context.Edge` caps native calls at the lesser of `Records` and the interpreter frames left. A Go entry above depth 0 releases its borrowed parameters itself after it returns, since `OpReturn` releases them only at depth 1. |
+| Native entries | Start at `Context.Level` = the suspended depth (`engine.depth`), on the same native stack below the suspended frames. A nested activation that deopts abandons the stack only back to where its entry started (`asm.State.Abandon`), so later nested entries never overwrite the suspended frames; `Records` bounds the total depth, and no entry starts once they are full. `Context.Edge` caps native calls at the lesser of `Records` and the interpreter frames left. A Go entry above depth 0 releases its borrowed parameters itself after it returns, since `return` releases them only at depth 1. |
 | State | `asm.State`, `Context.Edge`, `engine.depth`, and `Interpreter.floor` are saved before and restored before native code resumes (a failed call restores `asm.State`, `engine.depth`, and `Interpreter.floor`; the next entry sets `Edge` again); the nested run spends the caller's `Budget`. |
 | Hook | Under `WithHook` no call is served: the suspended callers' frame slots stay unmaterialized below the floor, where a hook would read them. The `ExitCall` deopts and replays the call. |
 | Callee | A generic call has `Exit.Callee` 0: the interpreter resolves its `Target` value to a function or closure whose parameter count is `Exit.Args` and whose return kinds are `Exit.Returns`; any other callee deopts and replays the call. |
@@ -301,3 +305,5 @@ Entry reuses the current frame (`FB = bp`, `Context.Level` = `engine.depth`); ex
 - `instruction-set.md`
 - `testing.md`
 - `jit-lessons.md`
+
+<!-- /coderabbit-ai-generated:v1 -->
