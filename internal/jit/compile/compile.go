@@ -124,7 +124,7 @@ type returned struct {
 }
 
 type save struct {
-	reg  asm.VReg
+	v    ssa.Value
 	slot int
 }
 
@@ -811,7 +811,7 @@ func (l *lowering) emit(id int) {
 		out.places = append(out.places, place{to: s.to, reg: reg})
 	}
 	for _, save := range out.saves {
-		l.m.Spill(l.a, save.reg, save.slot)
+		l.m.Spill(l.a, l.Reg(save.v), save.slot)
 	}
 	l.m.Exit(l.a, id, out.exit.Kind, l.live(id))
 	if len(out.results) > 0 {
@@ -864,8 +864,10 @@ func (l *lowering) exit(k jit.Kind) int {
 			l.fail(fmt.Errorf("%w: bridge of %s at ip %d", ErrInlined, l.op.Op, f.IP))
 			return id
 		}
-		performs = instr.Instruction(code[f.IP:]).Opcode()
-		if !transform.Performs(l.f, l.op, performs) {
+		decoded := instr.Instruction(code[f.IP:])
+		performs = decoded.Opcode()
+		if !transform.Performs(l.f, l.op, performs) ||
+			(l.op.Op == ssa.OpStructNewDefault || l.op.Op == ssa.OpArrayNewDefault) && decoded.Operand(0) != uint64(l.op.Shape.Index) {
 			l.fail(fmt.Errorf("%w: bridge of %s at ip %d", ErrInlined, l.op.Op, f.IP))
 			return id
 		}
@@ -902,7 +904,7 @@ func (l *lowering) exit(k jit.Kind) int {
 			continue
 		}
 		to.Value = jit.Value{Kind: l.f.Type(local.Value).Kind(), Loc: asm.Loc{Slot: slot, Spilled: true}}
-		l.outlets[id].saves = append(l.outlets[id].saves, save{reg: l.Reg(local.Value), slot: slot})
+		l.outlets[id].saves = append(l.outlets[id].saves, save{v: local.Value, slot: slot})
 	}
 	if k == jit.ExitBridge {
 		e.Code = performs

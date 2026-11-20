@@ -88,7 +88,7 @@ func (m *machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 		a.Bind(resume)
 	case op.Op == ssa.OpIntSDiv:
 		a.Emit(arm64.CBZLabel(s.Reg(op.Args[1]), s.Trap()))
-	case op.Op == ssa.OpStructNewDefault:
+	case op.Op == ssa.OpStructNewDefault || op.Op == ssa.OpArrayNewDefault:
 		m.operands = append(m.operands, op.Shape.Index)
 		exit, resume := s.Bridge()
 		a.Emit(arm64.CBZLabel(s.Reg(op.Results[0]), exit))
@@ -239,6 +239,32 @@ func TestLower(t *testing.T) {
 		require.Equal(t, []jit.Local{{Index: 0, Value: jit.Value{Kind: types.KindI32, Loc: asm.Loc{Slot: 0, Spilled: true}}}}, exits[0].Frame.Locals)
 	})
 
+	t.Run("materializes a zero local only in the division trap stub", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		zero := constant(b, entry, types.BoxI32(0))
+		x := constant(b, entry, types.BoxI32(5))
+		cond, result, at := b.Value(ssa.TypeI1), b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Locals: []ssa.Local{{Index: 0, Value: zero}}}}, Results: []ssa.Value{at}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntCmp, Cond: ssa.CondEQ, Args: []ssa.Value{x, zero}, State: at, Results: []ssa.Value{cond}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntSDiv, Args: []ssa.Value{x, x}, State: at, Results: []ssa.Value{result}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{result}})
+		m := new(machine)
+		assembly, err := compile.Lower(b.Build(), compile.Unit{Function: function(1, 1), Tier: jit.Baseline}, m)
+		require.NoError(t, err)
+		require.Equal(t, 1, slices.Index(m.calls, "const"))
+		loads := 0
+		for _, call := range m.calls[:slices.Index(m.calls, "return")] {
+			if call == "const" {
+				loads++
+			}
+		}
+		require.Equal(t, 1, loads)
+		require.Equal(t, []uint64{0}, m.consts)
+		require.Equal(t, []int{0}, m.spills)
+		require.Equal(t, jit.Value{Kind: types.KindI32, Loc: asm.Loc{Slot: 0, Spilled: true}}, assembly.Exits[0].Frame.Locals[0].Value)
+	})
+
 	t.Run("keeps a deopt-only local live across a call that a callee deopt can materialize", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
@@ -340,6 +366,8 @@ func TestLower(t *testing.T) {
 			}
 		}
 		require.Equal(t, 1, loads)
+		require.Contains(t, m.regs, x)
+		require.NotContains(t, m.regs, zero)
 	})
 
 	t.Run("keeps a loop table's default next, the only target a table falls through to", func(t *testing.T) {
@@ -521,6 +549,36 @@ func TestLower(t *testing.T) {
 		require.Equal(t, jit.ExitBridge, assembly.Exits[0].Kind)
 		require.Equal(t, instr.STRUCT_NEW_DEFAULT, assembly.Exits[0].Code)
 		require.Equal(t, []types.Kind{types.KindRef}, assembly.Exits[0].Results)
+	})
+
+	t.Run("admits default allocation bridges only for matching type indexes", func(t *testing.T) {
+		for _, op := range []ssa.Op{ssa.OpStructNewDefault, ssa.OpArrayNewDefault} {
+			for _, index := range []int{7, 8} {
+				b := ssa.New("f")
+				entry := b.Block()
+				operation := ssa.Operation{Op: op, Shape: ssa.Shape{Form: ssa.FormStruct, Index: 7}}
+				code := instr.STRUCT_NEW_DEFAULT
+				if op == ssa.OpArrayNewDefault {
+					operation.Shape.Form = ssa.FormArray
+					operation.Args = []ssa.Value{constant(b, entry, types.BoxI32(1))}
+					code = instr.ARRAY_NEW_DEFAULT
+				}
+				operands := []ssa.Operand{}
+				for _, v := range operation.Args {
+					operands = append(operands, ssa.Operand{Value: v})
+				}
+				operation.State = state(b, entry, 0, operands...)
+				operation.Results = []ssa.Value{b.Value(ssa.TypeRef)}
+				b.Add(entry, operation)
+				b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: operation.Results})
+				_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0, instr.MustNew(code, uint64(index))), Tier: jit.Baseline}, new(machine))
+				if index == 7 {
+					require.NoError(t, err)
+				} else {
+					require.ErrorIs(t, err, compile.ErrInlined)
+				}
+			}
+		}
 	})
 
 	t.Run("bridges a heap write with the stored value it adopts", func(t *testing.T) {

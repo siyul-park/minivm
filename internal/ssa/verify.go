@@ -290,6 +290,9 @@ func modelled(function *Function, o Operation) error {
 			return bad("takes lanes that differ or are not integers")
 		}
 	case o.Op >= OpIntClz && o.Op <= OpIntSExt32:
+		if o.Op == OpIntSExt32 && arg(0) != TypeI64 {
+			return bad("extends 32 bits in an i64 lane only")
+		}
 		if !isInt(arg(0)) || !isInt(res(0)) || res(0).Lane() != arg(0).Lane() {
 			return bad("changes the lane of an integer")
 		}

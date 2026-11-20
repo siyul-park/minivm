@@ -1,3 +1,7 @@
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:1790b2e9179eaf4dbacbfc95fe71bd127788617b3527a42f60b9c0a50d350a49 -->
+
 # JIT Internals
 
 Native tier: ownership, runtime contract, lifecycle.
@@ -77,7 +81,7 @@ One wake (analysis, the first compiles, their garbage) costs ~0.3–0.6 ms of in
 
 | Stage | Contract |
 |---|---|
-| Translate | bytecode → SSA: an opcode the native tier lowers becomes its modelled operation (`transform/opcode.go` owns the opcode↔operation table), any other `exec` of its opcode; attach interpreter state to each operation that can exit, and to each return and completion; block 0 has no predecessors |
+| Translate | bytecode → SSA: the walker handles special cases such as `I32_CONST` → `OpConst` and `BR_IF` → `TermBrIf`; for opcodes that reach the generic mapping, `transform/opcode.go` maps each modelled opcode to its operation and any other opcode to `exec`; attach interpreter state to each operation that can exit, and to each return and completion; block 0 has no predecessors |
 | Baseline | fold → DCE |
 | Optimized | fold → forward → CSE → guard → DCE → promote → LICM → BCE → DCE |
 | Lower | assign registers by SSA type, including register-passed parameters the machine prologue fills, order blocks in reverse postorder with an edge to the next block falling through, a two-way branch inside a loop falling through, when it can, to the successor that stays in its innermost loop whichever polarity it tests, resolve block parameters with edge moves, fuse a compare into the branch right after it when nothing else uses it |
@@ -151,13 +155,13 @@ A reference parameter its function never writes (`transform.Borrows`) is borrowe
 | Kind | Taken at | Resumes native |
 |---|---|---|
 | `ExitDeopt` | failed check, `exit` terminator; `Exit.Trap` marks a check the operation itself raises (zero divisor, index bounds) | no |
-| `ExitBridge` | an `exec`, or a modelled operation the machine declines | yes, unless denied or its handler traps |
+| `ExitBridge` | an `exec`, a modelled operation the machine declines, or a native slow path of an operation the machine lowers | yes, unless denied or its handler traps |
 | `ExitSafepoint` | loop header or native call when `Budget` is spent | yes, unless its tick runs threaded (Ticks) |
 | `ExitRelease` | dropping a last reference | yes |
 | `ExitCall` | `CALL` that cannot run natively, or a generic one | yes, unless the callee is a coroutine function, does not fit the stack, has another signature than a generic call's, or leaves by a trap, throw, or cancellation |
 | `ExitBox` | a wide (> 49-bit) i64 at a store, slot return, call argument, or `complete` terminator | yes |
 
-A deopt stub sits out of line after the next terminator that does not fall through, so the values its map names stay live only that far. Safepoint, release, box, and call stubs follow the body; a bridge and an `exit` terminator exit inline.
+A deopt stub sits out of line after the next terminator that does not fall through, so the values its map names stay live only that far. Safepoint, release, box, call, and native slow-path bridge stubs follow the body; `exec` and declined-operation bridges and an `exit` terminator exit inline.
 
 `jit.Kind.Resumes` owns the "Resumes native" column above; `compile.stub`/`function` and `arm64.Machine.Exit` all read it instead of comparing kinds themselves. A non-resuming exit's stub ends in `BRK` and skips the `X24` (`Budget`) reload, since native code never runs past it; it materializes the run's native activations outermost-first, then continues threaded.
 
@@ -169,7 +173,7 @@ A deopt stub sits out of line after the next terminator that does not fall throu
 | Box | `Exit.Word` carries the wide i64; interpreter allocates a boxed value, then native resumes. |
 | Trap | A bridge whose handler panics restores each heap operand to the count it saved before the attempt, then deopts; threaded code runs the op again and reports its trap. The declined attempt leaves only heap and count storage growth, stack slots above the frame, and the scratch frame changed: no admitted handler writes heap contents, allocates, or retains anything but its operands before its last panic point. A box trap deopts the same way. |
 
-A bridge or callout runs the opcode at its state's IP with the state's stack, so a bridge is admitted only when the opcode decoded at `Frame.IP` performs the exiting operation (`transform.Performs`: the operation's own `Code` for `exec`, else the opcode its table row models, of the same operand count); otherwise lowering fails with `compile.ErrInlined`. Code inlined by `InlinePass` (`pass-system.md`) carries its caller's `CALL` state, so an operation the machine declines would fail this way. `compile.Compile` then compiles the unit once more without the inline pass; that is its only retry.
+A bridge or callout runs the opcode at its state's IP with the state's stack, so a bridge is admitted only when the opcode decoded at `Frame.IP` performs the exiting operation (`transform.Performs`: the operation's own `Code` for `exec`, else the opcode its table row models, of the same operand count, and with a matching `Shape.Index` type index for `OpStructNewDefault` and `OpArrayNewDefault`); otherwise lowering fails with `compile.ErrInlined`. Code inlined by `InlinePass` (`pass-system.md`) carries its caller's `CALL` state, so an operation the machine declines would fail this way. `compile.Compile` then compiles the unit once more without the inline pass; that is its only retry.
 
 A bridge receives its lowered `SSA Args` through `Exit.Pops`, which for every admitted op are exactly the operands its handler pops; it uses a scratch stack and leaves native registers untouched. The bridge retains every ref operand for the handler, so none reaches zero during an attempt; a boxed wide i64 is a fresh heap value the handler owns. After a completed handler, the bridge releases its retain of each operand the op adopts (`transform.Adopts`: the stored value of a heap write with no result), since native code handed the op that operand's own reference; native code releases the other operands it owns. Result words are unboxed per kind; a heap-boxed i64 result is consumed into a raw word. The materializer retains borrowed refs.
 
@@ -301,3 +305,5 @@ Entry reuses the current frame (`FB = bp`, `Context.Level` = `engine.depth`); ex
 - `instruction-set.md`
 - `testing.md`
 - `jit-lessons.md`
+
+<!-- /coderabbit-ai-generated:v1 -->

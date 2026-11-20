@@ -408,8 +408,23 @@ func TestSSAPass_Run(t *testing.T) {
 
 			routed, routedMessage := executionResult(t, got)
 			require.Equal(t, message, routedMessage)
-			// NaN is not equal to itself, so compare the printed values.
-			require.Equal(t, fmt.Sprint(values), fmt.Sprint(routed))
+			require.Len(t, routed, len(values))
+			for i, value := range values {
+				require.IsType(t, value, routed[i])
+				switch v := value.(type) {
+				case types.F32:
+					if math.IsNaN(float64(v)) {
+						require.True(t, math.IsNaN(float64(routed[i].(types.F32))))
+						continue
+					}
+				case types.F64:
+					if math.IsNaN(float64(v)) {
+						require.True(t, math.IsNaN(float64(routed[i].(types.F64))))
+						continue
+					}
+				}
+				require.Equal(t, value, routed[i])
+			}
 		}
 		for _, op := range []instr.Opcode{
 			instr.I32_XOR, instr.I32_AND, instr.I32_OR,

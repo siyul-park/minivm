@@ -9,7 +9,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/internal/transform"
 	"github.com/siyul-park/minivm/pass"
@@ -125,29 +124,29 @@ func TestFoldPass_Run(t *testing.T) {
 
 	t.Run("declines saturating float-to-int conversions", func(t *testing.T) {
 		for _, c := range []struct {
-			code   instr.Opcode
+			op     ssa.Op
 			arg    ssa.Type
 			value  float64
 			result ssa.Type
 		}{
-			{instr.F32_TO_I32_S, ssa.TypeF32, math.NaN(), ssa.TypeI32},
-			{instr.F32_TO_I32_S, ssa.TypeF32, 3e9, ssa.TypeI32},
-			{instr.F32_TO_I32_S, ssa.TypeF32, -3e9, ssa.TypeI32},
-			{instr.F32_TO_I32_U, ssa.TypeF32, math.NaN(), ssa.TypeI32},
-			{instr.F32_TO_I32_U, ssa.TypeF32, -1, ssa.TypeI32},
-			{instr.F32_TO_I32_U, ssa.TypeF32, 5e9, ssa.TypeI32},
-			{instr.F64_TO_I32_S, ssa.TypeF64, math.NaN(), ssa.TypeI32},
-			{instr.F64_TO_I32_S, ssa.TypeF64, 3e9, ssa.TypeI32},
-			{instr.F64_TO_I32_S, ssa.TypeF64, -3e9, ssa.TypeI32},
-			{instr.F64_TO_I32_U, ssa.TypeF64, math.NaN(), ssa.TypeI32},
-			{instr.F64_TO_I32_U, ssa.TypeF64, -1, ssa.TypeI32},
-			{instr.F64_TO_I32_U, ssa.TypeF64, 5e9, ssa.TypeI32},
-			{instr.F64_TO_I64_S, ssa.TypeF64, math.NaN(), ssa.TypeI64},
-			{instr.F64_TO_I64_S, ssa.TypeF64, 1e19, ssa.TypeI64},
-			{instr.F64_TO_I64_S, ssa.TypeF64, -1e19, ssa.TypeI64},
-			{instr.F64_TO_I64_U, ssa.TypeF64, math.NaN(), ssa.TypeI64},
-			{instr.F64_TO_I64_U, ssa.TypeF64, -1, ssa.TypeI64},
-			{instr.F64_TO_I64_U, ssa.TypeF64, 2e19, ssa.TypeI64},
+			{ssa.OpFloatFPToSISat, ssa.TypeF32, math.NaN(), ssa.TypeI32},
+			{ssa.OpFloatFPToSISat, ssa.TypeF32, 3e9, ssa.TypeI32},
+			{ssa.OpFloatFPToSISat, ssa.TypeF32, -3e9, ssa.TypeI32},
+			{ssa.OpFloatFPToUISat, ssa.TypeF32, math.NaN(), ssa.TypeI32},
+			{ssa.OpFloatFPToUISat, ssa.TypeF32, -1, ssa.TypeI32},
+			{ssa.OpFloatFPToUISat, ssa.TypeF32, 5e9, ssa.TypeI32},
+			{ssa.OpFloatFPToSISat, ssa.TypeF64, math.NaN(), ssa.TypeI32},
+			{ssa.OpFloatFPToSISat, ssa.TypeF64, 3e9, ssa.TypeI32},
+			{ssa.OpFloatFPToSISat, ssa.TypeF64, -3e9, ssa.TypeI32},
+			{ssa.OpFloatFPToUISat, ssa.TypeF64, math.NaN(), ssa.TypeI32},
+			{ssa.OpFloatFPToUISat, ssa.TypeF64, -1, ssa.TypeI32},
+			{ssa.OpFloatFPToUISat, ssa.TypeF64, 5e9, ssa.TypeI32},
+			{ssa.OpFloatFPToSISat, ssa.TypeF64, math.NaN(), ssa.TypeI64},
+			{ssa.OpFloatFPToSISat, ssa.TypeF64, 1e19, ssa.TypeI64},
+			{ssa.OpFloatFPToSISat, ssa.TypeF64, -1e19, ssa.TypeI64},
+			{ssa.OpFloatFPToUISat, ssa.TypeF64, math.NaN(), ssa.TypeI64},
+			{ssa.OpFloatFPToUISat, ssa.TypeF64, -1, ssa.TypeI64},
+			{ssa.OpFloatFPToUISat, ssa.TypeF64, 2e19, ssa.TypeI64},
 		} {
 			// Threaded saturates these; Go's conversion is implementation-specific.
 			word := math.Float64bits(c.value)
@@ -158,16 +157,17 @@ func TestFoldPass_Run(t *testing.T) {
 			entry := b.Block()
 			x, result := b.Value(c.arg), b.Value(c.result)
 			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: word, Results: []ssa.Value{x}})
-			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: []ssa.Value{x}, State: deoptState(b, entry), Results: []ssa.Value{result}})
+			b.Add(entry, ssa.Operation{Op: c.op, Args: []ssa.Value{x}, State: deoptState(b, entry), Results: []ssa.Value{result}})
 			b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{result}})
 			fn := b.Build()
 			require.NoError(t, ssa.Verify(fn))
 
 			preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
 
-			require.NoError(t, err, c.code)
-			require.True(t, preserved, c.code)
-			require.Contains(t, ssa.Format(fn), instr.TypeOf(c.code).Mnemonic, c.code)
+			require.NoError(t, err, c.op)
+			require.True(t, preserved, c.op)
+			require.NoError(t, ssa.Verify(fn))
+			require.Contains(t, ssa.Format(fn), c.op.String(), c.op)
 		}
 	})
 
@@ -378,27 +378,51 @@ func TestFoldPass_Run(t *testing.T) {
 
 	t.Run("leaves same-operand operations that trap or involve floats", func(t *testing.T) {
 		for _, c := range []struct {
-			name string
-			code instr.Opcode
-			typ  ssa.Type
+			name        string
+			op          ssa.Op
+			cond        ssa.Cond
+			typ, result ssa.Type
+			input       uint64
+			want        string
 		}{
-			{"i32 x divided by x", instr.I32_DIV_S, ssa.TypeI32},
-			{"i64 x remainder x", instr.I64_REM_U, ssa.TypeI64},
-			{"f64 x minus x", instr.F64_SUB, ssa.TypeF64},
-			{"f32 x equals x", instr.F32_EQ, ssa.TypeF32},
+			{"i32 zero divided by itself traps", ssa.OpIntSDiv, 0, ssa.TypeI32, ssa.TypeI32, 0, ""},
+			{"i64 zero remainder itself traps", ssa.OpIntURem, 0, ssa.TypeI64, ssa.TypeI64, 0, ""},
+			{"f64 infinity minus itself is NaN", ssa.OpFloatSub, 0, ssa.TypeF64, ssa.TypeF64, math.Float64bits(math.Inf(1)), "NaN"},
+			{"f32 NaN equals itself is false", ssa.OpFloatCmp, ssa.CondOEQ, ssa.TypeF32, ssa.TypeI1, uint64(math.Float32bits(float32(math.NaN()))), "const false"},
 		} {
-			b := ssa.New("f")
+			// Check the typed constant case before the unknown-operand identity.
+			b := ssa.New("constant")
 			entry := b.Block()
-			x, result := b.Param(entry, c.typ), b.Value(c.typ)
-			b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: c.code, Args: []ssa.Value{x, x}, State: deoptState(b, entry), Results: []ssa.Value{result}})
+			x, result := b.Value(c.typ), b.Value(c.result)
+			b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: c.input, Results: []ssa.Value{x}})
+			b.Add(entry, ssa.Operation{Op: c.op, Cond: c.cond, Args: []ssa.Value{x, x}, State: deoptState(b, entry), Results: []ssa.Value{result}})
 			b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{result}})
 			fn := b.Build()
+			require.NoError(t, ssa.Verify(fn), c.name)
 			before := ssa.Format(fn)
-
 			preserved, err := transform.NewFoldPass().Run(pass.NewManager(), fn)
+			require.NoError(t, err, c.name)
+			require.NoError(t, ssa.Verify(fn), c.name)
+			if c.want == "" {
+				require.True(t, preserved, c.name)
+				require.Equal(t, before, ssa.Format(fn), c.name)
+			} else {
+				require.False(t, preserved, c.name)
+				require.Contains(t, ssa.Format(fn), c.want, c.name)
+			}
 
+			b = ssa.New("f")
+			entry = b.Block()
+			x, result = b.Param(entry, c.typ), b.Value(c.result)
+			b.Add(entry, ssa.Operation{Op: c.op, Cond: c.cond, Args: []ssa.Value{x, x}, State: deoptState(b, entry), Results: []ssa.Value{result}})
+			b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{result}})
+			fn = b.Build()
+			require.NoError(t, ssa.Verify(fn), c.name)
+			before = ssa.Format(fn)
+			preserved, err = transform.NewFoldPass().Run(pass.NewManager(), fn)
 			require.NoError(t, err, c.name)
 			require.True(t, preserved, c.name)
+			require.NoError(t, ssa.Verify(fn), c.name)
 			require.Equal(t, before, ssa.Format(fn), c.name)
 		}
 	})

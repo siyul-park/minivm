@@ -557,6 +557,11 @@ func TestVerify(t *testing.T) {
 		require.NoError(t, data(ssa.Operation{Op: ssa.OpSelect}, []ssa.Type{f64, f64, i32}, []ssa.Type{f64}, true))
 	})
 
+	t.Run("restricts int.sext32 to i64", func(t *testing.T) {
+		require.NoError(t, data(ssa.Operation{Op: ssa.OpIntSExt32}, []ssa.Type{i64}, []ssa.Type{i64}, true))
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntSExt32}, []ssa.Type{i32}, []ssa.Type{i32}, true), ssa.ErrType)
+	})
+
 	t.Run("rejects a data operation without a state", func(t *testing.T) {
 		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntAdd}, []ssa.Type{i32, i32}, []ssa.Type{i32}, false), ssa.ErrState)
 	})
