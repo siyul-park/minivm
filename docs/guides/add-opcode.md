@@ -15,6 +15,8 @@ End-to-end checklist.
 | fusion patterns | `internal/codegen/pattern.go` |
 | generated handlers | `interp/threaded.go` |
 | ARM64 encoding | `internal/asm/arm64/` |
+| SSA operation, effects, verify rule | `internal/ssa/` |
+| opcode↔operation table | `internal/transform/opcode.go` |
 | tests | `interp/*_test.go`, owner tests |
 | reference | `instruction-set.md` |
 
@@ -56,7 +58,13 @@ The agent `MUST` preserve:
 
 ## Native
 
-An opcode without an ARM64 lowering is handled by the existing exit/deopt path. A new lowering MUST:
+An opcode the native tier does not lower stays an `exec` and is handled by the existing exit/deopt path; nothing else changes. To lower one, the agent `MUST` in order:
+
+1. add the SSA operation to `internal/ssa/operation.go`, named `domain.verb`, with its effects and its type and arity rule in `internal/ssa/verify.go`;
+2. add its row to `internal/transform/opcode.go`, the one table relating opcode to operation, condition, and lanes;
+3. add its `Lower` case to `internal/jit/arm64/machine.go`.
+
+A new lowering `MUST`:
 
 - return `false` before changing lowering state when unsupported;
 - preserve the threaded ownership and failure semantics;

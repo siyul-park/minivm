@@ -29,6 +29,19 @@ New compiler or target terms `MUST` be introduced by the owning package or topic
 | `interp` | runtime execution |
 | `prof` | execution sampling |
 
+## SSA Vocabulary
+
+`internal/ssa` owns these terms:
+
+| Term | Meaning |
+|---|---|
+| `Op` | an operation named `domain.verb` (`int.add`, `array.get`); `exec` carries an unmodelled opcode |
+| `Term` | a block terminator: jump, branch, return, complete, exit |
+| `Cond` | the condition of a compare operation |
+| `Form` | the container kind a `Shape` guards: array, map, struct, closure, signature |
+| `Effect` | a machine part an operation reads or writes beyond its operands |
+| Lane | the register class a type occupies; `i1`, `i8`, and `i32` share one |
+
 Naming rules, symbol-removal review, ownership checks, and simplification checks are owned by `coding-patterns.md` and `refactoring.md`.
 
 Rename history does not belong here; dated plans and audits own historical decisions.
