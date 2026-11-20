@@ -4,6 +4,7 @@ import (
 	"github.com/siyul-park/minivm/internal/asm"
 	target "github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/siyul-park/minivm/internal/jit"
+	"github.com/siyul-park/minivm/internal/jit/arm64"
 	"github.com/siyul-park/minivm/types"
 )
 
@@ -24,7 +25,7 @@ func retainRows(ref asm.VReg) []asm.Instruction {
 	rows = append(rows,
 		target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, asm.Label(2)),
 		target.SBFX(target.X17, ref, 0, 32),
-		target.LDR(target.X16, target.Ctx, int16(jit.OffsetRC)),
+		target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetRC)),
 		target.LSLI(target.X17, target.X17, 3),
 		target.ADD(target.X16, target.X16, target.X17),
 		target.LDR(target.X17, target.X16, 0),
@@ -44,7 +45,7 @@ func releaseRows(ref asm.VReg) []asm.Instruction {
 		target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, resume),
 		target.SBFX(target.X17, ref, 0, 32),
 		target.CBZLabel(target.X17, resume),
-		target.LDR(target.X16, target.Ctx, int16(jit.OffsetRC)),
+		target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetRC)),
 		target.LSLI(target.X17, target.X17, 3),
 		target.ADD(target.X16, target.X16, target.X17),
 		target.LDR(target.X17, target.X16, 0),

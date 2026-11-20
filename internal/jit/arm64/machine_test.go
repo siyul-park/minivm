@@ -1175,7 +1175,37 @@ func TestMachine_Arch(t *testing.T) {
 }
 
 func TestMachine_Reserve(t *testing.T) {
-	require.Equal(t, []asm.PReg{target.X16, target.X17, target.X24, target.X25, target.X27}, arm64.New().Reserve())
+	t.Run("reserves the runtime and Go registers", func(t *testing.T) {
+		require.Equal(t, target.X26, arm64.Ctx)
+		require.Equal(t, []asm.PReg{target.X16, target.X17, target.X24, target.X25, target.X26, target.X27, target.X28}, arm64.New().Reserve())
+	})
+
+	t.Run("preserves the allocatable register bank and preference order", func(t *testing.T) {
+		m := arm64.New()
+		reserved := m.Reserve()
+		var available []asm.PReg
+		for _, r := range target.New().Registers(asm.RegTypeInt) {
+			if !slices.Contains(reserved, r) {
+				available = append(available, r)
+			}
+		}
+		require.Equal(t, []asm.PReg{
+			target.X0, target.X1, target.X2, target.X3, target.X4, target.X5, target.X6, target.X7,
+			target.X8, target.X9, target.X10, target.X11, target.X12, target.X13, target.X14, target.X15,
+			target.X19, target.X20, target.X21, target.X22, target.X23,
+		}, available)
+		for _, r := range target.New().Registers(asm.RegTypeFloat) {
+			require.NotContains(t, reserved, r)
+		}
+	})
+
+	t.Run("returns independently owned reservations", func(t *testing.T) {
+		m := arm64.New()
+		reserved := m.Reserve()
+		reserved[0] = target.X0
+		require.NotContains(t, m.Reserve(), target.X0)
+		require.Contains(t, m.Reserve(), target.X16)
+	})
 }
 
 func TestMachine_Prologue(t *testing.T) {
@@ -1190,7 +1220,7 @@ func TestMachine_Prologue(t *testing.T) {
 			target.STP(target.X25, target.X16, target.X27, int16(jit.RecordFB)),
 			target.STR(target.LR, target.X27, int16(jit.RecordPC)),
 			target.ADDI(target.X27, target.X27, uint16(jit.SizeofRecord)),
-			target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)),
+			target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetEntries)),
 			target.LDR(target.X17, target.X16, 24),
 			target.ADDI(target.X17, target.X17, 1),
 			target.STR(target.X17, target.X16, 24),
@@ -1221,7 +1251,7 @@ func TestMachine_Prologue(t *testing.T) {
 		a := asm.New(target.New())
 		arm64.New().Prologue(a, 4096, true, compile.Layout{Kinds: []types.Kind{types.KindI32, types.KindI64, types.KindRef}, Zeros: []types.Boxed{types.BoxI64(0), types.BoxedNull}}, nil)
 		require.Equal(t, []asm.Instruction{
-			target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)),
+			target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetEntries)),
 			target.MOVZ(target.X17, 0x8000, 0),
 			target.ADD(target.X16, target.X16, target.X17),
 			target.LDR(target.X17, target.X16, 0),
@@ -1238,7 +1268,7 @@ func TestMachine_Prologue(t *testing.T) {
 		a := asm.New(target.New())
 		arm64.New().Prologue(a, 3, false, compile.Layout{Kinds: []types.Kind{types.KindI32, types.KindI64, types.KindRef}, Zeros: []types.Boxed{types.BoxI64(0), types.BoxedNull}}, nil)
 		require.Len(t, a.Rows(), 11)
-		require.NotContains(t, a.Rows(), target.LDR(target.X16, target.Ctx, int16(jit.OffsetEntries)))
+		require.NotContains(t, a.Rows(), target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetEntries)))
 	})
 
 	t.Run("moves register-passed parameters into their registers once the frame is built", func(t *testing.T) {
@@ -1260,7 +1290,7 @@ func TestMachine_Prologue(t *testing.T) {
 		require.Equal(t, []asm.Instruction{
 			target.DEF(target.X0),
 			target.MOVW(args[0], target.X0),
-			target.LDR(vr(1), target.Ctx, int16(jit.OffsetUpvals)),
+			target.LDR(vr(1), arm64.Ctx, int16(jit.OffsetUpvals)),
 		}, a.Rows()[7:])
 	})
 
@@ -1319,13 +1349,13 @@ func TestMachine_Enter(t *testing.T) {
 
 		entry := asm.Label(1)
 		require.Equal(t, []asm.Instruction{
-			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
-			target.LDR(target.X27, target.Ctx, int16(jit.OffsetNext)),
-			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+			target.LDR(target.X25, arm64.Ctx, int16(jit.OffsetFB)),
+			target.LDR(target.X27, arm64.Ctx, int16(jit.OffsetNext)),
+			target.LDR(target.X24, arm64.Ctx, int16(jit.OffsetBudget)),
 			target.SUBI(target.SP, target.SP, 16),
 			target.STR(target.LR, target.SP, 8),
 			target.BLLabel(entry),
-			target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+			target.STR(target.X24, arm64.Ctx, int16(jit.OffsetBudget)),
 			target.LDR(target.LR, target.SP, 8),
 			target.ADDI(target.SP, target.SP, 16),
 			target.RET(),
@@ -1341,13 +1371,13 @@ func TestMachine_Enter(t *testing.T) {
 
 	t.Run("boxes results by kind: a narrow one by tag in slot 0, a ref raw in slot 1, a wide one raw", func(t *testing.T) {
 		head := []asm.Instruction{
-			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
-			target.LDR(target.X27, target.Ctx, int16(jit.OffsetNext)),
-			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+			target.LDR(target.X25, arm64.Ctx, int16(jit.OffsetFB)),
+			target.LDR(target.X27, arm64.Ctx, int16(jit.OffsetNext)),
+			target.LDR(target.X24, arm64.Ctx, int16(jit.OffsetBudget)),
 			target.SUBI(target.SP, target.SP, 16),
 			target.STR(target.LR, target.SP, 8),
 			target.BLLabel(1),
-			target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+			target.STR(target.X24, arm64.Ctx, int16(jit.OffsetBudget)),
 		}
 		tail := []asm.Instruction{
 			target.LDR(target.LR, target.SP, 8),
@@ -1385,15 +1415,15 @@ func TestMachine_Enter(t *testing.T) {
 
 	t.Run("loads and unboxes register-passed parameters from their slots before the body", func(t *testing.T) {
 		pin := []asm.Instruction{
-			target.LDR(target.X25, target.Ctx, int16(jit.OffsetFB)),
-			target.LDR(target.X27, target.Ctx, int16(jit.OffsetNext)),
-			target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+			target.LDR(target.X25, arm64.Ctx, int16(jit.OffsetFB)),
+			target.LDR(target.X27, arm64.Ctx, int16(jit.OffsetNext)),
+			target.LDR(target.X24, arm64.Ctx, int16(jit.OffsetBudget)),
 		}
 		call := []asm.Instruction{
 			target.SUBI(target.SP, target.SP, 16),
 			target.STR(target.LR, target.SP, 8),
 			target.BLLabel(1),
-			target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+			target.STR(target.X24, arm64.Ctx, int16(jit.OffsetBudget)),
 			target.LDR(target.LR, target.SP, 8),
 			target.ADDI(target.SP, target.SP, 16),
 			target.RET(),
@@ -1460,7 +1490,7 @@ func TestMachine_Lower(t *testing.T) {
 	word, prior := old, asm.NewVReg(-4, asm.RegTypeInt, asm.Width64)
 	heap := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
 	counter := []asm.Instruction{
-		target.LDR(target.X16, target.Ctx, int16(jit.OffsetRC)),
+		target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetRC)),
 		target.LSLI(target.X17, target.X17, 3),
 		target.ADD(target.X16, target.X16, target.X17),
 		target.LDR(target.X17, target.X16, 0),
@@ -1475,7 +1505,7 @@ func TestMachine_Lower(t *testing.T) {
 		for i, addr := range []int{1, 5} {
 			rows = append(rows,
 				target.SBFX(vr(addr), reg(ssa.TypeRef, ssa.Value(i+1)), 0, 32), target.LSLI(vr(addr), vr(addr), 4),
-				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 				target.ADD(vr(addr), target.X16, vr(addr)),
 				target.LDR(target.X16, vr(addr), 0),
 			)
@@ -1868,7 +1898,7 @@ func TestMachine_Lower(t *testing.T) {
 					target.BCondLabel(target.OpBNE, 2),
 					target.SBFX(heap, x(1), 0, 32),
 					target.LSLI(heap, heap, 4),
-					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 					target.ADD(heap, target.X16, heap),
 					target.LDR(target.X16, heap, 0),
 				},
@@ -1947,7 +1977,7 @@ func TestMachine_Lower(t *testing.T) {
 			name: "load global addresses the globals base",
 			regs: regs{1: i32},
 			op:   ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceGlobal, Index: 2}, Results: []ssa.Value{1}},
-			rows: []asm.Instruction{target.LDR(globals, target.Ctx, int16(jit.OffsetGlobals)), target.LDR(w(1), globals, 16)}, lower: true,
+			rows: []asm.Instruction{target.LDR(globals, arm64.Ctx, int16(jit.OffsetGlobals)), target.LDR(w(1), globals, 16)}, lower: true,
 		},
 		{
 			name: "store i8 tags its lane",
@@ -1985,7 +2015,7 @@ func TestMachine_Lower(t *testing.T) {
 			op:   ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceGlobal, Index: 1}, Args: []ssa.Value{1}},
 			rows: slices.Concat(
 				[]asm.Instruction{
-					target.LDR(globals, target.Ctx, int16(jit.OffsetGlobals)),
+					target.LDR(globals, arm64.Ctx, int16(jit.OffsetGlobals)),
 					target.LDR(old, globals, 8),
 					target.LSRI(target.X16, old, 49),
 				},
@@ -2011,7 +2041,7 @@ func TestMachine_Lower(t *testing.T) {
 			regs: regs{1: i64},
 			op:   ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceGlobal, Index: 1}, Args: []ssa.Value{1}},
 			rows: slices.Concat(
-				[]asm.Instruction{target.LDR(globals, target.Ctx, int16(jit.OffsetGlobals))},
+				[]asm.Instruction{target.LDR(globals, arm64.Ctx, int16(jit.OffsetGlobals))},
 				boxed(types.KindI64, append(target.LDI(target.X16, 1<<48),
 					target.ADD(target.X17, x(1), target.X16),
 					target.LSRI(target.X17, target.X17, 49),
@@ -2100,7 +2130,7 @@ func TestMachine_Lower(t *testing.T) {
 			rows: func() []asm.Instruction {
 				rows := []asm.Instruction{
 					target.SBFX(vr(1), reg(ssa.TypeRef, 1), 0, 32), target.LSLI(vr(1), vr(1), 4),
-					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 					target.ADD(vr(1), target.X16, vr(1)),
 					target.LDR(target.X16, vr(1), 0),
 				}
@@ -2119,7 +2149,7 @@ func TestMachine_Lower(t *testing.T) {
 			rows: func() []asm.Instruction {
 				rows := []asm.Instruction{
 					target.SBFX(vr(1), reg(ssa.TypeRef, 1), 0, 32), target.LSLI(vr(1), vr(1), 4),
-					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 					target.ADD(vr(1), target.X16, vr(1)),
 					target.LDR(target.X16, vr(1), 0),
 				}
@@ -2142,7 +2172,7 @@ func TestMachine_Lower(t *testing.T) {
 			rows: func() []asm.Instruction {
 				rows := []asm.Instruction{
 					target.SBFX(vr(1), reg(ssa.TypeRef, 1), 0, 32), target.LSLI(vr(1), vr(1), 4),
-					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 					target.ADD(vr(1), target.X16, vr(1)),
 					target.LDR(target.X16, vr(1), 0),
 				}
@@ -2167,7 +2197,7 @@ func TestMachine_Lower(t *testing.T) {
 			rows: func() []asm.Instruction {
 				rows := []asm.Instruction{
 					target.SBFX(vr(1), reg(ssa.TypeRef, 1), 0, 32), target.LSLI(vr(1), vr(1), 4),
-					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 					target.ADD(vr(1), target.X16, vr(1)),
 					target.LDR(target.X16, vr(1), 0),
 				}
@@ -2189,7 +2219,7 @@ func TestMachine_Lower(t *testing.T) {
 				[]asm.Instruction{
 					target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, exit),
 					target.SBFX(vr(1), reg(ssa.TypeRef, 1), 0, 32), target.LSLI(vr(1), vr(1), 4),
-					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 					target.ADD(vr(1), target.X16, vr(1)),
 					target.LDR(target.X16, vr(1), 0),
 				},
@@ -2226,7 +2256,7 @@ func TestMachine_Lower(t *testing.T) {
 			op:    ssa.Operation{Op: ssa.OpArrayLen, Args: []ssa.Value{2}, Results: []ssa.Value{3}},
 			rows: []asm.Instruction{
 				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 				target.ADD(vr(2), target.X16, vr(2)),
 				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 				target.LDR(vr(4), vr(3), 0),
@@ -2242,7 +2272,7 @@ func TestMachine_Lower(t *testing.T) {
 			op:    ssa.Operation{Op: ssa.OpArrayGet, Args: []ssa.Value{2, 3}, Results: []ssa.Value{4}},
 			rows: []asm.Instruction{
 				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 				target.ADD(vr(2), target.X16, vr(2)),
 				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 				target.LDR(vr(4), vr(3), 0),
@@ -2260,7 +2290,7 @@ func TestMachine_Lower(t *testing.T) {
 			op:    ssa.Operation{Op: ssa.OpArrayGet, Args: []ssa.Value{2, 3}, Results: []ssa.Value{4}},
 			rows: []asm.Instruction{
 				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 				target.ADD(vr(2), target.X16, vr(2)),
 				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 				target.LDR(vr(4), vr(3), 0),
@@ -2279,7 +2309,7 @@ func TestMachine_Lower(t *testing.T) {
 			rows: func() []asm.Instruction {
 				rows := []asm.Instruction{
 					target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 					target.ADD(vr(2), target.X16, vr(2)),
 					target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 					target.ADDI(vr(3), vr(3), uint16(jit.OffsetArrayElems)),
@@ -2301,7 +2331,7 @@ func TestMachine_Lower(t *testing.T) {
 			rows: func() []asm.Instruction {
 				rows := []asm.Instruction{
 					target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 					target.ADD(vr(2), target.X16, vr(2)),
 					target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 					target.ADDI(vr(3), vr(3), uint16(jit.OffsetArrayElems)),
@@ -2324,7 +2354,7 @@ func TestMachine_Lower(t *testing.T) {
 			rows: func() []asm.Instruction {
 				rows := []asm.Instruction{
 					target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 					target.ADD(vr(2), target.X16, vr(2)),
 					target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 					target.ADDI(vr(3), vr(3), uint16(jit.OffsetArrayElems)),
@@ -2351,7 +2381,7 @@ func TestMachine_Lower(t *testing.T) {
 			op:    ssa.Operation{Op: ssa.OpArraySet, Args: []ssa.Value{2, 3, 4}},
 			rows: []asm.Instruction{
 				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 				target.ADD(vr(2), target.X16, vr(2)),
 				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 				target.LDR(vr(4), vr(3), 0),
@@ -2369,7 +2399,7 @@ func TestMachine_Lower(t *testing.T) {
 			op:    ssa.Operation{Op: ssa.OpArraySet, Args: []ssa.Value{2, 3, 4}},
 			rows: []asm.Instruction{
 				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 				target.ADD(vr(2), target.X16, vr(2)),
 				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 				target.LDR(vr(4), vr(3), 0),
@@ -2387,7 +2417,7 @@ func TestMachine_Lower(t *testing.T) {
 			op:    ssa.Operation{Op: ssa.OpArraySet, Args: []ssa.Value{2, 3, 4}},
 			rows: []asm.Instruction{
 				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 				target.ADD(vr(2), target.X16, vr(2)),
 				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 				target.LDR(vr(4), vr(3), 0),
@@ -2406,7 +2436,7 @@ func TestMachine_Lower(t *testing.T) {
 			op:    ssa.Operation{Op: ssa.OpArrayView, Args: []ssa.Value{2}, Results: []ssa.Value{5}},
 			rows: []asm.Instruction{
 				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 				target.ADD(vr(2), target.X16, vr(2)),
 				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 				target.LDR(vr(4), vr(3), 0),
@@ -2483,7 +2513,7 @@ func TestMachine_Lower(t *testing.T) {
 			rows: func() []asm.Instruction {
 				rows := []asm.Instruction{
 					target.SBFX(vr(1), reg(ssa.TypeRef, 1), 0, 32), target.LSLI(vr(1), vr(1), 4),
-					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 					target.ADD(vr(1), target.X16, vr(1)),
 					target.LDR(target.X16, vr(1), 0),
 				}
@@ -2555,7 +2585,7 @@ func TestMachine_Lower(t *testing.T) {
 			op:     ssa.Operation{Op: ssa.OpArrayGet, Args: []ssa.Value{2, 3}, Results: []ssa.Value{4}},
 			rows: []asm.Instruction{
 				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 				target.ADD(vr(2), target.X16, vr(2)),
 				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 				target.LDR(vr(4), vr(3), 0),
@@ -2573,7 +2603,7 @@ func TestMachine_Lower(t *testing.T) {
 			op:     ssa.Operation{Op: ssa.OpArraySet, Args: []ssa.Value{2, 3, 4}},
 			rows: []asm.Instruction{
 				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 				target.ADD(vr(2), target.X16, vr(2)),
 				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 				target.LDR(vr(4), vr(3), 0),
@@ -2592,7 +2622,7 @@ func TestMachine_Lower(t *testing.T) {
 			op:     ssa.Operation{Op: ssa.OpArraySet, Args: []ssa.Value{2, 3, 4}},
 			rows: []asm.Instruction{
 				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 				target.ADD(vr(2), target.X16, vr(2)),
 				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 				target.LDR(vr(4), vr(3), 0),
@@ -2611,7 +2641,7 @@ func TestMachine_Lower(t *testing.T) {
 			op:     ssa.Operation{Op: ssa.OpStructGet, Args: []ssa.Value{2, 3}, Results: []ssa.Value{4}},
 			rows: []asm.Instruction{
 				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 				target.ADD(vr(2), target.X16, vr(2)),
 				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 				target.LDR(vr(4), vr(3), int16(jit.OffsetStructData)),
@@ -2629,7 +2659,7 @@ func TestMachine_Lower(t *testing.T) {
 			regs: regs{1: ssa.TypeRef},
 			op:   ssa.Operation{Op: ssa.OpStructNewDefault, Shape: ssa.Shape{Form: ssa.FormStruct, Index: binIndex}, Results: []ssa.Value{1}},
 			rows: []asm.Instruction{
-				target.LDR(vr(1), target.Ctx, int16(jit.OffsetBins)),
+				target.LDR(vr(1), arm64.Ctx, int16(jit.OffsetBins)),
 				target.LDR(vr(2), vr(1), int16(3*jit.Classes*int(jit.SizeofBin)+int(jit.OffsetBinN))),
 				target.CBZLabel(vr(2), exit),
 				target.SUBI(vr(2), vr(2), 1),
@@ -2645,7 +2675,7 @@ func TestMachine_Lower(t *testing.T) {
 			regs: regs{1: ssa.TypeRef},
 			op:   ssa.Operation{Op: ssa.OpStructNewDefault, Shape: ssa.Shape{Form: ssa.FormStruct, Index: farIndex}, Results: []ssa.Value{1}},
 			rows: func() []asm.Instruction {
-				rows := []asm.Instruction{target.LDR(vr(1), target.Ctx, int16(jit.OffsetBins))}
+				rows := []asm.Instruction{target.LDR(vr(1), arm64.Ctx, int16(jit.OffsetBins))}
 				rows = append(rows, target.LDI(target.X16, uint64(5000*jit.Classes*int(jit.SizeofBin)))...)
 				return append(rows,
 					target.ADD(vr(1), vr(1), target.X16),
@@ -2665,7 +2695,7 @@ func TestMachine_Lower(t *testing.T) {
 			regs: regs{1: ssa.TypeRef, 2: i32},
 			op:   ssa.Operation{Op: ssa.OpArrayNewDefault, Shape: ssa.Shape{Form: ssa.FormArray, Index: binIndex}, Args: []ssa.Value{2}, Results: []ssa.Value{1}},
 			rows: []asm.Instruction{
-				target.LDR(vr(1), target.Ctx, int16(jit.OffsetBins)),
+				target.LDR(vr(1), arm64.Ctx, int16(jit.OffsetBins)),
 				target.SXTW(vr(4), reg(i32, 2)),
 				target.LDI(target.X17, jit.Classes-1)[0], target.CMPI(vr(4), jit.Classes-1),
 				target.CSEL(vr(6), vr(4), target.X17, target.CondCC),
@@ -2688,7 +2718,7 @@ func TestMachine_Lower(t *testing.T) {
 			regs: regs{1: ssa.TypeRef, 2: i32},
 			op:   ssa.Operation{Op: ssa.OpArrayNewDefault, Shape: ssa.Shape{Form: ssa.FormArray, Index: farIndex}, Args: []ssa.Value{2}, Results: []ssa.Value{1}},
 			rows: func() []asm.Instruction {
-				rows := []asm.Instruction{target.LDR(vr(1), target.Ctx, int16(jit.OffsetBins))}
+				rows := []asm.Instruction{target.LDR(vr(1), arm64.Ctx, int16(jit.OffsetBins))}
 				rows = append(rows, target.LDI(target.X16, uint64(5000*jit.Classes*int(jit.SizeofBin)))...)
 				return append(rows,
 					target.ADD(vr(1), vr(1), target.X16),
@@ -2717,7 +2747,7 @@ func TestMachine_Lower(t *testing.T) {
 			op:    ssa.Operation{Op: ssa.OpStructGet, Args: []ssa.Value{2, 3}, Results: []ssa.Value{4}},
 			rows: []asm.Instruction{
 				target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 				target.ADD(vr(2), target.X16, vr(2)),
 				target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 				target.LDR(vr(4), vr(3), int16(jit.OffsetStructData)),
@@ -2735,7 +2765,7 @@ func TestMachine_Lower(t *testing.T) {
 			rows: func() []asm.Instruction {
 				rows := []asm.Instruction{
 					target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 					target.ADD(vr(2), target.X16, vr(2)),
 					target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 					target.LDR(vr(4), vr(3), int16(jit.OffsetStructData)),
@@ -2755,7 +2785,7 @@ func TestMachine_Lower(t *testing.T) {
 			rows: func() []asm.Instruction {
 				rows := []asm.Instruction{
 					target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 					target.ADD(vr(2), target.X16, vr(2)),
 					target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 					target.LDR(vr(4), vr(3), int16(jit.OffsetStructTyp)),
@@ -2785,7 +2815,7 @@ func TestMachine_Lower(t *testing.T) {
 			rows: func() []asm.Instruction {
 				rows := []asm.Instruction{
 					target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 					target.ADD(vr(2), target.X16, vr(2)),
 					target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 					target.LDR(vr(4), vr(3), int16(jit.OffsetStructTyp)),
@@ -2815,7 +2845,7 @@ func TestMachine_Lower(t *testing.T) {
 			rows: func() []asm.Instruction {
 				rows := []asm.Instruction{
 					target.SBFX(vr(2), reg(ssa.TypeRef, 2), 0, 32), target.LSLI(vr(2), vr(2), 4),
-					target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+					target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 					target.ADD(vr(2), target.X16, vr(2)),
 					target.LDR(vr(3), vr(2), int16(jit.OffsetData)),
 					target.LDR(vr(4), vr(3), int16(jit.OffsetStructTyp)),
@@ -2965,7 +2995,7 @@ func TestMachine_Lower(t *testing.T) {
 	tableOf := func(ref asm.VReg, addr int) []asm.Instruction {
 		return []asm.Instruction{
 			target.SBFX(vr(addr), ref, 0, 32), target.LSLI(vr(addr), vr(addr), 4),
-			target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+			target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 			target.ADD(vr(addr), target.X16, vr(addr)),
 			target.LDR(vr(addr+1), vr(addr), int16(jit.OffsetData)),
 		}
@@ -3478,7 +3508,7 @@ func TestMachine_Return(t *testing.T) {
 					target.BCondLabel(target.OpBNE, resume),
 					target.SBFX(target.X17, word, 0, 32),
 					target.CBZLabel(target.X17, resume),
-					target.LDR(target.X16, target.Ctx, int16(jit.OffsetRC)),
+					target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetRC)),
 					target.LSLI(target.X17, target.X17, 3),
 					target.ADD(target.X16, target.X16, target.X17),
 					target.LDR(target.X17, target.X16, 0),
@@ -3512,7 +3542,7 @@ func TestMachine_Return(t *testing.T) {
 					target.BCondLabel(target.OpBNE, resume),
 					target.SBFX(target.X17, word, 0, 32),
 					target.CBZLabel(target.X17, resume),
-					target.LDR(target.X16, target.Ctx, int16(jit.OffsetRC)),
+					target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetRC)),
 					target.LSLI(target.X17, target.X17, 3),
 					target.ADD(target.X16, target.X16, target.X17),
 					target.LDR(target.X17, target.X16, 0),
@@ -3532,7 +3562,7 @@ func TestMachine_Return(t *testing.T) {
 		start := len(a.Rows())
 		m.Return(a, ssa.Terminator{Term: ssa.TermReturn}, r)
 		require.Equal(t, slices.Concat(
-			[]asm.Instruction{target.ADDI(target.X16, target.Ctx, uint16(jit.OffsetRecords+jit.SizeofRecord)), target.CMP(target.X27, target.X16), target.BCondLabel(target.OpBNE, skip)},
+			[]asm.Instruction{target.ADDI(target.X16, arm64.Ctx, uint16(jit.OffsetRecords+jit.SizeofRecord)), target.CMP(target.X27, target.X16), target.BCondLabel(target.OpBNE, skip)},
 			[]asm.Instruction{target.LDR(word2, target.X25, 0)},
 			release(word2),
 			[]asm.Instruction{target.STR(target.XZR, target.X25, 0)},
@@ -3608,15 +3638,15 @@ func TestMachine_Exit(t *testing.T) {
 	rows := func(id uint64, trap jit.Trap) []asm.Instruction {
 		return slices.Concat(
 			[]asm.Instruction{
-				target.STR(target.X27, target.Ctx, int16(jit.OffsetNext)),
-				target.STR(target.X24, target.Ctx, int16(jit.OffsetBudget)),
+				target.STR(target.X27, arm64.Ctx, int16(jit.OffsetNext)),
+				target.STR(target.X24, arm64.Ctx, int16(jit.OffsetBudget)),
 			},
 			target.LDI(target.X16, id),
-			[]asm.Instruction{target.STR(target.X16, target.Ctx, int16(jit.OffsetExit))},
+			[]asm.Instruction{target.STR(target.X16, arm64.Ctx, int16(jit.OffsetExit))},
 			target.LDI(target.X16, uint64(trap)),
 			[]asm.Instruction{
-				target.STR(target.X16, target.Ctx, int16(jit.OffsetTrap)),
-				target.LDR(target.X16, target.Ctx, int16(asm.OffsetStub)),
+				target.STR(target.X16, arm64.Ctx, int16(jit.OffsetTrap)),
+				target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetStub)),
 				target.EXIT(target.X16),
 				target.USE(uses[0]),
 				target.USE(uses[1]),
@@ -3631,9 +3661,9 @@ func TestMachine_Exit(t *testing.T) {
 		trap jit.Trap
 		tail asm.Instruction
 	}{
-		{"suspends a resumable exit", 3, jit.ExitBridge, jit.TrapBridge, target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget))},
+		{"suspends a resumable exit", 3, jit.ExitBridge, jit.TrapBridge, target.LDR(target.X24, arm64.Ctx, int16(jit.OffsetBudget))},
 		{"never returns from a deopt", 4, jit.ExitDeopt, jit.TrapDeopt, target.BRK(0)},
-		{"suspends a call for the interpreter to run", 5, jit.ExitCall, jit.TrapBridge, target.LDR(target.X24, target.Ctx, int16(jit.OffsetBudget))},
+		{"suspends a call for the interpreter to run", 5, jit.ExitCall, jit.TrapBridge, target.LDR(target.X24, arm64.Ctx, int16(jit.OffsetBudget))},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			a := asm.New(target.New())
@@ -3656,8 +3686,8 @@ func TestMachine_Results(t *testing.T) {
 	d := asm.NewVReg(2, asm.RegTypeFloat, asm.Width64)
 	arm64.New().Results(a, []asm.VReg{w, d})
 	require.Equal(t, []asm.Instruction{
-		target.LDR(w, target.Ctx, int16(jit.OffsetResults)),
-		target.LDR(d, target.Ctx, int16(jit.OffsetResults)+8),
+		target.LDR(w, arm64.Ctx, int16(jit.OffsetResults)),
+		target.LDR(d, arm64.Ctx, int16(jit.OffsetResults)+8),
 	}, a.Rows())
 }
 
@@ -3684,17 +3714,17 @@ func TestMachine_Call(t *testing.T) {
 			[]asm.Instruction{
 				target.ORR(target.X16, target.X16, target.X17),
 				target.STR(target.X16, target.X25, 32),
-				target.LDR(code, target.Ctx, int16(jit.OffsetNatives)),
+				target.LDR(code, arm64.Ctx, int16(jit.OffsetNatives)),
 			},
 			target.LDI(target.X16, 5),
 			[]asm.Instruction{
 				target.LDRR(code, code, target.X16),
 				target.CBZLabel(code, bridge),
 				target.ADDI(target.X16, target.X25, 56),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
+				target.LDR(target.X17, arm64.Ctx, int16(jit.OffsetTop)),
 				target.CMP(target.X16, target.X17),
 				target.BCondLabel(target.OpBHI, bridge),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetEdge)),
+				target.LDR(target.X17, arm64.Ctx, int16(jit.OffsetEdge)),
 				target.CMP(target.X27, target.X17),
 				target.BCondLabel(target.OpBCS, bridge),
 				target.SUBSI(target.X24, target.X24, 1),
@@ -3711,7 +3741,7 @@ func TestMachine_Call(t *testing.T) {
 				target.BCondLabel(target.OpBNE, resume),
 				target.SBFX(target.X17, callee, 0, 32),
 				target.CBZLabel(target.X17, resume),
-				target.LDR(target.X16, target.Ctx, int16(jit.OffsetRC)),
+				target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetRC)),
 				target.LSLI(target.X17, target.X17, 3),
 				target.ADD(target.X16, target.X16, target.X17),
 				target.LDR(target.X17, target.X16, 0),
@@ -3764,28 +3794,28 @@ func TestMachine_Call(t *testing.T) {
 			[]asm.Instruction{
 				target.ORR(target.X16, target.X16, target.X17),
 				target.STR(target.X16, target.X25, 32),
-				target.LDR(code, target.Ctx, int16(jit.OffsetNatives)),
+				target.LDR(code, arm64.Ctx, int16(jit.OffsetNatives)),
 			},
 			target.LDI(target.X16, 5),
 			[]asm.Instruction{
 				target.LDRR(code, code, target.X16),
 				target.CBZLabel(code, bridge),
 				target.ADDI(target.X16, target.X25, 56),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
+				target.LDR(target.X17, arm64.Ctx, int16(jit.OffsetTop)),
 				target.CMP(target.X16, target.X17),
 				target.BCondLabel(target.OpBHI, bridge),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetEdge)),
+				target.LDR(target.X17, arm64.Ctx, int16(jit.OffsetEdge)),
 				target.CMP(target.X27, target.X17),
 				target.BCondLabel(target.OpBCS, bridge),
 				target.SUBSI(target.X24, target.X24, 1),
 				target.BCondLabel(target.OpBLE, safe),
 				target.SBFX(closure, r.Reg(2), 0, 32),
 				target.LSLI(closure, closure, 4),
-				target.LDR(target.X16, target.Ctx, int16(jit.OffsetHeap)),
+				target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
 				target.ADD(closure, target.X16, closure),
 				target.LDR(upvals, closure, int16(jit.OffsetData)),
 				target.LDR(upvals, upvals, int16(jit.OffsetClosureUpvals)),
-				target.STR(upvals, target.Ctx, int16(jit.OffsetUpvals)),
+				target.STR(upvals, arm64.Ctx, int16(jit.OffsetUpvals)),
 				target.ADDI(target.X25, target.X25, 32),
 				target.BLR(code),
 				target.USE(live),
@@ -3813,17 +3843,17 @@ func TestMachine_Call(t *testing.T) {
 			[]asm.Instruction{
 				target.ORR(target.X16, target.X16, target.X17),
 				target.STR(target.X16, target.X25, 32),
-				target.LDR(code, target.Ctx, int16(jit.OffsetNatives)),
+				target.LDR(code, arm64.Ctx, int16(jit.OffsetNatives)),
 			},
 			target.LDI(target.X16, 5),
 			[]asm.Instruction{
 				target.LDRR(code, code, target.X16),
 				target.CBZLabel(code, bridge),
 				target.ADDI(target.X16, target.X25, 56),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
+				target.LDR(target.X17, arm64.Ctx, int16(jit.OffsetTop)),
 				target.CMP(target.X16, target.X17),
 				target.BCondLabel(target.OpBHI, bridge),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetEdge)),
+				target.LDR(target.X17, arm64.Ctx, int16(jit.OffsetEdge)),
 				target.CMP(target.X27, target.X17),
 				target.BCondLabel(target.OpBCS, bridge),
 				target.SUBSI(target.X24, target.X24, 1),
@@ -3856,17 +3886,17 @@ func TestMachine_Call(t *testing.T) {
 			[]asm.Instruction{
 				target.ORR(target.X16, target.X16, target.X17),
 				target.STR(target.X16, target.X25, 32),
-				target.LDR(code, target.Ctx, int16(jit.OffsetNatives)),
+				target.LDR(code, arm64.Ctx, int16(jit.OffsetNatives)),
 			},
 			target.LDI(target.X16, 5),
 			[]asm.Instruction{
 				target.LDRR(code, code, target.X16),
 				target.CBZLabel(code, bridge),
 				target.ADDI(target.X16, target.X25, 56),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
+				target.LDR(target.X17, arm64.Ctx, int16(jit.OffsetTop)),
 				target.CMP(target.X16, target.X17),
 				target.BCondLabel(target.OpBHI, bridge),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetEdge)),
+				target.LDR(target.X17, arm64.Ctx, int16(jit.OffsetEdge)),
 				target.CMP(target.X27, target.X17),
 				target.BCondLabel(target.OpBCS, bridge),
 				target.SUBSI(target.X24, target.X24, 1),
@@ -3901,10 +3931,10 @@ func TestMachine_Call(t *testing.T) {
 				target.ORR(target.X16, target.X16, target.X17),
 				target.STR(target.X16, target.X25, 32),
 				target.ADDI(target.X16, target.X25, 56),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
+				target.LDR(target.X17, arm64.Ctx, int16(jit.OffsetTop)),
 				target.CMP(target.X16, target.X17),
 				target.BCondLabel(target.OpBHI, bridge),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetEdge)),
+				target.LDR(target.X17, arm64.Ctx, int16(jit.OffsetEdge)),
 				target.CMP(target.X27, target.X17),
 				target.BCondLabel(target.OpBCS, bridge),
 				target.SUBSI(target.X24, target.X24, 1),
@@ -3921,7 +3951,7 @@ func TestMachine_Call(t *testing.T) {
 				target.BCondLabel(target.OpBNE, resume),
 				target.SBFX(target.X17, callee, 0, 32),
 				target.CBZLabel(target.X17, resume),
-				target.LDR(target.X16, target.Ctx, int16(jit.OffsetRC)),
+				target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetRC)),
 				target.LSLI(target.X17, target.X17, 3),
 				target.ADD(target.X16, target.X16, target.X17),
 				target.LDR(target.X17, target.X16, 0),
@@ -3959,10 +3989,10 @@ func TestMachine_Call(t *testing.T) {
 			[]asm.Instruction{
 				target.STR(target.X16, target.X25, 40),
 				target.ADDI(target.X16, target.X25, 56),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
+				target.LDR(target.X17, arm64.Ctx, int16(jit.OffsetTop)),
 				target.CMP(target.X16, target.X17),
 				target.BCondLabel(target.OpBHI, bridge),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetEdge)),
+				target.LDR(target.X17, arm64.Ctx, int16(jit.OffsetEdge)),
 				target.CMP(target.X27, target.X17),
 				target.BCondLabel(target.OpBCS, bridge),
 				target.SUBSI(target.X24, target.X24, 1),
@@ -4005,10 +4035,10 @@ func TestMachine_Call(t *testing.T) {
 				target.ORR(target.X16, target.X16, target.X17),
 				target.STR(target.X16, target.X25, 32),
 				target.ADDI(target.X16, target.X25, 56),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetTop)),
+				target.LDR(target.X17, arm64.Ctx, int16(jit.OffsetTop)),
 				target.CMP(target.X16, target.X17),
 				target.BCondLabel(target.OpBHI, bridge),
-				target.LDR(target.X17, target.Ctx, int16(jit.OffsetEdge)),
+				target.LDR(target.X17, arm64.Ctx, int16(jit.OffsetEdge)),
 				target.CMP(target.X27, target.X17),
 				target.BCondLabel(target.OpBCS, bridge),
 				target.SUBSI(target.X24, target.X24, 1),

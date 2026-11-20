@@ -20,6 +20,11 @@ func TestNewBuffer(t *testing.T) {
 		_, err := asm.NewBuffer(arm64.New(), 0)
 		require.ErrorIs(t, err, asm.ErrInvalidSize)
 	})
+
+	t.Run("rejects a nil architecture", func(t *testing.T) {
+		_, err := asm.NewBuffer(nil, 1)
+		require.ErrorIs(t, err, asm.ErrInvalidArgs)
+	})
 }
 
 func TestBuffer_Link(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/siyul-park/minivm/internal/jit"
 )
 
@@ -360,7 +361,7 @@ func TestReader_Detach(t *testing.T) {
 // code returns a fresh, unpublished, non-OSR Code at address of tier.
 func code(t *testing.T, address int, tier jit.Tier) *jit.Code {
 	t.Helper()
-	c, err := jit.NewCode(address, 0, false, tier, jit.Assembly{Bytes: ret()})
+	c, err := jit.NewCode(arm64.New(), address, 0, false, tier, jit.Assembly{Bytes: ret()})
 	require.NoError(t, err)
 	return c
 }
@@ -368,7 +369,7 @@ func code(t *testing.T, address int, tier jit.Tier) *jit.Code {
 // osrCode returns a fresh, unpublished OSR Code at address rooted at ip.
 func osrCode(t *testing.T, address, ip int, tier jit.Tier) *jit.Code {
 	t.Helper()
-	c, err := jit.NewCode(address, ip, true, tier, jit.Assembly{Bytes: ret()})
+	c, err := jit.NewCode(arm64.New(), address, ip, true, tier, jit.Assembly{Bytes: ret()})
 	require.NoError(t, err)
 	return c
 }

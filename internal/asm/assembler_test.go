@@ -5,7 +5,6 @@ import (
 
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/asm/arm64"
-	"github.com/siyul-park/minivm/internal/testenv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -82,7 +81,7 @@ func TestAssembler_Build(t *testing.T) {
 			slots(arm64.OpSUBI),
 			arm64.MOVI(vint(0), 1),
 			arm64.ADDI(vint(1), vint(0), 2),
-			arm64.STR(vint(1), arm64.Ctx, 8),
+			arm64.STR(vint(1), arm64.X17, 8),
 			slots(arm64.OpADDI),
 			arm64.RET(),
 		)
@@ -93,7 +92,7 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.SUBI(arm64.SP, arm64.SP, 0),
 			arm64.MOVI(arm64.X0, 1),
 			arm64.ADDI(arm64.X1, arm64.X0, 2),
-			arm64.STR(arm64.X1, arm64.Ctx, 8),
+			arm64.STR(arm64.X1, arm64.X17, 8),
 			arm64.ADDI(arm64.SP, arm64.SP, 0),
 			arm64.RET(),
 		), code)
@@ -103,9 +102,9 @@ func TestAssembler_Build(t *testing.T) {
 		a := asm.New(arm64.New())
 		a.Emit(
 			arm64.MOVI(vint(0), 1),
-			arm64.STR(vint(0), arm64.Ctx, 0),
+			arm64.STR(vint(0), arm64.X17, 0),
 			arm64.MOVI(vint(1), 2),
-			arm64.STR(vint(1), arm64.Ctx, 8),
+			arm64.STR(vint(1), arm64.X17, 8),
 			arm64.RET(),
 		)
 
@@ -113,9 +112,9 @@ func TestAssembler_Build(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, encode(t,
 			arm64.MOVI(arm64.X0, 1),
-			arm64.STR(arm64.X0, arm64.Ctx, 0),
+			arm64.STR(arm64.X0, arm64.X17, 0),
 			arm64.MOVI(arm64.X0, 2),
-			arm64.STR(arm64.X0, arm64.Ctx, 8),
+			arm64.STR(arm64.X0, arm64.X17, 8),
 			arm64.RET(),
 		), code)
 	})
@@ -125,7 +124,7 @@ func TestAssembler_Build(t *testing.T) {
 		a.Emit(
 			arm64.MOVI(vint(0), 1),
 			arm64.MOV(vint(1), vint(0)),
-			arm64.STR(vint(1), arm64.Ctx, 0),
+			arm64.STR(vint(1), arm64.X17, 0),
 			arm64.RET(),
 		)
 
@@ -133,7 +132,7 @@ func TestAssembler_Build(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, encode(t,
 			arm64.MOVI(arm64.X0, 1),
-			arm64.STR(arm64.X0, arm64.Ctx, 0),
+			arm64.STR(arm64.X0, arm64.X17, 0),
 			arm64.RET(),
 		), code)
 	})
@@ -144,7 +143,7 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.MOVI(vint(0), 1),
 			arm64.MOV(vint(1), vint(0)),
 			arm64.MOV(vint(2), vint(1)),
-			arm64.STR(vint(2), arm64.Ctx, 0),
+			arm64.STR(vint(2), arm64.X17, 0),
 			arm64.RET(),
 		)
 
@@ -152,7 +151,7 @@ func TestAssembler_Build(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, encode(t,
 			arm64.MOVI(arm64.X0, 1),
-			arm64.STR(arm64.X0, arm64.Ctx, 0),
+			arm64.STR(arm64.X0, arm64.X17, 0),
 			arm64.RET(),
 		), code)
 	})
@@ -160,17 +159,17 @@ func TestAssembler_Build(t *testing.T) {
 	t.Run("drops a float copy whose source dies", func(t *testing.T) {
 		a := asm.New(arm64.New())
 		a.Emit(
-			arm64.LDR(vfloat(0), arm64.Ctx, 0),
+			arm64.LDR(vfloat(0), arm64.X17, 0),
 			arm64.FMOV(vfloat(1), vfloat(0)),
-			arm64.STR(vfloat(1), arm64.Ctx, 8),
+			arm64.STR(vfloat(1), arm64.X17, 8),
 			arm64.RET(),
 		)
 
 		code, err := a.Build()
 		require.NoError(t, err)
 		require.Equal(t, encode(t,
-			arm64.LDR(arm64.D0, arm64.Ctx, 0),
-			arm64.STR(arm64.D0, arm64.Ctx, 8),
+			arm64.LDR(arm64.D0, arm64.X17, 0),
+			arm64.STR(arm64.D0, arm64.X17, 8),
 			arm64.RET(),
 		), code)
 	})
@@ -180,8 +179,8 @@ func TestAssembler_Build(t *testing.T) {
 		a.Emit(
 			arm64.MOVI(vint(0), 1),
 			arm64.MOV(vint(1), vint(0)),
-			arm64.STR(vint(1), arm64.Ctx, 0),
-			arm64.STR(vint(0), arm64.Ctx, 8),
+			arm64.STR(vint(1), arm64.X17, 0),
+			arm64.STR(vint(0), arm64.X17, 8),
 			arm64.RET(),
 		)
 
@@ -190,8 +189,8 @@ func TestAssembler_Build(t *testing.T) {
 		require.Equal(t, encode(t,
 			arm64.MOVI(arm64.X0, 1),
 			arm64.MOV(arm64.X1, arm64.X0),
-			arm64.STR(arm64.X1, arm64.Ctx, 0),
-			arm64.STR(arm64.X0, arm64.Ctx, 8),
+			arm64.STR(arm64.X1, arm64.X17, 0),
+			arm64.STR(arm64.X0, arm64.X17, 8),
 			arm64.RET(),
 		), code)
 	})
@@ -201,7 +200,7 @@ func TestAssembler_Build(t *testing.T) {
 		a.Emit(
 			arm64.MOVI(vint(0), 1),
 			arm64.MOVW(asm.NewVReg(1, asm.RegTypeInt, asm.Width32), vint(0)),
-			arm64.STRW(asm.NewVReg(1, asm.RegTypeInt, asm.Width32), arm64.Ctx, 0),
+			arm64.STRW(asm.NewVReg(1, asm.RegTypeInt, asm.Width32), arm64.X17, 0),
 			arm64.RET(),
 		)
 
@@ -209,7 +208,7 @@ func TestAssembler_Build(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, encode(t,
 			arm64.MOVI(arm64.X0, 1),
-			arm64.STRW(arm64.W0, arm64.Ctx, 0),
+			arm64.STRW(arm64.W0, arm64.X17, 0),
 			arm64.RET(),
 		), code)
 	})
@@ -219,7 +218,7 @@ func TestAssembler_Build(t *testing.T) {
 		a.Emit(
 			arm64.MOVI(vint(0), 1),
 			arm64.FMOV(vfloat(1), vint(0)),
-			arm64.STR(vfloat(1), arm64.Ctx, 0),
+			arm64.STR(vfloat(1), arm64.X17, 0),
 			arm64.RET(),
 		)
 
@@ -228,7 +227,7 @@ func TestAssembler_Build(t *testing.T) {
 		require.Equal(t, encode(t,
 			arm64.MOVI(arm64.X0, 1),
 			arm64.FMOV(arm64.D0, arm64.X0),
-			arm64.STR(arm64.D0, arm64.Ctx, 0),
+			arm64.STR(arm64.D0, arm64.X17, 0),
 			arm64.RET(),
 		), code)
 	})
@@ -237,14 +236,14 @@ func TestAssembler_Build(t *testing.T) {
 		a := asm.New(arm64.New())
 		a.Emit(
 			arm64.MOV(vint(0), arm64.X0),
-			arm64.STR(vint(0), arm64.Ctx, 0),
+			arm64.STR(vint(0), arm64.X17, 0),
 			arm64.RET(),
 		)
 
 		code, err := a.Build()
 		require.NoError(t, err)
 		require.Equal(t, encode(t,
-			arm64.STR(arm64.X0, arm64.Ctx, 0),
+			arm64.STR(arm64.X0, arm64.X17, 0),
 			arm64.RET(),
 		), code)
 	})
@@ -274,7 +273,7 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.MOV(vint(1), vint(0)),
 			arm64.MOVI(arm64.X0, 5),
 			arm64.USE(arm64.X0),
-			arm64.STR(vint(1), arm64.Ctx, 0),
+			arm64.STR(vint(1), arm64.X17, 0),
 			arm64.RET(),
 		)
 
@@ -285,7 +284,7 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.MOV(arm64.X1, arm64.X0),
 			arm64.MOVI(arm64.X0, 5),
 			arm64.USE(arm64.X0),
-			arm64.STR(arm64.X1, arm64.Ctx, 0),
+			arm64.STR(arm64.X1, arm64.X17, 0),
 			arm64.RET(),
 		), code)
 	})
@@ -301,7 +300,7 @@ func TestAssembler_Build(t *testing.T) {
 		)
 		a.Bind(target)
 		a.Emit(
-			arm64.STR(vint(1), arm64.Ctx, 0),
+			arm64.STR(vint(1), arm64.X17, 0),
 			arm64.RET(),
 		)
 
@@ -320,7 +319,7 @@ func TestAssembler_Build(t *testing.T) {
 		)
 		want.Bind(skip)
 		want.Emit(
-			arm64.STR(arm64.X0, arm64.Ctx, 0),
+			arm64.STR(arm64.X0, arm64.X17, 0),
 			arm64.RET(),
 		)
 		expected, err := want.Build()
@@ -337,13 +336,13 @@ func TestAssembler_Build(t *testing.T) {
 			a.Emit(arm64.MOVI(vint(1+i), int64(i)))
 		}
 		for i := int32(len(regs)) - 1; i >= 0; i-- {
-			a.Emit(arm64.STR(vint(1+i), arm64.Ctx, int16(8*i)))
+			a.Emit(arm64.STR(vint(1+i), arm64.X17, int16(8*i)))
 		}
-		a.Emit(arm64.STR(vint(0), arm64.Ctx, 200), arm64.BLabel(join))
+		a.Emit(arm64.STR(vint(0), arm64.X17, 200), arm64.BLabel(join))
 		a.Bind(other)
-		a.Emit(arm64.STR(vint(0), arm64.Ctx, 208))
+		a.Emit(arm64.STR(vint(0), arm64.X17, 208))
 		a.Bind(join)
-		a.Emit(arm64.STR(vint(0), arm64.Ctx, 216), slots(arm64.OpADDI), arm64.RET())
+		a.Emit(arm64.STR(vint(0), arm64.X17, 216), slots(arm64.OpADDI), arm64.RET())
 
 		code, err := a.Build()
 		require.NoError(t, err)
@@ -357,16 +356,16 @@ func TestAssembler_Build(t *testing.T) {
 			want = append(want, arm64.MOVI(r, int64(i)))
 		}
 		for i := len(regs) - 1; i >= 0; i-- {
-			want = append(want, arm64.STR(regs[i], arm64.Ctx, int16(8*i)))
+			want = append(want, arm64.STR(regs[i], arm64.X17, int16(8*i)))
 		}
 		want = append(want,
 			arm64.LDR(arm64.X0, arm64.SP, 0),
-			arm64.STR(arm64.X0, arm64.Ctx, 200),
+			arm64.STR(arm64.X0, arm64.X17, 200),
 			arm64.B(3*4),
 			arm64.LDR(arm64.X0, arm64.SP, 0),
-			arm64.STR(arm64.X0, arm64.Ctx, 208),
+			arm64.STR(arm64.X0, arm64.X17, 208),
 			arm64.LDR(arm64.X0, arm64.SP, 0),
-			arm64.STR(arm64.X0, arm64.Ctx, 216),
+			arm64.STR(arm64.X0, arm64.X17, 216),
 			arm64.ADDI(arm64.SP, arm64.SP, 16),
 			arm64.RET(),
 		)
@@ -383,11 +382,11 @@ func TestAssembler_Build(t *testing.T) {
 			a.Emit(arm64.MOVI(vint(1+i), int64(i)))
 		}
 		for i := int32(len(regs)) - 1; i >= 0; i-- {
-			a.Emit(arm64.STR(vint(1+i), arm64.Ctx, int16(8*i)))
+			a.Emit(arm64.STR(vint(1+i), arm64.X17, int16(8*i)))
 		}
 		a.Emit(slots(arm64.OpADDI), arm64.RET())
 		a.Bind(use)
-		a.Emit(arm64.STR(vint(0), arm64.Ctx, 200), slots(arm64.OpADDI), arm64.RET())
+		a.Emit(arm64.STR(vint(0), arm64.X17, 200), slots(arm64.OpADDI), arm64.RET())
 
 		code, err := a.Build()
 		require.NoError(t, err)
@@ -401,12 +400,12 @@ func TestAssembler_Build(t *testing.T) {
 			want = append(want, arm64.MOVI(r, int64(i)))
 		}
 		for i := len(regs) - 1; i >= 0; i-- {
-			want = append(want, arm64.STR(regs[i], arm64.Ctx, int16(8*i)))
+			want = append(want, arm64.STR(regs[i], arm64.X17, int16(8*i)))
 		}
 		want = append(want,
 			arm64.ADDI(arm64.SP, arm64.SP, 0),
 			arm64.RET(),
-			arm64.STR(arm64.X0, arm64.Ctx, 200),
+			arm64.STR(arm64.X0, arm64.X17, 200),
 			arm64.ADDI(arm64.SP, arm64.SP, 0),
 			arm64.RET(),
 		)
@@ -422,7 +421,7 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.ADDI(vint(0), vint(0), 1),
 			arm64.CMPI(vint(0), 10),
 			arm64.BCondLabel(arm64.OpBNE, loop),
-			arm64.STR(vint(0), arm64.Ctx, 0),
+			arm64.STR(vint(0), arm64.X17, 0),
 			arm64.RET(),
 		)
 
@@ -433,7 +432,7 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.ADDI(arm64.X0, arm64.X0, 1),
 			arm64.CMPI(arm64.X0, 10),
 			arm64.BNE(-8),
-			arm64.STR(arm64.X0, arm64.Ctx, 0),
+			arm64.STR(arm64.X0, arm64.X17, 0),
 			arm64.RET(),
 		), code)
 	})
@@ -444,7 +443,7 @@ func TestAssembler_Build(t *testing.T) {
 			slots(arm64.OpSUBI),
 			arm64.MOVI(vint(0), 5),
 			arm64.BLR(arm64.X1),
-			arm64.STR(vint(0), arm64.Ctx, 0),
+			arm64.STR(vint(0), arm64.X17, 0),
 			slots(arm64.OpADDI),
 			arm64.RET(),
 		)
@@ -457,7 +456,7 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.STR(arm64.X0, arm64.SP, 0),
 			arm64.BLR(arm64.X1),
 			arm64.LDR(arm64.X0, arm64.SP, 0),
-			arm64.STR(arm64.X0, arm64.Ctx, 0),
+			arm64.STR(arm64.X0, arm64.X17, 0),
 			arm64.ADDI(arm64.SP, arm64.SP, 16),
 			arm64.RET(),
 		), code)
@@ -470,7 +469,7 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.MOVZ(vint(0), 5, 0),
 			arm64.MOVK(vint(0), 1, 48),
 			arm64.BLR(arm64.X1),
-			arm64.STR(vint(0), arm64.Ctx, 0),
+			arm64.STR(vint(0), arm64.X17, 0),
 			slots(arm64.OpADDI),
 			arm64.RET(),
 		)
@@ -486,7 +485,7 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.STR(arm64.X0, arm64.SP, 0),
 			arm64.BLR(arm64.X1),
 			arm64.LDR(arm64.X0, arm64.SP, 0),
-			arm64.STR(arm64.X0, arm64.Ctx, 0),
+			arm64.STR(arm64.X0, arm64.X17, 0),
 			arm64.ADDI(arm64.SP, arm64.SP, 16),
 			arm64.RET(),
 		), code)
@@ -498,7 +497,7 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.FMOV(vfloat(0), arm64.X2),
 			arm64.BLR(arm64.X1),
 			arm64.FMOV(arm64.X0, vfloat(0)),
-			arm64.STR(arm64.X0, arm64.Ctx, 0),
+			arm64.STR(arm64.X0, arm64.X17, 0),
 			arm64.RET(),
 		)
 
@@ -510,7 +509,7 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.BLR(arm64.X1),
 			arm64.LDR(arm64.D0, arm64.SP, 0),
 			arm64.FMOV(arm64.X0, arm64.D0),
-			arm64.STR(arm64.X0, arm64.Ctx, 0),
+			arm64.STR(arm64.X0, arm64.X17, 0),
 			arm64.RET(),
 		), code)
 	})
@@ -520,8 +519,8 @@ func TestAssembler_Build(t *testing.T) {
 		a.Emit(
 			arm64.MOVI(vint(0), 1),
 			arm64.MOVI(arm64.X0, 2),
-			arm64.STR(arm64.X0, arm64.Ctx, 0),
-			arm64.STR(vint(0), arm64.Ctx, 8),
+			arm64.STR(arm64.X0, arm64.X17, 0),
+			arm64.STR(vint(0), arm64.X17, 8),
 			arm64.RET(),
 		)
 
@@ -530,8 +529,8 @@ func TestAssembler_Build(t *testing.T) {
 		require.Equal(t, encode(t,
 			arm64.MOVI(arm64.X1, 1),
 			arm64.MOVI(arm64.X0, 2),
-			arm64.STR(arm64.X0, arm64.Ctx, 0),
-			arm64.STR(arm64.X1, arm64.Ctx, 8),
+			arm64.STR(arm64.X0, arm64.X17, 0),
+			arm64.STR(arm64.X1, arm64.X17, 8),
 			arm64.RET(),
 		), code)
 	})
@@ -541,8 +540,8 @@ func TestAssembler_Build(t *testing.T) {
 		a.Emit(
 			arm64.MOVI(vint(0), 1),
 			arm64.FMOV(vfloat(0), arm64.X2),
-			arm64.STR(vint(0), arm64.Ctx, 0),
-			arm64.STR(vfloat(0), arm64.Ctx, 8),
+			arm64.STR(vint(0), arm64.X17, 0),
+			arm64.STR(vfloat(0), arm64.X17, 8),
 			arm64.RET(),
 		)
 
@@ -551,8 +550,8 @@ func TestAssembler_Build(t *testing.T) {
 		require.Equal(t, encode(t,
 			arm64.MOVI(arm64.X0, 1),
 			arm64.FMOV(arm64.D0, arm64.X2),
-			arm64.STR(arm64.X0, arm64.Ctx, 0),
-			arm64.STR(arm64.D0, arm64.Ctx, 8),
+			arm64.STR(arm64.X0, arm64.X17, 0),
+			arm64.STR(arm64.D0, arm64.X17, 8),
 			arm64.RET(),
 		), code)
 	})
@@ -563,7 +562,7 @@ func TestAssembler_Build(t *testing.T) {
 		a.Emit(
 			arm64.MOVI(w, 1),
 			arm64.BLR(arm64.X1),
-			arm64.STRW(w, arm64.Ctx, 0),
+			arm64.STRW(w, arm64.X17, 0),
 			arm64.RET(),
 		)
 
@@ -574,7 +573,7 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.STRW(arm64.W0, arm64.SP, 0),
 			arm64.BLR(arm64.X1),
 			arm64.LDR(arm64.W0, arm64.SP, 0),
-			arm64.STRW(arm64.W0, arm64.Ctx, 0),
+			arm64.STRW(arm64.W0, arm64.X17, 0),
 			arm64.RET(),
 		), code)
 	})
@@ -599,24 +598,24 @@ func TestAssembler_Build(t *testing.T) {
 	t.Run("parks both registers a pair load writes", func(t *testing.T) {
 		a := asm.New(arm64.New())
 		a.Emit(
-			arm64.LDP(vint(0), vint(1), arm64.Ctx, 0),
+			arm64.LDP(vint(0), vint(1), arm64.X17, 0),
 			arm64.BLR(arm64.X1),
 			arm64.ADD(vint(2), vint(0), vint(1)),
-			arm64.STR(vint(2), arm64.Ctx, 16),
+			arm64.STR(vint(2), arm64.X17, 16),
 			arm64.RET(),
 		)
 
 		code, err := a.Build()
 		require.NoError(t, err)
 		require.Equal(t, encode(t,
-			arm64.LDP(arm64.X0, arm64.X2, arm64.Ctx, 0),
+			arm64.LDP(arm64.X0, arm64.X2, arm64.X17, 0),
 			arm64.STR(arm64.X0, arm64.SP, 0),
 			arm64.STR(arm64.X2, arm64.SP, 8),
 			arm64.BLR(arm64.X1),
 			arm64.LDR(arm64.X0, arm64.SP, 0),
 			arm64.LDR(arm64.X1, arm64.SP, 8),
 			arm64.ADD(arm64.X2, arm64.X0, arm64.X1),
-			arm64.STR(arm64.X2, arm64.Ctx, 16),
+			arm64.STR(arm64.X2, arm64.X17, 16),
 			arm64.RET(),
 		), code)
 	})
@@ -631,7 +630,7 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.BLabel(join),
 		)
 		a.Bind(other)
-		a.Emit(arm64.STR(vint(0), arm64.Ctx, 0))
+		a.Emit(arm64.STR(vint(0), arm64.X17, 0))
 		a.Bind(join)
 		a.Emit(arm64.RET())
 
@@ -642,7 +641,7 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.CBZ(arm64.X1, 12),
 			arm64.BLR(arm64.X2),
 			arm64.B(8),
-			arm64.STR(arm64.X0, arm64.Ctx, 0),
+			arm64.STR(arm64.X0, arm64.X17, 0),
 			arm64.RET(),
 		), code)
 	})
@@ -654,7 +653,7 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.FMOV(s, arm64.W2),
 			arm64.BLR(arm64.X1),
 			arm64.FMOV(arm64.W0, s),
-			arm64.STRW(arm64.W0, arm64.Ctx, 0),
+			arm64.STRW(arm64.W0, arm64.X17, 0),
 			arm64.RET(),
 		)
 
@@ -666,7 +665,7 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.BLR(arm64.X1),
 			arm64.LDR(arm64.S0, arm64.SP, 0),
 			arm64.FMOV(arm64.W0, arm64.S0),
-			arm64.STRW(arm64.W0, arm64.Ctx, 0),
+			arm64.STRW(arm64.W0, arm64.X17, 0),
 			arm64.RET(),
 		), code)
 	})
@@ -677,7 +676,7 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.MOVI(vint(0), 1),
 			arm64.MOVI(vint(1), 2),
 			arm64.ADD(vint(2), vint(0), vint(1)),
-			arm64.STR(vint(2), arm64.Ctx, 0),
+			arm64.STR(vint(2), arm64.X17, 0),
 			arm64.RET(),
 		)
 
@@ -719,44 +718,6 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.ADDI(arm64.SP, arm64.SP, 16),
 			arm64.RET(),
 		), code)
-	})
-	t.Run("runs a value spilled across an exit", func(t *testing.T) {
-		testenv.MustHaveArch(t, "arm64")
-		s, err := asm.NewState(arm64.New(), 4096)
-		require.NoError(t, err)
-		exit := []asm.Instruction{
-			arm64.LDR(arm64.X16, arm64.Ctx, int16(asm.OffsetStub)),
-			arm64.BLR(arm64.X16),
-		}
-		assembler := asm.New(arm64.New())
-		assembler.Emit(
-			arm64.SUBI(arm64.SP, arm64.SP, 16),
-			arm64.STR(arm64.LR, arm64.SP, 8),
-			slots(arm64.OpSUBI),
-			arm64.MOVI(vint(0), 42),
-		)
-		assembler.Emit(exit...)
-		assembler.Emit(arm64.ADDI(arm64.X0, vint(0), 1))
-		assembler.Emit(exit...)
-		assembler.Emit(
-			slots(arm64.OpADDI),
-			arm64.LDR(arm64.LR, arm64.SP, 8),
-			arm64.ADDI(arm64.SP, arm64.SP, 16),
-			arm64.RET(),
-		)
-
-		code, err := assembler.Build()
-		require.NoError(t, err)
-		buffer, err := asm.NewBuffer(arm64.New(), len(code))
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, buffer.Free()) })
-		addr, err := buffer.Link(code)
-		require.NoError(t, err)
-
-		require.True(t, arm64.New().Enter(addr, &s))
-		require.True(t, arm64.New().Resume(&s))
-		require.Equal(t, uint64(43), s.Reg(arm64.X0))
-		require.False(t, arm64.New().Resume(&s))
 	})
 }
 

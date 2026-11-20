@@ -1,6 +1,6 @@
 # Add an Architecture
 
-Checklist for adding architecture-specific executable-memory and encoding support.
+Checklist for contributors adding a target architecture: encoding, executable memory, the entry trampoline, and SSA lowering.
 
 `compatibility.md` owns platform support; `instruction-set.md` owns opcode status; `jit-internals.md` owns the native tier's runtime contract.
 
@@ -12,7 +12,9 @@ Checklist for adding architecture-specific executable-memory and encoding suppor
 | reference encoder | `internal/asm/arm64/` |
 | executable memory | `internal/asm/` |
 | platform selection | `internal/asm/` build-tagged files |
-| SSA lowering for a target | `internal/jit/<arch>/` implementing `compile.Machine` |
+| entry/exit trampoline | `internal/jit/enter_<arch>.{go,s}`; narrow the `!arm64` tag of `internal/jit/enter_noasm.go` |
+| SSA lowering and register pins for a target | `internal/jit/<arch>/` implementing `compile.Machine` |
+| host backend selection | `internal/jit/host/host_<arch>.go`; narrow the `!arm64` tag of `host_unsupported.go` |
 | platform support | `compatibility.md` |
 
 An architecture package MUST expose one concrete constructor when its behavior is consumed by another package.
@@ -25,7 +27,9 @@ Encoders MUST accept the architecture-neutral instruction representation and MUS
 
 ## Native Layer
 
-`internal/jit/arm64` is the current native layer: it implements `compile.Machine` and keeps target lowering separate from the encoder in `internal/asm/arm64`, using the runtime contract `jit-internals.md` owns. A new architecture's lowering package MUST do the same.
+`internal/jit/arm64` is the current native layer: it implements `compile.Machine` and keeps target lowering separate from the encoder in `internal/asm/arm64`, using the runtime contract `jit-internals.md` owns. A new architecture's lowering package `MUST` do the same, and its `Machine.Reserve` `MUST` hold every register the allocator must not assign: its `Ctx`, its own pinned and scratch registers, and any Go-reserved register the trampoline does not save.
+
+The trampoline (`internal/jit/enter_<arch>.s`) `MUST` satisfy the `jit.State`, `jit.Enter` / `jit.Resume`, and exit-stub contracts in `jit-internals.md`, and its context register `MUST` be the lowering's `Ctx`.
 
 A `compile.Machine` implementation MUST return the concrete target type from one exported constructor (see `arm64.New`) and MUST decline (return `false` from `Lower`) rather than emit incorrect code for an operation it does not support — `compile.Lower` bridges that operation into the interpreter through `ExitBridge` instead.
 
@@ -53,7 +57,7 @@ Calls, host interaction, heap access, loops, and suspension require the core run
 The agent MUST run:
 
 ```bash
-go test ./internal/asm/<arch>/...
+go test ./internal/asm/<arch>/... ./internal/jit/...
 GOOS=linux GOARCH=<arch> go build ./...
 GOOS=linux GOARCH=<arch> go test -exec=true ./...
 ```
