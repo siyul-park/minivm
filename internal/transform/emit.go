@@ -26,6 +26,7 @@ type emitter struct {
 	home     map[ssa.Value]int
 	source   map[ssa.Value]ssa.Operation
 	remat    map[ssa.Value]bool
+	zeros    map[ssa.Value]bool
 	loops    map[int]bool
 	bodies   map[int]map[int]bool
 	liveIn   []map[ssa.Value]bool
@@ -52,21 +53,6 @@ type fix struct {
 	at      int
 	operand int
 	block   int
-}
-
-var inverses = map[instr.Opcode]instr.Opcode{
-	instr.I32_EQ: instr.I32_NE, instr.I32_NE: instr.I32_EQ,
-	instr.I32_LT_S: instr.I32_GE_S, instr.I32_GE_S: instr.I32_LT_S,
-	instr.I32_GT_S: instr.I32_LE_S, instr.I32_LE_S: instr.I32_GT_S,
-	instr.I32_LT_U: instr.I32_GE_U, instr.I32_GE_U: instr.I32_LT_U,
-	instr.I32_GT_U: instr.I32_LE_U, instr.I32_LE_U: instr.I32_GT_U,
-	instr.I64_EQ: instr.I64_NE, instr.I64_NE: instr.I64_EQ,
-	instr.I64_LT_S: instr.I64_GE_S, instr.I64_GE_S: instr.I64_LT_S,
-	instr.I64_GT_S: instr.I64_LE_S, instr.I64_LE_S: instr.I64_GT_S,
-	instr.I64_LT_U: instr.I64_GE_U, instr.I64_GE_U: instr.I64_LT_U,
-	instr.I64_GT_U: instr.I64_LE_U, instr.I64_LE_U: instr.I64_GT_U,
-	instr.F32_EQ: instr.F32_NE, instr.F32_NE: instr.F32_EQ,
-	instr.F64_EQ: instr.F64_NE, instr.F64_NE: instr.F64_EQ,
 }
 
 var spaceOps = [...]struct{ read, write instr.Opcode }{
@@ -121,6 +107,15 @@ func (e *emitter) collect() bool {
 	e.source, e.remat = map[ssa.Value]ssa.Operation{}, map[ssa.Value]bool{}
 	e.spare, e.produced = map[ssa.Value]bool{}, map[ssa.Value]bool{}
 	e.ops, e.terms = make([][]ssa.Operation, e.function.Len()), make([]ssa.Terminator, e.function.Len())
+
+	e.zeros = map[ssa.Value]bool{}
+	for id := range e.function.Len() {
+		for _, operation := range e.function.Block(id).Operations {
+			if operation.Op == ssa.OpConst && operation.Const == 0 && e.function.Type(operation.Results[0]) != ssa.TypeRef {
+				e.zeros[operation.Results[0]] = true
+			}
+		}
+	}
 
 	for id := range e.function.Len() {
 		block := e.function.Block(id)
@@ -311,7 +306,7 @@ func (e *emitter) headers() {
 	reached, back := map[int]bool{}, map[int]bool{}
 	for id, term := range e.terms {
 		for _, edge := range term.Edges {
-			if term.Op != ssa.OpJump {
+			if term.Term != ssa.TermJump {
 				reached[edge.Block] = true
 			}
 			if edge.Block <= id {
@@ -337,7 +332,7 @@ func (e *emitter) loads() {
 	stores, uses := map[int]map[int][]int{}, map[ssa.Value][]site{}
 	for id, ops := range e.ops {
 		for at, operation := range ops {
-			if operation.Op == ssa.OpExec && operation.Code.Writes(instr.Local) {
+			if operation.Writes()&ssa.EffectLocal != 0 {
 				return
 			}
 			if operation.Op == ssa.OpStore && operation.Slot.Space == ssa.SpaceLocal {
@@ -396,24 +391,32 @@ func (e *emitter) loads() {
 
 func (e *emitter) accept(id int, operation ssa.Operation) bool {
 	switch operation.Op {
-	case ssa.OpGuardKind, ssa.OpGuardShape, ssa.OpGuardValue, ssa.OpSlice:
+	case ssa.OpGuardKind, ssa.OpGuardShape, ssa.OpGuardValue, ssa.OpArrayView:
 		e.subst[operation.Results[0]] = e.resolve(operation.Args[0])
 		return true
-	case ssa.OpGuardBounds, ssa.OpRetain, ssa.OpRelease, ssa.OpState:
+	case ssa.OpGuardBounds, ssa.OpRefRetain, ssa.OpRefRelease, ssa.OpState:
 		return true
 	case ssa.OpExec:
 		if len(instr.TypeOf(operation.Code).Widths) > 0 {
 			return false
 		}
+	case ssa.OpArrayNewDefault, ssa.OpStructNewDefault:
+		return false
 	case ssa.OpConst:
 	case ssa.OpLoad, ssa.OpStore:
 		if operation.Slot.Base != 0 || int(operation.Slot.Space) >= len(spaceOps) {
 			return false
 		}
 	default:
-		return false
+		if !operation.Op.Data() {
+			return false
+		}
 	}
 	operation.Args = e.values(operation.Args)
+	if operation.Op == ssa.OpIntCmp && operation.Cond == ssa.CondEQ && len(operation.Args) == 2 && e.zeros[operation.Args[1]] {
+		// A compare with zero is the one-operand eqz.
+		operation.Args = operation.Args[:1]
+	}
 	for _, v := range operation.Results {
 		e.defined[v] = id
 		e.produced[v] = true
@@ -515,7 +518,7 @@ func (e *emitter) assign() bool {
 func (e *emitter) hints() map[ssa.Value]ssa.Value {
 	hints := map[ssa.Value]ssa.Value{}
 	for _, term := range e.terms {
-		if term.Op != ssa.OpJump || !e.loops[term.Edges[0].Block] {
+		if term.Term != ssa.TermJump || !e.loops[term.Edges[0].Block] {
 			continue
 		}
 		for i, param := range e.function.Block(term.Edges[0].Block).Params {
@@ -534,7 +537,7 @@ func (e *emitter) free() []int {
 	for _, ops := range e.ops {
 		for _, operation := range ops {
 			switch {
-			case operation.Op == ssa.OpExec && (operation.Code.Reads(instr.Local) || operation.Code.Writes(instr.Local)):
+			case (operation.Reads()|operation.Writes())&ssa.EffectLocal != 0:
 				return nil
 			case operation.Op == ssa.OpStore && operation.Slot.Space == ssa.SpaceLocal,
 				operation.Op == ssa.OpLoad && operation.Slot.Space == ssa.SpaceLocal && e.uses[operation.Results[0]] > 0:
@@ -729,7 +732,7 @@ func (e *emitter) rooted(id int) map[int][]int {
 // tree does not enter a frame.
 func (e *emitter) tree(id, root int) int {
 	operation := e.ops[id][root]
-	if len(operation.Results) != 1 || operation.Op == ssa.OpExec && operation.Code.Writes(instr.Frame) {
+	if len(operation.Results) != 1 || operation.Writes()&ssa.EffectFrame != 0 {
 		return -1
 	}
 	start := root
@@ -778,7 +781,7 @@ func (e *emitter) consumer(id, root int) (int, []ssa.Value) {
 // elided reports whether the walk emits nothing for operation: a value it
 // rematerializes at each use, or one nothing reads.
 func (e *emitter) elided(operation ssa.Operation) bool {
-	return operation.Op != ssa.OpStore && operation.Op != ssa.OpExec && (e.remat[operation.Results[0]] || e.uses[operation.Results[0]] == 0)
+	return (operation.Op == ssa.OpConst || operation.Op == ssa.OpLoad) && (e.remat[operation.Results[0]] || e.uses[operation.Results[0]] == 0)
 }
 
 // layout orders the blocks for emission: block 0 first, then, after a branch
@@ -808,7 +811,7 @@ func (e *emitter) layout() {
 				if next < 0 {
 					next = id
 				}
-				if op := e.terms[id].Op; op != ssa.OpComplete && op != ssa.OpReturn {
+				if op := e.terms[id].Term; op != ssa.TermComplete && op != ssa.TermReturn {
 					next = id
 					break
 				}
@@ -833,7 +836,7 @@ func (e *emitter) layout() {
 // stays in the loop falls through so an iteration takes the back edge alone.
 func (e *emitter) following(id int, placed []bool) int {
 	term := e.terms[id]
-	if term.Op != ssa.OpBranch || len(term.Edges) != 2 {
+	if term.Term != ssa.TermBrIf || len(term.Edges) != 2 {
 		return -1
 	}
 	next := term.Edges[1].Block
@@ -861,8 +864,11 @@ func (e *emitter) inverts(id int) bool {
 		return false
 	}
 	last := ops[len(ops)-1]
-	_, ok := inverses[last.Code]
-	return ok && last.Op == ssa.OpExec && len(last.Results) == 1 && last.Results[0] == term.Args[0]
+	code, ok := opcode(e.function, last)
+	if _, inverse := invert(code); !ok || !inverse {
+		return false
+	}
+	return len(last.Results) == 1 && last.Results[0] == term.Args[0]
 }
 
 func (e *emitter) open(id int) bool {
@@ -890,7 +896,7 @@ func (e *emitter) open(id int) bool {
 // placeholder home says nothing about which values share a local.
 func (e *emitter) settle(id, index int) {
 	term := e.terms[id]
-	if !e.placed || term.Op != ssa.OpJump || !e.loops[term.Edges[0].Block] {
+	if !e.placed || term.Term != ssa.TermJump || !e.loops[term.Edges[0].Block] {
 		return
 	}
 	edge, operation := term.Edges[0], e.ops[id][index]
@@ -925,20 +931,20 @@ func (e *emitter) settle(id, index int) {
 
 func (e *emitter) close(id int) bool {
 	term := e.terms[id]
-	switch term.Op {
-	case ssa.OpReturn:
+	switch term.Term {
+	case ssa.TermReturn:
 		if !e.load(term.Args) {
 			return false
 		}
 		e.write(instr.RETURN)
-	case ssa.OpComplete:
+	case ssa.TermComplete:
 		if !e.module || !e.carry(term.Args) {
 			return false
 		}
 		if e.after[id] >= 0 {
 			e.branch(instr.BR, e.function.Len())
 		}
-	case ssa.OpJump:
+	case ssa.TermJump:
 		edge := term.Edges[0]
 		args, moves := edge.Args, []int(nil)
 		if e.loops[edge.Block] {
@@ -959,18 +965,18 @@ func (e *emitter) close(id int) bool {
 		}
 		e.stack = e.stack[:len(e.stack)-len(moves)]
 		e.leave(id, edge.Block)
-	case ssa.OpBranch, ssa.OpTable:
+	case ssa.TermBrIf, ssa.TermBrTable:
 		if !uniform(term.Edges) || !e.carry(append(slices.Clone(term.Edges[0].Args), term.Args[0])) {
 			return false
 		}
 		e.stack = e.stack[:len(e.stack)-1]
-		if term.Op == ssa.OpTable {
+		if term.Term == ssa.TermBrTable {
 			e.table(term.Edges)
 			return true
 		}
 		last := len(e.code) - 1
 		if last >= e.floor && term.Edges[0].Block == e.after[id] {
-			if inverse, ok := inverses[e.code[last].Opcode()]; ok {
+			if inverse, ok := invert(e.code[last].Opcode()); ok {
 				e.code[last] = instr.MustNew(inverse)
 				e.branch(instr.BR_IF, term.Edges[1].Block)
 				return true
@@ -1037,7 +1043,7 @@ func (e *emitter) perform(operation ssa.Operation) bool {
 	// come, is duplicated rather than homed; a later use that is not next on
 	// the stack makes the walk fail and homes it. An operation that can trap
 	// or enter a frame keeps the stack its caller left, which a trap exposes.
-	if len(operation.Args) == 1 && len(operation.Results) == 0 && (operation.Op != ssa.OpExec || !operation.Code.Traps() && !operation.Code.Writes(instr.Frame)) && e.spare[operation.Args[0]] && e.used[operation.Args[0]] < e.uses[operation.Args[0]] {
+	if len(operation.Args) == 1 && len(operation.Results) == 0 && !operation.Traps() && operation.Writes()&ssa.EffectFrame == 0 && e.spare[operation.Args[0]] && e.used[operation.Args[0]] < e.uses[operation.Args[0]] {
 		e.write(instr.DUP)
 		e.stack = append(e.stack, operation.Args[0])
 	}
@@ -1051,7 +1057,12 @@ func (e *emitter) perform(operation ssa.Operation) bool {
 	case ssa.OpStore:
 		e.write(spaceOps[operation.Slot.Space].write, uint64(operation.Slot.Index))
 	default:
-		e.write(operation.Code)
+		code, ok := opcode(e.function, operation)
+		if !ok {
+			e.failed = true
+			return false
+		}
+		e.write(code)
 	}
 	e.stack = e.stack[:len(e.stack)-len(operation.Args)]
 	return e.results(operation.Results)

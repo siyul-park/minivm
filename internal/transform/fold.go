@@ -5,7 +5,6 @@ import (
 	"math/bits"
 	"slices"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/graph"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/pass"
@@ -93,11 +92,11 @@ func foldBlocks(function *ssa.Function, collapsing bool) (next *ssa.Function, ch
 			}
 			operation = r.define(operation)
 			r.builder.Add(id, operation)
-			switch operation.Op {
-			case ssa.OpConst:
+			switch {
+			case operation.Op == ssa.OpConst:
 				constants[operation.Results[0]] = operation.Const
 				computed[operation.Results[0]] = true
-			case ssa.OpExec:
+			case operation.Op == ssa.OpExec || operation.Op.Data():
 				for _, result := range operation.Results {
 					computed[result] = true
 				}
@@ -143,8 +142,8 @@ func agreed(r *rebuilder, constants map[ssa.Value]uint64, edges [][]ssa.Value, i
 // it, decoding the condition as the interpreter does: from its i32 lane.
 func collapse(r *rebuilder, constants map[ssa.Value]uint64, t ssa.Terminator) (ssa.Terminator, bool) {
 	var edge ssa.Edge
-	switch t.Op {
-	case ssa.OpBranch:
+	switch t.Term {
+	case ssa.TermBrIf:
 		if len(t.Edges) == 2 && t.Edges[0].Block == t.Edges[1].Block && slices.Equal(t.Edges[0].Args, t.Edges[1].Args) {
 			edge = t.Edges[0]
 			break
@@ -157,7 +156,7 @@ func collapse(r *rebuilder, constants map[ssa.Value]uint64, t ssa.Terminator) (s
 		if uint32(w) != 0 {
 			edge = t.Edges[0]
 		}
-	case ssa.OpTable:
+	case ssa.TermBrTable:
 		w, ok := constants[r.value(t.Args[0])]
 		if !ok {
 			return t, false
@@ -169,21 +168,21 @@ func collapse(r *rebuilder, constants map[ssa.Value]uint64, t ssa.Terminator) (s
 	default:
 		return t, false
 	}
-	return ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{edge}}, true
+	return ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{edge}}, true
 }
 
 func fold(r *rebuilder, id int, constants map[ssa.Value]uint64, computed map[ssa.Value]bool, operation ssa.Operation) (ssa.Operation, bool) {
-	if operation.Op != ssa.OpExec || !operation.Code.IsPure() {
+	if !operation.Op.Data() || !operation.Pure() {
 		return operation, false
 	}
-	if tagged(operation.Code) && r.builder.Type(operation.Args[0]) != r.builder.Type(operation.Args[1]) {
+	if tagged(operation.Op) && r.builder.Type(operation.Args[0]) != r.builder.Type(operation.Args[1]) {
 		return operation, false
 	}
 	// The interpreter keeps the kind tag of a bitwise operation's operands, so
 	// such a constant takes the operands' type, not the opcode's i32.
 	result := func(w uint64) (ssa.Operation, bool) {
 		t := r.from.Type(operation.Results[0])
-		if tagged(operation.Code) {
+		if tagged(operation.Op) {
 			t = r.builder.Type(operation.Args[0])
 		}
 		if t == r.from.Type(operation.Results[0]) {
@@ -204,7 +203,7 @@ func fold(r *rebuilder, id int, constants map[ssa.Value]uint64, computed map[ssa
 		args = append(args, w)
 	}
 	if len(args) == len(operation.Args) {
-		if w, ok := eval(operation.Code, args); ok {
+		if w, ok := eval(operation, r.builder.Type(operation.Args[0]), r.from.Type(operation.Results[0]), args); ok {
 			return result(w)
 		}
 		return operation, false
@@ -213,141 +212,141 @@ func fold(r *rebuilder, id int, constants map[ssa.Value]uint64, computed map[ssa
 		return operation, false
 	}
 	x, y := operation.Args[0], operation.Args[1]
+	lane := r.builder.Type(x).Lane()
 	if x == y {
-		w, alias, ok := reflexive(operation.Code)
+		w, alias, ok := reflexive(operation)
 		if ok && !alias {
 			return result(w)
 		}
 		if ok && computed[x] && r.builder.Type(x) == r.from.Type(operation.Results[0]) {
 			r.alias(operation.Results[0], x)
-			return ssa.Operation{Op: operation.Op, Code: operation.Code, Args: operation.Args}, true
+			return ssa.Operation{Op: operation.Op, Args: operation.Args}, true
 		}
 		return operation, false
 	}
 	_, left := constants[x]
-	if _, right := constants[y]; left && !right && commutative(operation.Code) {
+	if _, right := constants[y]; left && !right && commutative(operation) {
 		x, y = y, x
 	}
 	right, ok := constants[y]
 	if !ok {
 		return operation, false
 	}
-	if w, ok := absorb(operation.Code, right); ok {
+	if w, ok := absorb(operation.Op, right, lane); ok {
 		return result(w)
 	}
-	if identity(operation.Code, right) && computed[x] && r.builder.Type(x) == r.from.Type(operation.Results[0]) {
+	if identity(operation.Op, right, lane) && computed[x] && r.builder.Type(x) == r.from.Type(operation.Results[0]) {
 		r.alias(operation.Results[0], x)
-		return ssa.Operation{Op: operation.Op, Code: operation.Code, Args: operation.Args}, true
+		return ssa.Operation{Op: operation.Op, Args: operation.Args}, true
 	}
-	code, amount, ok := shift(operation.Code, right)
+	op, amount, ok := shift(operation.Op, right, lane)
 	if !ok {
 		return operation, false
 	}
 	count := r.builder.Value(r.builder.Type(y))
 	r.builder.Add(id, ssa.Operation{Op: ssa.OpConst, Const: amount, Results: []ssa.Value{count}})
 	constants[count] = amount
-	return ssa.Operation{Op: operation.Op, Code: code, Args: []ssa.Value{x, count}, State: operation.State, Results: operation.Results}, true
+	return ssa.Operation{Op: op, Args: []ssa.Value{x, count}, State: operation.State, Results: operation.Results}, true
 }
 
-// tagged reports whether code keeps its operands' kind tag in its result.
-func tagged(code instr.Opcode) bool {
-	switch code {
-	case instr.I32_XOR, instr.I32_AND, instr.I32_OR:
+// tagged reports whether op keeps its operands' kind tag in its result.
+func tagged(op ssa.Op) bool {
+	switch op {
+	case ssa.OpIntXor, ssa.OpIntAnd, ssa.OpIntOr:
 		return true
 	default:
 		return false
 	}
 }
 
-// reflexive returns what code gives when both operands are the same value: a
-// constant word, or alias when the result is that value.
-func reflexive(code instr.Opcode) (w uint64, alias, ok bool) {
-	switch code {
-	case instr.I32_SUB, instr.I32_XOR, instr.I64_SUB, instr.I64_XOR:
+// reflexive returns what an integer operation gives when both operands are the
+// same value: a constant word, or alias when the result is that value.
+func reflexive(o ssa.Operation) (w uint64, alias, ok bool) {
+	switch o.Op {
+	case ssa.OpIntSub, ssa.OpIntXor:
 		return 0, false, true
-	case instr.I32_NE, instr.I32_LT_S, instr.I32_LT_U, instr.I32_GT_S, instr.I32_GT_U,
-		instr.I64_NE, instr.I64_LT_S, instr.I64_LT_U, instr.I64_GT_S, instr.I64_GT_U:
-		return word(false), false, true
-	case instr.I32_EQ, instr.I32_LE_S, instr.I32_LE_U, instr.I32_GE_S, instr.I32_GE_U,
-		instr.I64_EQ, instr.I64_LE_S, instr.I64_LE_U, instr.I64_GE_S, instr.I64_GE_U:
-		return word(true), false, true
-	case instr.I32_AND, instr.I32_OR, instr.I64_AND, instr.I64_OR:
+	case ssa.OpIntAnd, ssa.OpIntOr:
 		return 0, true, true
+	case ssa.OpIntCmp:
+		switch o.Cond {
+		case ssa.CondNE, ssa.CondSLT, ssa.CondULT, ssa.CondSGT, ssa.CondUGT:
+			return word(false), false, true
+		default:
+			return word(true), false, true
+		}
 	default:
 		return 0, false, false
 	}
 }
 
-// commutative reports whether code gives the same result for swapped integer operands.
-func commutative(code instr.Opcode) bool {
-	switch code {
-	case instr.I32_ADD, instr.I32_MUL, instr.I32_AND, instr.I32_OR, instr.I32_XOR, instr.I32_EQ, instr.I32_NE,
-		instr.I64_ADD, instr.I64_MUL, instr.I64_AND, instr.I64_OR, instr.I64_XOR, instr.I64_EQ, instr.I64_NE:
+// commutative reports whether o gives the same result for swapped integer operands.
+func commutative(o ssa.Operation) bool {
+	switch o.Op {
+	case ssa.OpIntAdd, ssa.OpIntMul, ssa.OpIntAnd, ssa.OpIntOr, ssa.OpIntXor:
 		return true
+	case ssa.OpIntCmp:
+		return o.Cond == ssa.CondEQ || o.Cond == ssa.CondNE
 	default:
 		return false
 	}
 }
 
-// absorb returns the result code gives for any left operand when w is its
-// absorbing right operand, decoded by the opcode's own family.
-func absorb(code instr.Opcode, w uint64) (uint64, bool) {
-	switch code {
-	case instr.I32_MUL, instr.I32_AND:
-		return 0, uint32(w) == 0
-	case instr.I32_OR:
+// absorb returns the result op gives for any left operand when w is its
+// absorbing right operand, decoded by the lane of the operands.
+func absorb(op ssa.Op, w uint64, lane ssa.Type) (uint64, bool) {
+	wide := lane == ssa.TypeI64
+	switch op {
+	case ssa.OpIntMul, ssa.OpIntAnd:
+		return 0, mask(w, wide) == 0
+	case ssa.OpIntOr:
+		if wide {
+			return math.MaxUint64, w == math.MaxUint64
+		}
 		return word(int32(-1)), uint32(w) == 0xFFFFFFFF
-	case instr.I64_MUL, instr.I64_AND:
-		return 0, w == 0
-	case instr.I64_OR:
-		return math.MaxUint64, w == math.MaxUint64
 	default:
 		return 0, false
 	}
 }
 
-// identity reports whether w is code's identity operand, decoded by the
-// opcode's own family: the i32 lane for an i32 op, the full word for i64.
-func identity(code instr.Opcode, w uint64) bool {
-	switch code {
-	case instr.I32_ADD, instr.I32_SUB, instr.I32_OR, instr.I32_XOR,
-		instr.I32_SHL, instr.I32_SHR_S, instr.I32_SHR_U:
-		return uint32(w) == 0
-	case instr.I32_AND:
+// identity reports whether w is op's identity operand, decoded by the lane of
+// the operands: the i32 lane for an i32 operation, the full word for i64.
+func identity(op ssa.Op, w uint64, lane ssa.Type) bool {
+	wide := lane == ssa.TypeI64
+	switch op {
+	case ssa.OpIntAdd, ssa.OpIntSub, ssa.OpIntOr, ssa.OpIntXor, ssa.OpIntShl, ssa.OpIntAShr, ssa.OpIntLShr:
+		return mask(w, wide) == 0
+	case ssa.OpIntAnd:
+		if wide {
+			return w == math.MaxUint64
+		}
 		return uint32(w) == 0xFFFFFFFF
-	case instr.I32_MUL, instr.I32_DIV_S, instr.I32_DIV_U:
-		return uint32(w) == 1
-	case instr.I64_ADD, instr.I64_SUB, instr.I64_OR, instr.I64_XOR,
-		instr.I64_SHL, instr.I64_SHR_S, instr.I64_SHR_U:
-		return w == 0
-	case instr.I64_AND:
-		return w == math.MaxUint64
-	case instr.I64_MUL, instr.I64_DIV_S, instr.I64_DIV_U:
-		return w == 1
+	case ssa.OpIntMul, ssa.OpIntSDiv, ssa.OpIntUDiv:
+		return mask(w, wide) == 1
 	default:
 		return false
 	}
 }
 
-// shift rewrites a power-of-two mul/div-u into a shift, decoding the operand
-// by code's own family.
-func shift(code instr.Opcode, w uint64) (instr.Opcode, uint64, bool) {
-	switch code {
-	case instr.I32_MUL:
-		n, ok := log2(uint64(uint32(w)))
-		return instr.I32_SHL, word(int32(n)), ok
-	case instr.I32_DIV_U:
-		n, ok := log2(uint64(uint32(w)))
-		return instr.I32_SHR_U, word(int32(n)), ok
-	case instr.I64_MUL:
-		n, ok := log2(w)
-		return instr.I64_SHL, n, ok
-	case instr.I64_DIV_U:
-		n, ok := log2(w)
-		return instr.I64_SHR_U, n, ok
+// shift rewrites a power-of-two mul or unsigned div into a shift, decoding the
+// operand by the lane of the operands.
+func shift(op ssa.Op, w uint64, lane ssa.Type) (ssa.Op, uint64, bool) {
+	n, ok := log2(mask(w, lane == ssa.TypeI64))
+	switch op {
+	case ssa.OpIntMul:
+		return ssa.OpIntShl, n, ok
+	case ssa.OpIntUDiv:
+		return ssa.OpIntLShr, n, ok
 	default:
 		return 0, 0, false
 	}
+}
+
+// mask returns w decoded as its lane: the full word when wide, else its i32 lane.
+func mask(w uint64, wide bool) uint64 {
+	if wide {
+		return w
+	}
+	return uint64(uint32(w))
 }
 
 func log2(v uint64) (uint64, bool) {
@@ -357,74 +356,72 @@ func log2(v uint64) (uint64, bool) {
 	return uint64(bits.TrailingZeros64(v)), true
 }
 
-func eval(code instr.Opcode, args []uint64) (uint64, bool) {
-	switch code {
-	case instr.I32_ADD, instr.I32_SUB, instr.I32_MUL, instr.I32_DIV_S, instr.I32_DIV_U,
-		instr.I32_REM_S, instr.I32_REM_U, instr.I32_SHL, instr.I32_SHR_S, instr.I32_SHR_U,
-		instr.I32_XOR, instr.I32_AND, instr.I32_OR,
-		instr.I32_EQ, instr.I32_NE, instr.I32_LT_S, instr.I32_LT_U, instr.I32_GT_S, instr.I32_GT_U,
-		instr.I32_LE_S, instr.I32_LE_U, instr.I32_GE_S, instr.I32_GE_U:
-		return evalI32(code, int32(uint32(args[0])), int32(uint32(args[1])))
-	case instr.I32_EQZ:
-		return word(int32(uint32(args[0])) == 0), true
-
-	case instr.I64_ADD, instr.I64_SUB, instr.I64_MUL, instr.I64_DIV_S, instr.I64_DIV_U,
-		instr.I64_REM_S, instr.I64_REM_U, instr.I64_SHL, instr.I64_SHR_S, instr.I64_SHR_U,
-		instr.I64_XOR, instr.I64_AND, instr.I64_OR,
-		instr.I64_EQ, instr.I64_NE, instr.I64_LT_S, instr.I64_LT_U, instr.I64_GT_S, instr.I64_GT_U,
-		instr.I64_LE_S, instr.I64_LE_U, instr.I64_GE_S, instr.I64_GE_U:
-		return evalI64(code, int64(args[0]), int64(args[1]))
-	case instr.I64_EQZ:
-		return word(int64(args[0]) == 0), true
-
-	case instr.F32_ADD, instr.F32_SUB, instr.F32_MUL, instr.F32_DIV, instr.F32_REM, instr.F32_MOD,
-		instr.F32_EQ, instr.F32_NE, instr.F32_LT, instr.F32_GT, instr.F32_LE, instr.F32_GE:
-		return evalF32(code, math.Float32frombits(uint32(args[0])), math.Float32frombits(uint32(args[1])))
-
-	case instr.F64_ADD, instr.F64_SUB, instr.F64_MUL, instr.F64_DIV, instr.F64_REM, instr.F64_MOD,
-		instr.F64_EQ, instr.F64_NE, instr.F64_LT, instr.F64_GT, instr.F64_LE, instr.F64_GE:
-		return evalF64(code, math.Float64frombits(args[0]), math.Float64frombits(args[1]))
-
-	case instr.I32_TO_F32_S:
-		return word(float32(int32(uint32(args[0])))), true
-	case instr.I32_TO_F32_U:
-		return word(float32(uint32(args[0]))), true
-	case instr.I64_TO_I32:
+// eval evaluates operation o over its constant args, whose first has type arg
+// and whose result has type res, failing for an operation it does not model or
+// one that would trap or leave the target range.
+func eval(o ssa.Operation, arg, res ssa.Type, args []uint64) (uint64, bool) {
+	switch o.Op {
+	case ssa.OpIntAdd, ssa.OpIntSub, ssa.OpIntMul, ssa.OpIntSDiv, ssa.OpIntUDiv, ssa.OpIntSRem, ssa.OpIntURem,
+		ssa.OpIntShl, ssa.OpIntAShr, ssa.OpIntLShr, ssa.OpIntXor, ssa.OpIntAnd, ssa.OpIntOr, ssa.OpIntCmp:
+		if arg.Lane() == ssa.TypeI64 {
+			return evalI64(o, int64(args[0]), int64(args[1]))
+		}
+		return evalI32(o, int32(uint32(args[0])), int32(uint32(args[1])))
+	case ssa.OpFloatAdd, ssa.OpFloatSub, ssa.OpFloatMul, ssa.OpFloatDiv, ssa.OpFloatCmp:
+		if arg == ssa.TypeF32 {
+			return evalF32(o, math.Float32frombits(uint32(args[0])), math.Float32frombits(uint32(args[1])))
+		}
+		return evalF64(o, math.Float64frombits(args[0]), math.Float64frombits(args[1]))
+	case ssa.OpIntSIToFP:
+		switch {
+		case arg.Lane() == ssa.TypeI32 && res == ssa.TypeF32:
+			return word(float32(int32(uint32(args[0])))), true
+		case res == ssa.TypeF32:
+			return word(float32(int64(args[0]))), true
+		case arg.Lane() == ssa.TypeI64:
+			return math.Float64bits(float64(int64(args[0]))), true
+		}
+	case ssa.OpIntUIToFP:
+		switch {
+		case arg.Lane() == ssa.TypeI32 && res == ssa.TypeF32:
+			return word(float32(uint32(args[0]))), true
+		case res == ssa.TypeF32:
+			return word(float32(uint64(args[0]))), true
+		case arg.Lane() == ssa.TypeI64:
+			return math.Float64bits(float64(uint64(args[0]))), true
+		}
+	case ssa.OpIntWrap:
 		return word(int32(int64(args[0]))), true
-	case instr.I64_TO_F32_S:
-		return word(float32(int64(args[0]))), true
-	case instr.I64_TO_F32_U:
-		return word(float32(uint64(args[0]))), true
-	case instr.I64_TO_F64_S:
-		return math.Float64bits(float64(int64(args[0]))), true
-	case instr.I64_TO_F64_U:
-		return math.Float64bits(float64(uint64(args[0]))), true
-	case instr.F32_TO_I32_S, instr.F32_TO_I32_U:
-		return truncate(code, float64(math.Float32frombits(uint32(args[0]))))
-	case instr.F64_TO_I32_S, instr.F64_TO_I32_U, instr.F64_TO_I64_S, instr.F64_TO_I64_U:
-		return truncate(code, math.Float64frombits(args[0]))
-	case instr.F64_TO_F32:
+	case ssa.OpFloatFPTrunc:
 		return word(float32(math.Float64frombits(args[0]))), true
-	default:
-		return 0, false
+	case ssa.OpFloatFPToSISat, ssa.OpFloatFPToUISat:
+		f := math.Float64frombits(args[0])
+		if arg == ssa.TypeF32 {
+			f = float64(math.Float32frombits(uint32(args[0])))
+			if res != ssa.TypeI32 {
+				return 0, false
+			}
+		}
+		return truncate(o.Op == ssa.OpFloatFPToSISat, res == ssa.TypeI64, f)
 	}
+	return 0, false
 }
 
 // truncate evaluates a float-to-integer conversion, failing when f is NaN or
 // outside the target range.
-func truncate(code instr.Opcode, f float64) (uint64, bool) {
-	switch code {
-	case instr.F32_TO_I32_S, instr.F64_TO_I32_S:
+func truncate(signed, wide bool, f float64) (uint64, bool) {
+	switch {
+	case signed && !wide:
 		if math.IsNaN(f) || f < -(1<<31) || f >= 1<<31 {
 			return 0, false
 		}
 		return word(int32(f)), true
-	case instr.F32_TO_I32_U, instr.F64_TO_I32_U:
+	case !signed && !wide:
 		if math.IsNaN(f) || f < 0 || f >= 1<<32 {
 			return 0, false
 		}
 		return word(int32(uint32(f))), true
-	case instr.F64_TO_I64_S:
+	case signed:
 		if math.IsNaN(f) || f < -(1<<63) || f >= 1<<63 {
 			return 0, false
 		}
@@ -437,214 +434,202 @@ func truncate(code instr.Opcode, f float64) (uint64, bool) {
 	}
 }
 
-func evalI32(code instr.Opcode, a, b int32) (uint64, bool) {
-	switch code {
-	case instr.I32_ADD:
+func evalI32(o ssa.Operation, a, b int32) (uint64, bool) {
+	switch o.Op {
+	case ssa.OpIntAdd:
 		return word(a + b), true
-	case instr.I32_SUB:
+	case ssa.OpIntSub:
 		return word(a - b), true
-	case instr.I32_MUL:
+	case ssa.OpIntMul:
 		return word(a * b), true
-	case instr.I32_DIV_S:
+	case ssa.OpIntSDiv:
 		if b == 0 {
 			return 0, false
 		}
 		return word(a / b), true
-	case instr.I32_DIV_U:
+	case ssa.OpIntUDiv:
 		if b == 0 {
 			return 0, false
 		}
 		return word(int32(uint32(a) / uint32(b))), true
-	case instr.I32_REM_S:
+	case ssa.OpIntSRem:
 		if b == 0 {
 			return 0, false
 		}
 		return word(a % b), true
-	case instr.I32_REM_U:
+	case ssa.OpIntURem:
 		if b == 0 {
 			return 0, false
 		}
 		return word(int32(uint32(a) % uint32(b))), true
-	case instr.I32_SHL:
+	case ssa.OpIntShl:
 		return word(a << (uint32(b) & 0x1F)), true
-	case instr.I32_SHR_S:
+	case ssa.OpIntAShr:
 		return word(a >> (uint32(b) & 0x1F)), true
-	case instr.I32_SHR_U:
+	case ssa.OpIntLShr:
 		return word(int32(uint32(a) >> (uint32(b) & 0x1F))), true
-	case instr.I32_XOR:
+	case ssa.OpIntXor:
 		return word(a ^ b), true
-	case instr.I32_AND:
+	case ssa.OpIntAnd:
 		return word(a & b), true
-	case instr.I32_OR:
+	case ssa.OpIntOr:
 		return word(a | b), true
-	case instr.I32_EQ:
-		return word(a == b), true
-	case instr.I32_NE:
-		return word(a != b), true
-	case instr.I32_LT_S:
-		return word(a < b), true
-	case instr.I32_LT_U:
-		return word(uint32(a) < uint32(b)), true
-	case instr.I32_GT_S:
-		return word(a > b), true
-	case instr.I32_GT_U:
-		return word(uint32(a) > uint32(b)), true
-	case instr.I32_LE_S:
-		return word(a <= b), true
-	case instr.I32_LE_U:
-		return word(uint32(a) <= uint32(b)), true
-	case instr.I32_GE_S:
-		return word(a >= b), true
-	case instr.I32_GE_U:
-		return word(uint32(a) >= uint32(b)), true
-	default:
-		return 0, false
+	case ssa.OpIntCmp:
+		switch o.Cond {
+		case ssa.CondEQ:
+			return word(a == b), true
+		case ssa.CondNE:
+			return word(a != b), true
+		case ssa.CondSLT:
+			return word(a < b), true
+		case ssa.CondULT:
+			return word(uint32(a) < uint32(b)), true
+		case ssa.CondSGT:
+			return word(a > b), true
+		case ssa.CondUGT:
+			return word(uint32(a) > uint32(b)), true
+		case ssa.CondSLE:
+			return word(a <= b), true
+		case ssa.CondULE:
+			return word(uint32(a) <= uint32(b)), true
+		case ssa.CondSGE:
+			return word(a >= b), true
+		case ssa.CondUGE:
+			return word(uint32(a) >= uint32(b)), true
+		}
 	}
+	return 0, false
 }
 
-func evalI64(code instr.Opcode, a, b int64) (uint64, bool) {
-	switch code {
-	case instr.I64_ADD:
+func evalI64(o ssa.Operation, a, b int64) (uint64, bool) {
+	switch o.Op {
+	case ssa.OpIntAdd:
 		return uint64(a + b), true
-	case instr.I64_SUB:
+	case ssa.OpIntSub:
 		return uint64(a - b), true
-	case instr.I64_MUL:
+	case ssa.OpIntMul:
 		return uint64(a * b), true
-	case instr.I64_DIV_S:
+	case ssa.OpIntSDiv:
 		if b == 0 {
 			return 0, false
 		}
 		return uint64(a / b), true
-	case instr.I64_DIV_U:
+	case ssa.OpIntUDiv:
 		if b == 0 {
 			return 0, false
 		}
-		return uint64(uint64(a) / uint64(b)), true
-	case instr.I64_REM_S:
+		return uint64(a) / uint64(b), true
+	case ssa.OpIntSRem:
 		if b == 0 {
 			return 0, false
 		}
 		return uint64(a % b), true
-	case instr.I64_REM_U:
+	case ssa.OpIntURem:
 		if b == 0 {
 			return 0, false
 		}
-		return uint64(uint64(a) % uint64(b)), true
-	case instr.I64_SHL:
+		return uint64(a) % uint64(b), true
+	case ssa.OpIntShl:
 		return uint64(a << (uint64(b) & 0x3F)), true
-	case instr.I64_SHR_S:
+	case ssa.OpIntAShr:
 		return uint64(a >> (uint64(b) & 0x3F)), true
-	case instr.I64_SHR_U:
+	case ssa.OpIntLShr:
 		return uint64(a) >> (uint64(b) & 0x3F), true
-	case instr.I64_XOR:
+	case ssa.OpIntXor:
 		return uint64(a ^ b), true
-	case instr.I64_AND:
+	case ssa.OpIntAnd:
 		return uint64(a & b), true
-	case instr.I64_OR:
+	case ssa.OpIntOr:
 		return uint64(a | b), true
-	case instr.I64_EQ:
-		return word(a == b), true
-	case instr.I64_NE:
-		return word(a != b), true
-	case instr.I64_LT_S:
-		return word(a < b), true
-	case instr.I64_LT_U:
-		return word(uint64(a) < uint64(b)), true
-	case instr.I64_GT_S:
-		return word(a > b), true
-	case instr.I64_GT_U:
-		return word(uint64(a) > uint64(b)), true
-	case instr.I64_LE_S:
-		return word(a <= b), true
-	case instr.I64_LE_U:
-		return word(uint64(a) <= uint64(b)), true
-	case instr.I64_GE_S:
-		return word(a >= b), true
-	case instr.I64_GE_U:
-		return word(uint64(a) >= uint64(b)), true
-	default:
-		return 0, false
+	case ssa.OpIntCmp:
+		switch o.Cond {
+		case ssa.CondEQ:
+			return word(a == b), true
+		case ssa.CondNE:
+			return word(a != b), true
+		case ssa.CondSLT:
+			return word(a < b), true
+		case ssa.CondULT:
+			return word(uint64(a) < uint64(b)), true
+		case ssa.CondSGT:
+			return word(a > b), true
+		case ssa.CondUGT:
+			return word(uint64(a) > uint64(b)), true
+		case ssa.CondSLE:
+			return word(a <= b), true
+		case ssa.CondULE:
+			return word(uint64(a) <= uint64(b)), true
+		case ssa.CondSGE:
+			return word(a >= b), true
+		case ssa.CondUGE:
+			return word(uint64(a) >= uint64(b)), true
+		}
 	}
+	return 0, false
 }
 
-func evalF32(code instr.Opcode, a, b float32) (uint64, bool) {
-	switch code {
-	case instr.F32_ADD:
+func evalF32(o ssa.Operation, a, b float32) (uint64, bool) {
+	switch o.Op {
+	case ssa.OpFloatAdd:
 		return word(a + b), true
-	case instr.F32_SUB:
+	case ssa.OpFloatSub:
 		return word(a - b), true
-	case instr.F32_MUL:
+	case ssa.OpFloatMul:
 		return word(a * b), true
-	case instr.F32_DIV:
+	case ssa.OpFloatDiv:
 		if b == 0 {
 			return 0, false
 		}
 		return word(a / b), true
-	case instr.F32_REM:
-		if b == 0 {
-			return 0, false
+	case ssa.OpFloatCmp:
+		switch o.Cond {
+		case ssa.CondOEQ:
+			return word(a == b), true
+		case ssa.CondUNE:
+			return word(a != b), true
+		case ssa.CondOLT:
+			return word(a < b), true
+		case ssa.CondOGT:
+			return word(a > b), true
+		case ssa.CondOLE:
+			return word(a <= b), true
+		case ssa.CondOGE:
+			return word(a >= b), true
 		}
-		return word(float32(mod(float64(a), float64(b), false))), true
-	case instr.F32_MOD:
-		if b == 0 {
-			return 0, false
-		}
-		return word(float32(mod(float64(a), float64(b), true))), true
-	case instr.F32_EQ:
-		return word(a == b), true
-	case instr.F32_NE:
-		return word(a != b), true
-	case instr.F32_LT:
-		return word(a < b), true
-	case instr.F32_GT:
-		return word(a > b), true
-	case instr.F32_LE:
-		return word(a <= b), true
-	case instr.F32_GE:
-		return word(a >= b), true
-	default:
-		return 0, false
 	}
+	return 0, false
 }
 
-func evalF64(code instr.Opcode, a, b float64) (uint64, bool) {
-	switch code {
-	case instr.F64_ADD:
+func evalF64(o ssa.Operation, a, b float64) (uint64, bool) {
+	switch o.Op {
+	case ssa.OpFloatAdd:
 		return math.Float64bits(a + b), true
-	case instr.F64_SUB:
+	case ssa.OpFloatSub:
 		return math.Float64bits(a - b), true
-	case instr.F64_MUL:
+	case ssa.OpFloatMul:
 		return math.Float64bits(a * b), true
-	case instr.F64_DIV:
+	case ssa.OpFloatDiv:
 		if b == 0 {
 			return 0, false
 		}
 		return math.Float64bits(a / b), true
-	case instr.F64_REM:
-		if b == 0 {
-			return 0, false
+	case ssa.OpFloatCmp:
+		switch o.Cond {
+		case ssa.CondOEQ:
+			return word(a == b), true
+		case ssa.CondUNE:
+			return word(a != b), true
+		case ssa.CondOLT:
+			return word(a < b), true
+		case ssa.CondOGT:
+			return word(a > b), true
+		case ssa.CondOLE:
+			return word(a <= b), true
+		case ssa.CondOGE:
+			return word(a >= b), true
 		}
-		return math.Float64bits(mod(a, b, false)), true
-	case instr.F64_MOD:
-		if b == 0 {
-			return 0, false
-		}
-		return math.Float64bits(mod(a, b, true)), true
-	case instr.F64_EQ:
-		return word(a == b), true
-	case instr.F64_NE:
-		return word(a != b), true
-	case instr.F64_LT:
-		return word(a < b), true
-	case instr.F64_GT:
-		return word(a > b), true
-	case instr.F64_LE:
-		return word(a <= b), true
-	case instr.F64_GE:
-		return word(a >= b), true
-	default:
-		return 0, false
 	}
+	return 0, false
 }
 
 // word encodes a folded result as its native word.
@@ -658,12 +643,4 @@ func word[v bool | int32 | float32](x v) uint64 {
 		return types.BoxF32(v).Word()
 	}
 	return 0
-}
-
-func mod(a, b float64, floored bool) float64 {
-	m := math.Mod(a, b)
-	if floored && m != 0 && (m < 0) != (b < 0) {
-		m += b
-	}
-	return m
 }

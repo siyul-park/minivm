@@ -4,7 +4,6 @@ package arm64
 import (
 	"slices"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/asm"
 	target "github.com/siyul-park/minivm/internal/asm/arm64"
 	"github.com/siyul-park/minivm/internal/jit"
@@ -27,15 +26,15 @@ type Machine struct {
 	// exec op can assert its own container argument is one (compile.Site
 	// carries no such query).
 	guards map[ssa.Value]ssa.Shape
-	// slices is the element pointer and length each OpSlice result's array
+	// slices is the element pointer and length each OpArrayView result's array
 	// had where the slice ran; array ops naming the result read these.
 	slices map[ssa.Value][2]asm.VReg
-	// bounds is the index register and slice each OpBound result names.
+	// bounds is the index register and slice each OpArrayBound result names.
 	bounds map[ssa.Value]bound
 	// registers is this function's register-convention results (see compile's
-	// registers), empty when OpReturn boxes to the VM frame instead.
+	// registers), empty when TermReturn boxes to the VM frame instead.
 	registers []types.Kind
-	// borrows is per-parameter, from transform.Borrows: OpReturn releases a
+	// borrows is per-parameter, from transform.Borrows: TermReturn releases a
 	// borrowed slot only at depth 1, the Go-entered activation, since
 	// threaded CALL pushed it owned; a native caller lent it instead. Empty
 	// for an OSR unit, whose threaded-entered frame owns every slot.
@@ -44,12 +43,12 @@ type Machine struct {
 	// (Layout.Upvals); upval slots address it.
 	upvals asm.VReg
 	// flag is the compare Site.Fuse left in the condition flags, true
-	// under cond, for the OpBranch right after it.
+	// under cond, for the TermBrIf right after it.
 	flag ssa.Value
 	cond uint8
 }
 
-// bound is an index register proven within the slice an OpBound names.
+// bound is an index register proven within the slice an OpArrayBound names.
 type bound struct {
 	slice ssa.Value
 	index asm.VReg
@@ -74,6 +73,21 @@ var jumps = [...]target.Op{
 	target.CondGE: target.OpBGE, target.CondLT: target.OpBLT,
 	target.CondGT: target.OpBGT, target.CondLE: target.OpBLE,
 }
+
+// integer and float map a condition to the flags test that decides it. A float
+// condition absent from float has no lowering: the unordered ones exist so
+// every condition has an inverse, and no opcode compares by them.
+var (
+	integer = map[ssa.Cond]uint8{
+		ssa.CondEQ: target.CondEQ, ssa.CondNE: target.CondNE,
+		ssa.CondSLT: target.CondLT, ssa.CondSLE: target.CondLE, ssa.CondSGT: target.CondGT, ssa.CondSGE: target.CondGE,
+		ssa.CondULT: target.CondCC, ssa.CondULE: target.CondLS, ssa.CondUGT: target.CondHI, ssa.CondUGE: target.CondCS,
+	}
+	float = map[ssa.Cond]uint8{
+		ssa.CondOEQ: target.CondEQ, ssa.CondUNE: target.CondNE,
+		ssa.CondOLT: target.CondMI, ssa.CondOLE: target.CondLS, ssa.CondOGT: target.CondGT, ssa.CondOGE: target.CondGE,
+	}
+)
 
 // New returns an ARM64 machine.
 func New() *Machine {
@@ -230,40 +244,38 @@ func (m *Machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 		return m.load(a, op, s)
 	case ssa.OpStore:
 		return m.store(a, op, s)
-	case ssa.OpExec:
-		return m.exec(a, op, s)
 	case ssa.OpGuardKind:
 		return m.guard(a, op, s)
 	case ssa.OpGuardShape:
 		return m.shape(a, op, s)
 	case ssa.OpGuardValue:
 		return m.value(a, op, s)
-	case ssa.OpSlice:
+	case ssa.OpArrayView:
 		return m.slice(a, op, s)
-	case ssa.OpBound:
+	case ssa.OpArrayBound:
 		return m.bound(op, s)
 	case ssa.OpGuardBounds:
 		return limit(a, op, s)
-	case ssa.OpRetain:
+	case ssa.OpRefRetain:
 		m.retain(a, s.Reg(op.Args[0]))
 		return true
-	case ssa.OpRelease:
+	case ssa.OpRefRelease:
 		m.release(a, s.Reg(op.Args[0]), s)
 		return true
 	default:
-		return false
+		return op.Op.Data() && m.data(a, op, s)
 	}
 }
 
-// Branch transfers control to labels: OpBranch takes labels[0] on nonzero,
-// OpTable takes labels[i] for index i and the last label out of range. An
-// edge to next falls through; an OpBranch whose nonzero edge is next
+// Branch transfers control to labels: TermBrIf takes labels[0] on nonzero,
+// TermBrTable takes labels[i] for index i and the last label out of range. An
+// edge to next falls through; an TermBrIf whose nonzero edge is next
 // branches on the inverted condition instead. A fused compare's condition
 // is read from the flags.
 func (m *Machine) Branch(a *asm.Assembler, t ssa.Terminator, s compile.Site, labels []asm.Label, next asm.Label) {
-	switch t.Op {
-	case ssa.OpJump:
-	case ssa.OpBranch:
+	switch t.Term {
+	case ssa.TermJump:
+	case ssa.TermBrIf:
 		yes, no, invert := labels[0], labels[1], labels[0] == next
 		if invert {
 			yes, no = no, yes
@@ -279,7 +291,7 @@ func (m *Machine) Branch(a *asm.Assembler, t ssa.Terminator, s compile.Site, lab
 			a.Emit(target.CBNZLabel(s.Reg(t.Args[0]), yes))
 		}
 		labels = []asm.Label{no}
-	case ssa.OpTable:
+	case ssa.TermBrTable:
 		index := s.Reg(t.Args[0])
 		scratch := target.X16
 		if index.Width() == asm.Width32 {
@@ -299,11 +311,11 @@ func (m *Machine) Branch(a *asm.Assembler, t ssa.Terminator, s compile.Site, lab
 	}
 }
 
-// Return boxes results into the interpreter's return slots. OpReturn first
+// Return boxes results into the interpreter's return slots. TermReturn first
 // releases reference-capable frame slots, matching threaded RETURN.
 func (m *Machine) Return(a *asm.Assembler, t ssa.Terminator, s compile.Site) {
 	base := len(m.kinds)
-	if t.Op == ssa.OpReturn {
+	if t.Term == ssa.TermReturn {
 		base = 0
 		if slices.Contains(m.borrows, true) {
 			skip := a.Label()
@@ -337,7 +349,7 @@ func (m *Machine) Return(a *asm.Assembler, t ssa.Terminator, s compile.Site) {
 			a.Emit(target.STR(target.XZR, target.X25, int16(i*8)))
 		}
 	}
-	if t.Op == ssa.OpReturn && len(m.registers) > 0 {
+	if t.Term == ssa.TermReturn && len(m.registers) > 0 {
 
 		for i, v := range t.Args {
 			convention(a, s.Reg(v), i, false)
@@ -581,216 +593,158 @@ func (m *Machine) base(a *asm.Assembler, slot ssa.Slot) (asm.Reg, bool) {
 	}
 }
 
-// exec lowers an OpExec by its instruction code.
-func (m *Machine) exec(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	switch op.Code {
-	case instr.I32_ADD:
-		return arith(a, op, s, asm.Width32, true)
-	case instr.I64_ADD:
-		return arith(a, op, s, asm.Width64, true)
-	case instr.I32_SUB:
-		return arith(a, op, s, asm.Width32, false)
-	case instr.I64_SUB:
-		return arith(a, op, s, asm.Width64, false)
-	case instr.I32_MUL, instr.I64_MUL:
+// data lowers a data operation. Width comes from the types of its values: a
+// 32-bit lane or f32 is 32 bits wide, an i64 or f64 64.
+func (m *Machine) data(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	switch op.Op {
+	case ssa.OpIntAdd:
+		return arith(a, op, s, result(s, op), true)
+	case ssa.OpIntSub:
+		return arith(a, op, s, result(s, op), false)
+	case ssa.OpIntMul:
 		return binary(a, op, s, target.MUL)
-	case instr.I32_AND, instr.I64_AND:
+	case ssa.OpIntAnd:
 		return binary(a, op, s, target.AND)
-	case instr.I32_OR, instr.I64_OR:
+	case ssa.OpIntOr:
 		return binary(a, op, s, target.ORR)
-	case instr.I32_XOR, instr.I64_XOR:
+	case ssa.OpIntXor:
 		return binary(a, op, s, target.EOR)
-	case instr.I32_SHL, instr.I64_SHL:
+	case ssa.OpIntShl:
 		return binary(a, op, s, target.LSL)
-	case instr.I32_SHR_S, instr.I64_SHR_S:
+	case ssa.OpIntAShr:
 		return binary(a, op, s, target.ASR)
-	case instr.I32_SHR_U, instr.I64_SHR_U:
+	case ssa.OpIntLShr:
 		return binary(a, op, s, target.LSR)
-	case instr.I32_ROTR, instr.I64_ROTR:
+	case ssa.OpIntRotr:
 		return binary(a, op, s, target.ROR)
-	case instr.I32_ROTL:
-		return m.rotl(a, op, s, asm.Width32)
-	case instr.I64_ROTL:
-		return m.rotl(a, op, s, asm.Width64)
-	case instr.I32_DIV_S, instr.I32_DIV_U, instr.I32_REM_S, instr.I32_REM_U:
-		return divide(a, op, s, asm.Width32)
-	case instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U:
-		return divide(a, op, s, asm.Width64)
-	case instr.I32_EQZ:
-		return m.eqz(a, op, s, asm.Width32)
-	case instr.I64_EQZ:
-		return m.eqz(a, op, s, asm.Width64)
-	case instr.I32_EQ, instr.F32_EQ:
-		return m.compare(a, op, s, target.CondEQ, asm.Width32)
-	case instr.I32_NE, instr.F32_NE:
-		return m.compare(a, op, s, target.CondNE, asm.Width32)
-	case instr.I32_LT_S:
-		return m.compare(a, op, s, target.CondLT, asm.Width32)
-	case instr.I32_LT_U:
-		return m.compare(a, op, s, target.CondCC, asm.Width32)
-	case instr.I32_GT_S, instr.F32_GT:
-		return m.compare(a, op, s, target.CondGT, asm.Width32)
-	case instr.I32_GT_U:
-		return m.compare(a, op, s, target.CondHI, asm.Width32)
-	case instr.I32_LE_S:
-		return m.compare(a, op, s, target.CondLE, asm.Width32)
-	case instr.I32_LE_U:
-		return m.compare(a, op, s, target.CondLS, asm.Width32)
-	case instr.I32_GE_S, instr.F32_GE:
-		return m.compare(a, op, s, target.CondGE, asm.Width32)
-	case instr.I32_GE_U:
-		return m.compare(a, op, s, target.CondCS, asm.Width32)
-	case instr.I64_EQ, instr.F64_EQ:
-		return m.compare(a, op, s, target.CondEQ, asm.Width64)
-	case instr.I64_NE, instr.F64_NE:
-		return m.compare(a, op, s, target.CondNE, asm.Width64)
-	case instr.I64_LT_S:
-		return m.compare(a, op, s, target.CondLT, asm.Width64)
-	case instr.I64_LT_U:
-		return m.compare(a, op, s, target.CondCC, asm.Width64)
-	case instr.I64_GT_S, instr.F64_GT:
-		return m.compare(a, op, s, target.CondGT, asm.Width64)
-	case instr.I64_GT_U:
-		return m.compare(a, op, s, target.CondHI, asm.Width64)
-	case instr.I64_LE_S:
-		return m.compare(a, op, s, target.CondLE, asm.Width64)
-	case instr.I64_LE_U:
-		return m.compare(a, op, s, target.CondLS, asm.Width64)
-	case instr.I64_GE_S, instr.F64_GE:
-		return m.compare(a, op, s, target.CondGE, asm.Width64)
-	case instr.I64_GE_U:
-		return m.compare(a, op, s, target.CondCS, asm.Width64)
-	case instr.F32_LT:
-		return m.compare(a, op, s, target.CondMI, asm.Width32)
-	case instr.F32_LE:
-		return m.compare(a, op, s, target.CondLS, asm.Width32)
-	case instr.F64_LT:
-		return m.compare(a, op, s, target.CondMI, asm.Width64)
-	case instr.F64_LE:
-		return m.compare(a, op, s, target.CondLS, asm.Width64)
-	case instr.I32_EXTEND8_S, instr.I64_EXTEND8_S:
+	case ssa.OpIntRotl:
+		return m.rotl(a, op, s, result(s, op))
+	case ssa.OpIntSDiv, ssa.OpIntUDiv, ssa.OpIntSRem, ssa.OpIntURem:
+		return divide(a, op, s, result(s, op))
+	case ssa.OpIntCmp:
+		cond, ok := integer[op.Cond]
+		return ok && m.compare(a, op, s, cond, operand(s, op))
+	case ssa.OpFloatCmp:
+		cond, ok := float[op.Cond]
+		return ok && m.compare(a, op, s, cond, operand(s, op))
+	case ssa.OpRefCmp:
+		cond, ok := integer[op.Cond]
+		return ok && m.compare(a, op, s, cond, asm.Width64)
+	case ssa.OpStringCmp:
+		cond, ok := integer[op.Cond]
+		return ok && m.stringCompare(a, op, s, cond)
+	case ssa.OpIntSExt8:
 		return unary(a, op, s, target.SXTB)
-	case instr.I32_EXTEND16_S, instr.I64_EXTEND16_S:
+	case ssa.OpIntSExt16:
 		return unary(a, op, s, target.SXTH)
-	case instr.I64_EXTEND32_S:
+	case ssa.OpIntSExt32:
 		return unary(a, op, s, target.SXTW)
-	case instr.I32_CLZ, instr.I64_CLZ:
+	case ssa.OpIntClz:
 		return unary(a, op, s, target.CLZ)
-	case instr.I32_CTZ:
-		return m.ctz(a, op, s, asm.Width32)
-	case instr.I64_CTZ:
-		return m.ctz(a, op, s, asm.Width64)
-	case instr.I32_POPCNT:
-		return m.popcnt(a, op, s, asm.Width32)
-	case instr.I64_POPCNT:
-		return m.popcnt(a, op, s, asm.Width64)
-	case instr.I32_TO_I64_S:
+	case ssa.OpIntCtz:
+		return m.ctz(a, op, s, result(s, op))
+	case ssa.OpIntPopcnt:
+		return m.popcnt(a, op, s, result(s, op))
+	case ssa.OpIntSExt:
 		return convert(a, op, s, target.SXTW)
-	case instr.I32_TO_I64_U:
+	case ssa.OpIntZExt:
 		return convert(a, op, s, target.UXTW)
-	case instr.I32_TO_F32_S, instr.I32_TO_F64_S, instr.I64_TO_F32_S, instr.I64_TO_F64_S:
+	case ssa.OpIntSIToFP:
 		return convert(a, op, s, target.SCVTF)
-	case instr.I32_TO_F32_U, instr.I32_TO_F64_U, instr.I64_TO_F32_U, instr.I64_TO_F64_U:
+	case ssa.OpIntUIToFP:
 		return convert(a, op, s, target.UCVTF)
-	case instr.F32_TO_F64, instr.F64_TO_F32:
+	case ssa.OpFloatFPExt, ssa.OpFloatFPTrunc:
 		return convert(a, op, s, target.FCVT)
-	case instr.I64_TO_I32:
+	case ssa.OpIntWrap:
 		return narrow(a, op, s)
-	case instr.I32_REINTERPRET_F32, instr.I64_REINTERPRET_F64, instr.F32_REINTERPRET_I32, instr.F64_REINTERPRET_I64:
+	case ssa.OpIntBitcast, ssa.OpFloatBitcast:
 		return reinterpret(a, op, s)
-	case instr.F32_ADD, instr.F64_ADD:
+	case ssa.OpFloatAdd:
 		return binary(a, op, s, target.FADD)
-	case instr.F32_SUB, instr.F64_SUB:
+	case ssa.OpFloatSub:
 		return binary(a, op, s, target.FSUB)
-	case instr.F32_MUL, instr.F64_MUL:
+	case ssa.OpFloatMul:
 		return binary(a, op, s, target.FMUL)
-	case instr.F32_DIV, instr.F64_DIV:
+	case ssa.OpFloatDiv:
 		return binary(a, op, s, target.FDIV)
-	case instr.F32_MIN, instr.F64_MIN:
+	case ssa.OpFloatMin:
 		return binary(a, op, s, target.FMIN)
-	case instr.F32_MAX, instr.F64_MAX:
+	case ssa.OpFloatMax:
 		return binary(a, op, s, target.FMAX)
-	case instr.F32_ABS, instr.F64_ABS:
+	case ssa.OpFloatAbs:
 		return unary(a, op, s, target.FABS)
-	case instr.F32_NEG, instr.F64_NEG:
+	case ssa.OpFloatNeg:
 		return unary(a, op, s, target.FNEG)
-	case instr.F32_SQRT, instr.F64_SQRT:
+	case ssa.OpFloatSqrt:
 		return unary(a, op, s, target.FSQRT)
-	case instr.F32_CEIL, instr.F64_CEIL:
+	case ssa.OpFloatCeil:
 		return unary(a, op, s, target.FRINTP)
-	case instr.F32_FLOOR, instr.F64_FLOOR:
+	case ssa.OpFloatFloor:
 		return unary(a, op, s, target.FRINTM)
-	case instr.F32_TRUNC, instr.F64_TRUNC:
+	case ssa.OpFloatTrunc:
 		return unary(a, op, s, target.FRINTZ)
-	case instr.F32_NEAREST, instr.F64_NEAREST:
+	case ssa.OpFloatNearest:
 		return unary(a, op, s, target.FRINTN)
-	case instr.F32_COPYSIGN:
-		return m.copysign(a, op, s, asm.Width32)
-	case instr.F64_COPYSIGN:
-		return m.copysign(a, op, s, asm.Width64)
-	case instr.F32_TO_I32_S:
-		return truncate(a, op, s, target.FCVTZS, asm.Width32, asm.Width32)
-	case instr.F32_TO_I32_U:
-		return truncate(a, op, s, target.FCVTZU, asm.Width32, asm.Width32)
-	case instr.F32_TO_I64_S:
-		return truncate(a, op, s, target.FCVTZS, asm.Width32, asm.Width64)
-	case instr.F32_TO_I64_U:
-		return truncate(a, op, s, target.FCVTZU, asm.Width32, asm.Width64)
-	case instr.F64_TO_I32_S:
-		return truncate(a, op, s, target.FCVTZS, asm.Width64, asm.Width32)
-	case instr.F64_TO_I32_U:
-		return truncate(a, op, s, target.FCVTZU, asm.Width64, asm.Width32)
-	case instr.F64_TO_I64_S:
-		return truncate(a, op, s, target.FCVTZS, asm.Width64, asm.Width64)
-	case instr.F64_TO_I64_U:
-		return truncate(a, op, s, target.FCVTZU, asm.Width64, asm.Width64)
-	case instr.SELECT:
+	case ssa.OpFloatCopysign:
+		return m.copysign(a, op, s, result(s, op))
+	case ssa.OpFloatFPToSISat:
+		return truncate(a, op, s, target.FCVTZS, operand(s, op), result(s, op))
+	case ssa.OpFloatFPToUISat:
+		return truncate(a, op, s, target.FCVTZU, operand(s, op), result(s, op))
+	case ssa.OpSelect:
 		return choose(a, op, s)
-	case instr.REF_IS_NULL:
+	case ssa.OpRefIsNull:
 		return refIsNull(a, op, s)
-	case instr.ARRAY_GET:
+	case ssa.OpArrayGet:
 		return m.arrayGet(a, op, s)
-	case instr.ARRAY_SET:
+	case ssa.OpArraySet:
 		return m.arraySet(a, op, s)
-	case instr.ARRAY_LEN:
+	case ssa.OpArrayLen:
 		return m.arrayLen(a, op, s)
-	case instr.STRING_LEN:
+	case ssa.OpStringLen:
 		return m.stringLen(a, op, s)
-	case instr.STRING_EQ:
-		return m.stringCompare(a, op, s, target.CondEQ)
-	case instr.STRING_NE:
-		return m.stringCompare(a, op, s, target.CondNE)
-	case instr.STRING_LT:
-		return m.stringCompare(a, op, s, target.CondCC)
-	case instr.STRING_GT:
-		return m.stringCompare(a, op, s, target.CondHI)
-	case instr.STRING_LE:
-		return m.stringCompare(a, op, s, target.CondLS)
-	case instr.STRING_GE:
-		return m.stringCompare(a, op, s, target.CondCS)
-	case instr.REF_EQ:
-		return m.compare(a, op, s, target.CondEQ, asm.Width64)
-	case instr.REF_NE:
-		return m.compare(a, op, s, target.CondNE, asm.Width64)
-	case instr.STRUCT_NEW_DEFAULT:
+	case ssa.OpStructNewDefault:
 		return m.reserve(a, op, s, 0)
-	case instr.ARRAY_NEW_DEFAULT:
+	case ssa.OpArrayNewDefault:
 		return m.reserve(a, op, s, 1)
-	case instr.STRUCT_GET:
+	case ssa.OpStructGet:
 		return m.structGet(a, op, s)
-	case instr.STRUCT_SET:
+	case ssa.OpStructSet:
 		return m.structSet(a, op, s)
-	case instr.MAP_LEN:
+	case ssa.OpMapLen:
 		return m.mapLen(a, op, s)
-	case instr.MAP_GET, instr.MAP_LOOKUP:
+	case ssa.OpMapGet, ssa.OpMapLookup:
 		return m.mapGet(a, op, s)
-	case instr.MAP_SET:
+	case ssa.OpMapSet:
 		return m.mapSet(a, op, s)
-	case instr.MAP_DELETE:
+	case ssa.OpMapDelete:
 		return m.mapDelete(a, op, s)
 	default:
 		return false
 	}
+}
+
+// result is the width of op's first result, operand that of its first argument.
+func result(s compile.Site, op ssa.Operation) asm.RegWidth {
+	if len(op.Results) == 0 {
+		return asm.Width32
+	}
+	return width(s.Type(op.Results[0]))
+}
+
+func operand(s compile.Site, op ssa.Operation) asm.RegWidth {
+	if len(op.Args) == 0 {
+		return asm.Width32
+	}
+	return width(s.Type(op.Args[0]))
+}
+
+// width returns the register width a value of type t fills.
+func width(t ssa.Type) asm.RegWidth {
+	if t == ssa.TypeI64 || t == ssa.TypeF64 || t == ssa.TypeRef {
+		return asm.Width64
+	}
+	return asm.Width32
 }
 
 // ctz counts trailing zeros as RBIT then CLZ: bit-reversal turns the
@@ -867,19 +821,6 @@ func (m *Machine) copysign(a *asm.Assembler, op ssa.Operation, s compile.Site, w
 	a.Emit(target.ANDI(sign, sign, signBit))
 	a.Emit(target.ORR(mag, mag, sign))
 	a.Emit(target.FMOV(dst, mag))
-	return true
-}
-
-func (m *Machine) eqz(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWidth) bool {
-	if !has(op, 1, 1) {
-		return false
-	}
-	src, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
-	if !match(asm.RegTypeInt, width, src) || !match(asm.RegTypeInt, asm.Width32, dst) {
-		return false
-	}
-	a.Emit(target.CMPI(src, 0))
-	m.set(a, s, op.Results[0], dst, target.CondEQ)
 	return true
 }
 
@@ -976,24 +917,24 @@ func (m *Machine) shape(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 		return false
 	}
 	ref, dst := s.Reg(op.Args[0]), s.Reg(op.Results[0])
-	if op.Shape.Function != 0 {
+	if op.Shape.Form == ssa.FormClosure {
 		expectRef(a, ref, s.Deopt())
 	}
 	addr := m.heap(a, ref)
 	a.Emit(target.LDR(target.X16, addr, 0))
 	expect(a, uint64(expected), s.Deopt())
-	if op.Shape.Struct && op.Shape.Type != 0 {
+	if op.Shape.Form == ssa.FormStruct && op.Shape.Type != 0 {
 		a.Emit(target.LDR(target.X16, addr, int16(jit.OffsetData)))
 		a.Emit(target.LDR(target.X16, target.X16, int16(jit.OffsetStructTyp)))
 		expect(a, uint64(op.Shape.Type), s.Deopt())
 	}
-	if op.Shape.Map {
+	if op.Shape.Form == ssa.FormMap {
 		a.Emit(target.LDR(target.X16, addr, int16(jit.OffsetData)))
 		a.Emit(target.LDR(target.X16, target.X16, int16(jit.OffsetMapTyp)))
 		a.Emit(target.LDRB(target.X16, target.X16, int16(jit.OffsetMapTypeElemKind)))
 		a.Emit(target.CMPI(target.X16, uint16(op.Shape.Elem)), target.BCondLabel(target.OpBNE, s.Deopt()))
 	}
-	if op.Shape.Function != 0 {
+	if op.Shape.Form == ssa.FormClosure {
 		m.closure(a, addr, op.Shape, s)
 	}
 	m.Move(a, dst, ref)
@@ -1031,7 +972,7 @@ func (m *Machine) slice(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 		return false
 	}
 	shape, ok := m.guards[op.Args[0]]
-	if !ok || shape.Struct || shape.Function != 0 {
+	if !ok || shape.Form != ssa.FormArray {
 		return false
 	}
 	ptr, ln := m.elements(a, s, op.Args[0], shape)
@@ -1171,10 +1112,10 @@ func (m *Machine) arrayGet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 	}
 	ptr, ln := m.elements(a, s, op.Args[0], shape)
 	dst := s.Reg(op.Results[0])
-	switch stride(shape.Kind) {
+	switch stride(shape.Elem) {
 	case 1:
 		at := m.element(a, s, op, ptr, ln, 0)
-		if shape.Kind == types.KindI8 {
+		if shape.Elem == types.KindI8 {
 			a.Emit(at.row(target.LDRSB, target.LDRSBR, dst))
 		} else {
 			a.Emit(at.row(target.LDRB, target.LDRBR, dst))
@@ -1183,7 +1124,7 @@ func (m *Machine) arrayGet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 		a.Emit(m.element(a, s, op, ptr, ln, 2).row(target.LDR, target.LDRR, dst))
 	default:
 		a.Emit(m.element(a, s, op, ptr, ln, 3).row(target.LDR, target.LDRR, dst))
-		if shape.Kind == types.KindRef {
+		if shape.Elem == types.KindRef {
 			m.retain(a, dst)
 		}
 	}
@@ -1203,10 +1144,10 @@ func (m *Machine) arraySet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 	}
 	ptr, ln := m.elements(a, s, op.Args[0], shape)
 	val := s.Reg(op.Args[2])
-	switch stride(shape.Kind) {
+	switch stride(shape.Elem) {
 	case 1:
 		at := m.element(a, s, op, ptr, ln, 0)
-		if shape.Kind == types.KindI1 && s.Type(op.Args[2]).Kind() != types.KindI1 {
+		if shape.Elem == types.KindI1 && s.Type(op.Args[2]).Kind() != types.KindI1 {
 
 			bit := m.vreg()
 			a.Emit(target.CMPI(val, 0), target.CSET(bit, target.CondNE))
@@ -1216,14 +1157,14 @@ func (m *Machine) arraySet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 	case 4:
 
 		at := m.element(a, s, op, ptr, ln, 2)
-		if shape.Kind == types.KindI32 {
+		if shape.Elem == types.KindI32 {
 			a.Emit(at.row(target.STRW, target.STRWR, val))
 		} else {
 			a.Emit(at.row(target.STR, target.STRR, val))
 		}
 	default:
 		at := m.element(a, s, op, ptr, ln, 3)
-		if shape.Kind == types.KindRef {
+		if shape.Elem == types.KindRef {
 
 			m.replace(a, s, at, box(a, s, op.Args[2]))
 		} else {
@@ -1244,8 +1185,8 @@ func (m *Machine) arraySet(a *asm.Assembler, op ssa.Operation, s compile.Site) b
 // bytecode operand, and the interpreter sizes the table to the program's
 // types, which verification bounds it by.
 func (m *Machine) reserve(a *asm.Assembler, op ssa.Operation, s compile.Site, args int) bool {
-	index, ok := s.Operand()
-	if !has(op, args, 1) || !ok {
+	index := op.Shape.Index
+	if !has(op, args, 1) {
 		return false
 	}
 	empty, resume := s.Bridge()
@@ -1306,7 +1247,7 @@ func (m *Machine) structGet(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 		return false
 	}
 	shape, ok := m.guards[op.Args[0]]
-	if !ok || !shape.Struct {
+	if !ok || shape.Form != ssa.FormStruct {
 		return false
 	}
 	var load func(dst, base asm.Reg, offset int16) asm.Instruction
@@ -1352,7 +1293,7 @@ func (m *Machine) structSet(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 		return false
 	}
 	shape, ok := m.guards[op.Args[0]]
-	if !ok || !shape.Struct {
+	if !ok || shape.Form != ssa.FormStruct {
 		return false
 	}
 	kind := s.Type(op.Args[2]).Kind()
@@ -1391,7 +1332,7 @@ func (m *Machine) mapLen(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 	if !has(op, 1, 1) {
 		return false
 	}
-	if shape, ok := m.mapOf(op.Args[0]); !ok || !shape.Serves(op.Code, 0, 0) || !match(asm.RegTypeInt, asm.Width32, s.Reg(op.Results[0])) {
+	if shape, ok := m.mapOf(op.Args[0]); !ok || !shape.Serves(op.Op, 0, 0) || !match(asm.RegTypeInt, asm.Width32, s.Reg(op.Results[0])) {
 		return false
 	}
 	data := m.container(a, s.Reg(op.Args[0]))
@@ -1404,7 +1345,7 @@ func (m *Machine) mapLen(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 // zero, retained when it is a reference; MAP_LOOKUP also yields whether the key
 // was found. It mirrors types.get.
 func (m *Machine) mapGet(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
-	lookup := op.Code == instr.MAP_LOOKUP
+	lookup := op.Op == ssa.OpMapLookup
 	results := 1
 	if lookup {
 		results = 2
@@ -1413,7 +1354,7 @@ func (m *Machine) mapGet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 		return false
 	}
 	shape, ok := m.mapOf(op.Args[0])
-	if !ok || !shape.Serves(op.Code, s.Type(op.Args[1]).Kind(), 0) || s.Type(op.Results[0]).Kind() != shape.Elem {
+	if !ok || !shape.Serves(op.Op, s.Type(op.Args[1]).Kind(), 0) || s.Type(op.Results[0]).Kind() != shape.Elem {
 		return false
 	}
 	if lookup && s.Type(op.Results[1]) != ssa.TypeI1 {
@@ -1463,7 +1404,7 @@ func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 		return false
 	}
 	shape, ok := m.mapOf(op.Args[0])
-	if !ok || !shape.Serves(op.Code, s.Type(op.Args[1]).Kind(), s.Type(op.Args[2]).Kind()) {
+	if !ok || !shape.Serves(op.Op, s.Type(op.Args[1]).Kind(), s.Type(op.Args[2]).Kind()) {
 		return false
 	}
 	exit, resume := s.Bridge()
@@ -1520,7 +1461,7 @@ func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 		return false
 	}
 	shape, ok := m.mapOf(op.Args[0])
-	if !ok || !shape.Serves(op.Code, s.Type(op.Args[1]).Kind(), 0) {
+	if !ok || !shape.Serves(op.Op, s.Type(op.Args[1]).Kind(), 0) {
 		return false
 	}
 	hit, done := a.Label(), a.Label()
@@ -1549,7 +1490,7 @@ func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 // mapOf is the shape of map operand v when a map guard admitted it.
 func (m *Machine) mapOf(v ssa.Value) (ssa.Shape, bool) {
 	shape, ok := m.guards[v]
-	return shape, ok && shape.Map
+	return shape, ok && shape.Form == ssa.FormMap
 }
 
 // key is the table's key word of operand v, as types.keyWord makes it: an i64 is
@@ -1557,11 +1498,11 @@ func (m *Machine) mapOf(v ssa.Value) (ssa.Shape, bool) {
 // is 0 or 1 (a Boxed.Bool is any nonzero payload).
 func (m *Machine) key(a *asm.Assembler, s compile.Site, shape ssa.Shape, v ssa.Value) asm.VReg {
 	word := s.Reg(v)
-	if shape.Kind == types.KindI64 {
+	if shape.Key == types.KindI64 {
 		return word
 	}
 	key := m.vreg()
-	switch shape.Kind {
+	switch shape.Key {
 	case types.KindI32:
 		a.Emit(target.UXTW(key, word))
 	case types.KindI8:
@@ -1635,7 +1576,7 @@ func (m *Machine) elements(a *asm.Assembler, s compile.Site, v ssa.Value, shape 
 		return sliced[0], sliced[1]
 	}
 	header := m.container(a, s.Reg(v))
-	if shape.Kind == types.KindRef {
+	if shape.Elem == types.KindRef {
 		a.Emit(target.ADDI(header, header, uint16(jit.OffsetArrayElems)))
 	}
 	ptr, ln = m.vreg(), m.vreg()
@@ -1847,12 +1788,12 @@ func divide(a *asm.Assembler, op ssa.Operation, s compile.Site, width asm.RegWid
 	}
 	a.Emit(target.CBZLabel(y, s.Trap()))
 	div, rem := target.UDIV, false
-	switch op.Code {
-	case instr.I32_DIV_S, instr.I64_DIV_S:
+	switch op.Op {
+	case ssa.OpIntSDiv:
 		div = target.SDIV
-	case instr.I32_REM_S, instr.I64_REM_S:
+	case ssa.OpIntSRem:
 		div, rem = target.SDIV, true
-	case instr.I32_REM_U, instr.I64_REM_U:
+	case ssa.OpIntURem:
 		rem = true
 	}
 	if !rem {
@@ -1878,7 +1819,7 @@ func convert(a *asm.Assembler, op ssa.Operation, s compile.Site, emit func(dst, 
 	switch {
 	case x.Type() == asm.RegTypeInt && dst.Type() == asm.RegTypeFloat:
 	case x.Type() == asm.RegTypeInt && dst.Type() == asm.RegTypeInt && x.Width() != dst.Width():
-	case x.Type() == asm.RegTypeFloat && dst.Type() == asm.RegTypeFloat && (op.Code == instr.F32_TO_F64 || op.Code == instr.F64_TO_F32):
+	case x.Type() == asm.RegTypeFloat && dst.Type() == asm.RegTypeFloat && (op.Op == ssa.OpFloatFPExt || op.Op == ssa.OpFloatFPTrunc):
 	default:
 		return false
 	}

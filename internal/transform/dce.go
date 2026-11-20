@@ -109,11 +109,9 @@ func liveness(function *ssa.Function, blocks []int) (map[site]bool, map[ssa.Valu
 		for i, operation := range block.Operations {
 			effectful := false
 			switch operation.Op {
-			case ssa.OpStore, ssa.OpGuardKind, ssa.OpGuardShape, ssa.OpGuardBounds, ssa.OpGuardValue,
-				ssa.OpRetain, ssa.OpRelease:
-				effectful = true
-			case ssa.OpExec:
-				effectful = !operation.Code.IsPure() || operation.Code.Traps()
+			case ssa.OpConst, ssa.OpLoad, ssa.OpState, ssa.OpArrayView, ssa.OpArrayBound:
+			default:
+				effectful = !operation.Pure() || operation.Traps()
 			}
 			if effectful {
 				mark(site{b, i}, operation)

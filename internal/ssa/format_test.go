@@ -4,7 +4,6 @@ import (
 	"math"
 	"testing"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -21,17 +20,17 @@ func TestFormat(t *testing.T) {
 		zero := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 0, Returns: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 0}, Results: []ssa.Value{array}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{checked}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormArray, Elem: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{checked}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 0, Results: []ssa.Value{zero}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{zero, zero}}}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{zero, zero}}}})
 
 		index := b.Param(header, ssa.TypeI32)
 		total := b.Param(header, ssa.TypeI32)
 		length := b.Value(ssa.TypeI32)
 		more := b.Value(ssa.TypeI1)
-		b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{checked}, State: state, Results: []ssa.Value{length}})
-		b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_LT_S, Args: []ssa.Value{index, length}, State: state, Results: []ssa.Value{more}})
-		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{more}, Edges: []ssa.Edge{{Block: body}, {Block: done, Args: []ssa.Value{total}}}})
+		b.Add(header, ssa.Operation{Op: ssa.OpArrayLen, Args: []ssa.Value{checked}, State: state, Results: []ssa.Value{length}})
+		b.Add(header, ssa.Operation{Op: ssa.OpIntCmp, Cond: ssa.CondSLT, Args: []ssa.Value{index, length}, State: state, Results: []ssa.Value{more}})
+		b.Term(header, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{more}, Edges: []ssa.Edge{{Block: body}, {Block: done, Args: []ssa.Value{total}}}})
 
 		inner := b.Value(ssa.TypeState)
 		elem := b.Value(ssa.TypeI32)
@@ -40,14 +39,14 @@ func TestFormat(t *testing.T) {
 		step := b.Value(ssa.TypeI32)
 		b.Add(body, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 12, Returns: 1, Stack: []ssa.Operand{{Value: index}}}}, Results: []ssa.Value{inner}})
 		b.Add(body, ssa.Operation{Op: ssa.OpGuardBounds, Args: []ssa.Value{index, length}, State: inner})
-		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{checked, index}, State: state, Results: []ssa.Value{elem}})
-		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{total, elem}, State: state, Results: []ssa.Value{next}})
+		b.Add(body, ssa.Operation{Op: ssa.OpArrayGet, Args: []ssa.Value{checked, index}, State: state, Results: []ssa.Value{elem}})
+		b.Add(body, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{total, elem}, State: state, Results: []ssa.Value{next}})
 		b.Add(body, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{one}})
-		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{index, one}, State: state, Results: []ssa.Value{step}})
-		b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{step, next}}}})
+		b.Add(body, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{index, one}, State: state, Results: []ssa.Value{step}})
+		b.Term(body, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{step, next}}}})
 
 		result := b.Param(done, ssa.TypeI32)
-		b.Term(done, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{result}})
+		b.Term(done, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{result}})
 
 		f := b.Build()
 		require.NoError(t, ssa.Verify(f))
@@ -60,15 +59,15 @@ func TestFormat(t *testing.T) {
 			"\tjump blk1(v4, v4)\n"+
 			"blk1: (v5:i32, v6:i32) <-- (blk0, blk2)\n"+
 			"\tv7:i32 = array.len v3 state v1\n"+
-			"\tv8:i1 = i32.lt_s v5, v7 state v1\n"+
-			"\tbr v8, blk2(), blk3(v6)\n"+
+			"\tv8:i1 = int.cmp slt v5, v7 state v1\n"+
+			"\tbrif v8, blk2(), blk3(v6)\n"+
 			"blk2: () <-- (blk1)\n"+
 			"\tv9:state = state {addr=1 base=0 ip=12 returns=1 stack=[v5]}\n"+
 			"\tguard.bounds v5, v7 state v9\n"+
 			"\tv10:i32 = array.get v3, v5 state v1\n"+
-			"\tv11:i32 = i32.add v6, v10 state v1\n"+
+			"\tv11:i32 = int.add v6, v10 state v1\n"+
 			"\tv12:i32 = const 1\n"+
-			"\tv13:i32 = i32.add v5, v12 state v1\n"+
+			"\tv13:i32 = int.add v5, v12 state v1\n"+
 			"\tjump blk1(v13, v11)\n"+
 			"blk3: (v14:i32) <-- (blk1)\n"+
 			"\treturn v14\n", ssa.Format(f))
@@ -80,18 +79,18 @@ func TestFormat(t *testing.T) {
 		array := b.Value(ssa.TypeRef)
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 0}, Results: []ssa.Value{array}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{array}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpRefRetain, Args: []ssa.Value{array}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{
 			{Address: 1, Stack: []ssa.Operand{{Value: array}, {Value: array, Owned: true}}},
 		}, Results: []ssa.Value{state}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 
 		f := b.Build()
 		require.NoError(t, ssa.Verify(f))
 		require.Equal(t, "func own\n"+
 			"blk0: ()\n"+
 			"\tv1:ref = load local[0]\n"+
-			"\tretain v1\n"+
+			"\tref.retain v1\n"+
 			"\tv2:state = state {addr=1 base=0 ip=0 returns=0 stack=[v1, v1 owned]}\n"+
 			"\texit state v2\n", ssa.Format(f))
 	})
@@ -105,7 +104,7 @@ func TestFormat(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{
 			{Address: 1, Locals: []ssa.Local{{Index: 1, Value: counter}}},
 		}, Results: []ssa.Value{state}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpExit, State: state})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: state})
 
 		f := b.Build()
 		require.NoError(t, ssa.Verify(f))
@@ -134,7 +133,7 @@ func TestFormat(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(math.Float32bits(1.5)), Results: []ssa.Value{f32}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: math.Float64bits(2.5), Results: []ssa.Value{f64}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: uint64(types.BoxRef(9)), Results: []ssa.Value{ref}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{i1}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{i1}})
 
 		f := b.Build()
 		require.NoError(t, ssa.Verify(f))
@@ -156,8 +155,8 @@ func TestFormat(t *testing.T) {
 		state, table, guarded := b.Value(ssa.TypeState), b.Value(ssa.TypeRef), b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Returns: 0}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal}, Results: []ssa.Value{table}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Map: true, Kind: types.KindI8, Elem: types.KindF64}, Args: []ssa.Value{table}, State: state, Results: []ssa.Value{guarded}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, State: state})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormMap, Key: types.KindI8, Elem: types.KindF64}, Args: []ssa.Value{table}, State: state, Results: []ssa.Value{guarded}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, State: state})
 
 		require.Contains(t, ssa.Format(b.Build()), "\tv3:ref = guard.shape v2 map key i8 elem f64 state v1\n")
 	})
@@ -170,8 +169,8 @@ func TestFormat(t *testing.T) {
 		checked := b.Value(ssa.TypeRef)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Returns: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceLocal, Index: 0}, Results: []ssa.Value{array}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindF64}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{checked}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{checked}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormArray, Elem: types.KindF64}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{checked}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{checked}})
 
 		f := b.Build()
 		require.NoError(t, ssa.Verify(f))
@@ -203,21 +202,21 @@ func TestFormat(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpLoad, Slot: ssa.Slot{Space: ssa.SpaceUpval, Index: 1}, Results: []ssa.Value{slot}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{slot, callee}, State: state, Results: []ssa.Value{target}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{target}, State: state, Results: []ssa.Value{kind}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpRetain, Args: []ssa.Value{target}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpRefRetain, Args: []ssa.Value{target}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpStore, Slot: ssa.Slot{Space: ssa.SpaceGlobal, Index: 2}, Args: []ssa.Value{target}, State: state})
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 3, Results: []ssa.Value{three}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.SELECT, Args: []ssa.Value{kind, three, three}, State: state, Results: []ssa.Value{picked}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_SET, Args: []ssa.Value{target, three, picked}, State: state})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Shape: ssa.Shape{Type: 0x50}, Args: []ssa.Value{callee, three}, State: state, Results: []ssa.Value{returned}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_NEW_DEFAULT, Args: []ssa.Value{returned}, State: state, Results: []ssa.Value{fresh}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpRelease, Args: []ssa.Value{fresh}, State: state})
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Struct: true, Type: 0x40}, Args: []ssa.Value{target}, State: state, Results: []ssa.Value{record}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.STRUCT_GET, Args: []ssa.Value{record, three}, State: state, Results: []ssa.Value{field}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpTable, Args: []ssa.Value{field}, Edges: []ssa.Edge{{Block: stop}, {Block: give}, {Block: end}}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpSelect, Args: []ssa.Value{kind, three, three}, State: state, Results: []ssa.Value{picked}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpArraySet, Args: []ssa.Value{target, three, picked}, State: state})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Shape: ssa.Shape{Form: ssa.FormSignature, Type: 0x50}, Args: []ssa.Value{three, callee}, State: state, Results: []ssa.Value{returned}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpArrayNewDefault, Shape: ssa.Shape{Form: ssa.FormArray, Type: 0x30}, Args: []ssa.Value{returned}, State: state, Results: []ssa.Value{fresh}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpRefRelease, Args: []ssa.Value{fresh}, State: state})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormStruct, Type: 0x40}, Args: []ssa.Value{target}, State: state, Results: []ssa.Value{record}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpStructGet, Args: []ssa.Value{record, three}, State: state, Results: []ssa.Value{field}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermBrTable, Args: []ssa.Value{field}, Edges: []ssa.Edge{{Block: stop}, {Block: give}, {Block: end}}})
 
-		b.Term(stop, ssa.Terminator{Op: ssa.OpReturn, State: state})
-		b.Term(give, ssa.Terminator{Op: ssa.OpExit, State: state})
-		b.Term(end, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(stop, ssa.Terminator{Term: ssa.TermReturn, State: state})
+		b.Term(give, ssa.Terminator{Term: ssa.TermExit, State: state})
+		b.Term(end, ssa.Terminator{Term: ssa.TermComplete})
 
 		f := b.Build()
 		require.NoError(t, ssa.Verify(f))
@@ -228,22 +227,34 @@ func TestFormat(t *testing.T) {
 			"\tv3:ref = load upval[1]\n"+
 			"\tv4:ref = guard.value v3, v2 state v1\n"+
 			"\tv5:i32 = guard.kind v4 state v1\n"+
-			"\tretain v4\n"+
+			"\tref.retain v4\n"+
 			"\tstore global[2], v4 state v1\n"+
 			"\tv6:i32 = const 3\n"+
 			"\tv7:i32 = select v5, v6, v6 state v1\n"+
 			"\tarray.set v4, v6, v7 state v1\n"+
-			"\tv8:i32 = call v2, v6 callee type 0x50 state v1\n"+
-			"\tv9:ref = array.new_default v8 state v1\n"+
-			"\trelease v9 state v1\n"+
+			"\tv8:i32 = call v6, v2 callee type 0x50 state v1\n"+
+			"\tv9:ref = array.new_default v8 kind f64 state v1\n"+
+			"\tref.release v9 state v1\n"+
 			"\tv11:ref = guard.shape v4 struct type 0x40 state v1\n"+
 			"\tv10:i32 = struct.get v11, v6 state v1\n"+
-			"\ttable v10, blk1(), blk2(), blk3()\n"+
+			"\tbr_table v10, blk1(), blk2(), blk3()\n"+
 			"blk1: () <-- (blk0)\n"+
 			"\treturn state v1\n"+
 			"blk2: () <-- (blk0)\n"+
 			"\texit state v1\n"+
 			"blk3: () <-- (blk0)\n"+
 			"\tcomplete\n", ssa.Format(f))
+	})
+
+	t.Run("prints a compare with its condition", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		x, y := b.Param(entry, ssa.TypeI32), b.Param(entry, ssa.TypeI32)
+		at := b.Value(ssa.TypeState)
+		less := b.Value(ssa.TypeI1)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{at}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntCmp, Cond: ssa.CondSLT, Args: []ssa.Value{x, y}, State: at, Results: []ssa.Value{less}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermExit, State: at})
+		require.Contains(t, ssa.Format(b.Build()), "v4:i1 = int.cmp slt v1, v2 state v3")
 	})
 }

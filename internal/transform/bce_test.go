@@ -8,7 +8,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/internal/transform"
 	"github.com/siyul-park/minivm/pass"
@@ -27,7 +26,7 @@ type boundedLoop struct {
 	offset bool
 	// test is the header compare, its operands in order (i, limit) unless
 	// swapped.
-	test    instr.Opcode
+	test    ssa.Cond
 	swapped bool
 }
 
@@ -43,12 +42,12 @@ func (l boundedLoop) build() *ssa.Function {
 	entry := b.Value(ssa.TypeState)
 	b.Add(pre, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 1}}, Results: []ssa.Value{entry}})
 	guarded, sliced := b.Value(ssa.TypeRef), b.Value(ssa.TypeRef)
-	b.Add(pre, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: entry, Results: []ssa.Value{guarded}})
-	b.Add(pre, ssa.Operation{Op: ssa.OpSlice, Args: []ssa.Value{guarded}, Results: []ssa.Value{sliced}})
+	b.Add(pre, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormArray, Elem: types.KindI32}, Args: []ssa.Value{array}, State: entry, Results: []ssa.Value{guarded}})
+	b.Add(pre, ssa.Operation{Op: ssa.OpArrayView, Args: []ssa.Value{guarded}, Results: []ssa.Value{sliced}})
 	init, limit, step := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
 	b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: l.init, Results: []ssa.Value{init}})
 	if l.length {
-		b.Add(pre, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_LEN, Args: []ssa.Value{sliced}, State: entry, Results: []ssa.Value{limit}})
+		b.Add(pre, ssa.Operation{Op: ssa.OpArrayLen, Args: []ssa.Value{sliced}, State: entry, Results: []ssa.Value{limit}})
 	} else {
 		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: l.limit, Results: []ssa.Value{limit}})
 	}
@@ -57,7 +56,7 @@ func (l boundedLoop) build() *ssa.Function {
 	} else {
 		b.Add(pre, ssa.Operation{Op: ssa.OpConst, Const: l.step, Results: []ssa.Value{step}})
 	}
-	b.Term(pre, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{init}}}})
+	b.Term(pre, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{init}}}})
 
 	i := b.Param(header, ssa.TypeI32)
 	at := b.Value(ssa.TypeState)
@@ -67,23 +66,23 @@ func (l boundedLoop) build() *ssa.Function {
 	if l.swapped {
 		args = []ssa.Value{limit, i}
 	}
-	b.Add(header, ssa.Operation{Op: ssa.OpExec, Code: l.test, Args: args, State: at, Results: []ssa.Value{cond}})
+	b.Add(header, ssa.Operation{Op: ssa.OpIntCmp, Cond: l.test, Args: args, State: at, Results: []ssa.Value{cond}})
 	edges := []ssa.Edge{{Block: exit}, {Block: body}}
-	if l.test == instr.I32_LT_S || l.test == instr.I32_GT_S {
+	if l.test == ssa.CondSLT || l.test == ssa.CondSGT {
 		edges = []ssa.Edge{{Block: body}, {Block: exit}}
 	}
-	b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: edges})
+	b.Term(header, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{cond}, Edges: edges})
 
 	index := i
 	if l.offset {
 		index = b.Value(ssa.TypeI32)
-		b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{i, step}, State: at, Results: []ssa.Value{index}})
+		b.Add(body, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{i, step}, State: at, Results: []ssa.Value{index}})
 	}
 	element, next := b.Value(ssa.TypeI32), b.Value(ssa.TypeI32)
-	b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.ARRAY_GET, Args: []ssa.Value{sliced, index}, State: at, Results: []ssa.Value{element}})
-	b.Add(body, ssa.Operation{Op: ssa.OpExec, Code: instr.I32_ADD, Args: []ssa.Value{i, step}, State: at, Results: []ssa.Value{next}})
-	b.Term(body, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{next}}}})
-	b.Term(exit, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{i}})
+	b.Add(body, ssa.Operation{Op: ssa.OpArrayGet, Args: []ssa.Value{sliced, index}, State: at, Results: []ssa.Value{element}})
+	b.Add(body, ssa.Operation{Op: ssa.OpIntAdd, Args: []ssa.Value{i, step}, State: at, Results: []ssa.Value{next}})
+	b.Term(body, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header, Args: []ssa.Value{next}}}})
+	b.Term(exit, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{i}})
 	return b.Build()
 }
 
@@ -93,7 +92,7 @@ func TestNewBCEPass(t *testing.T) {
 }
 
 func TestBCEPass_Run(t *testing.T) {
-	counted := boundedLoop{init: 0, step: 1, limit: 256, test: instr.I32_GE_S}
+	counted := boundedLoop{init: 0, step: 1, limit: 256, test: ssa.CondSGE}
 	minus := uint64(uint32(math.MaxUint32))
 	tests := []struct {
 		name    string
@@ -104,16 +103,16 @@ func TestBCEPass_Run(t *testing.T) {
 		guards, bounds int
 	}{
 		{name: "bounds an index below a constant limit behind a preheader guard", loop: counted, guards: 1, bounds: 1},
-		{name: "bounds an index below a stay-on-true compare", loop: boundedLoop{step: 1, limit: 256, test: instr.I32_LT_S}, guards: 1, bounds: 1},
-		{name: "bounds an index below a swapped compare", loop: boundedLoop{step: 1, limit: 256, test: instr.I32_LE_S, swapped: true}, guards: 1, bounds: 1},
-		{name: "bounds an index stepping by a constant that cannot wrap past the limit", loop: boundedLoop{init: 2, step: 3, limit: 256, test: instr.I32_GE_S}, guards: 1, bounds: 1},
-		{name: "guards an index below the array's own length", loop: boundedLoop{step: 1, length: true, test: instr.I32_GE_S}, guards: 1, bounds: 1},
-		{name: "leaves an index starting negative", loop: boundedLoop{init: minus, step: 1, limit: 256, test: instr.I32_GE_S}},
-		{name: "leaves an index stepping by a variable", loop: boundedLoop{step: 1, limit: 256, variable: true, test: instr.I32_GE_S}},
-		{name: "leaves an index whose step could wrap past a constant limit", loop: boundedLoop{step: 2, limit: math.MaxInt32, test: instr.I32_GE_S}},
-		{name: "leaves an index stepping by more than one below the array's length", loop: boundedLoop{step: 2, length: true, test: instr.I32_GE_S}},
-		{name: "leaves an index that is not the induction variable", loop: boundedLoop{step: 1, limit: 256, offset: true, test: instr.I32_GE_S}},
-		{name: "leaves an unsigned compare", loop: boundedLoop{step: 1, limit: 256, test: instr.I32_GE_U}},
+		{name: "bounds an index below a stay-on-true compare", loop: boundedLoop{step: 1, limit: 256, test: ssa.CondSLT}, guards: 1, bounds: 1},
+		{name: "bounds an index below a swapped compare", loop: boundedLoop{step: 1, limit: 256, test: ssa.CondSLE, swapped: true}, guards: 1, bounds: 1},
+		{name: "bounds an index stepping by a constant that cannot wrap past the limit", loop: boundedLoop{init: 2, step: 3, limit: 256, test: ssa.CondSGE}, guards: 1, bounds: 1},
+		{name: "guards an index below the array's own length", loop: boundedLoop{step: 1, length: true, test: ssa.CondSGE}, guards: 1, bounds: 1},
+		{name: "leaves an index starting negative", loop: boundedLoop{init: minus, step: 1, limit: 256, test: ssa.CondSGE}},
+		{name: "leaves an index stepping by a variable", loop: boundedLoop{step: 1, limit: 256, variable: true, test: ssa.CondSGE}},
+		{name: "leaves an index whose step could wrap past a constant limit", loop: boundedLoop{step: 2, limit: math.MaxInt32, test: ssa.CondSGE}},
+		{name: "leaves an index stepping by more than one below the array's length", loop: boundedLoop{step: 2, length: true, test: ssa.CondSGE}},
+		{name: "leaves an index that is not the induction variable", loop: boundedLoop{step: 1, limit: 256, offset: true, test: ssa.CondSGE}},
+		{name: "leaves an unsigned compare", loop: boundedLoop{step: 1, limit: 256, test: ssa.CondUGE}},
 		{name: "leaves a loop whose header entry a guard refuted", loop: counted, refuted: transform.Profiles{1: {Refuted: map[int]bool{2: true}}}},
 		{name: "bounds a loop whose header offset only another function refuted", loop: counted, refuted: transform.Profiles{2: {Refuted: map[int]bool{2: true}}}, guards: 1, bounds: 1},
 	}
@@ -130,8 +129,8 @@ func TestBCEPass_Run(t *testing.T) {
 			induction := fn.Block(headerBlock).Params[0]
 			require.Equal(t, tt.guards, strings.Count(out, "guard.bounds"), out)
 			require.Equal(t, tt.guards, strings.Count(blockChunk(out, preheaderBlock), "guard.bounds"), out)
-			require.Equal(t, tt.bounds, strings.Count(out, "bound v"), out)
-			require.Equal(t, tt.bounds, strings.Count(out, fmt.Sprintf("bound v%d,", induction)), out)
+			require.Equal(t, tt.bounds, strings.Count(out, "array.bound v"), out)
+			require.Equal(t, tt.bounds, strings.Count(out, fmt.Sprintf("array.bound v%d,", induction)), out)
 		})
 	}
 }

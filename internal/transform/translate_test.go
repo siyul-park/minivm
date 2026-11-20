@@ -53,8 +53,8 @@ blk1: () <-- (blk0, blk3)
 	v3:i32 = load local[0]
 	v4:i32 = const 10
 	v6:state = state {addr=1 base=0 ip=14 returns=1 stack=[v3, v4]}
-	v5:i1 = i32.ge_s v3, v4 state v6
-	br v5, blk2(), blk3()
+	v5:i1 = int.cmp sge v3, v4 state v6
+	brif v5, blk2(), blk3()
 blk2: () <-- (blk1)
 	v7:i32 = load local[0]
 	v8:state = state {addr=1 base=0 ip=33 returns=1 stack=[v7]}
@@ -63,7 +63,7 @@ blk3: () <-- (blk1)
 	v9:i32 = load local[0]
 	v10:i32 = const 1
 	v12:state = state {addr=1 base=0 ip=25 returns=1 stack=[v9, v10]}
-	v11:i32 = i32.add v9, v10 state v12
+	v11:i32 = int.add v9, v10 state v12
 	v13:state = state {addr=1 base=0 ip=26 returns=1 stack=[v11]}
 	store local[0], v11 state v13
 	jump blk1()
@@ -122,7 +122,7 @@ blk0: ()
 	v1:i32 = const 1
 	v2:i32 = const 2
 	v4:state = state {addr=1 base=0 ip=10 returns=1 stack=[v1, v2]}
-	v3:i32 = i32.add v1, v2 state v4
+	v3:i32 = int.add v1, v2 state v4
 	v5:state = state {addr=1 base=0 ip=11 returns=1 stack=[v3]}
 	return v3 state v5
 `, ssa.Format(out))
@@ -139,7 +139,7 @@ blk0: (v1:ref)
 	jump blk1(v1)
 blk1: (v2:ref) <-- (blk0, blk3)
 	v3:i32 = load local[1]
-	br v3, blk2(v2), blk3(v2)
+	brif v3, blk2(v2), blk3(v2)
 blk2: (v10:ref) <-- (blk1)
 	v11:state = state {addr=1 base=0 ip=20 returns=1 stack=[v10 owned]}
 	return v10 state v11
@@ -147,7 +147,7 @@ blk3: (v4:ref) <-- (blk1)
 	v5:i32 = load local[1]
 	v6:i32 = const 1
 	v7:state = state {addr=1 base=0 ip=14 returns=1 stack=[v4 owned, v5, v6]}
-	v8:i32 = i32.sub v5, v6 state v7
+	v8:i32 = int.sub v5, v6 state v7
 	v9:state = state {addr=1 base=0 ip=15 returns=1 stack=[v4 owned, v8]}
 	store local[1], v8 state v9
 	jump blk1(v4)
@@ -166,16 +166,16 @@ blk0: ()
 	jump blk1(v1)
 blk1: (v2:ref) <-- (blk0, blk3)
 	v3:i32 = load local[1]
-	br v3, blk2(v2), blk3(v2)
+	brif v3, blk2(v2), blk3(v2)
 blk2: (v4:ref) <-- (blk1)
-	retain v4
+	ref.retain v4
 	v5:state = state {addr=1 base=0 ip=20 returns=1 stack=[v4 owned]}
 	return v4 state v5
 blk3: (v6:ref) <-- (blk1)
 	v7:i32 = load local[1]
 	v8:i32 = const 1
 	v10:state = state {addr=1 base=0 ip=14 returns=1 stack=[v6, v7, v8]}
-	v9:i32 = i32.sub v7, v8 state v10
+	v9:i32 = int.sub v7, v8 state v10
 	v11:state = state {addr=1 base=0 ip=15 returns=1 stack=[v6, v9]}
 	store local[1], v9 state v11
 	jump blk1(v6)
@@ -210,7 +210,7 @@ blk3: (v6:ref) <-- (blk1)
 		require.NotNil(t, out)
 		require.NoError(t, ssa.Verify(out))
 		require.Empty(t, out.Block(0).Params)
-		require.Contains(t, ssa.Format(out), "i32.div_s")
+		require.Contains(t, ssa.Format(out), "int.sdiv")
 	})
 
 	t.Run("rejects an entry that starts no block", func(t *testing.T) {
@@ -253,7 +253,7 @@ blk0: ()
 	v1:i32 = load local[0]
 	v2:i32 = load local[1]
 	v4:state = state {addr=1 base=0 ip=4 returns=1 stack=[v1, v2]}
-	v3:i32 = i32.div_s v1, v2 state v4
+	v3:i32 = int.sdiv v1, v2 state v4
 	jump blk1(v3)
 blk1: (v5:i32) <-- (blk0)
 	v6:state = state {addr=1 base=0 ip=5 returns=1 stack=[v5]}
@@ -398,8 +398,8 @@ blk1: () <-- (blk0, blk3)
 	v6:i32 = array.len v4 state v5
 	v7:i32 = load local[1]
 	v9:state = state {addr=1 base=0 ip=12 returns=1 stack=[v6, v7]}
-	v8:i1 = i32.le_s v6, v7 state v9
-	br v8, blk2(), blk3()
+	v8:i1 = int.cmp sle v6, v7 state v9
+	brif v8, blk2(), blk3()
 blk2: () <-- (blk1)
 	v10:i32 = load local[1]
 	v11:state = state {addr=1 base=0 ip=31 returns=1 stack=[v10]}
@@ -412,7 +412,7 @@ blk3: () <-- (blk1)
 	v16:i32 = array.get v14, v13 state v15
 	v17:i32 = load local[1]
 	v19:state = state {addr=1 base=0 ip=23 returns=1 stack=[v16, v17]}
-	v18:i32 = i32.add v16, v17 state v19
+	v18:i32 = int.add v16, v17 state v19
 	v20:state = state {addr=1 base=0 ip=24 returns=1 stack=[v18]}
 	store local[1], v18 state v20
 	jump blk1()
@@ -533,13 +533,13 @@ blk0: ()
 blk0: ()
 	v1:i32 = const 0
 	v3:state = state {addr=1 base=0 ip=5 returns=0 stack=[v1]}
-	v2:ref = struct.new v1 state v3
+	v2:ref = exec struct.new v1 state v3
 	v4:i32 = const 0
 	v5:i32 = const 5
 	v7:state = state {addr=1 base=0 ip=18 returns=0 stack=[v2 owned, v4, v5]}
 	v6:ref = guard.shape v2 struct type 0x0 state v7
 	struct.set v6, v4, v5 state v7
-	release v6 state v7
+	ref.release v6 state v7
 	v8:state = state {addr=1 base=0 ip=19 returns=0 stack=[]}
 	return state v8
 `, ssa.Format(out))
@@ -581,7 +581,7 @@ blk0: ()
 blk0: ()
 	v1:i32 = load local[0]
 	v2:ref = const 2
-	retain v2
+	ref.retain v2
 	v3:state = state {addr=1 base=0 ip=5 returns=1 stack=[v1, v2 owned]}
 	exit state v3
 `, ssa.Format(out))
@@ -613,8 +613,8 @@ blk1: () <-- (blk0, blk3)
 	v1:i32 = load local[0]
 	v2:i32 = const 0
 	v3:state = state {addr=1 base=0 ip=7 returns=1 stack=[v1, v2]}
-	v4:i1 = i32.eq v1, v2 state v3
-	br v4, blk2(), blk3()
+	v4:i1 = int.cmp eq v1, v2 state v3
+	brif v4, blk2(), blk3()
 blk2: () <-- (blk1)
 	v16:i32 = load local[1]
 	v17:state = state {addr=1 base=0 ip=30 returns=1 stack=[v16]}
@@ -623,11 +623,11 @@ blk3: () <-- (blk1)
 	v5:i32 = load local[0]
 	v6:i32 = const 1
 	v7:state = state {addr=1 base=0 ip=18 returns=1 stack=[v5, v6]}
-	v8:i32 = i32.sub v5, v6 state v7
+	v8:i32 = int.sub v5, v6 state v7
 	v9:i32 = load local[1]
 	v10:i32 = load local[0]
 	v11:state = state {addr=1 base=0 ip=23 returns=1 stack=[v8, v9, v10]}
-	v12:i32 = i32.add v9, v10 state v11
+	v12:i32 = int.add v9, v10 state v11
 	v13:ref = const 1
 	v14:state = state {addr=1 base=0 ip=27 returns=1 stack=[v8, v12, v13]}
 	store local[1], v12 state v14
@@ -655,8 +655,8 @@ blk1: () <-- (blk0, blk6)
 	v1:i32 = load local[0]
 	v2:i32 = const 0
 	v3:state = state {addr=1 base=0 ip=7 returns=1 stack=[v1, v2]}
-	v4:i1 = i32.eq v1, v2 state v3
-	br v4, blk2(), blk3()
+	v4:i1 = int.cmp eq v1, v2 state v3
+	brif v4, blk2(), blk3()
 blk2: () <-- (blk1)
 	v33:i32 = load local[1]
 	v34:state = state {addr=1 base=0 ip=30 returns=1 stack=[v33]}
@@ -665,11 +665,11 @@ blk3: () <-- (blk1)
 	v5:i32 = load local[0]
 	v6:i32 = const 1
 	v7:state = state {addr=1 base=0 ip=18 returns=1 stack=[v5, v6]}
-	v8:i32 = i32.sub v5, v6 state v7
+	v8:i32 = int.sub v5, v6 state v7
 	v9:i32 = load local[1]
 	v10:i32 = load local[0]
 	v11:state = state {addr=1 base=0 ip=23 returns=1 stack=[v8, v9, v10]}
-	v12:i32 = i32.add v9, v10 state v11
+	v12:i32 = int.add v9, v10 state v11
 	v13:ref = const 2
 	v14:state = state {addr=1 base=0 ip=27 returns=1 stack=[v8, v12, v13]}
 	store local[1], v12 state v14
@@ -681,8 +681,8 @@ blk4: () <-- (blk3)
 	v16:i32 = load local[0]
 	v17:i32 = const 0
 	v18:state = state {addr=2 base=0 ip=7 returns=1 stack=[v16, v17]}
-	v19:i1 = i32.eq v16, v17 state v18
-	br v19, blk5(), blk6()
+	v19:i1 = int.cmp eq v16, v17 state v18
+	brif v19, blk5(), blk6()
 blk5: () <-- (blk4)
 	v31:i32 = load local[1]
 	v32:state = state {addr=2 base=0 ip=30 returns=1 stack=[v31]}
@@ -691,11 +691,11 @@ blk6: () <-- (blk4)
 	v20:i32 = load local[0]
 	v21:i32 = const 1
 	v22:state = state {addr=2 base=0 ip=18 returns=1 stack=[v20, v21]}
-	v23:i32 = i32.sub v20, v21 state v22
+	v23:i32 = int.sub v20, v21 state v22
 	v24:i32 = load local[1]
 	v25:i32 = load local[0]
 	v26:state = state {addr=2 base=0 ip=23 returns=1 stack=[v23, v24, v25]}
-	v27:i32 = i32.add v24, v25 state v26
+	v27:i32 = int.add v24, v25 state v26
 	v28:ref = const 1
 	v29:state = state {addr=2 base=0 ip=27 returns=1 stack=[v23, v27, v28]}
 	store local[1], v27 state v29
@@ -897,8 +897,8 @@ blk0: ()
 	v1:i32 = load local[0]
 	v2:i32 = const 2
 	v4:state = state {addr=1 base=0 ip=7 returns=1 stack=[v1, v2]}
-	v3:i1 = i32.lt_s v1, v2 state v4
-	br v3, blk1(), blk2()
+	v3:i1 = int.cmp slt v1, v2 state v4
+	brif v3, blk1(), blk2()
 blk1: () <-- (blk0)
 	v5:i32 = load local[0]
 	v6:state = state {addr=1 base=0 ip=41 returns=1 stack=[v5]}
@@ -907,7 +907,7 @@ blk2: () <-- (blk0)
 	v7:i32 = load local[0]
 	v8:i32 = const 1
 	v10:state = state {addr=1 base=0 ip=18 returns=1 stack=[v7, v8]}
-	v9:i32 = i32.sub v7, v8 state v10
+	v9:i32 = int.sub v7, v8 state v10
 	v11:ref = load local[1]
 	v12:ref = load local[1]
 	v13:ref = const 1
@@ -917,7 +917,7 @@ blk2: () <-- (blk0)
 	v17:i32 = load local[0]
 	v18:i32 = const 2
 	v20:state = state {addr=1 base=0 ip=31 returns=1 stack=[v16, v17, v18]}
-	v19:i32 = i32.sub v17, v18 state v20
+	v19:i32 = int.sub v17, v18 state v20
 	v21:ref = load local[1]
 	v22:ref = load local[1]
 	v23:ref = const 1
@@ -925,7 +925,7 @@ blk2: () <-- (blk0)
 	v24:ref = guard.value v22, v23 state v25
 	v26:i32 = call v19, v21, v23 state v25
 	v28:state = state {addr=1 base=0 ip=37 returns=1 stack=[v16, v26]}
-	v27:i32 = i32.add v16, v26 state v28
+	v27:i32 = int.add v16, v26 state v28
 	v29:state = state {addr=1 base=0 ip=38 returns=1 stack=[v27]}
 	return v27 state v29
 `, ips[0], ips[1]), ssa.Format(out))
@@ -951,7 +951,7 @@ blk0: ()
 	v1:i32 = const 5
 	v2:ref = const 2
 	v4:state = state {addr=0 base=0 ip=8 returns=0 stack=[v1, v2]}
-	v3:ref = closure.new v1, v2 state v4
+	v3:ref = exec closure.new v1, v2 state v4
 	v5:state = state {addr=0 base=0 ip=9 returns=0 stack=[v3 owned]}
 	store local[0], v3 state v5
 	v6:ref = load local[0]
@@ -1033,10 +1033,10 @@ blk0: ()
 blk0: ()
 	v1:ref = load global[0]
 	v2:ref = const 2
-	retain v1
+	ref.retain v1
 	v4:state = state {addr=0 base=0 ip=6 returns=0 stack=[v1 owned, v2]}
 	v3:i32 = call v1, v2 state v4
-	release v1 state v4
+	ref.release v1 state v4
 	v5:state = state {addr=0 base=0 ip=7 returns=0 stack=[v3]}
 	complete v3 state v5
 `, ssa.Format(out))
@@ -1059,7 +1059,7 @@ blk0: ()
 	v1:ref = load local[0]
 	v2:ref = const 2
 	v4:state = state {addr=1 base=0 ip=5 returns=1 stack=[v1, v2]}
-	v3:ref = string.concat v1, v2 state v4
+	v3:ref = exec string.concat v1, v2 state v4
 	v5:state = state {addr=1 base=0 ip=6 returns=1 stack=[v3 owned]}
 	return v3 state v5
 `, ssa.Format(out))
@@ -1074,10 +1074,10 @@ blk0: ()
 		require.Equal(t, fmt.Sprintf(`func 1:0
 blk0: ()
 	v1:i32 = load local[0]
-	br v1, blk1(), blk2()
+	brif v1, blk1(), blk2()
 blk1: () <-- (blk0)
 	v2:ref = load local[1]
-	retain v2
+	ref.retain v2
 	v3:state = state {addr=1 base=0 ip=%d returns=1 stack=[v2 owned]}
 	exit state v3
 blk2: () <-- (blk0)
@@ -1098,13 +1098,13 @@ blk2: () <-- (blk0)
 		require.Equal(t, fmt.Sprintf(`func 1:0
 blk0: ()
 	v1:i32 = load local[0]
-	br v1, blk1(), blk2()
+	brif v1, blk1(), blk2()
 blk1: () <-- (blk0)
 	v2:ref = load local[1]
-	retain v2
+	ref.retain v2
 	v4:state = state {addr=1 base=0 ip=%d returns=1 stack=[v2 owned]}
 	v3:i32 = call v2 callee type 0x%x state v4
-	br v3, blk3(), blk4()
+	brif v3, blk3(), blk4()
 blk2: () <-- (blk0)
 	v5:i32 = load local[0]
 	v6:state = state {addr=1 base=0 ip=7 returns=1 stack=[v5]}
@@ -1208,7 +1208,7 @@ blk0: ()
 	v8:ref = guard.shape v6 map key i32 elem i32 state v9
 	v10:i32, v11:i1 = map.lookup v8, v7 state v9
 	v13:state = state {addr=1 base=0 ip=17 returns=1 stack=[v5, v10]}
-	v12:i32 = i32.add v5, v10 state v13
+	v12:i32 = int.add v5, v10 state v13
 	v14:state = state {addr=1 base=0 ip=18 returns=1 stack=[v12]}
 	return v12 state v14
 `, ssa.Format(out))
@@ -1233,10 +1233,10 @@ blk0: ()
 			for _, op := range out.Block(0).Operations {
 				switch {
 				case op.Op == ssa.OpGuardShape:
-					got = append(got, fmt.Sprintf("guard map key %s elem %s", op.Shape.Kind, op.Shape.Elem))
-					require.True(t, op.Shape.Map)
-				case op.Op == ssa.OpExec && op.Code.Reads(instr.Heap):
-					got = append(got, instr.TypeOf(op.Code).Mnemonic)
+					got = append(got, fmt.Sprintf("guard map key %s elem %s", op.Shape.Key, op.Shape.Elem))
+					require.Equal(t, ssa.FormMap, op.Shape.Form)
+				case op.Reads()&ssa.EffectHeap != 0:
+					got = append(got, op.Op.String())
 				}
 			}
 			return got
@@ -1326,9 +1326,9 @@ blk0: ()
 	v3:i32 = const 1
 	v5:state = state {addr=1 base=0 ip=7 returns=1 stack=[v1 owned, v2 owned, v3]}
 	v4:ref = select v1, v2, v3 state v5
-	retain v4
-	release v1 state v5
-	release v2 state v5
+	ref.retain v4
+	ref.release v1 state v5
+	ref.release v2 state v5
 	v6:state = state {addr=1 base=0 ip=8 returns=1 stack=[v4 owned]}
 	return v4 state v6
 `, ssa.Format(out))

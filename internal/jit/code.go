@@ -22,7 +22,7 @@ type Code struct {
 	OSR  bool
 	Tier Tier
 	// Results is the value count a TrapReturn leaves: module code's own
-	// OpComplete carries it on the operand stack past the locals, since it
+	// TermComplete carries it on the operand stack past the locals, since it
 	// has no Typ.Returns to read it from otherwise.
 	Results int
 	// Registers is the function's register-convention result kinds, nil
@@ -64,7 +64,7 @@ type Assembly struct {
 	Sites []Site
 	Entry int
 	// Results is the value count a TrapReturn leaves: module code's own
-	// OpComplete carries it on the operand stack past the locals, since it
+	// TermComplete carries it on the operand stack past the locals, since it
 	// has no Typ.Returns to read it from otherwise.
 	Results int
 	// Registers is the function's register-convention result kinds, nil

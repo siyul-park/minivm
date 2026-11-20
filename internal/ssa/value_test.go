@@ -25,6 +25,21 @@ func TestTypeOf(t *testing.T) {
 	})
 }
 
+func TestType_Lane(t *testing.T) {
+	for _, tt := range []struct {
+		typ  ssa.Type
+		want ssa.Type
+	}{
+		{ssa.TypeI1, ssa.TypeI32}, {ssa.TypeI8, ssa.TypeI32}, {ssa.TypeI32, ssa.TypeI32},
+		{ssa.TypeI64, ssa.TypeI64}, {ssa.TypeF32, ssa.TypeF32}, {ssa.TypeF64, ssa.TypeF64},
+		{ssa.TypeRef, ssa.TypeRef}, {ssa.TypeState, ssa.TypeState},
+	} {
+		t.Run("maps "+tt.typ.String(), func(t *testing.T) {
+			require.Equal(t, tt.want, tt.typ.Lane())
+		})
+	}
+}
+
 func TestType_Kind(t *testing.T) {
 	t.Run("inverts TypeOf", func(t *testing.T) {
 		for _, kind := range []types.Kind{

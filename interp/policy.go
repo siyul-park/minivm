@@ -71,8 +71,8 @@ type key struct {
 type site struct {
 	address, ip int
 	fn          *types.Function
-	// module reports whether fn completes through OpComplete instead of
-	// returning through OpReturn.
+	// module reports whether fn completes through TermComplete instead of
+	// returning through TermReturn.
 	module bool
 	// inner is s's own threaded handler, restored in place of the observer
 	// once s is known to never resolve.

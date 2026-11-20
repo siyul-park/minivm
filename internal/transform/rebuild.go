@@ -35,7 +35,7 @@ func (r *rebuilder) splice(id int, call ssa.Operation, body *ssa.Function) int {
 	}
 
 	inner := &rebuilder{from: body, builder: r.builder, blocks: map[int]int{}, values: map[ssa.Value]ssa.Value{}}
-	r.builder.Term(id, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: inner.block(0)}}})
+	r.builder.Term(id, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: inner.block(0)}}})
 	for _, block := range graph.Order(body) {
 		at := inner.open(block)
 		b := body.Block(block)
@@ -59,8 +59,8 @@ func (r *rebuilder) splice(id int, call ssa.Operation, body *ssa.Function) int {
 		}
 		term := inner.terminator(b.Terminator)
 		term.State = ssa.NoValue
-		if term.Op == ssa.OpReturn {
-			term = ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join, Args: term.Args}}}
+		if term.Term == ssa.TermReturn {
+			term = ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: join, Args: term.Args}}}
 		}
 		r.builder.Term(at, term)
 	}

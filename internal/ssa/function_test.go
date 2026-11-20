@@ -15,7 +15,7 @@ func TestFunction_Name(t *testing.T) {
 	t.Run("returns the name given to New", func(t *testing.T) {
 		b := ssa.New("gcd")
 		entry := b.Block()
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
 		require.Equal(t, "gcd", b.Build().Name())
 	})
 }
@@ -25,12 +25,12 @@ func TestFunction_Block(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
 		param := b.Param(entry, ssa.TypeI32)
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{param}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{param}})
 
 		block := b.Build().Block(entry)
 		require.Equal(t, []ssa.Value{param}, block.Params)
 		require.Empty(t, block.Operations)
-		require.Equal(t, ssa.OpReturn, block.Terminator.Op)
+		require.Equal(t, ssa.TermReturn, block.Terminator.Term)
 	})
 }
 
@@ -40,7 +40,7 @@ func TestFunction_Values(t *testing.T) {
 		entry := b.Block()
 		b.Param(entry, ssa.TypeI32)
 		v := b.Value(ssa.TypeF64)
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
 		require.Equal(t, int(v)+1, b.Build().Values())
 	})
 
@@ -52,7 +52,7 @@ func TestFunction_Values(t *testing.T) {
 func TestFunction_Entry(t *testing.T) {
 	t.Run("returns the frame Builder.Entry set", func(t *testing.T) {
 		b := ssa.New("f")
-		b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(b.Block(), ssa.Terminator{Term: ssa.TermComplete})
 		b.Entry(ssa.Frame{Address: 4, IP: 9, Returns: 1})
 
 		require.Equal(t, ssa.Frame{Address: 4, IP: 9, Returns: 1}, b.Build().Entry())
@@ -60,7 +60,7 @@ func TestFunction_Entry(t *testing.T) {
 
 	t.Run("is zero when Builder.Entry was never called", func(t *testing.T) {
 		b := ssa.New("f")
-		b.Term(b.Block(), ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(b.Block(), ssa.Terminator{Term: ssa.TermComplete})
 
 		require.Zero(t, b.Build().Entry())
 	})
@@ -70,7 +70,7 @@ func TestFunction_Len(t *testing.T) {
 	t.Run("counts the blocks built", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
 		require.Equal(t, 1, b.Build().Len())
 	})
 
@@ -85,10 +85,10 @@ func TestFunction_Succ(t *testing.T) {
 		entry, left, right, join := b.Block(), b.Block(), b.Block(), b.Block()
 		cond := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{cond}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
-		b.Term(left, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
-		b.Term(right, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: join}}})
-		b.Term(join, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: left}, {Block: right}}})
+		b.Term(left, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: join}}})
+		b.Term(right, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: join}}})
+		b.Term(join, ssa.Terminator{Term: ssa.TermComplete})
 
 		f := b.Build()
 		require.Equal(t, []int{left, right}, f.Succ(entry))
@@ -103,8 +103,8 @@ func TestFunction_Pred(t *testing.T) {
 		entry, join := b.Block(), b.Block()
 		cond := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{cond}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: join}, {Block: join}}})
-		b.Term(join, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: join}, {Block: join}}})
+		b.Term(join, ssa.Terminator{Term: ssa.TermComplete})
 
 		f := b.Build()
 		require.Empty(t, f.Pred(entry))
@@ -115,10 +115,10 @@ func TestFunction_Pred(t *testing.T) {
 		b := ssa.New("f")
 		entry, header, done := b.Block(), b.Block(), b.Block()
 		cond := b.Value(ssa.TypeI32)
-		b.Term(entry, ssa.Terminator{Op: ssa.OpJump, Edges: []ssa.Edge{{Block: header}}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: header}}})
 		b.Add(header, ssa.Operation{Op: ssa.OpConst, Const: 1, Results: []ssa.Value{cond}})
-		b.Term(header, ssa.Terminator{Op: ssa.OpBranch, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: header}, {Block: done}}})
-		b.Term(done, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(header, ssa.Terminator{Term: ssa.TermBrIf, Args: []ssa.Value{cond}, Edges: []ssa.Edge{{Block: header}, {Block: done}}})
+		b.Term(done, ssa.Terminator{Term: ssa.TermComplete})
 
 		f := b.Build()
 		dom := graph.NewDominance(f)
@@ -136,14 +136,14 @@ func TestFunction_Type(t *testing.T) {
 		entry := b.Block()
 		v := b.Value(ssa.TypeF64)
 		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Const: math.Float64bits(1.5), Results: []ssa.Value{v}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
 		require.Equal(t, ssa.TypeF64, b.Build().Type(v))
 	})
 
 	t.Run("returns the invalid type for a value it does not hold", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()
-		b.Term(entry, ssa.Terminator{Op: ssa.OpComplete})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
 
 		f := b.Build()
 		require.Equal(t, "invalid", f.Type(ssa.NoValue).String())

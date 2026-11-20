@@ -1,4 +1,31 @@
 // Package ssa defines the VM optimizer intermediate representation.
+//
+// Every data operation is named domain.verb, with domain one of int, float,
+// ref, string, array, struct, map, or guard. Signedness is an s or u prefix on
+// the verb (int.sdiv) or on a condition (slt), never in a type. Operations with
+// no data domain stay bare: const, load, store, select, call, state, and exec,
+// which performs a guest opcode no other operation models. A Go name mirrors
+// the text: int.sdiv is OpIntSDiv.
+//
+// Operations follow these semantics:
+//
+//   - i1, i8, and i32 share one 32-bit lane, an i8 held sign-extended; i64 is
+//     its own. Type.Lane maps a type to its lane. int operations work on lanes:
+//     arithmetic and unary width is the result lane, int.cmp width the operand
+//     lane, and casts use both.
+//   - int.shl, int.ashr, int.lshr, int.rotl, and int.rotr mask the count by the
+//     width; none is poison.
+//   - int.sdiv, int.udiv, int.srem, and int.urem trap on a zero divisor only;
+//     int.sdiv of the minimum value by -1 wraps.
+//   - float.min and float.max propagate NaN. float.fptosi.sat and
+//     float.fptoui.sat map NaN to zero and clamp an out-of-range value.
+//   - int.and, int.or, and int.xor keep the tag typing of their operands: the
+//     result type is what translation assigns, and Verify requires equal lanes
+//     only.
+//   - select tests its condition as a nonzero lane; ref.cmp compares identity,
+//     so it admits eq and ne only.
+//   - An operation that can exit the unit (trap, bridge, box an i64, call)
+//     carries a State; Verify enforces it.
 package ssa
 
 // Builder constructs an SSA Function.

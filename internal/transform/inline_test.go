@@ -119,7 +119,7 @@ func TestInlinePass_Run(t *testing.T) {
 					if op.Op == ssa.OpState {
 						states[op.Results[0]] = op.Frames[0].IP
 					}
-					if op.Op == ssa.OpExec && op.Code == instr.CALL {
+					if op.Op == ssa.OpCall {
 						remains = true
 					}
 				}
@@ -130,7 +130,7 @@ func TestInlinePass_Run(t *testing.T) {
 			}
 			for b := range f.Len() {
 				for _, op := range f.Block(b).Operations {
-					if op.Op == ssa.OpExec && op.Code != instr.CALL {
+					if op.Op == ssa.OpExec || op.Op.Data() && op.Op != ssa.OpCall {
 						require.Equal(t, at, states[op.State], "%s keeps the call's state", ssa.Format(f))
 					}
 				}

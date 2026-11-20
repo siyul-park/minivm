@@ -6,7 +6,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
 	"github.com/siyul-park/minivm/internal/transform"
 	"github.com/siyul-park/minivm/pass"
@@ -28,10 +27,10 @@ func TestGuardPass_Run(t *testing.T) {
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		first := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{first}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormArray, Elem: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{first}})
 		second := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{second}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{second}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormArray, Elem: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{second}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{second}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -53,11 +52,11 @@ func TestGuardPass_Run(t *testing.T) {
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		first := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{first}})
-		b.Add(entry, ssa.Operation{Op: ssa.OpExec, Code: instr.CALL, Args: []ssa.Value{callee}, State: state})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormArray, Elem: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{first}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpCall, Args: []ssa.Value{callee}, State: state})
 		second := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{second}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{second}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormArray, Elem: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{second}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{second}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -74,10 +73,10 @@ func TestGuardPass_Run(t *testing.T) {
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		first := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{first}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormArray, Elem: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{first}})
 		second := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI64}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{second}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{first, second}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormArray, Elem: types.KindI64}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{second}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{first, second}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -99,7 +98,7 @@ func TestGuardPass_Run(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{dyn}, State: state, Results: []ssa.Value{first}})
 		second := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{dyn}, State: state, Results: []ssa.Value{second}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{second}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{second}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -121,7 +120,7 @@ func TestGuardPass_Run(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{dyn}, State: state, Results: []ssa.Value{asI32}})
 		asF64 := b.Value(ssa.TypeF64)
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardKind, Args: []ssa.Value{dyn}, State: state, Results: []ssa.Value{asF64}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{asI32, asF64}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{asI32, asF64}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -144,7 +143,7 @@ func TestGuardPass_Run(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{value, observed}, State: state, Results: []ssa.Value{first}})
 		second := b.Value(ssa.TypeI32)
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardValue, Args: []ssa.Value{value, observed}, State: state, Results: []ssa.Value{second}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{second}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{second}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -164,7 +163,7 @@ func TestGuardPass_Run(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1}}, Results: []ssa.Value{state}})
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardBounds, Args: []ssa.Value{index, length}, State: state})
 		b.Add(entry, ssa.Operation{Op: ssa.OpGuardBounds, Args: []ssa.Value{index, length}, State: state})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 
@@ -183,10 +182,10 @@ func TestGuardPass_Run(t *testing.T) {
 		state := b.Value(ssa.TypeState)
 		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, Stack: []ssa.Operand{{Value: extra}}}}, Results: []ssa.Value{state}})
 		first := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{first}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormArray, Elem: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{first}})
 		second := b.Value(ssa.TypeRef)
-		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Kind: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{second}})
-		b.Term(entry, ssa.Terminator{Op: ssa.OpReturn, Args: []ssa.Value{second}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormArray, Elem: types.KindI32}, Args: []ssa.Value{array}, State: state, Results: []ssa.Value{second}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn, Args: []ssa.Value{second}})
 		fn := b.Build()
 		require.NoError(t, ssa.Verify(fn))
 

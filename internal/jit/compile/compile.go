@@ -74,7 +74,7 @@ type lowering struct {
 	// uses counts each value's uses: operation, terminator, and edge
 	// arguments, and the frames of every state.
 	uses map[ssa.Value]int
-	// fuse is the condition of the OpBranch ending the block being lowered
+	// fuse is the condition of the TermBrIf ending the block being lowered
 	// when the block's last operation defines it and nothing else uses it.
 	fuse ssa.Value
 
@@ -218,7 +218,7 @@ func (l *lowering) Const(v ssa.Value) (uint64, bool) {
 	return word, ok
 }
 
-// Fuse reports whether v is the condition of the OpBranch ending the block
+// Fuse reports whether v is the condition of the TermBrIf ending the block
 // being lowered, defined by the block's last operation and used nowhere else.
 func (l *lowering) Fuse(v ssa.Value) bool {
 	return v == l.fuse
@@ -243,28 +243,6 @@ func (l *lowering) Deopt() asm.Label {
 // resume, where its caller binds.
 func (l *lowering) Bridge() (exit, resume asm.Label) {
 	return l.stub(l.exit(jit.ExitBridge))
-}
-
-// Operand reads the current operation's first immediate operand off the
-// bytecode at its state's innermost frame.
-func (l *lowering) Operand() (int, bool) {
-	state, ok := l.states[l.op.State]
-	if !ok || len(state.Frames) == 0 {
-		return 0, false
-	}
-	frame := state.Frames[len(state.Frames)-1]
-	code := l.fn.Code
-	if member := l.objects[frame.Address].Function; frame.Address != l.address && member != nil {
-		code = member.Code
-	}
-	if frame.IP < 0 || frame.IP >= len(code) {
-		return 0, false
-	}
-	inst := instr.Instruction(code[frame.IP:])
-	if len(instr.TypeOf(inst.Opcode()).Widths) == 0 || len(inst) < inst.Width() {
-		return 0, false
-	}
-	return int(inst.Operand(0)), true
 }
 
 // Release places a release stub for ref.
@@ -381,7 +359,7 @@ func (l *lowering) scan() {
 			}
 		}
 		for _, op := range b.Operations {
-			caller = caller || op.Op == ssa.OpExec && op.Code == instr.CALL
+			caller = caller || op.Op == ssa.OpCall
 			l.upvals = l.upvals || (op.Op == ssa.OpLoad || op.Op == ssa.OpStore) && op.Slot.Space == ssa.SpaceUpval
 			mark(op.Args)
 			for _, frame := range op.Frames {
@@ -448,7 +426,7 @@ func (l *lowering) function() error {
 		b := l.f.Block(block)
 		l.a.Bind(labels[block])
 		l.fuse = ssa.NoValue
-		if n := len(b.Operations); n > 0 && b.Terminator.Op == ssa.OpBranch {
+		if n := len(b.Operations); n > 0 && b.Terminator.Term == ssa.TermBrIf {
 			if results := b.Operations[n-1].Results; len(results) == 1 && results[0] == b.Terminator.Args[0] && l.uses[results[0]] == 1 {
 				l.fuse = results[0]
 			}
@@ -549,22 +527,25 @@ func (l *lowering) operation(op ssa.Operation) error {
 		if !l.raw[op.Args[0]] {
 			return fmt.Errorf("%w: guard.kind of raw int", ErrUnsupported)
 		}
+	case ssa.OpCall:
+		return l.call(op)
 	case ssa.OpExec:
-		if op.Code == instr.CALL {
-			return l.call(op)
-		}
-		if l.m.Lower(l.a, op, l) {
-			return l.err
-		}
 		l.emit(l.exit(jit.ExitBridge))
 		return l.err
 	case ssa.OpStore:
 		if i, ok := l.argument(op.Slot); ok {
 			l.args[i] = asm.VReg{}
 		}
-	case ssa.OpRetain, ssa.OpRelease, ssa.OpGuardShape, ssa.OpGuardValue, ssa.OpGuardBounds, ssa.OpSlice, ssa.OpBound:
+	case ssa.OpRefRetain, ssa.OpRefRelease, ssa.OpGuardShape, ssa.OpGuardValue, ssa.OpGuardBounds, ssa.OpArrayView, ssa.OpArrayBound:
 	default:
-		return fmt.Errorf("%w: %s", ErrUnsupported, op.Op)
+		if !op.Op.Data() {
+			return fmt.Errorf("%w: %s", ErrUnsupported, op.Op)
+		}
+		if l.m.Lower(l.a, op, l) {
+			return l.err
+		}
+		l.emit(l.exit(jit.ExitBridge))
+		return l.err
 	}
 	if !l.m.Lower(l.a, op, l) {
 		return fmt.Errorf("%w: %s", ErrUnsupported, op.Op)
@@ -592,26 +573,26 @@ func (l *lowering) terminator(t ssa.Terminator, labels []asm.Label, next asm.Lab
 		return err
 	}
 	l.op = ssa.Operation{State: t.State}
-	switch t.Op {
-	case ssa.OpReturn:
+	switch t.Term {
+	case ssa.TermReturn:
 		if err := l.leave(t); err != nil {
 			return err
 		}
 		l.m.Return(l.a, t, l)
 		l.deopt()
 		return l.err
-	case ssa.OpComplete:
+	case ssa.TermComplete:
 		l.m.Return(l.a, t, l)
 		l.deopt()
 		return l.err
-	case ssa.OpExit:
+	case ssa.TermExit:
 		id := l.exit(jit.ExitDeopt)
 		l.emit(id)
 		l.deopt()
 		return l.err
-	case ssa.OpJump, ssa.OpBranch, ssa.OpTable:
+	case ssa.TermJump, ssa.TermBrIf, ssa.TermBrTable:
 	default:
-		return fmt.Errorf("%w: %s", ErrUnsupported, t.Op)
+		return fmt.Errorf("%w: %s", ErrUnsupported, t.Term)
 	}
 	edges := make([]edge, len(t.Edges))
 	moved := false
@@ -624,7 +605,7 @@ func (l *lowering) terminator(t ssa.Terminator, labels []asm.Label, next asm.Lab
 		moved = moved || len(moves) > 0
 	}
 	if len(edges) == 0 {
-		return fmt.Errorf("%w: %s without edges", ErrUnsupported, t.Op)
+		return fmt.Errorf("%w: %s without edges", ErrUnsupported, t.Term)
 	}
 	if len(edges) == 1 {
 		l.shuffle(edges[0].moves)
@@ -675,7 +656,7 @@ func (l *lowering) deopt() {
 // jump branches to label from stub code, whose next row is never label.
 func (l *lowering) jump(label asm.Label) {
 	next := l.a.Label()
-	l.m.Branch(l.a, ssa.Terminator{Op: ssa.OpJump}, l, []asm.Label{label}, next)
+	l.m.Branch(l.a, ssa.Terminator{Term: ssa.TermJump}, l, []asm.Label{label}, next)
 	l.a.Bind(next)
 }
 
@@ -685,8 +666,8 @@ func (l *lowering) jump(label asm.Label) {
 // through its closure: called directly, it has no upvals to read.
 func (l *lowering) call(op ssa.Operation) error {
 	callee := op.Args[len(op.Args)-1]
-	generic := op.Shape.Function == 0 && op.Shape.Type != 0
-	ref, closure := op.Shape.Function, op.Shape.Function != 0
+	generic := op.Shape.Form == ssa.FormSignature
+	ref, closure := op.Shape.Function, op.Shape.Form == ssa.FormClosure
 	var target *types.Function
 	if !generic {
 		if !closure {
@@ -864,9 +845,17 @@ func (l *lowering) exit(k jit.Kind) int {
 	if member := l.objects[f.Address].Function; f.Address != l.address && member != nil {
 		code = member.Code
 	}
-	if k == jit.ExitBridge && (f.IP >= len(code) || instr.Instruction(code[f.IP:]).Opcode() != l.op.Code) {
-		l.fail(fmt.Errorf("%w: bridge of %s at ip %d", ErrInlined, instr.TypeOf(l.op.Code).Mnemonic, f.IP))
-		return id
+	var performs instr.Opcode
+	if k == jit.ExitBridge {
+		if f.IP >= len(code) {
+			l.fail(fmt.Errorf("%w: bridge of %s at ip %d", ErrInlined, l.op.Op, f.IP))
+			return id
+		}
+		performs = instr.Instruction(code[f.IP:]).Opcode()
+		if !transform.Performs(l.f, l.op, performs) {
+			l.fail(fmt.Errorf("%w: bridge of %s at ip %d", ErrInlined, l.op.Op, f.IP))
+			return id
+		}
 	}
 	if k == jit.ExitCall {
 		stack = stack[:len(stack)-len(l.op.Args)]
@@ -903,9 +892,9 @@ func (l *lowering) exit(k jit.Kind) int {
 		l.outlets[id].saves = append(l.outlets[id].saves, save{reg: l.Reg(local.Value), slot: slot})
 	}
 	if k == jit.ExitBridge {
-		e.Code = l.op.Code
+		e.Code = performs
 		e.Pops = len(l.op.Args)
-		e.Adopts = transform.Adopts(l.op.Code, len(l.op.Args), len(l.op.Results))
+		e.Adopts = transform.Adopts(performs, len(l.op.Args), len(l.op.Results))
 		for _, v := range l.op.Results {
 			e.Results = append(e.Results, l.f.Type(v).Kind())
 			l.outlets[id].results = append(l.outlets[id].results, l.Reg(v))
@@ -1076,7 +1065,7 @@ func (l *lowering) layout() []int {
 	for block := range succs {
 		succ := f.Succ(block)
 		loop := l.inner[block]
-		if f.Block(block).Terminator.Op == ssa.OpBranch && len(succ) == 2 && loop != nil && loop[succ[0]] && !loop[succ[1]] {
+		if f.Block(block).Terminator.Term == ssa.TermBrIf && len(succ) == 2 && loop != nil && loop[succ[0]] && !loop[succ[1]] {
 			succ = []int{succ[1], succ[0]}
 		}
 		succs[block] = succ
@@ -1084,12 +1073,12 @@ func (l *lowering) layout() []int {
 	return graph.Order(laid{f, succs})
 }
 
-// completion is the value count a TrapReturn from f's own OpComplete
+// completion is the value count a TrapReturn from f's own TermComplete
 // leaves, 0 when f never completes (an ordinary function's RETURN count
 // comes from its own Typ.Returns instead).
 func completion(f *ssa.Function) int {
 	for id := 0; id < f.Len(); id++ {
-		if t := f.Block(id).Terminator; t.Op == ssa.OpComplete {
+		if t := f.Block(id).Terminator; t.Term == ssa.TermComplete {
 			return len(t.Args)
 		}
 	}
