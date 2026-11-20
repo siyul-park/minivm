@@ -24,11 +24,11 @@ Bytecode is what the VM executes, SSA is the meaning to optimize, and the machin
 | `internal/graph` | CFG analysis |
 | `internal/ssa` | SSA IR and verification |
 | `internal/transform` | bytecode↔SSA conversion, SSA transforms, JIT feedback model |
-| `internal/asm` | machine IR, register allocation, encoding, linking, executable memory, native stack and trampoline |
+| `internal/asm` | machine IR, register allocation, encoding, linking, executable memory |
 | `internal/asm/arm64` | ARM64 encoding |
-| `internal/jit` | native runtime contract shared by the interpreter and the compiler; publishes and invalidates native code (`Code`, `Cache`) |
+| `internal/jit` | native runtime contract shared by the interpreter and the compiler (`Context`): native stack and entry/exit trampoline (`State`, `Enter`, `Resume`); publishes and invalidates native code (`Code`, `Cache`) |
 | `internal/jit/compile` | SSA to machine rows: block layout, value registers, edge moves, loop budget; compiles a unit by tier and queues compiles (`Compile`, `Queue`) |
-| `internal/jit/arm64` | ARM64 lowering of SSA operations |
+| `internal/jit/arm64` | ARM64 lowering of SSA operations; the runtime's register roles (`Ctx`, `Machine.Reserve`) |
 | `pass` | pass API, lifecycle, pipelines, analysis cache |
 | `analysis` | reusable read-only facts |
 | `optimize` | optimization composition |
@@ -42,7 +42,7 @@ Behavior `MUST` follow dominant ownership, not import convenience; an owner `MUS
 
 - `instr` and `internal/graph` `MUST` remain leaf-like.
 - `internal/ssa` and `internal/transform` `MUST NOT` depend on runtime or target packages.
-- `internal/asm` MUST remain below the runtime and compiler layers and MUST NOT own JIT or interpreter exit semantics; it may own the low-level native-stack and trampoline mechanics required to enter, suspend, and resume native code.
+- `internal/asm` `MUST` remain below the runtime and compiler layers and `MUST NOT` own any runtime convention: native stack, entry, exit, suspension, or pinned registers.
 - `internal/jit` MUST NOT import `interp`.
 - ARM64 encoding MUST stay under `internal/asm/arm64`.
 - `internal/jit/compile` MUST NOT name a physical register or target instruction; `internal/jit/arm64` MUST NOT walk SSA control flow.
@@ -76,7 +76,7 @@ The following invariants `MUST` hold:
 
 ## Native Boundary
 
-The native tier consumes `internal/transform`, `internal/ssa`, and `internal/asm`; `interp` owns native entry, exit, materialization, and tiering.
+The native tier consumes `internal/transform`, `internal/ssa`, and `internal/asm`; `internal/jit` owns the native stack and trampoline, and `interp` owns when to enter, exit service, materialization, and tiering.
 
 ## Related
 
