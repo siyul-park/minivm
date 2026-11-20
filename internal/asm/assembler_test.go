@@ -5,7 +5,6 @@ import (
 
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/asm/arm64"
-	"github.com/siyul-park/minivm/internal/testenv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -719,44 +718,6 @@ func TestAssembler_Build(t *testing.T) {
 			arm64.ADDI(arm64.SP, arm64.SP, 16),
 			arm64.RET(),
 		), code)
-	})
-	t.Run("runs a value spilled across an exit", func(t *testing.T) {
-		testenv.MustHaveArch(t, "arm64")
-		s, err := asm.NewState(arm64.New(), 4096)
-		require.NoError(t, err)
-		exit := []asm.Instruction{
-			arm64.LDR(arm64.X16, arm64.Ctx, int16(asm.OffsetStub)),
-			arm64.BLR(arm64.X16),
-		}
-		assembler := asm.New(arm64.New())
-		assembler.Emit(
-			arm64.SUBI(arm64.SP, arm64.SP, 16),
-			arm64.STR(arm64.LR, arm64.SP, 8),
-			slots(arm64.OpSUBI),
-			arm64.MOVI(vint(0), 42),
-		)
-		assembler.Emit(exit...)
-		assembler.Emit(arm64.ADDI(arm64.X0, vint(0), 1))
-		assembler.Emit(exit...)
-		assembler.Emit(
-			slots(arm64.OpADDI),
-			arm64.LDR(arm64.LR, arm64.SP, 8),
-			arm64.ADDI(arm64.SP, arm64.SP, 16),
-			arm64.RET(),
-		)
-
-		code, err := assembler.Build()
-		require.NoError(t, err)
-		buffer, err := asm.NewBuffer(arm64.New(), len(code))
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, buffer.Free()) })
-		addr, err := buffer.Link(code)
-		require.NoError(t, err)
-
-		require.True(t, arm64.New().Enter(addr, &s))
-		require.True(t, arm64.New().Resume(&s))
-		require.Equal(t, uint64(43), s.Reg(arm64.X0))
-		require.False(t, arm64.New().Resume(&s))
 	})
 }
 

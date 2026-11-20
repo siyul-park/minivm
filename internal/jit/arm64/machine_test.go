@@ -3616,7 +3616,7 @@ func TestMachine_Exit(t *testing.T) {
 			target.LDI(target.X16, uint64(trap)),
 			[]asm.Instruction{
 				target.STR(target.X16, target.Ctx, int16(jit.OffsetTrap)),
-				target.LDR(target.X16, target.Ctx, int16(asm.OffsetStub)),
+				target.LDR(target.X16, target.Ctx, int16(jit.OffsetStub)),
 				target.EXIT(target.X16),
 				target.USE(uses[0]),
 				target.USE(uses[1]),

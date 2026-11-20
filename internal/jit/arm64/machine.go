@@ -395,7 +395,7 @@ func (m *Machine) Exit(a *asm.Assembler, id int, k jit.Kind, uses []asm.VReg) {
 	a.Emit(target.LDI(target.X16, uint64(trap))...)
 	a.Emit(
 		target.STR(target.X16, target.Ctx, int16(jit.OffsetTrap)),
-		target.LDR(target.X16, target.Ctx, int16(asm.OffsetStub)),
+		target.LDR(target.X16, target.Ctx, int16(jit.OffsetStub)),
 		target.EXIT(target.X16),
 	)
 	for _, u := range uses {

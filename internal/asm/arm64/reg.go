@@ -38,9 +38,8 @@ const (
 
 	FP = X29
 	LR = X30
-	// Ctx holds the *asm.State for as long as native code runs. The
-	// trampoline in internal/asm hands it over in this register and reads
-	// it back here on every exit, so native code never writes it.
+	// Ctx is the register the jit runtime pins to its context for as long
+	// as native code runs; native code never writes it.
 	Ctx = X26
 	XZR = asm.Int64 + 31
 	// SP shares register id 31 with XZR. In data-processing instructions
