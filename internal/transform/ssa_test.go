@@ -1940,6 +1940,48 @@ func TestSSAPass_Run(t *testing.T) {
 		require.Subset(t, []uint32{2001, 2002, 2003, 2004}, sources)
 	})
 
+	t.Run("keeps the source of an addition inlined into a caller without positions", func(t *testing.T) {
+		leaf := types.NewFunctionBuilder(&types.FunctionType{
+			Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN)).MustBuild()
+		leaf.Positions = positioned(leaf.Code, 1000)
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+			program.WithConstants(leaf), program.WithGlobals(types.TypeI32()))
+
+		_, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), true).Run(pass.NewManager(), prog)
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+		require.NotContains(t, instr.Format(prog.Code), "call")
+
+		var additions []uint32
+		for ip := 0; ip < len(prog.Code); {
+			inst := instr.Instruction(prog.Code[ip:])
+			if inst.Opcode() == instr.I32_ADD {
+				additions = append(additions, instr.Find(prog.Positions, ip))
+			}
+			ip += inst.Width()
+		}
+		require.Equal(t, []uint32{1003}, additions)
+	})
+
+	t.Run("leaves code with unsorted positions unchanged", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_ADD)})
+		prog.Positions = positioned(prog.Code, 0)
+		slices.Reverse(prog.Positions)
+		require.ErrorIs(t, program.Verify(prog), program.ErrPosition)
+		before := prog.String()
+
+		passes := pass.NewPipeline[*ssa.Function]()
+		passes.Add(transform.NewFoldPass())
+		passes.Add(transform.NewDCEPass())
+		preserved, err := transform.NewSSAPass(passes, false).Run(pass.NewManager(), prog)
+		require.NoError(t, err)
+		require.True(t, preserved)
+		require.Equal(t, before, prog.String())
+	})
+
 	t.Run("restores a function whose fault is reported at a literal holding it", func(t *testing.T) {
 		fn := sliceFunction(types.TypeAny())
 		literal := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeAny()), Elems: []types.Value{fn}}

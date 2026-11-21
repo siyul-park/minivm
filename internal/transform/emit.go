@@ -40,7 +40,7 @@ type emitter struct {
 
 	locals []types.Type
 	code   []instr.Instruction
-	// tracked reports whether the source function carries positions; sources
+	// tracked reports whether the input bytecode or SSA carries sources; sources
 	// then runs parallel to code, each instruction with the source of the
 	// operation or terminator it serves, which at holds while one is lowered.
 	tracked bool
@@ -61,8 +61,8 @@ type fix struct {
 }
 
 // emission is the bytecode emit wrote for a function: its code, the locals the
-// code adds to the function's own, and its source positions, nil unless the
-// function had them.
+// code adds to the function's own, and its source positions, nil when
+// tracking is disabled.
 type emission struct {
 	code      []byte
 	locals    []types.Type
@@ -124,10 +124,12 @@ func (e *emitter) collect() bool {
 
 	for id := range e.function.Len() {
 		block := e.function.Block(id)
+		e.tracked = e.tracked || block.Terminator.Source != 0
 		for _, p := range block.Params {
 			e.defined[p] = id
 		}
 		for _, operation := range block.Operations {
+			e.tracked = e.tracked || operation.Source != 0
 			if !e.accept(id, operation) {
 				return false
 			}
