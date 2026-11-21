@@ -13179,6 +13179,61 @@ func BenchmarkNew(b *testing.B) {
 	})
 }
 
+func FuzzCheckedArithmetic(f *testing.F) {
+	edges := []int64{math.MinInt64, math.MaxInt64, math.MinInt64 + 1, math.MaxInt64 - 1, -1, 0, 1, 1 << 31, 1 << 32, 3037000500, 46341}
+	for op := byte(0); op < 6; op++ {
+		for _, x := range edges {
+			for _, y := range edges {
+				f.Add(op, x, y)
+			}
+		}
+	}
+
+	f.Fuzz(func(t *testing.T, operation byte, left, right int64) {
+		// operation picks one of the six checked opcodes; an i32 one takes the
+		// operands' low halves.
+		ops := []instr.Opcode{instr.I32_ADD_OVF, instr.I32_SUB_OVF, instr.I32_MUL_OVF, instr.I64_ADD_OVF, instr.I64_SUB_OVF, instr.I64_MUL_OVF}
+		op := ops[int(operation)%len(ops)]
+		wide := int(operation)%len(ops) >= 3
+		bits, code, a, b := uint(32), instr.I32_CONST, uint64(uint32(left)), uint64(uint32(right))
+		x, y := big.NewInt(int64(int32(left))), big.NewInt(int64(int32(right)))
+		if wide {
+			bits, code, a, b = 64, instr.I64_CONST, uint64(left), uint64(right)
+			x, y = big.NewInt(left), big.NewInt(right)
+		}
+		exact := new(big.Int)
+		switch int(operation) % 3 {
+		case 0:
+			exact.Add(x, y)
+		case 1:
+			exact.Sub(x, y)
+		default:
+			exact.Mul(x, y)
+		}
+		limit := new(big.Int).Lsh(big.NewInt(1), bits-1)
+		overflow := exact.Cmp(limit) >= 0 || exact.Cmp(new(big.Int).Neg(limit)) < 0
+		wrapped := new(big.Int).And(exact, new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), bits), big.NewInt(1))).Uint64()
+		var want types.Value = types.I32(int32(uint32(wrapped)))
+		if wide {
+			want = types.I64(int64(wrapped))
+		}
+
+		prog := program.New([]instr.Instruction{instr.MustNew(code, a), instr.MustNew(code, b), instr.MustNew(op)})
+		require.NoError(t, program.Verify(prog))
+		for _, opts := range [][]interp.Option{{interp.WithThreshold(-1)}, {interp.WithTick(1), interp.WithThreshold(-1)}} {
+			vm := interp.MustNew(prog, opts...)
+			require.NoError(t, vm.Run(context.Background()))
+			flag, err := vm.Pop()
+			require.NoError(t, err)
+			result, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I1(overflow), flag)
+			require.Equal(t, want, result)
+			require.NoError(t, vm.Close())
+		}
+	})
+}
+
 func BenchmarkInterpreter_Run(b *testing.B) {
 	for _, tt := range runTests {
 		b.Run(runTestName(tt.program), func(b *testing.B) {
@@ -13229,6 +13284,93 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 			}
 		})
 	}
+
+	// Checked compares a hot i64 loop of 10000 iterations that tests overflow
+	// with the checked opcode against the manual sequence (add) or the plain
+	// opcode as a floor (mul, which has no cheap manual sequence).
+	b.Run("Checked", func(b *testing.B) {
+		const iterations = 10000
+		build := func(carries bool, body func(b *instr.Builder, out instr.Label)) *program.Program {
+			code := instr.NewBuilder()
+			loop, out, done := code.Label(), code.Label(), code.Label()
+			code.Emit(instr.I64_CONST, 1).Emit(instr.LOCAL_SET, 1).Emit(instr.I64_CONST, 1).Emit(instr.LOCAL_SET, 2)
+			code.Bind(loop)
+			code.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, iterations).Emit(instr.I32_GE_S).BrIf(done)
+			body(code, out)
+			code.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+			code.Bind(out)
+			if carries {
+				code.Emit(instr.DROP)
+			}
+			code.Bind(done).Emit(instr.LOCAL_GET, 0)
+			assembled, err := code.Assemble()
+			require.NoError(b, err)
+			return program.New(assembled, program.WithLocals(types.TypeI32(), types.TypeI64(), types.TypeI64(), types.TypeI64()))
+		}
+		checked := func(op instr.Opcode) *program.Program {
+			return build(true, func(code *instr.Builder, out instr.Label) {
+				code.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(op).BrIf(out).Emit(instr.LOCAL_SET, 1)
+			})
+		}
+		manual := build(false, func(code *instr.Builder, out instr.Label) {
+			code.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I64_ADD).Emit(instr.LOCAL_TEE, 3)
+			code.Emit(instr.LOCAL_GET, 1).Emit(instr.I64_XOR).Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 2).Emit(instr.I64_XOR)
+			code.Emit(instr.I64_AND).Emit(instr.I64_CONST, 0).Emit(instr.I64_LT_S).BrIf(out)
+			code.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_SET, 1)
+		})
+		plain := build(false, func(code *instr.Builder, out instr.Label) {
+			code.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I64_MUL).Emit(instr.LOCAL_SET, 1)
+		})
+		for _, tt := range []struct {
+			name string
+			prog *program.Program
+		}{
+			{"add ovf", checked(instr.I64_ADD_OVF)},
+			{"add manual", manual},
+			{"mul ovf", checked(instr.I64_MUL_OVF)},
+			{"mul plain", plain},
+		} {
+			for _, mode := range []string{"Threaded", "JIT"} {
+				b.Run(tt.name+"/"+mode, func(b *testing.B) {
+					ctx := context.Background()
+					opts := []interp.Option{interp.WithThreshold(-1)}
+					var profiler *prof.Profiler
+					if mode == "JIT" {
+						testenv.MustHaveJIT(b)
+						profiler = prof.New()
+						opts = []interp.Option{interp.WithThreshold(1), interp.WithProfiler(profiler)}
+					}
+					vm := interp.MustNew(tt.prog, opts...)
+					b.Cleanup(func() { require.NoError(b, vm.Close()) })
+					run := func() {
+						require.NoError(b, vm.Run(ctx))
+						got, err := vm.Pop()
+						require.NoError(b, err)
+						require.Equal(b, types.I32(iterations), got)
+						vm.Reset()
+						vm.Flush()
+					}
+					run()
+					if profiler != nil {
+						for deadline := time.Now().Add(10 * time.Second); ; {
+							before := nativeEntries(profiler)
+							run()
+							if nativeEntries(profiler) > before {
+								break
+							}
+							require.True(b, time.Now().Before(deadline), "never entered native code")
+						}
+					}
+					b.ReportAllocs()
+					b.ResetTimer()
+					for b.Loop() {
+						run()
+					}
+					b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/iterations, "ns/iter")
+				})
+			}
+		}
+	})
 
 	b.Run("PerOp", func(b *testing.B) {
 		for _, tt := range runTests {
