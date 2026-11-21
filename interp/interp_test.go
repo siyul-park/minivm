@@ -5218,7 +5218,16 @@ func TestWithThreshold(t *testing.T) {
 			prog := program.New(code, program.WithLocals(types.TypeAny(), types.TypeI32()), program.WithTypes(scalars...))
 
 			require.ErrorIs(t, runProgramErr(t, prog, interp.WithThreshold(-1)), interp.ErrTypeMismatch)
-			require.ErrorIs(t, runProgramErr(t, prog, interp.WithThreshold(1)), interp.ErrTypeMismatch)
+
+			profiler := prof.New()
+			vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+			defer vm.Close()
+			poll(t, func() bool {
+				require.ErrorIs(t, vm.Run(context.Background()), interp.ErrTypeMismatch)
+				vm.Reset()
+				vm.Flush()
+				return exitsOf(profiler)["deopt"] > 0
+			})
 		})
 	})
 
