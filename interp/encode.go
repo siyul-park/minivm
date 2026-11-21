@@ -314,11 +314,10 @@ func typedArray[T types.Scalar](
 }
 
 // marshalMap converts a Go map. Go map memory is not addressable, so iteration
-// is the one place the run step still uses reflection; the destination writer,
-// which would otherwise switch over every map representation per call, is
+// is the one place the run step still uses reflection; how a key boxes is
 // chosen once at compile time.
 func marshalMap(t reflect.Type, mt *types.MapType, key, elem *conversion) MarshalerFunc {
-	write := mapWriter(mt, key)
+	box := mapKey(mt, key)
 
 	shared := !key.host && !elem.host
 	return func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
@@ -329,7 +328,7 @@ func marshalMap(t reflect.Type, mt *types.MapType, key, elem *conversion) Marsha
 			defer e.leave(target)
 		}
 		rv := reflect.NewAt(t, p).Elem()
-		out := types.NewMapForType(mt, rv.Len())
+		out := types.NewMap(&e.interp.heap, mt, rv.Len())
 		entryKey, entryValue := reflect.New(t.Key()).Elem(), reflect.New(t.Elem()).Elem()
 		for iter := rv.MapRange(); iter.Next(); {
 			if !shared {
@@ -341,9 +340,14 @@ func marshalMap(t reflect.Type, mt *types.MapType, key, elem *conversion) Marsha
 			if err != nil {
 				return nil, fmt.Errorf("map value: %w", err)
 			}
-			if err := write(e, out, entryKey.Addr().UnsafePointer(), value); err != nil {
+			k, err := box(e, entryKey.Addr().UnsafePointer())
+			if err != nil {
 				return nil, fmt.Errorf("map key: %w", err)
 			}
+			if !out.Accepts(k) {
+				return nil, fmt.Errorf("map key: %w: target=%s", ErrTypeMismatch, mt.Key)
+			}
+			out.Store(k, value)
 		}
 		return out, nil
 	}
@@ -583,82 +587,65 @@ func (e *Encoder) leave(ptr unsafe.Pointer) {
 	delete(e.seen, ptr)
 }
 
-// mapWriter selects how one entry is stored, from the key kind the map type
-// already fixed.
-func mapWriter(mt *types.MapType, key *conversion) func(*Encoder, types.Value, unsafe.Pointer, types.Boxed) error {
+// mapKey selects how a Go key boxes, from the key kind the map type already
+// fixed. A key that does not fit the kind is an error; one the map does not
+// accept is the caller's.
+func mapKey(mt *types.MapType, key *conversion) func(*Encoder, unsafe.Pointer) (types.Boxed, error) {
 	switch mt.KeyKind {
-	case types.KindI1:
-		return typedMap(key, func(val types.Value) (bool, error) {
-			n, err := keyInt(val, mt.Key)
-			return n != 0, err
-		})
-	case types.KindI8:
-		return typedMap(key, func(val types.Value) (int8, error) {
-			n, err := keyInt(val, mt.Key)
-			return int8(n), err
-		})
-	case types.KindI32:
-		return typedMap(key, func(val types.Value) (int32, error) {
+	case types.KindI1, types.KindI8, types.KindI32, types.KindI64:
+		return func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
+			val, err := key.value(e, p)
+			if err != nil {
+				return 0, err
+			}
 			n, err := keyInt(val, mt.Key)
 			if err != nil {
 				return 0, err
 			}
-			if n < math.MinInt32 || n > math.MaxInt32 {
-				return 0, fmt.Errorf("%w: %d overflows i32", ErrValueOverflow, n)
-			}
-			return int32(n), nil
-		})
-	case types.KindI64:
-		return typedMap(key, func(val types.Value) (int64, error) { return keyInt(val, mt.Key) })
-	case types.KindF32:
-		return typedMap(key, func(val types.Value) (float32, error) {
-			f, err := keyFloat(val, mt.Key)
-			return float32(f), err
-		})
-	case types.KindF64:
-		return typedMap(key, func(val types.Value) (float64, error) { return keyFloat(val, mt.Key) })
-
-	case types.KindRef:
-
-		if mt.Key.Equals(types.TypeString()) {
-			return func(e *Encoder, m types.Value, p unsafe.Pointer, value types.Boxed) error {
-				val, err := key.value(e, p)
-				if err != nil {
-					return err
+			switch mt.KeyKind {
+			case types.KindI1:
+				return types.BoxI1(n != 0), nil
+			case types.KindI8:
+				return types.BoxI8(int8(n)), nil
+			case types.KindI32:
+				if n < math.MinInt32 || n > math.MaxInt32 {
+					return 0, fmt.Errorf("%w: %d overflows i32", ErrValueOverflow, n)
 				}
-				text, ok := val.(types.String)
-				if !ok {
-					return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, val, mt.Key)
-				}
-				m.(*types.StringMap).Set(string(text), value)
-				return nil
+				return types.BoxI32(int32(n)), nil
 			}
+			return e.boxI64(n)
 		}
-		return func(e *Encoder, m types.Value, p unsafe.Pointer, value types.Boxed) error {
+	case types.KindF32, types.KindF64:
+		return func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
 			val, err := key.value(e, p)
 			if err != nil {
-				return err
+				return 0, err
 			}
-			boxed, err := e.box(val)
+			f, err := keyFloat(val, mt.Key)
 			if err != nil {
-				return err
+				return 0, err
 			}
-			k, entryKey := e.interp.mapKey(boxed)
-			if old, replaced := m.(*types.Map).Set(k, types.MapEntry{Key: entryKey, Value: value}); replaced {
-				e.interp.heap.Release(old.Key)
-				e.interp.heap.Release(old.Value)
+			if mt.KeyKind == types.KindF32 {
+				return types.BoxF32(float32(f)), nil
 			}
-			return nil
+			return types.BoxF64(f), nil
+		}
+	case types.KindRef:
+		return func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
+			val, err := key.value(e, p)
+			if err != nil {
+				return 0, err
+			}
+			return e.box(val)
 		}
 	}
-	return func(*Encoder, types.Value, unsafe.Pointer, types.Boxed) error {
-		return fmt.Errorf("%w: map key type=%s", ErrUnsupportedMarshalType, mt.Key)
+	return func(*Encoder, unsafe.Pointer) (types.Boxed, error) {
+		return 0, fmt.Errorf("%w: map key type=%s", ErrUnsupportedMarshalType, mt.Key)
 	}
 }
 
 // boxed holds val the way the VM holds a value on its stack, so a key or an
-// element reaches (*Interpreter).mapKey in the same form an opcode would hand
-// it over. It is the error-returning counterpart of (*Interpreter).box, which
+// element reaches a map in the same form an opcode would hand it over. It is the error-returning counterpart of (*Interpreter).box, which
 // panics on heap exhaustion where conversion must report it.
 func (e *Encoder) box(val types.Value) (types.Boxed, error) {
 	switch v := val.(type) {
@@ -717,25 +704,6 @@ func (e *Encoder) alloc(val types.Value) (types.Boxed, error) {
 	}
 	e.owned = append(e.owned, addr)
 	return types.BoxRef(addr), nil
-}
-
-// typedMap stores one entry of a map that holds its keys as Go values. The key
-// is read as a standalone value and narrowed straight to K: routing it through a
-// slot first would allocate a heap reference for an i64 too large to box and then
-// drop it, since such a map never stores a key as a reference.
-func typedMap[K types.Scalar](key *conversion, narrow func(types.Value) (K, error)) func(*Encoder, types.Value, unsafe.Pointer, types.Boxed) error {
-	return func(e *Encoder, m types.Value, p unsafe.Pointer, value types.Boxed) error {
-		val, err := key.value(e, p)
-		if err != nil {
-			return err
-		}
-		k, err := narrow(val)
-		if err != nil {
-			return err
-		}
-		m.(*types.TypedMap[K]).Set(k, value)
-		return nil
-	}
 }
 
 // keyInt and keyFloat read a map key as the VM scalar its declared key type

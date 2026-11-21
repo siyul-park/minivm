@@ -39,14 +39,14 @@ const (
 	OffsetClosureFn        = unsafe.Offsetof(types.Closure{}.Fn)
 	OffsetClosureUpvals    = unsafe.Offsetof(types.Closure{}.Upvals)
 
-	// OffsetMapTyp is a TypedMap's declared *types.MapType, whose element kind
-	// the map guard compares at OffsetMapTypeElemKind. A key kind alone does
-	// not fix the element: one TypedMap[int32] serves map[i32]string and
-	// map[i32]i32 alike.
-	OffsetMapTyp          = unsafe.Offsetof(types.TypedMap[int64]{}.Typ)
-	OffsetMapTypeElemKind = unsafe.Offsetof(types.MapType{}.ElemKind)
+	// OffsetMapTyp is a Map's declared *types.MapType, whose KeyKind, ElemKind,
+	// and Class bytes the map guard reads as one 32-bit word at
+	// OffsetMapTypeKinds. A key kind alone does not fix the element or the key
+	// class: one Map layout serves map[i32]string and map[i32]i32 alike.
+	OffsetMapTyp       = unsafe.Offsetof(types.Map{}.Typ)
+	OffsetMapTypeKinds = unsafe.Offsetof(types.MapType{}.KeyKind)
 	// OffsetMapZero is the Boxed word MAP_GET returns for an absent key.
-	OffsetMapZero = unsafe.Offsetof(types.TypedMap[int64]{}.Zero)
+	OffsetMapZero = unsafe.Offsetof(types.Map{}.Zero)
 )
 
 // Control bytes of a table slot, and the hash multiplier. An empty slot is 0, a
@@ -58,10 +58,10 @@ const (
 	MapHash  = 0x9E3779B97F4A7C15
 )
 
-// Offsets native code reads and writes in a numeric-keyed *types.TypedMap: the
+// Offsets native code reads and writes in a *types.Map: the
 // words of its pointer-free table (types/map.go owns the layout). They are
 // taken from reflection, since the table is unexported, and TestHeap_Layout pins
-// every value. Every key kind shares one layout: only the methods differ.
+// every value. Every key class shares one layout.
 var (
 	// OffsetMapCtrl, OffsetMapSlots, OffsetMapOrder, and OffsetMapPos are the
 	// data words of the control bytes, of the key and value words, of the
@@ -95,12 +95,12 @@ func Itab(v types.Value) uintptr {
 	return (*face)(unsafe.Pointer(&v)).tab
 }
 
-// mapField is the offset of the named table field in a TypedMap. A renamed
+// mapField is the offset of the named table field in a types.Map. A renamed
 // field fails at start, not as a wrong read.
 func mapField(name string) uintptr {
-	table, ok := reflect.TypeFor[types.TypedMap[int64]]().FieldByName("table")
+	table, ok := reflect.TypeFor[types.Map]().FieldByName("table")
 	if !ok {
-		panic("jit: types.TypedMap has no table field")
+		panic("jit: types.Map has no table field")
 	}
 	field, ok := table.Type.FieldByName(name)
 	if !ok {

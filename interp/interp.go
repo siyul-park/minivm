@@ -1184,10 +1184,13 @@ func (i *Interpreter) load(constants []types.Value) {
 		}
 	}
 
-	// A map literal can repeat a key. The entry it replaces is reconciled once
-	// the counts are established, because a deduplicated string may be shared
-	// with the entry that replaced it.
-	var replaced []types.Boxed
+	// A map literal is filled once the counts are established, because the
+	// edges of an empty map are what Recount counts.
+	type literal struct {
+		m     *types.Map
+		words []types.Boxed
+	}
+	var literals []literal
 	dedup := make(map[string]types.Ref)
 	// An object reachable from several positions is copied once, so every
 	// position shares the interpreter-owned copy as the program shared the source.
@@ -1221,23 +1224,27 @@ func (i *Interpreter) load(constants []types.Value) {
 				})
 			}
 		case *types.MapLiteral:
-			m := types.NewMap(value.Typ)
+			m := types.NewMap(&i.heap, value.Typ, len(value.Keys))
 			boxed = types.BoxRef(i.heap.Add(m))
+			words := make([]types.Boxed, 2*len(value.Keys))
+			literals = append(literals, literal{m, words})
 			for index, key := range value.Keys {
-				var mapKey types.MapKey
-				var storedKey types.Boxed
 				queue = append(queue, key)
 				slots = append(slots, func(value types.Boxed) {
-					mapKey, storedKey = i.mapKey(value)
+					words[2*index] = value
 				})
 				queue = append(queue, value.Values[index])
 				slots = append(slots, func(value types.Boxed) {
-					old, ok := m.Set(mapKey, types.MapEntry{Key: storedKey, Value: value})
-					if ok {
-						replaced = append(replaced, old.Key, old.Value)
-					}
+					words[2*index+1] = value
 				})
 			}
+		case *types.Map:
+			m := types.NewMap(&i.heap, value.Typ, value.Len())
+			value.Range(func(key, val types.Boxed) bool {
+				m.Store(key, val)
+				return true
+			})
+			boxed = types.BoxRef(i.heap.Add(m))
 		case *types.StructLiteral:
 			structure := types.NewStruct(nil, value.Typ)
 			boxed = types.BoxRef(i.heap.Add(structure))
@@ -1264,11 +1271,20 @@ func (i *Interpreter) load(constants []types.Value) {
 	}
 
 	i.heap.Recount(i.constants)
-	// Holding each replaced ref across its release frees only what the map no
-	// longer reaches.
-	for _, old := range replaced {
-		i.heap.Retain(old)
-		i.heap.Release(old)
+	// Each entry is retained, then stored, so a repeated key keeps its first
+	// place and last value and releases exactly what it replaces.
+	for _, l := range literals {
+		for _, word := range l.words {
+			i.heap.Retain(word)
+		}
+	}
+	for _, l := range literals {
+		for at := 0; at < len(l.words); at += 2 {
+			if !l.m.Accepts(l.words[at]) {
+				panic(ErrTypeMismatch)
+			}
+			l.m.Store(l.words[at], l.words[at+1])
+		}
 	}
 }
 
@@ -1441,12 +1457,12 @@ func (i *Interpreter) runes(text types.Boxed) types.TypedArray[int32] {
 }
 
 // newMapDefault is a new empty map of typ sized for capacity entries.
-func (i *Interpreter) newMapDefault(typ *types.MapType, capacity types.Boxed) types.Value {
+func (i *Interpreter) newMapDefault(typ *types.MapType, capacity types.Boxed) *types.Map {
 	n := capacity.I32()
 	if n < 0 {
 		panic(ErrIndexOutOfRange)
 	}
-	return types.NewMapForType(typ, int(n))
+	return types.NewMap(&i.heap, typ, int(n))
 }
 
 // newArrayDefault is a new array of typ's element kind holding size zero elements; a
@@ -1611,41 +1627,6 @@ func (i *Interpreter) structGet(addr, at int) types.Boxed {
 			panic(err)
 		}
 		return result
-	default:
-		panic(ErrTypeMismatch)
-	}
-}
-
-// mapKey defines the canonical map key: i1/i8 normalize to i32, strings key
-// by content, and other refs by heap address. The optional second result is
-// the owned stored key when normalization alone cannot reconstruct it.
-func (i *Interpreter) mapKey(key types.Boxed) (types.MapKey, types.Boxed) {
-	switch key.Kind() {
-	case types.KindI1, types.KindI8, types.KindI32:
-		bits := uint64(uint32(key.I32()))
-		return types.MapKey{Kind: types.KindI32, Bits: bits}, types.BoxI32(int32(bits))
-	case types.KindI64:
-		return types.MapKey{Kind: types.KindI64, Bits: uint64(i.unboxI64(key))}, 0
-	case types.KindF32:
-		bits := math.Float32bits(key.F32())
-		if bits == negZeroF32 {
-			bits = 0
-		}
-		return types.MapKey{Kind: types.KindF32, Bits: uint64(bits)}, types.BoxF32(math.Float32frombits(bits))
-	case types.KindF64:
-		bits := math.Float64bits(key.F64())
-		if bits == negZeroF64 {
-			bits = 0
-		}
-		return types.MapKey{Kind: types.KindF64, Bits: bits}, types.BoxF64(math.Float64frombits(bits))
-	case types.KindRef:
-		switch value := i.heap.At(key.Ref()).(type) {
-		case types.I64:
-			return types.MapKey{Kind: types.KindI64, Bits: uint64(i.unboxI64(key))}, 0
-		case types.String:
-			return types.MapKey{Kind: types.KindText, Text: string(value)}, key
-		}
-		return types.MapKey{Kind: types.KindRef, Bits: uint64(key.Ref())}, key
 	default:
 		panic(ErrTypeMismatch)
 	}

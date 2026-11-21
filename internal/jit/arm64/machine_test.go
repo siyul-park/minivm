@@ -745,7 +745,7 @@ func TestNew(t *testing.T) {
 		}
 		require.Contains(t, ssa.Format(f), "array.view")
 
-		heap := []types.Value{nil, types.TypedArray[int32]{10, 20, 30, 40, 50, 60, 70}, types.NewMap(types.NewMapType(types.TypeF64(), types.TypeI32()))}
+		heap := []types.Value{nil, types.TypedArray[int32]{10, 20, 30, 40, 50, 60, 70}, types.NewMap(nil, types.NewMapType(types.TypeF64(), types.TypeI32()), 0)}
 		stack := []types.Boxed{types.BoxRef(1), types.BoxRef(2), 0, 0}
 		// RETURN releases both reference params; counts above one keep
 		// those releases from reaching the last reference.
@@ -2210,7 +2210,7 @@ func TestMachine_Lower(t *testing.T) {
 			lower: true,
 		},
 		{
-			name: "admits a map of the exact key and additionally checks the declared element kind",
+			name: "admits a map of the exact key and additionally checks the declared kinds and class in one word",
 			regs: regs{1: ssa.TypeRef, 2: ssa.TypeRef},
 			op:   ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormMap, Key: types.KindI32, Elem: types.KindRef}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
 			rows: func() []asm.Instruction {
@@ -2220,13 +2220,17 @@ func TestMachine_Lower(t *testing.T) {
 					target.ADD(vr(1), target.X16, vr(1)),
 					target.LDR(target.X16, vr(1), 0),
 				}
-				rows = append(rows, target.LDI(target.X17, uint64(jit.Itab((*types.TypedMap[int32])(nil))))...)
+				rows = append(rows, target.LDI(target.X17, uint64(jit.Itab((*types.Map)(nil))))...)
 				rows = append(rows, target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, exit))
-				return append(rows,
+				rows = append(rows,
 					target.LDR(target.X16, vr(1), int16(jit.OffsetData)),
 					target.LDR(target.X16, target.X16, int16(jit.OffsetMapTyp)),
-					target.LDRB(target.X16, target.X16, int16(jit.OffsetMapTypeElemKind)),
-					target.CMPI(target.X16, uint16(types.KindRef)), target.BCondLabel(target.OpBNE, exit),
+					target.LDR(target.W16, target.X16, int16(jit.OffsetMapTypeKinds)),
+					target.ANDI(target.X16, target.X16, 0xFFFFFF),
+				)
+				rows = append(rows, target.LDI(target.X17, uint64(types.KindI32)|uint64(types.KindRef)<<8)...)
+				return append(rows,
+					target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, exit),
 					target.MOV(reg(ssa.TypeRef, 2), reg(ssa.TypeRef, 1)),
 				)
 			}(),
@@ -3117,6 +3121,14 @@ func TestMachine_Lower(t *testing.T) {
 	guarded := vr
 	vr := func(n int) asm.VReg { return guarded(n + 1) }
 	type walk struct{ data, ctrl, slots, mask, index, tag, free, state, slot, word int }
+	// keyRegs is the registers a key's rows derive: an i64 key is its own register,
+	// and its rows only check it.
+	keyRegs := func(rows []asm.Instruction) int {
+		if len(rows) == 0 || rows[0].Op == uint16(target.OpSBFX) {
+			return 0
+		}
+		return 1
+	}
 	// layout numbers a walk's registers; a set takes one more, free, before the
 	// probe's.
 	layout := func(data, ctrl int, set bool) walk {
@@ -3218,7 +3230,7 @@ func TestMachine_Lower(t *testing.T) {
 	// get is map.get or map.lookup; hit, miss, and done are labels 2, 3, and 4, and
 	// the probe's loop and next 5 and 6. The heap slot is vr(1), the table vr(2).
 	get := func(ref, dst asm.VReg, key asm.Reg, keyRows []asm.Instruction, flag asm.VReg, extra []asm.Instruction) []asm.Instruction {
-		w := layout(2, 3+min(len(keyRows), 1), false)
+		w := layout(2, 3+keyRegs(keyRows), false)
 		rows := slices.Concat(tableOf(ref, 1), keyRows, words(w), home(w, key), probe(w, key, 5, 6, 2, 3))
 		rows = append(rows, target.LDR(dst, vr(w.slot), 8))
 		if flag != (asm.VReg{}) {
@@ -3239,7 +3251,7 @@ func TestMachine_Lower(t *testing.T) {
 	// slot to the order, and points the slot back at its position.
 	set := func(ref asm.VReg, key asm.Reg, keyRows, valueRows []asm.Instruction, value asm.Reg, release bool) []asm.Instruction {
 		first := 1 + min(len(valueRows), 1)
-		w := layout(first+1, first+2+min(len(keyRows), 1), true)
+		w := layout(first+1, first+2+keyRegs(keyRows), true)
 		used, want, limit, order, pos, count := w.word+1, w.word+2, w.word+3, w.word+4, w.word+5, w.word+6
 		rows := slices.Concat(valueRows, tableOf(ref, first), keyRows, words(w), home(w, key), []asm.Instruction{target.MOVN(vr(w.free), 0, 0)}, probe(w, key, 4, 5, 2, 3))
 		rows = append(rows,
@@ -3265,7 +3277,7 @@ func TestMachine_Lower(t *testing.T) {
 	}
 	// del is map.delete; hit and done are labels 2 and 3, the probe's loop and next 4 and 5.
 	del := func(ref asm.VReg, key asm.Reg, keyRows []asm.Instruction, release bool) []asm.Instruction {
-		w := layout(2, 3+min(len(keyRows), 1), false)
+		w := layout(2, 3+keyRegs(keyRows), false)
 		rows := slices.Concat(tableOf(ref, 1), keyRows, words(w), home(w, key), probe(w, key, 4, 5, 2, 3))
 		state, count := w.word+1, w.word+2
 		rows = append(rows, target.LDI(vr(state), jit.SlotDead)...)
@@ -3278,6 +3290,11 @@ func TestMachine_Lower(t *testing.T) {
 		}
 		old := vr(count + 1)
 		return append(append(rows, target.LDR(old, vr(w.slot), 8)), released(old)...)
+	}
+	// wide is the check that bridges an i64 key outside the inline range: the
+	// table holds it as a heap cell native code neither compares nor creates.
+	wide := func(key asm.VReg) []asm.Instruction {
+		return []asm.Instruction{target.SBFX(target.X16, key, 0, types.VBits), target.CMP(target.X16, key), target.BCondLabel(target.OpBNE, exit)}
 	}
 	zext := func(key asm.VReg, into int) []asm.Instruction { return []asm.Instruction{target.UXTW(vr(into), key)} }
 	box32 := func(value asm.VReg) []asm.Instruction {
@@ -3316,10 +3333,10 @@ func TestMachine_Lower(t *testing.T) {
 			rows: get(reg(ref, 2), reg(f32, 4), vr(3), []asm.Instruction{target.CMPI(reg(ssa.TypeI1, 3), 0), target.CSET(vr(3), target.CondNE)}, asm.VReg{}, nil), lower: true,
 		},
 		{
-			name: "map.get of an i64 key hashes the register itself",
+			name: "map.get of an i64 key bridges outside the inline range and else hashes the register itself",
 			regs: regs{1: ref, 2: ref, 3: i64, 4: ssa.TypeI1}, guard: intMap(types.KindI64, types.KindI1),
 			op:   mapped(ssa.OpMapGet, 1, 2, 3),
-			rows: get(reg(ref, 2), reg(ssa.TypeI1, 4), reg(i64, 3), nil, asm.VReg{}, nil), lower: true,
+			rows: get(reg(ref, 2), reg(ssa.TypeI1, 4), reg(i64, 3), wide(reg(i64, 3)), asm.VReg{}, nil), lower: true,
 		},
 		{
 			name: "map.get of a ref element retains the result",
@@ -3346,6 +3363,12 @@ func TestMachine_Lower(t *testing.T) {
 			rows: set(reg(ref, 2), vr(3), zext(reg(i32, 3), 3), nil, reg(ref, 4), true), lower: true,
 		},
 		{
+			name: "map.set of an i64 key bridges outside the inline range before it touches the table",
+			regs: regs{1: ref, 2: ref, 3: i64, 4: i32}, guard: intMap(types.KindI64, types.KindI32),
+			op:   ssa.Operation{Op: ssa.OpMapSet, Args: []ssa.Value{2, 3, 4}},
+			rows: set(reg(ref, 2), reg(i64, 3), wide(reg(i64, 3)), box32(reg(i32, 4)), vr(1), false), lower: true,
+		},
+		{
 			name: "map.delete marks the slot dead and counts it out",
 			regs: regs{1: ref, 2: ref, 3: i32}, guard: intMap(types.KindI32, types.KindI32),
 			op:   ssa.Operation{Op: ssa.OpMapDelete, Args: []ssa.Value{2, 3}},
@@ -3355,7 +3378,7 @@ func TestMachine_Lower(t *testing.T) {
 			name: "map.delete of a ref element also releases the removed element",
 			regs: regs{1: ref, 2: ref, 3: i64}, guard: intMap(types.KindI64, types.KindRef),
 			op:   ssa.Operation{Op: ssa.OpMapDelete, Args: []ssa.Value{2, 3}},
-			rows: del(reg(ref, 2), reg(i64, 3), nil, true), lower: true,
+			rows: del(reg(ref, 2), reg(i64, 3), wide(reg(i64, 3)), true), lower: true,
 		},
 		{
 			name: "map.get declines a map that carries no shape guard",
@@ -3426,7 +3449,7 @@ func TestMachine_Lower(t *testing.T) {
 		testenv.MustHaveArch(t, "arm64")
 
 		t.Run("i32 keys", func(t *testing.T) {
-			mirror[int32](t, types.TypeI32(), types.BoxI32, func(n int) int32 { return int32(n * 7919) })
+			mirror[int32](t, types.TypeI32(), types.BoxI32, func(n int) int32 { return int32(n*7919 - 20000) })
 		})
 		t.Run("i8 keys", func(t *testing.T) {
 			mirror[int8](t, types.TypeI8(), types.BoxI8, func(n int) int8 { return int8(n*37 - 90) })
@@ -3435,6 +3458,126 @@ func TestMachine_Lower(t *testing.T) {
 		t.Run("i64 keys", func(t *testing.T) {
 			mirror[int64](t, types.TypeI64(), types.BoxI64, func(n int) int64 { return int64(n) << 33 })
 		})
+	})
+
+	t.Run("the map guard admits exactly the declared key kind, element kind, and class", func(t *testing.T) {
+		testenv.MustHaveArch(t, "arm64")
+
+		fn := function(t, []types.Type{types.NewMapType(types.TypeI32(), types.TypeI32())}, nil, func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_LEN).Emit(instr.RETURN)
+		})
+		fn.Typ.Returns = []types.Type{types.TypeI32()}
+		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
+
+		tests := []struct {
+			name  string
+			key   types.Type
+			elem  types.Type
+			admit bool
+		}{
+			{"the declared map", types.TypeI32(), types.TypeI32(), true},
+			{"an f64 key", types.TypeF64(), types.TypeI32(), false},
+			{"a string key", types.TypeString(), types.TypeI32(), false},
+			{"an any key", types.TypeAny(), types.TypeI32(), false},
+			{"an i8 key", types.TypeI8(), types.TypeI32(), false},
+			{"another element kind", types.TypeI32(), types.TypeF64(), false},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				stack := []types.Boxed{types.BoxRef(1), 0}
+				ctx := enter(t, stack)
+				ctx.Heap = address(t, []types.Value{nil, types.NewMap(nil, types.NewMapType(tt.key, tt.elem), 0)})
+				ctx.RC = address(t, []int{0, 2})
+				want := jit.TrapReturn
+				if !tt.admit {
+					want = jit.TrapDeopt
+				}
+				require.Equal(t, want, jit.Enter(code, ctx))
+			})
+		}
+	})
+
+	t.Run("an i64 key outside the inline range bridges before the table is touched", func(t *testing.T) {
+		testenv.MustHaveArch(t, "arm64")
+
+		typ := types.NewMapType(types.TypeI64(), types.TypeI32())
+		key := func(b *instr.Builder) { b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I64_ADD) }
+		params := []types.Type{typ, types.TypeI64(), types.TypeI64(), types.TypeI32()}
+		run := func(emit func(*instr.Builder), returns ...types.Type) (uintptr, []jit.Exit) {
+			fn := function(t, params, nil, emit)
+			fn.Typ.Returns = returns
+			return lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
+		}
+		set, setExits := run(func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0)
+			key(b)
+			b.Emit(instr.LOCAL_GET, 3).Emit(instr.MAP_SET).Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+		}, types.TypeI32())
+		del, delExits := run(func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0)
+			key(b)
+			b.Emit(instr.MAP_DELETE).Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+		}, types.TypeI32())
+		lookup, lookupExits := run(func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0)
+			key(b)
+			b.Emit(instr.MAP_LOOKUP).Emit(instr.RETURN)
+		}, types.TypeI32(), types.TypeI1())
+
+		const top, bottom = 1<<48 - 1, -(1 << 48)
+		tests := []struct {
+			name   string
+			base   int64
+			offset int64
+			bridge bool
+		}{
+			{"the largest inline key", top, 0, false},
+			{"the smallest inline key", bottom, 0, false},
+			{"one above the inline range", top, 1, true},
+			{"one below the inline range", bottom, -1, true},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				m := types.NewMap(nil, typ, 0)
+				m.Store(types.BoxI64(1), types.BoxI32(7))
+				before := snapshot(m)
+				call := func(code uintptr, exits []jit.Exit, op instr.Opcode, results ...uint64) (stack []types.Boxed, bridges int) {
+					stack = []types.Boxed{types.BoxRef(1), types.BoxI64(tt.base), types.BoxI64(tt.offset), types.BoxI32(9), 0, 0}
+					ctx := enter(t, stack)
+					ctx.Heap = address(t, []types.Value{nil, m})
+					ctx.RC = address(t, []int{0, 1 << 20})
+					for trap := jit.Enter(code, ctx); trap != jit.TrapReturn; trap = jit.Resume(ctx) {
+						require.Equal(t, jit.TrapBridge, trap)
+						exit := exits[ctx.Exit()]
+						require.Equal(t, jit.ExitBridge, exit.Kind)
+						require.Equal(t, op, exit.Code)
+						require.Equal(t, before, snapshot(m), "native code wrote the table before it bridged")
+						copy(ctx.Results[:], results)
+						bridges++
+					}
+					return stack, bridges
+				}
+
+				_, bridges := call(del, delExits, instr.MAP_DELETE)
+				require.Equal(t, btoi(tt.bridge), bridges)
+				out, bridges := call(lookup, lookupExits, instr.MAP_LOOKUP, 5, 1)
+				require.Equal(t, btoi(tt.bridge), bridges)
+				if tt.bridge {
+					require.Equal(t, []types.Boxed{types.BoxI32(5), types.BoxI1(true)}, out[:2])
+				} else {
+					require.Equal(t, []types.Boxed{m.Zero, types.BoxI1(false)}, out[:2])
+				}
+				require.Equal(t, before, snapshot(m))
+				_, bridges = call(set, setExits, instr.MAP_SET)
+				require.Equal(t, btoi(tt.bridge), bridges)
+				if !tt.bridge {
+					require.Equal(t, 2, m.Len())
+					v, ok := m.Load(types.BoxI64(tt.base + tt.offset))
+					require.True(t, ok)
+					require.Equal(t, types.BoxI32(9), v)
+				}
+			})
+		}
 	})
 }
 
@@ -3469,7 +3612,7 @@ func mirror[K types.Scalar](t *testing.T, key types.Type, box func(K) types.Boxe
 	for _, initial := range []int{0, 5, 40} {
 		for _, space := range []int{3, 12, 50} {
 			t.Run(fmt.Sprintf("capacity %d over %d keys", initial, space), func(t *testing.T) {
-				want := types.NewTypedMap[K](typ, initial)
+				want := types.NewMap(nil, typ, initial)
 				got := want.Clone()
 				heap := []types.Value{nil, got}
 				rc := []int{0, 1 << 20}
@@ -3504,23 +3647,23 @@ func mirror[K types.Scalar](t *testing.T, key types.Type, box func(K) types.Boxe
 					switch n := rng.IntN(10); {
 					case n < 5:
 						before := arrays(want)
-						want.Set(k, types.BoxI32(v))
+						want.Store(box(k), types.BoxI32(v))
 						rehashed := arrays(want) != before
 						before = arrays(got)
 						_, bridges := call(set, setExits, k, v, func(exit jit.Exit) {
 							require.Equal(t, instr.MAP_SET, exit.Code)
 							require.Equal(t, before, arrays(got), "native code must not touch the arrays before it bridges")
-							got.Set(k, types.BoxI32(v))
+							got.Store(box(k), types.BoxI32(v))
 						})
 						require.Equal(t, rehashed, arrays(got) != before)
 						require.Equal(t, btoi(rehashed), bridges, "step %d: native set and Go set disagree on rehashing", step)
 						bridged += bridges
 					case n < 8:
-						want.Delete(k)
+						want.Delete(box(k))
 						_, bridges := call(del, delExits, k, v, never)
 						require.Zero(t, bridges)
 					case n < 9:
-						value, ok := want.Get(k)
+						value, ok := want.Load(box(k))
 						if !ok {
 							value = want.Zero
 						}

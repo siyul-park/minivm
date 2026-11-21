@@ -201,7 +201,7 @@ func unmarshalArray(t reflect.Type, elem *conversion) UnmarshalerFunc {
 	}
 }
 
-// unmarshalKey reverses Interpreter.mapKey for dynamic host maps: numeric kinds
+// unmarshalKey reverses how a Go key boxes for dynamic host maps: numeric kinds
 // use their normalized Go type, strings use content, and other refs use identity.
 func unmarshalKey(d *Decoder, val types.Value, p unsafe.Pointer) error {
 	value, err := d.interp.deref(val)
@@ -281,51 +281,29 @@ func (d *Decoder) elements(val types.Value) (int, func(int) (types.Value, error)
 	}
 }
 
-// entries walks a VM map, resolving one representation switch per map and
-// reporting the entry count first so the destination is sized once.
+// entries walks a VM map, reporting the entry count first so the destination
+// is sized once.
 func (d *Decoder) entries(val types.Value, reserve func(int), set func(key, value types.Value) error) error {
-	var err error
-	visit := func(key types.Value, value types.Boxed) {
-		if err != nil {
-			return
-		}
-		elem, resolveErr := d.interp.deref(value)
-		if resolveErr != nil {
-			err = fmt.Errorf("map value: %w", resolveErr)
-			return
-		}
-		err = set(key, elem)
-	}
-	switch m := val.(type) {
-	case *types.TypedMap[bool]:
-		rangeKeys(m.Len(), m.Range, func(k bool) types.Value { return types.I1(k) }, reserve, visit)
-	case *types.TypedMap[int8]:
-		rangeKeys(m.Len(), m.Range, func(k int8) types.Value { return types.I8(k) }, reserve, visit)
-	case *types.TypedMap[int32]:
-		rangeKeys(m.Len(), m.Range, func(k int32) types.Value { return types.I32(k) }, reserve, visit)
-	case *types.TypedMap[int64]:
-		rangeKeys(m.Len(), m.Range, func(k int64) types.Value { return types.I64(k) }, reserve, visit)
-	case *types.TypedMap[float32]:
-		rangeKeys(m.Len(), m.Range, func(k float32) types.Value { return types.F32(k) }, reserve, visit)
-	case *types.TypedMap[float64]:
-		rangeKeys(m.Len(), m.Range, func(k float64) types.Value { return types.F64(k) }, reserve, visit)
-	case *types.StringMap:
-		rangeKeys(m.Len(), m.Range, func(k string) types.Value { return types.String(k) }, reserve, visit)
-	case *types.Map:
-		reserve(m.Len())
-		m.Range(func(k types.MapKey, entry types.MapEntry) {
-			key, keyErr := d.interp.deref(k.Value(entry))
-			if keyErr != nil {
-				if err == nil {
-					err = fmt.Errorf("map key: %w", keyErr)
-				}
-				return
-			}
-			visit(key, entry.Value)
-		})
-	default:
+	m, ok := val.(*types.Map)
+	if !ok {
 		return fmt.Errorf("%w: source=%T", ErrTypeMismatch, val)
 	}
+	reserve(m.Len())
+	var err error
+	m.Range(func(key, value types.Boxed) bool {
+		k, keyErr := d.interp.deref(key)
+		if keyErr != nil {
+			err = fmt.Errorf("map key: %w", keyErr)
+			return false
+		}
+		elem, valueErr := d.interp.deref(value)
+		if valueErr != nil {
+			err = fmt.Errorf("map value: %w", valueErr)
+			return false
+		}
+		err = set(k, elem)
+		return err == nil
+	})
 	return err
 }
 
@@ -340,12 +318,6 @@ func fill(d *Decoder, elem *conversion, base unsafe.Pointer, stride uintptr, n i
 		}
 	}
 	return nil
-}
-
-// rangeKeys reserves a map's size n, then visits each entry under its boxed key.
-func rangeKeys[K any](n int, each func(func(K, types.Boxed)), key func(K) types.Value, reserve func(int), visit func(types.Value, types.Boxed)) {
-	reserve(n)
-	each(func(k K, v types.Boxed) { visit(key(k), v) })
 }
 
 // unmarshalStruct decodes a VM struct into a Go struct, matching each Go field

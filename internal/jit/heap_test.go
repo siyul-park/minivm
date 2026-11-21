@@ -56,11 +56,11 @@ func TestHeap_Layout(t *testing.T) {
 	})
 
 	t.Run("pins a map", func(t *testing.T) {
-		typ := types.NewMapType(types.TypeI32(), types.TypeI32())
-
 		t.Run("pins every table field to its offset", func(t *testing.T) {
 			require.Equal(t, uintptr(0), jit.OffsetMapTyp)
-			require.Equal(t, unsafe.Offsetof(types.MapType{}.ElemKind), jit.OffsetMapTypeElemKind)
+			require.Equal(t, unsafe.Offsetof(types.MapType{}.KeyKind), jit.OffsetMapTypeKinds)
+			require.Equal(t, jit.OffsetMapTypeKinds+1, unsafe.Offsetof(types.MapType{}.ElemKind))
+			require.Equal(t, jit.OffsetMapTypeKinds+2, unsafe.Offsetof(types.MapType{}.Class))
 			require.Equal(t, uintptr(8), jit.OffsetMapZero)
 			require.Equal(t, uintptr(16), jit.OffsetMapCtrl)
 			require.Equal(t, uintptr(40), jit.OffsetMapSlots)
@@ -73,9 +73,10 @@ func TestHeap_Layout(t *testing.T) {
 			require.Equal(t, uintptr(144), jit.OffsetMapUsed)
 		})
 
-		t.Run("reads the fields of every key kind's table", func(t *testing.T) {
-			keys := []types.Value{
-				types.NewTypedMap[bool](typ, 0), types.NewTypedMap[int8](typ, 0), types.NewTypedMap[int32](typ, 0), types.NewTypedMap[int64](typ, 0),
+		t.Run("reads the fields of every key class's table", func(t *testing.T) {
+			var keys []*types.Map
+			for _, key := range []types.Type{types.TypeI1(), types.TypeI8(), types.TypeI32(), types.TypeI64(), types.TypeF64(), types.TypeString(), types.TypeAny()} {
+				keys = append(keys, types.NewMap(nil, types.NewMapType(key, types.TypeI32()), 0))
 			}
 			for _, m := range keys {
 				v := reflect.ValueOf(m).Elem()
@@ -97,9 +98,9 @@ func TestHeap_Layout(t *testing.T) {
 		})
 
 		t.Run("states and hashes as the table does", func(t *testing.T) {
-			m := types.NewTypedMap[int64](typ, 0)
+			m := types.NewMap(nil, types.NewMapType(types.TypeI64(), types.TypeI32()), 0)
 			const key = 12345
-			m.Set(key, types.BoxI32(7))
+			m.Store(types.BoxI64(key), types.BoxI32(7))
 			table := reflect.ValueOf(m).Elem().FieldByName("table")
 			seed, shift := table.FieldByName("seed").Uint(), table.FieldByName("shift").Uint()
 			hash := (uint64(key) ^ seed) * jit.MapHash
@@ -112,7 +113,7 @@ func TestHeap_Layout(t *testing.T) {
 			require.Equal(t, uint64(key), slots.Index(int(2*home)).Uint())
 			require.Equal(t, uint64(types.BoxI32(7)), slots.Index(int(2*home+1)).Uint())
 
-			m.Delete(key)
+			m.Delete(types.BoxI64(key))
 			require.Equal(t, uint64(jit.SlotDead), table.FieldByName("ctrl").Index(int(home)).Uint())
 		})
 

@@ -383,7 +383,7 @@ func (w *walker) guardMap(operation instr.Opcode, m *types.MapType, pops int) {
 	if pops > 2 {
 		value = w.stack[top-1].kind
 	}
-	shape := ssa.Shape{Form: ssa.FormMap, Key: m.KeyKind, Elem: m.ElemKind}
+	shape := ssa.Shape{Form: ssa.FormMap, Key: m.KeyKind, Elem: m.ElemKind, Class: m.Class}
 	if shape.Serves(models[operation].op, key, value) {
 		w.guard(top-pops, shape)
 	}

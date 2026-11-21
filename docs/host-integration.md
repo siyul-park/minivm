@@ -71,6 +71,10 @@ A value from `Marshal` owns the refs of its fields until the VM takes it. The ca
 
 `Pop` frees the refs a value holds with its last reference, so read them before `Pop` or `Retain` them.
 
+## Maps
+
+A host builds a VM map with `types.NewMap(vm.Heap(), types.NewMapType(key, elem), capacity)`. The `Map` owns the refs its keys and values hold (`memory-model.md`, Map Ownership, owns the per-method contract). A map built with a nil heap is unbound: the first ref it must read, retain, or release panics with `ErrDetached`. `HostMap.Map` returns a VM-owned copy of the Go map, which iterates in Go's order.
+
 ## Host Functions
 
 `HostFunction` bridges `CALL` to Go:

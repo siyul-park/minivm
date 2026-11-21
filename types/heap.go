@@ -52,7 +52,13 @@ type Hooks struct {
 
 const heapRunway = 64
 
-var errHook = errors.New("types: heap hook is not set")
+var (
+	// ErrDetached is the panic of a container, such as a Map built with a nil heap,
+	// that must read, retain, or release a reference without a heap to do it in.
+	ErrDetached = errors.New("types: container is not bound to a heap")
+
+	errHook = errors.New("types: heap hook is not set")
+)
 
 // NewHeap returns an empty heap with room for capacity values that holds at
 // most limit slots, or any number when limit is 0.

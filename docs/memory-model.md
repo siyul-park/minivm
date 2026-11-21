@@ -42,19 +42,41 @@ Transfers `MUST` preserve counts exactly. Native execution `MAY` borrow backing 
 
 ## Map Storage
 
-`types/map.go` owns map storage. A `TypedMap` with a numeric key (`i1`, `i8`, `i32`, `i64`, `f32`, `f64`) keeps its entries in an open-addressing table of four flat arrays that hold no Go pointers. A `StringMap` and the generic `Map` keep a Go map. Native code `MUST NOT` touch a Go map, so only the table is reachable from machine code.
+`types/map.go` owns map storage. One `Map` serves every key type: it keeps its entries in an open-addressing table of four flat arrays that hold no Go pointers, so native code reads them without touching a Go map. A `Map` `MUST` come from `NewMap`; its zero value is not usable.
+
+A key's class is `ClassWord` (`i1`, `i8`, `i32`, `i64`), `ClassFloat` (`f32`, `f64`), `ClassText` (`string`), or `ClassAny` (`any` and every other reference type). `value-representation.md`, Map Key Words, owns the table word each class stores and how it matches.
+
+An `i64` key outside the inline range is a map-owned `I64` heap cell: `Store` and `Swap` adopt the incoming cell when the caller holds the only reference, else copy it, and release a cell whose value fits inline. `Range` lends the cell; `map.keys` and `map.iter` hand out fresh copies, so a guest never holds the map's own cell. `Accepts` is the check before a key enters: a scalar fits unless the map is keyed by `string`, and a reference fits a `string` map when it is a `String`, an `i64` map when it is an `I64`, and an `any` map always.
 
 | Part | Contract |
 |---|---|
-| Capacity | a power of two, at least 8 for a map built by `NewTypedMap`; a zero-value `TypedMap` is not usable |
+| Capacity | a power of two, at least 8 |
 | Hash | the key word xor a random per-table seed, times a fixed constant; the top bits pick the home slot and the seven bits below them the tag. The seed survives rehash and `Clone`, so keys crafted to collide for the bare constant spread out; it never affects iteration order |
 | Slot | key word, then `Boxed` value word, in `slots`; control byte `empty` (0), `dead` (1, a tombstone), or `full` (`0x80` with the tag) in `ctrl`; probing is linear and passes every slot whose control byte is not the key's tag. An insert takes the first tombstone on its probe, else the empty slot that ended it |
-| Order | `order[:used]` lists the slot of every insert since the last rehash, the rehash's own re-inserts first, and `pos[slot]` is the position of the slot's latest insert; position `p` is live while slot `order[p]` is full and `pos[order[p]]` is `p`. A zero key is stored as `+0` |
+| Order | `order[:used]` lists the slot of every insert since the last rehash, the rehash's own re-inserts first, and `pos[slot]` is the position of the slot's latest insert; position `p` is live while slot `order[p]` is full and `pos[order[p]]` is `p` |
 | Load | `used`, which bounds live entries plus tombstones, stays at or below three quarters of capacity; an insert past that rehashes the live entries, in order, into fresh arrays, doubling them when live entries exceed three eighths and keeping the size otherwise |
 
-Native code reads and writes the table of a `TypedMap` with an integer key (`i1`, `i8`, `i32`, `i64`) through `jit.OffsetMap*` (`jit-internals.md`, Maps). It `MUST` choose the same slot, write the same control byte, append the same `order` entry, write the same `pos` word, and make the same `count` and `used` updates as `set`, `remove`, and `get`, and `MUST NOT` rehash: an insert past the load takes the Go `set`. It `MUST NOT` write `gen`, `epoch`, a slice header, or `seed`.
+Native code serves `ClassWord` maps only; every other class bridges or deopts (`jit-internals.md`, Maps). It reads and writes the table through `jit.OffsetMap*`, and `MUST` choose the same slot, write the same control byte, append the same `order` entry, write the same `pos` word, and make the same `count` and `used` updates as `Store`, `Delete`, and `Load`, and `MUST NOT` rehash: an insert past the load takes the Go `Store`. It `MUST NOT` write `gen`, `epoch`, a slice header, or `seed`.
 
-A numeric map iterates (`Range`, `map.keys`, `map.iter`) in insertion order: an update keeps the entry's place, and a key deleted and set again goes last. A `StringMap` or `Map` iterates in an unspecified order; map constants and host maps are such maps. Under mutation, `map.iter` `MUST` produce every entry present for the whole walk exactly once and `MUST NOT` produce a key deleted before the walk reaches it. Over a numeric table it also produces every entry inserted during the walk, once: a rehash ends the table's `epoch` with the order positions it dropped, and the walk follows the epochs to its place in the new order, so it never reads an entry the table gave up. A walk that inserts a new key at every step therefore never ends. A table has no epoch until its first walk; after that every rehash records one, and a walk left unfinished keeps the epochs after its own reachable. `map.clear` ends a walk over a numeric table. Entries inserted during a walk over a `StringMap` or `Map` `MAY` be produced; such a map is cleared in place, so a walk over it produces nothing already cleared, but entries added after the clear `MAY` still appear. Float keys follow Go map keys, except that `-0` and `+0` are one key stored as `+0`; a `NaN` key never matches, so each set adds an entry that only `map.clear` removes.
+## Map Ownership
+
+A `Map` owns the references its keys and values hold and releases them through its heap. A map built with a nil heap is unbound: the first reference it must read, retain, or release panics with `ErrDetached`.
+
+| Method | Key | Value |
+|---|---|---|
+| `Load` | borrowed | borrowed |
+| `Store` | taken; a hit keeps the first key and releases the incoming one | taken; a hit releases the replaced value |
+| `Swap` | taken as `Store` | taken; a hit returns the replaced value to the caller unreleased |
+| `LoadAndDelete` | borrowed; the stored key is released | moves to the caller |
+| `Delete` | borrowed; the stored key is released | released |
+| `Clear` | every key released once | every value released once |
+| `Clone` | a bound copy retains every ref, `null` included | same |
+
+`Heap.Retain` counts `null`; `Heap.Release` skips it.
+
+A walk over a map (`Range`, `map.keys`, `map.iter`) yields entries in insertion order for every map, constants and host-map copies included: an update keeps the entry's place, and a key deleted and stored again goes last. A host-map copy takes the order Go's map range gives. Under mutation, `map.iter` `MUST` produce every entry present for the whole walk exactly once and `MUST NOT` produce a key deleted before the walk reaches it. It also produces every entry inserted during the walk, once: a rehash ends the table's `epoch` with the order positions it dropped, and the walk follows the epochs to its place in the new order, so it never reads an entry the table gave up. A walk that inserts a new key at every step therefore never ends. A table has no epoch until its first walk; after that every rehash records one, and a walk left unfinished keeps the epochs after its own reachable. `map.clear` ends every walk.
+
+A map owns its refs; arrays and structs keep handler reference counting until `types.Heap` owns theirs too (#367).
 
 ## Representation
 

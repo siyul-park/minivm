@@ -157,7 +157,9 @@ func TestShape_Serves(t *testing.T) {
 		{"delete of an i64 key", i64, ssa.OpMapDelete, types.KindI64, 0, true},
 		{"i64 key held in a 32-bit lane", i64, ssa.OpMapDelete, types.KindI32, 0, false},
 		{"i32 key held in a 64-bit word", i32, ssa.OpMapDelete, types.KindI64, 0, false},
-		{"float key", ssa.Shape{Form: ssa.FormMap, Key: types.KindF64, Elem: types.KindI32}, ssa.OpMapLen, 0, 0, false},
+		{"float key", ssa.Shape{Form: ssa.FormMap, Key: types.KindF64, Elem: types.KindI32, Class: types.ClassFloat}, ssa.OpMapLen, 0, 0, false},
+		{"string key", ssa.Shape{Form: ssa.FormMap, Key: types.KindRef, Elem: types.KindI32, Class: types.ClassText}, ssa.OpMapLen, 0, 0, false},
+		{"any key", ssa.Shape{Form: ssa.FormMap, Key: types.KindRef, Elem: types.KindI32, Class: types.ClassAny}, ssa.OpMapDelete, types.KindRef, 0, false},
 		{"array shape", ssa.Shape{Form: ssa.FormArray, Elem: types.KindI32}, ssa.OpMapLen, 0, 0, false},
 	}
 	for _, tt := range tests {

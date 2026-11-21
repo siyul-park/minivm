@@ -269,8 +269,17 @@ func (h *HostMap) Clear() {
 
 // Map rebuilds the view as the VM map a copy of the Go value would have
 // produced, for an opcode that yields a new value rather than changing this one.
-func (h *HostMap) Map(i *Interpreter) (types.Value, error) {
-	return convert(i, h.registry, h.copy, h.ptr)
+// The copy owns the references its keys and values hold.
+func (h *HostMap) Map(i *Interpreter) (*types.Map, error) {
+	out, err := convert(i, h.registry, h.copy, h.ptr)
+	if err != nil {
+		return nil, err
+	}
+	m, ok := out.(*types.Map)
+	if !ok {
+		return nil, ErrTypeMismatch
+	}
+	return m, nil
 }
 
 // Kind returns the value kind.

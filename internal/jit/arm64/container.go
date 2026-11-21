@@ -37,7 +37,7 @@ func (p address) row(imm func(r, base asm.Reg, offset int16) asm.Instruction, re
 
 // itab is the itab of the concrete representation shape admits: TypedArray[T]
 // for a scalar Kind, *types.Array for KindRef, *types.Struct when Struct,
-// *types.Closure when Function, *types.TypedMap[K] of key Kind when Map.
+// *types.Closure when Function, *types.Map when Map.
 func itab(shape ssa.Shape) uintptr {
 	if shape.Form == ssa.FormClosure {
 		return jit.Itab((*types.Closure)(nil))
@@ -46,18 +46,7 @@ func itab(shape ssa.Shape) uintptr {
 		return jit.Itab((*types.Struct)(nil))
 	}
 	if shape.Form == ssa.FormMap {
-		switch shape.Key {
-		case types.KindI1:
-			return jit.Itab((*types.TypedMap[bool])(nil))
-		case types.KindI8:
-			return jit.Itab((*types.TypedMap[int8])(nil))
-		case types.KindI32:
-			return jit.Itab((*types.TypedMap[int32])(nil))
-		case types.KindI64:
-			return jit.Itab((*types.TypedMap[int64])(nil))
-		default:
-			return 0
-		}
+		return jit.Itab((*types.Map)(nil))
 	}
 	switch shape.Elem {
 	case types.KindI1:

@@ -581,16 +581,6 @@ func check(call jen.Code) jen.Code {
 	return jen.If(jen.Id("err").Op(":=").Add(call), jen.Id("err").Op("!=").Nil()).Block(jen.Panic(jen.Id("err")))
 }
 
-// view replaces the host view in source with the VM value method of the view
-// returns, a copy of the Go value it addresses.
-func view(host, method string) jen.Code {
-	return jen.If(jen.List(jen.Id("view"), jen.Id("ok")).Op(":=").Id("source").Assert(jen.Op("*").Id(host)), jen.Id("ok")).Block(
-		jen.List(jen.Id("value"), jen.Id("err")).Op(":=").Id("view").Dot(method).Call(jen.Id("i")),
-		jen.If(jen.Id("err").Op("!=").Nil()).Block(jen.Panic(jen.Id("err"))),
-		jen.Id("source").Op("=").Id("value"),
-	)
-}
-
 // typeSwitch dispatches on the dynamic type behind subject: one case per
 // element of table, then rest, then a trap for any other type.
 func typeSwitch[T any](subject jen.Code, table []T, instance func(T) jen.Code, body func(T) []jen.Code, rest ...jen.Code) jen.Code {

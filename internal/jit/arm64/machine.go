@@ -942,8 +942,9 @@ func (m *Machine) shape(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 	if op.Shape.Form == ssa.FormMap {
 		a.Emit(target.LDR(target.X16, addr, int16(jit.OffsetData)))
 		a.Emit(target.LDR(target.X16, target.X16, int16(jit.OffsetMapTyp)))
-		a.Emit(target.LDRB(target.X16, target.X16, int16(jit.OffsetMapTypeElemKind)))
-		a.Emit(target.CMPI(target.X16, uint16(op.Shape.Elem)), target.BCondLabel(target.OpBNE, s.Deopt()))
+		a.Emit(target.LDR(target.W16, target.X16, int16(jit.OffsetMapTypeKinds)))
+		a.Emit(target.ANDI(target.X16, target.X16, 0xFFFFFF))
+		expect(a, uint64(op.Shape.Key)|uint64(op.Shape.Elem)<<8|uint64(op.Shape.Class)<<16, s.Deopt())
 	}
 	if op.Shape.Form == ssa.FormClosure {
 		m.closure(a, addr, op.Shape, s)
@@ -1352,9 +1353,9 @@ func (m *Machine) mapLen(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 }
 
 // mapGet looks up a key in a guarded map, as interp's MAP_GET and MAP_LOOKUP
-// do with a TypedMap: the element at a full slot holding the key, else the map's
+// do with a types.Map: the element at a full slot holding the key, else the map's
 // zero, retained when it is a reference; MAP_LOOKUP also yields whether the key
-// was found. It mirrors types.get.
+// was found. It mirrors Map.Load.
 func (m *Machine) mapGet(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	lookup := op.Op == ssa.OpMapLookup
 	results := 1
@@ -1372,9 +1373,10 @@ func (m *Machine) mapGet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 		return false
 	}
 	dst := s.Reg(op.Results[0])
+	exit, resume := s.Bridge()
 	hit, miss, done := a.Label(), a.Label(), a.Label()
 	data := m.container(a, s.Reg(op.Args[0]))
-	key := m.key(a, s, shape, op.Args[1])
+	key := m.key(a, s, shape, op.Args[1], exit)
 	t := m.table(a, data)
 	index, tag := m.home(a, t, key)
 	slot := m.probe(a, t, key, index, tag, asm.VReg{}, hit, miss)
@@ -1394,6 +1396,7 @@ func (m *Machine) mapGet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 	if shape.Elem == types.KindRef {
 		m.retain(a, dst)
 	}
+	a.Bind(resume)
 	return true
 }
 
@@ -1406,7 +1409,7 @@ func (m *Machine) retain(a *asm.Assembler, ref asm.VReg) {
 	a.Bind(skip)
 }
 
-// mapSet stores a value under a key of a guarded map, as types.set does: it
+// mapSet stores a value under a key of a guarded map, as Map.Swap does: it
 // replaces the value of a full slot holding the key, else fills the first
 // tombstone on the probe, or the empty slot that ended it, and appends that
 // slot to the insertion order. An insert that would rehash changes nothing and
@@ -1429,7 +1432,7 @@ func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 		word = boxed
 	}
 	data := m.container(a, s.Reg(op.Args[0]))
-	key := m.key(a, s, shape, op.Args[1])
+	key := m.key(a, s, shape, op.Args[1], exit)
 	t := m.table(a, data)
 	index, tag := m.home(a, t, key)
 	free := m.vreg()
@@ -1439,7 +1442,7 @@ func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 	a.Bind(empty)
 	used, want, limit, order, pos, count := m.vreg(), m.vreg(), m.vreg(), m.vreg(), m.vreg(), m.vreg()
 	a.Emit(
-		// (used+1)*4 > (mask+1)*3 is the order's capacity, at which table.set rehashes.
+		// (used+1)*4 > (mask+1)*3 is the order's capacity, at which Map.insert rehashes.
 		target.LDR(used, data, int16(jit.OffsetMapUsed)), target.ADDI(want, used, 1), target.LSLI(want, want, 2),
 		target.ADDI(limit, t.mask, 1), target.LSLI(target.X16, limit, 1), target.ADD(limit, limit, target.X16),
 		target.CMP(want, limit), target.BCondLabel(target.OpBGT, exit),
@@ -1463,7 +1466,7 @@ func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 	return true
 }
 
-// mapDelete removes a key from a guarded map, as types.remove does: the slot
+// mapDelete removes a key from a guarded map, as Map.Delete does: the slot
 // becomes a tombstone the order passes over and the count drops, leaving the key
 // and value words in place. A map of references releases the removed value.
 func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
@@ -1474,9 +1477,10 @@ func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 	if !ok || !shape.Serves(op.Op, s.Type(op.Args[1]).Kind(), 0) {
 		return false
 	}
+	exit, resume := s.Bridge()
 	hit, done := a.Label(), a.Label()
 	data := m.container(a, s.Reg(op.Args[0]))
-	key := m.key(a, s, shape, op.Args[1])
+	key := m.key(a, s, shape, op.Args[1], exit)
 	t := m.table(a, data)
 	index, tag := m.home(a, t, key)
 	slot := m.probe(a, t, key, index, tag, asm.VReg{}, hit, done)
@@ -1494,6 +1498,7 @@ func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 		m.release(a, old, s)
 	}
 	a.Bind(done)
+	a.Bind(resume)
 	return true
 }
 
@@ -1503,12 +1508,15 @@ func (m *Machine) mapOf(v ssa.Value) (ssa.Shape, bool) {
 	return shape, ok && shape.Form == ssa.FormMap
 }
 
-// key is the table's key word of operand v, as types.keyWord makes it: an i64 is
-// its own register; an i32 zero-extends, an i8 keeps its low byte, and an i1
-// is 0 or 1 (a Boxed.Bool is any nonzero payload).
-func (m *Machine) key(a *asm.Assembler, s compile.Site, shape ssa.Shape, v ssa.Value) asm.VReg {
+// key is the table's key word of operand v, as Map.resolve makes it: an i64 is
+// its own register, which bridges through exit when it is outside the inline
+// range, since the table holds such a key as a heap cell native code neither
+// compares nor creates; an i32 zero-extends, an i8 keeps its low byte, and an
+// i1 is 0 or 1 (a Boxed.Bool is any nonzero payload).
+func (m *Machine) key(a *asm.Assembler, s compile.Site, shape ssa.Shape, v ssa.Value, exit asm.Label) asm.VReg {
 	word := s.Reg(v)
 	if shape.Key == types.KindI64 {
+		a.Emit(target.SBFX(target.X16, word, 0, types.VBits), target.CMP(target.X16, word), target.BCondLabel(target.OpBNE, exit))
 		return word
 	}
 	key := m.vreg()
@@ -1534,7 +1542,7 @@ func (m *Machine) table(a *asm.Assembler, data asm.VReg) table {
 	return t
 }
 
-// home is the home slot and control byte of key, as types.probe computes them
+// home is the home slot and control byte of key, as Map.find computes them
 // from the hash (key ^ seed) * MapHash: the slot is hash >> shift & mask, and
 // the control byte SlotFull with the seven hash bits below the slot's.
 func (m *Machine) home(a *asm.Assembler, t table, key asm.VReg) (index, tag asm.VReg) {
@@ -1554,7 +1562,7 @@ func (m *Machine) home(a *asm.Assembler, t table, key asm.VReg) (index, tag asm.
 	return index, tag
 }
 
-// probe walks the table linearly from index, as types.probe does. It branches
+// probe walks the table linearly from index, as Map.find does. It branches
 // to miss at an empty slot and to hit at a full slot holding key, leaving the
 // slot's index in index and its address in the returned register. A slot whose
 // control byte is not tag, a dead one included, is passed over. A set passes

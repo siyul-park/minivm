@@ -291,11 +291,11 @@ One opcode per row, in opcode-value order.
 | Structs | `STRUCT_SET` | `struct.set` | ✅ | 🔲 | guarded, else bridges and resumes native code |
 | Maps | `MAP_NEW` | `map.new` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Maps | `MAP_NEW_DEFAULT` | `map.new_default` | ⬜ | 🔲 | served as a callout and resumes native code on ARM64 (`jit-internals.md`, Exits) |
-| Maps | `MAP_LEN` | `map.len` | ◐ | 🔲 | reads the entry count of a map of declared `i1`/`i8`/`i32`/`i64` key behind a shape guard, else bridges and resumes native code (`jit-internals.md`, Maps) |
-| Maps | `MAP_GET` | `map.get` | ◐ | 🔲 | probes the table of a map of declared `i1`/`i8`/`i32`/`i64` key behind a shape guard, else bridges and resumes native code; an `i64` element bridges; a map of undeclared type makes the translator decline the whole unit |
-| Maps | `MAP_LOOKUP` | `map.lookup` | ◐ | 🔲 | probes the table of a map of declared `i1`/`i8`/`i32`/`i64` key behind a shape guard, else bridges and resumes native code; an `i64` element bridges; a map of undeclared type makes the translator decline the whole unit |
-| Maps | `MAP_SET` | `map.set` | ◐ | 🔲 | stores into the table of a map of declared `i1`/`i8`/`i32`/`i64` key behind a shape guard; an insert that must rehash and an `i64` value bridge and resume native code, as does any other map |
-| Maps | `MAP_DELETE` | `map.delete` | ◐ | 🔲 | tombstones the slot in the table of a map of declared `i1`/`i8`/`i32`/`i64` key behind a shape guard, else bridges and resumes native code |
+| Maps | `MAP_LEN` | `map.len` | ◐ | 🔲 | reads the entry count of a map of declared `i1`/`i8`/`i32`/`i64` key behind a shape guard (a wide `i64` key bridges), else bridges and resumes native code (`jit-internals.md`, Maps) |
+| Maps | `MAP_GET` | `map.get` | ◐ | 🔲 | probes the table of a map of declared `i1`/`i8`/`i32`/`i64` key behind a shape guard (a wide `i64` key bridges), else bridges and resumes native code; an `i64` element bridges; a map of undeclared type makes the translator decline the whole unit |
+| Maps | `MAP_LOOKUP` | `map.lookup` | ◐ | 🔲 | probes the table of a map of declared `i1`/`i8`/`i32`/`i64` key behind a shape guard (a wide `i64` key bridges), else bridges and resumes native code; an `i64` element bridges; a map of undeclared type makes the translator decline the whole unit |
+| Maps | `MAP_SET` | `map.set` | ◐ | 🔲 | stores into the table of a map of declared `i1`/`i8`/`i32`/`i64` key behind a shape guard (a wide `i64` key bridges); an insert that must rehash and an `i64` value bridge and resume native code, as does any other map |
+| Maps | `MAP_DELETE` | `map.delete` | ◐ | 🔲 | tombstones the slot in the table of a map of declared `i1`/`i8`/`i32`/`i64` key behind a shape guard (a wide `i64` key bridges), else bridges and resumes native code |
 | Maps | `MAP_CLEAR` | `map.clear` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | Maps | `MAP_KEYS` | `map.keys` | ⬜ | 🔲 | deoptimizes on ARM64: it allocates every key before the result array, so a heap-exhaustion trap between them would repeat those allocations |
 | Closures | `CLOSURE_NEW` | `closure.new` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
@@ -336,9 +336,9 @@ All string comparisons are by content and require string operands. Mismatches `M
 
 Primitive keys use value identity; `i1`/`i8` use their `i32` representation. Strings use content. Other refs use heap identity.
 
-`(*Interpreter).mapKey` owns the rule for map operations and `Marshal`. Missing keys return element zero values. `MAP_LOOKUP` also returns an `i1` presence flag.
+`value-representation.md`, Map Key Words, owns the key rule. Missing keys return element zero values. `MAP_LOOKUP` also returns an `i1` presence flag.
 
-`MAP_KEYS` and `MAP_ITER` produce the keys of a numeric-keyed map that `MAP_NEW` created in insertion order: an update keeps the key's place, and a key deleted and set again goes last. The order over any other key kind, a map constant, or a host map is unspecified; programs `MUST NOT` depend on it. `memory-model.md` owns the guarantee under mutation during `MAP_ITER`.
+`MAP_KEYS` and `MAP_ITER` produce the keys of every map in insertion order, map constants and host-map copies included: an update keeps the key's place, and a key deleted and set again goes last. A host-map copy takes Go's map order. `memory-model.md` owns the guarantee under mutation during `MAP_ITER`.
 
 ### Structured Errors
 

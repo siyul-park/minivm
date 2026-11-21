@@ -40,8 +40,7 @@ func TestClone(t *testing.T) {
 		values := []types.Value{
 			types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(1)),
 			types.NewStruct(nil, types.NewStructType(types.NewStructField(types.TypeI32())), types.BoxI32(1)),
-			types.NewMap(mapTyp),
-			types.NewTypedMap[int32](mapTyp, 0),
+			types.NewMap(nil, mapTyp, 0),
 			types.TypedArray[int32]{1},
 			types.TypedArray[float64]{1},
 		}

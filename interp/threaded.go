@@ -124123,65 +124123,19 @@ var (
 				if i.sp < v0*2+1 {
 					panic(ErrStackUnderflow)
 				}
-				v2 := types.NewMapForType(v1, v0)
+				v2 := types.NewMap(&i.heap, v1, v0)
 				v3 := i.sp - 1 - v0*2
 				for v1 := 0; v1 < v0; v1++ {
-					v0 := i.stack[v3+v1*2]
-					v4 := i.stack[v3+v1*2+1]
-					switch v1 := v2.(type) {
-					case *types.TypedMap[int8]:
-						v2, v3 := v1.Set(v0.I8(), v4)
-						if v3 {
-							i.heap.Release(v2)
-						}
-					case *types.TypedMap[bool]:
-						v2, v3 := v1.Set(v0.Bool(), v4)
-						if v3 {
-							i.heap.Release(v2)
-						}
-					case *types.TypedMap[int32]:
-						v2, v3 := v1.Set(v0.I32(), v4)
-						if v3 {
-							i.heap.Release(v2)
-						}
-					case *types.TypedMap[int64]:
-						v2, v3 := v1.Set(i.unboxI64(v0), v4)
-						if v3 {
-							i.heap.Release(v2)
-						}
-					case *types.TypedMap[float32]:
-						v2, v3 := v1.Set(v0.F32(), v4)
-						if v3 {
-							i.heap.Release(v2)
-						}
-					case *types.TypedMap[float64]:
-						v2, v3 := v1.Set(v0.F64(), v4)
-						if v3 {
-							i.heap.Release(v2)
-						}
-					case *types.StringMap:
-						v2, v3 := v1.Set(string(unboxRef[types.String](i, v0)), v4)
-						if v3 {
-							i.heap.Release(v2)
-						}
-					case *types.Map:
-						v2, v3 := i.mapKey(v0)
-						v5 := types.MapEntry{
-							Key:   v3,
-							Value: v4,
-						}
-						v6, v7 := v1.Set(v2, v5)
-						if v7 {
-							i.heap.Release(v6.Key)
-							i.heap.Release(v6.Value)
-						}
-					default:
+					if !v2.Accepts(i.stack[v3+v1*2]) {
 						panic(ErrTypeMismatch)
 					}
 				}
-				v8 := i.heap.Add(v2)
+				for v1 := 0; v1 < v0; v1++ {
+					v2.Store(i.stack[v3+v1*2], i.stack[v3+v1*2+1])
+				}
+				v4 := i.heap.Add(v2)
 				i.sp = v3 + 1
-				i.stack[v3] = types.BoxRef(v8)
+				i.stack[v3] = types.BoxRef(v4)
 				i.fr.ip += 3
 			}
 		},
@@ -124221,20 +124175,6 @@ var (
 				v1 := v0.Ref()
 				v2 := 0
 				switch v0 := i.heap.At(v1).(type) {
-				case *types.TypedMap[int8]:
-					v2 = v0.Len()
-				case *types.TypedMap[bool]:
-					v2 = v0.Len()
-				case *types.TypedMap[int32]:
-					v2 = v0.Len()
-				case *types.TypedMap[int64]:
-					v2 = v0.Len()
-				case *types.TypedMap[float32]:
-					v2 = v0.Len()
-				case *types.TypedMap[float64]:
-					v2 = v0.Len()
-				case *types.StringMap:
-					v2 = v0.Len()
 				case *types.Map:
 					v2 = v0.Len()
 				case *HostMap:
@@ -124260,65 +124200,26 @@ var (
 				}
 				v2 := v1.Ref()
 				var v3 types.Boxed
-				var v4 bool
-				var v5 bool
 				switch v1 := i.heap.At(v2).(type) {
-				case *types.TypedMap[int8]:
-					v3, v4 = v1.Get(v0.I8())
-					if !v4 {
-						v3 = v1.Zero
-					}
-				case *types.TypedMap[bool]:
-					v3, v4 = v1.Get(v0.Bool())
-					if !v4 {
-						v3 = v1.Zero
-					}
-				case *types.TypedMap[int32]:
-					v3, v4 = v1.Get(v0.I32())
-					if !v4 {
-						v3 = v1.Zero
-					}
-				case *types.TypedMap[int64]:
-					v3, v4 = v1.Get(i.unboxI64(v0))
-					if !v4 {
-						v3 = v1.Zero
-					}
-				case *types.TypedMap[float32]:
-					v3, v4 = v1.Get(v0.F32())
-					if !v4 {
-						v3 = v1.Zero
-					}
-				case *types.TypedMap[float64]:
-					v3, v4 = v1.Get(v0.F64())
-					if !v4 {
-						v3 = v1.Zero
-					}
-				case *types.StringMap:
-					v3, v4 = v1.Get(string(unboxRef[types.String](i, v0)))
-					if !v4 {
-						v3 = v1.Zero
-					}
 				case *types.Map:
-					v2, v4 := i.mapKey(v0)
-					v5, v6 := v1.Get(v2)
-					i.heap.Release(v4)
-					if v6 {
-						v3 = v5.Value
-					} else {
+					if !v1.Accepts(v0) {
+						panic(ErrTypeMismatch)
+					}
+					var v2 bool
+					v3, v2 = v1.Load(v0)
+					if !v2 {
 						v3 = v1.Zero
 					}
+					i.heap.Retain(v3)
+					i.heap.Release(v0)
 				case *HostMap:
-					v2, v4, v6 := v1.Get(i, v0)
-					if v6 != nil {
-						panic(v6)
+					v2, _, v4 := v1.Get(i, v0)
+					if v4 != nil {
+						panic(v4)
 					}
-					v3, v5 = v2, true
-					_ = v4
+					v3 = v2
 				default:
 					panic(ErrTypeMismatch)
-				}
-				if !v5 {
-					i.heap.Retain(v3)
 				}
 				i.heap.Dec(v2)
 				i.sp--
@@ -124340,48 +124241,29 @@ var (
 				v2 := v1.Ref()
 				var v3 types.Boxed
 				var v4 bool
-				var v5 bool
 				switch v1 := i.heap.At(v2).(type) {
-				case *types.TypedMap[int8]:
-					v3, v5 = v1.Get(v0.I8())
-				case *types.TypedMap[bool]:
-					v3, v5 = v1.Get(v0.Bool())
-				case *types.TypedMap[int32]:
-					v3, v5 = v1.Get(v0.I32())
-				case *types.TypedMap[int64]:
-					v3, v5 = v1.Get(i.unboxI64(v0))
-				case *types.TypedMap[float32]:
-					v3, v5 = v1.Get(v0.F32())
-				case *types.TypedMap[float64]:
-					v3, v5 = v1.Get(v0.F64())
-				case *types.StringMap:
-					v3, v5 = v1.Get(string(unboxRef[types.String](i, v0)))
 				case *types.Map:
-					v2, v4 := i.mapKey(v0)
-					v6, v7 := v1.Get(v2)
-					i.heap.Release(v4)
-					v5 = v7
-					if v7 {
-						v3 = v6.Value
-					} else {
+					if !v1.Accepts(v0) {
+						panic(ErrTypeMismatch)
+					}
+					v3, v4 = v1.Load(v0)
+					if !v4 {
 						v3 = v1.Zero
 					}
+					i.heap.Retain(v3)
+					i.heap.Release(v0)
 				case *HostMap:
-					v2, v6, v7 := v1.Get(i, v0)
-					if v7 != nil {
-						panic(v7)
+					v2, v5, v6 := v1.Get(i, v0)
+					if v6 != nil {
+						panic(v6)
 					}
-					v3, v4 = v2, true
-					v5 = v6
+					v3, v4 = v2, v5
 				default:
 					panic(ErrTypeMismatch)
 				}
-				if !v4 {
-					i.heap.Retain(v3)
-				}
 				i.heap.Dec(v2)
 				i.stack[i.sp-2] = v3
-				i.stack[i.sp-1] = types.BoxI1(v5)
+				i.stack[i.sp-1] = types.BoxI1(v4)
 				i.fr.ip++
 			}
 		},
@@ -124399,52 +124281,11 @@ var (
 				}
 				v3 := v2.Ref()
 				switch v2 := i.heap.At(v3).(type) {
-				case *types.TypedMap[int8]:
-					v3, v4 := v2.Set(v1.I8(), v0)
-					if v4 {
-						i.heap.Release(v3)
-					}
-				case *types.TypedMap[bool]:
-					v3, v4 := v2.Set(v1.Bool(), v0)
-					if v4 {
-						i.heap.Release(v3)
-					}
-				case *types.TypedMap[int32]:
-					v3, v4 := v2.Set(v1.I32(), v0)
-					if v4 {
-						i.heap.Release(v3)
-					}
-				case *types.TypedMap[int64]:
-					v3, v4 := v2.Set(i.unboxI64(v1), v0)
-					if v4 {
-						i.heap.Release(v3)
-					}
-				case *types.TypedMap[float32]:
-					v3, v4 := v2.Set(v1.F32(), v0)
-					if v4 {
-						i.heap.Release(v3)
-					}
-				case *types.TypedMap[float64]:
-					v3, v4 := v2.Set(v1.F64(), v0)
-					if v4 {
-						i.heap.Release(v3)
-					}
-				case *types.StringMap:
-					v3, v4 := v2.Set(string(unboxRef[types.String](i, v1)), v0)
-					if v4 {
-						i.heap.Release(v3)
-					}
 				case *types.Map:
-					v3, v4 := i.mapKey(v1)
-					v5 := types.MapEntry{
-						Key:   v4,
-						Value: v0,
+					if !v2.Accepts(v1) {
+						panic(ErrTypeMismatch)
 					}
-					v6, v7 := v2.Set(v3, v5)
-					if v7 {
-						i.heap.Release(v6.Key)
-						i.heap.Release(v6.Value)
-					}
+					v2.Store(v1, v0)
 				case *HostMap:
 					if v3 := v2.Set(i, v1, v0); v3 != nil {
 						panic(v3)
@@ -124470,49 +124311,12 @@ var (
 				}
 				v2 := v1.Ref()
 				switch v1 := i.heap.At(v2).(type) {
-				case *types.TypedMap[int8]:
-					v2, v3 := v1.Delete(v0.I8())
-					if v3 {
-						i.heap.Release(v2)
-					}
-				case *types.TypedMap[bool]:
-					v2, v3 := v1.Delete(v0.Bool())
-					if v3 {
-						i.heap.Release(v2)
-					}
-				case *types.TypedMap[int32]:
-					v2, v3 := v1.Delete(v0.I32())
-					if v3 {
-						i.heap.Release(v2)
-					}
-				case *types.TypedMap[int64]:
-					v2, v3 := v1.Delete(i.unboxI64(v0))
-					if v3 {
-						i.heap.Release(v2)
-					}
-				case *types.TypedMap[float32]:
-					v2, v3 := v1.Delete(v0.F32())
-					if v3 {
-						i.heap.Release(v2)
-					}
-				case *types.TypedMap[float64]:
-					v2, v3 := v1.Delete(v0.F64())
-					if v3 {
-						i.heap.Release(v2)
-					}
-				case *types.StringMap:
-					v2, v3 := v1.Delete(string(unboxRef[types.String](i, v0)))
-					if v3 {
-						i.heap.Release(v2)
-					}
 				case *types.Map:
-					v2, v3 := i.mapKey(v0)
-					v4, v5 := v1.Delete(v2)
-					if v5 {
-						i.heap.Release(v4.Key)
-						i.heap.Release(v4.Value)
+					if !v1.Accepts(v0) {
+						panic(ErrTypeMismatch)
 					}
-					i.heap.Release(v3)
+					v1.Delete(v0)
+					i.heap.Release(v0)
 				case *HostMap:
 					if v2 := v1.Delete(i, v0); v2 != nil {
 						panic(v2)
@@ -124537,39 +124341,8 @@ var (
 				}
 				v1 := v0.Ref()
 				switch v0 := i.heap.At(v1).(type) {
-				case *types.TypedMap[int8]:
-					v0.Clear(func(value types.Boxed) {
-						i.heap.Release(value)
-					})
-				case *types.TypedMap[bool]:
-					v0.Clear(func(value types.Boxed) {
-						i.heap.Release(value)
-					})
-				case *types.TypedMap[int32]:
-					v0.Clear(func(value types.Boxed) {
-						i.heap.Release(value)
-					})
-				case *types.TypedMap[int64]:
-					v0.Clear(func(value types.Boxed) {
-						i.heap.Release(value)
-					})
-				case *types.TypedMap[float32]:
-					v0.Clear(func(value types.Boxed) {
-						i.heap.Release(value)
-					})
-				case *types.TypedMap[float64]:
-					v0.Clear(func(value types.Boxed) {
-						i.heap.Release(value)
-					})
-				case *types.StringMap:
-					v0.Clear(func(value types.Boxed) {
-						i.heap.Release(value)
-					})
 				case *types.Map:
-					v0.Clear(func(entry types.MapEntry) {
-						i.heap.Release(entry.Key)
-						i.heap.Release(entry.Value)
-					})
+					v0.Clear()
 				case *HostMap:
 					v0.Clear()
 				default:
@@ -124591,79 +124364,40 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				v1 := v0.Ref()
-				var v2 *types.Array
-				v3 := i.heap.At(v1)
-				if v0, v1 := v3.(*HostMap); v1 {
-					v1, v2 := v0.Map(i)
-					if v2 != nil {
-						panic(v2)
-					}
-					v3 = v1
-				}
-				switch v0 := v3.(type) {
-				case *types.TypedMap[int8]:
-					v2 = types.MakeArray(&i.heap, types.NewArrayType(v0.Typ.Key), v0.Len())
-					v1 := 0
-					v0.Range(func(k int8, _ types.Boxed) {
-						v2.Elems[v1] = types.BoxI8(k)
-						v1++
-					})
-				case *types.TypedMap[bool]:
-					v2 = types.MakeArray(&i.heap, types.NewArrayType(v0.Typ.Key), v0.Len())
-					v1 := 0
-					v0.Range(func(k bool, _ types.Boxed) {
-						v2.Elems[v1] = types.BoxI1(k)
-						v1++
-					})
-				case *types.TypedMap[int32]:
-					v2 = types.MakeArray(&i.heap, types.NewArrayType(v0.Typ.Key), v0.Len())
-					v1 := 0
-					v0.Range(func(k int32, _ types.Boxed) {
-						v2.Elems[v1] = types.BoxI32(k)
-						v1++
-					})
-				case *types.TypedMap[int64]:
-					v2 = types.MakeArray(&i.heap, types.NewArrayType(v0.Typ.Key), v0.Len())
-					v1 := 0
-					v0.Range(func(k int64, _ types.Boxed) {
-						v2.Elems[v1] = i.boxI64(k)
-						v1++
-					})
-				case *types.TypedMap[float32]:
-					v2 = types.MakeArray(&i.heap, types.NewArrayType(v0.Typ.Key), v0.Len())
-					v1 := 0
-					v0.Range(func(k float32, _ types.Boxed) {
-						v2.Elems[v1] = types.BoxF32(k)
-						v1++
-					})
-				case *types.TypedMap[float64]:
-					v2 = types.MakeArray(&i.heap, types.NewArrayType(v0.Typ.Key), v0.Len())
-					v1 := 0
-					v0.Range(func(k float64, _ types.Boxed) {
-						v2.Elems[v1] = types.BoxF64(k)
-						v1++
-					})
-				case *types.StringMap:
-					v2 = types.MakeArray(&i.heap, types.NewArrayType(v0.Typ.Key), v0.Len())
-					v1 := 0
-					v0.Range(func(k string, _ types.Boxed) {
-						v2.Elems[v1] = types.BoxRef(i.heap.Add(types.String(k)))
-						v1++
-					})
+				var v2 *types.Map
+				v3 := false
+				switch v0 := i.heap.At(v1).(type) {
 				case *types.Map:
-					v2 = types.MakeArray(&i.heap, types.NewArrayType(v0.Typ.Key), v0.Len())
-					v1 := 0
-					v0.Range(func(_ types.MapKey, entry types.MapEntry) {
-						i.heap.Retain(entry.Key)
-						v2.Elems[v1] = entry.Key
-						v1++
-					})
+					v2 = v0
+				case *HostMap:
+					v1, v4 := v0.Map(i)
+					if v4 != nil {
+						panic(v4)
+					}
+					v2, v3 = v1, true
 				default:
 					panic(ErrTypeMismatch)
 				}
-				v4 := types.BoxRef(i.heap.Add(v2))
+				v5 := types.MakeArray(&i.heap, types.NewArrayType(v2.Typ.Key), v2.Len())
+				v6 := 0
+				v2.Range(func(key, _ types.Boxed) bool {
+					if key.Kind() == types.KindRef {
+						if v0, v1 := i.heap.At(key.Ref()).(types.I64); v1 {
+							key = types.BoxRef(i.heap.Add(v0))
+						} else {
+							i.heap.Retain(key)
+						}
+					}
+					v5.Elems[v6] = key
+					v6++
+					return true
+				})
+				if v3 {
+					v2.Clear()
+				}
+				v7 := types.BoxRef(i.heap.Add(v5))
 				i.heap.Dec(v1)
-				i.stack[i.sp-1] = v4
+				i.stack[i.sp-1] = v7
 				i.fr.ip++
 			}
 		},
@@ -124702,32 +124436,31 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				v1 := v0.Ref()
-				v2 := i.heap.At(v1)
-				if v0, v1 := v2.(*HostMap); v1 {
-					v1, v3 := v0.Map(i)
-					if v3 != nil {
-						panic(v3)
+				var v2 *types.Map
+				switch v0 := i.heap.At(v1).(type) {
+				case *types.Map:
+					v2 = v0
+				case *HostMap:
+					v3, v4 := v0.Map(i)
+					if v4 != nil {
+						panic(v4)
 					}
-					v2 = v1
-				}
-				switch v2.(type) {
-				case *types.TypedMap[int8], *types.TypedMap[bool], *types.TypedMap[int32], *types.TypedMap[int64], *types.TypedMap[float32], *types.TypedMap[float64], *types.StringMap, *types.Map:
+					v5 := v1
+					v1 = i.heap.Add(v3)
+					i.heap.Dec(v5)
+					v2 = v3
 				default:
 					panic(ErrTypeMismatch)
 				}
-				v4 := types.NewMapIterator(types.Ref(v1), v2)
-				v4.Next()
-				v5 := types.BoxRef(i.heap.Add(v4))
-				if !v4.Done() {
-					v0 := v4.Current()
-					switch v1 := v0.(type) {
-					case types.Boxed:
-						i.heap.Retain(v1)
-					case types.Ref:
-						i.heap.Inc(int(v1), 1)
+				v6 := types.NewMapIterator(types.Ref(v1), v2)
+				v6.Next()
+				v7 := types.BoxRef(i.heap.Add(v6))
+				if !v6.Done() {
+					if v0, v1 := v6.Current().(types.Boxed); v1 {
+						i.heap.Retain(v0)
 					}
 				}
-				i.stack[i.sp-1] = v5
+				i.stack[i.sp-1] = v7
 				i.fr.ip++
 			}
 		},
