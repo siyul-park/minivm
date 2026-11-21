@@ -133,9 +133,6 @@ func Translate(module Module, profiles Profiles, address int, function *types.Fu
 	if function == nil || len(function.Code) == 0 {
 		return nil, nil, fmt.Errorf("%w: no code", ErrUnsupported)
 	}
-	if !orderedPositions(function.Positions) {
-		return nil, nil, fmt.Errorf("%w: source position IPs must strictly ascend", ErrUnsupported)
-	}
 	blocks, err := analysis.Blocks(function)
 	if err != nil {
 		return nil, nil, err
@@ -299,20 +296,9 @@ func newTranslation(m Module, root activation, spans []span, profiles Profiles) 
 func (t *translation) admits(target *types.Function) bool {
 	root := t.acts[0].function
 	return target.Typ != nil && len(target.Code) > 0 && len(target.Captures) == 0 && len(target.Handlers) == 0 &&
-		orderedPositions(target.Positions) &&
 		len(target.Typ.Params) == len(root.Typ.Params) &&
 		slices.EqualFunc(target.Declared(), t.acts[0].slots, types.Type.Equals) &&
 		slices.EqualFunc(target.Typ.Returns, root.Typ.Returns, types.Type.Equals)
-}
-
-// orderedPositions checks the strictly ascending IPs required for source lookup.
-func orderedPositions(positions []instr.Position) bool {
-	for i, p := range positions {
-		if i > 0 && p.IP <= positions[i-1].IP {
-			return false
-		}
-	}
-	return true
 }
 
 // add appends act and its spans as a member.

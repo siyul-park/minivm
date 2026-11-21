@@ -1965,23 +1965,6 @@ func TestSSAPass_Run(t *testing.T) {
 		require.Equal(t, []uint32{1003}, additions)
 	})
 
-	t.Run("leaves code with unsorted positions unchanged", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_ADD)})
-		prog.Positions = positioned(prog.Code, 0)
-		slices.Reverse(prog.Positions)
-		require.ErrorIs(t, program.Verify(prog), program.ErrPosition)
-		before := prog.String()
-
-		passes := pass.NewPipeline[*ssa.Function]()
-		passes.Add(transform.NewFoldPass())
-		passes.Add(transform.NewDCEPass())
-		preserved, err := transform.NewSSAPass(passes, false).Run(pass.NewManager(), prog)
-		require.NoError(t, err)
-		require.True(t, preserved)
-		require.Equal(t, before, prog.String())
-	})
-
 	t.Run("restores a function whose fault is reported at a literal holding it", func(t *testing.T) {
 		fn := sliceFunction(types.TypeAny())
 		literal := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeAny()), Elems: []types.Value{fn}}

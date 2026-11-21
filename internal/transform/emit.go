@@ -40,9 +40,10 @@ type emitter struct {
 
 	locals []types.Type
 	code   []instr.Instruction
-	// tracked reports whether the input bytecode or SSA carries sources; sources
-	// then runs parallel to code, each instruction with the source of the
-	// operation or terminator it serves, which at holds while one is lowered.
+	// tracked reports whether any operation or terminator carries a source, its
+	// own or an inlined callee's; sources then runs parallel to code, each
+	// instruction with the source of the operation or terminator it serves,
+	// which at holds while one is lowered.
 	tracked bool
 	sources []uint32
 	at      uint32
@@ -76,7 +77,7 @@ var spaceOps = [...]struct{ read, write instr.Opcode }{
 }
 
 func emit(function *ssa.Function, constants *pool, module bool, source *types.Function) (emission, bool) {
-	e := &emitter{function: function, constants: constants, module: module, declared: source.Declared(), captures: source.Captures, tracked: len(source.Positions) > 0}
+	e := &emitter{function: function, constants: constants, module: module, declared: source.Declared(), captures: source.Captures}
 	if !e.collect() {
 		return emission{}, false
 	}
