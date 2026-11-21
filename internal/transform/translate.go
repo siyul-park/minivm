@@ -200,11 +200,11 @@ func Borrows(function *types.Function) []bool {
 
 // Adopts returns the number of code's topmost popped operands whose
 // ownership it takes: every one when it enters a frame, the stored value
-// when it overwrites heap contents and yields nothing. The other operands
-// stay their owner's to release after code.
+// when it overwrites heap contents and yields nothing, the operand a cast
+// yields again. The other operands stay their owner's to release after code.
 func Adopts(code instr.Opcode, pops, results int) int {
 	switch {
-	case code.Writes(instr.Frame):
+	case code.Writes(instr.Frame), code == instr.REF_CAST:
 		return pops
 	case code.Reads(instr.Heap) && code.Writes(instr.Heap) && results == 0:
 		return 1

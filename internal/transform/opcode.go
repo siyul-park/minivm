@@ -143,6 +143,8 @@ var rows = func() []row {
 	plain(instr.SELECT, ssa.OpSelect, 0)
 	plain(instr.CALL, ssa.OpCall, 0)
 	plain(instr.REF_IS_NULL, ssa.OpRefIsNull, 0)
+	plain(instr.REF_TEST, ssa.OpRefTest, 0)
+	plain(instr.REF_CAST, ssa.OpRefCast, 0)
 	plain(instr.REF_EQ, ssa.OpRefCmp, ssa.CondEQ)
 	plain(instr.REF_NE, ssa.OpRefCmp, ssa.CondNE)
 	plain(instr.STRING_LEN, ssa.OpStringLen, 0)

@@ -500,6 +500,34 @@ blk0: ()
 		require.Contains(t, ssa.Format(out), "guard.shape")
 	})
 
+	t.Run("attaches ref.test and ref.cast's checked type and its kind", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{types.TypeAny()}, Returns: []types.Type{types.TypeI1()}},
+			Code: assemble(t, func(b *instr.Builder) {
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.REF_CAST, 1).Emit(instr.DROP).
+					Emit(instr.LOCAL_GET, 0).Emit(instr.REF_TEST, 0).Emit(instr.RETURN)
+			})}
+		m := transform.Module{Types: []types.Type{types.TypeI64(), types.TypeF32()}}
+
+		out, _, err := transform.Translate(m, nil, 1, fn, 0)
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.NoError(t, ssa.Verify(out))
+
+		shapes := map[ssa.Op]ssa.Shape{}
+		for b := range out.Len() {
+			for _, o := range out.Block(b).Operations {
+				if o.Op == ssa.OpRefTest || o.Op == ssa.OpRefCast {
+					shapes[o.Op] = o.Shape
+				}
+			}
+		}
+		require.Equal(t, map[ssa.Op]ssa.Shape{
+			ssa.OpRefTest: {Elem: types.KindI64},
+			ssa.OpRefCast: {Elem: types.KindF32, Index: 1},
+		}, shapes)
+	})
+
 	t.Run("guards a []any array store through the container's element kind, not the stored value's own", func(t *testing.T) {
 		fn := &types.Function{
 			Typ: &types.FunctionType{},
@@ -1415,6 +1443,7 @@ func TestAdopts(t *testing.T) {
 		{name: "a call adopts every operand", code: instr.CALL, pops: 3, results: 1, want: 3},
 		{name: "a heap write with no result adopts the stored value", code: instr.MAP_SET, pops: 3, results: 0, want: 1},
 		{name: "a heap write with a result adopts nothing", code: instr.ARRAY_APPEND, pops: 3, results: 1, want: 0},
+		{name: "a cast adopts the operand it yields again", code: instr.REF_CAST, pops: 1, results: 1, want: 1},
 		{name: "a heap read adopts nothing", code: instr.MAP_GET, pops: 2, results: 1, want: 0},
 		{name: "an allocation adopts nothing", code: instr.STRING_CONCAT, pops: 2, results: 1, want: 0},
 	}

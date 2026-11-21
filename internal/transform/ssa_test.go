@@ -1800,6 +1800,12 @@ func TestSSAPass_Run(t *testing.T) {
 				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(body(
 				instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0),
 				instr.MustNew(instr.ARRAY_LEN), instr.MustNew(instr.RETURN))), program.WithTypes(types.NewArrayType(types.TypeI32()))),
+			"a ref.test": program.New([]instr.Instruction{
+				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(body(
+				instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.REF_TEST, 0), instr.MustNew(instr.RETURN))), program.WithTypes(types.TypeI32())),
+			"a ref.cast": program.New([]instr.Instruction{
+				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(body(
+				instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.REF_CAST, 0), instr.MustNew(instr.RETURN))), program.WithTypes(types.TypeI32())),
 			"a tail call": program.New([]instr.Instruction{
 				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)}, program.WithConstants(body(
 				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.RETURN_CALL)))),

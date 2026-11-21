@@ -76,7 +76,7 @@ var types = map[Opcode]Type{
 	REF_NULL: {Mnemonic: "ref.null", Push: []Kind{KindRef}},
 
 	REF_TEST: {Mnemonic: "ref.test", Widths: []int{2}, Pop: []Kind{KindAny}, Push: []Kind{KindI1}, Reads: Heap},
-	REF_CAST: {Mnemonic: "ref.cast", Widths: []int{2}, Pop: []Kind{KindAny}, Push: []Kind{KindAny}, Reads: Heap},
+	REF_CAST: {Mnemonic: "ref.cast", Widths: []int{2}, Pop: []Kind{KindAny}, Push: []Kind{KindAny}, Reads: Heap, Traps: true},
 
 	REF_IS_NULL: {Mnemonic: "ref.is_null", Pop: []Kind{KindRef}, Push: []Kind{KindI1}},
 	REF_EQ:      {Mnemonic: "ref.eq", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}},
