@@ -69,6 +69,8 @@ func split(code []byte, blocks []*analysis.BasicBlock) ([]span, map[int]int) {
 	return spans, at
 }
 
+// past reports whether control can continue from inside code to its end as a
+// successor edge: a branch targets it, or a final BR_IF falls through to it.
 func past(code []byte) bool {
 	for ip := 0; ip < len(code); {
 		for _, target := range instr.Targets(code, ip) {
@@ -76,7 +78,11 @@ func past(code []byte) bool {
 				return true
 			}
 		}
-		ip += instr.Instruction(code[ip:]).Width()
+		inst := instr.Instruction(code[ip:])
+		ip += inst.Width()
+		if ip == len(code) && inst.Opcode() == instr.BR_IF {
+			return true
+		}
 	}
 	return false
 }
