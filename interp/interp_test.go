@@ -362,97 +362,97 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, i32operand(2)), instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.I32_ADD_OVF),
+			instr.MustNew(instr.I32_CONST, i32operand(2)), instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.I32_ADD_OVF_S),
 		}),
 		values: []types.Value{types.I1(false), types.I32(5)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, i32operand(math.MaxInt32)), instr.MustNew(instr.I32_CONST, i32operand(1)), instr.MustNew(instr.I32_ADD_OVF),
+			instr.MustNew(instr.I32_CONST, i32operand(math.MaxInt32)), instr.MustNew(instr.I32_CONST, i32operand(1)), instr.MustNew(instr.I32_ADD_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I32(math.MinInt32)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_ADD_OVF),
+			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_ADD_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I32(math.MaxInt32)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, i32operand(math.MaxInt32)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_ADD_OVF),
+			instr.MustNew(instr.I32_CONST, i32operand(math.MaxInt32)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_ADD_OVF_S),
 		}),
 		values: []types.Value{types.I1(false), types.I32(-1)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_ADD_OVF),
+			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_ADD_OVF_S),
 		}),
 		values: []types.Value{types.I1(false), types.I32(math.MinInt32)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, i32operand(5)), instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.I32_SUB_OVF),
+			instr.MustNew(instr.I32_CONST, i32operand(5)), instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.I32_SUB_OVF_S),
 		}),
 		values: []types.Value{types.I1(false), types.I32(2)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(1)), instr.MustNew(instr.I32_SUB_OVF),
+			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(1)), instr.MustNew(instr.I32_SUB_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I32(math.MaxInt32)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, i32operand(math.MaxInt32)), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_SUB_OVF),
+			instr.MustNew(instr.I32_CONST, i32operand(math.MaxInt32)), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_SUB_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I32(math.MinInt32)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_SUB_OVF),
+			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_SUB_OVF_S),
 		}),
 		values: []types.Value{types.I1(false), types.I32(0)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_SUB_OVF),
+			instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_SUB_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I32(math.MinInt32)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.I32_CONST, i32operand(4)), instr.MustNew(instr.I32_MUL_OVF),
+			instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.I32_CONST, i32operand(4)), instr.MustNew(instr.I32_MUL_OVF_S),
 		}),
 		values: []types.Value{types.I1(false), types.I32(12)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_MUL_OVF),
+			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_MUL_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I32(math.MinInt32)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_MUL_OVF),
+			instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_MUL_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I32(math.MinInt32)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, i32operand(math.MaxInt32)), instr.MustNew(instr.I32_CONST, i32operand(2)), instr.MustNew(instr.I32_MUL_OVF),
+			instr.MustNew(instr.I32_CONST, i32operand(math.MaxInt32)), instr.MustNew(instr.I32_CONST, i32operand(2)), instr.MustNew(instr.I32_MUL_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I32(-2)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_MUL_OVF),
+			instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_MUL_OVF_S),
 		}),
 		values: []types.Value{types.I1(false), types.I32(0)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(1)), instr.MustNew(instr.I32_MUL_OVF),
+			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(1)), instr.MustNew(instr.I32_MUL_OVF_S),
 		}),
 		values: []types.Value{types.I1(false), types.I32(math.MinInt32)},
 	},
@@ -626,121 +626,253 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(2)), instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.I64_ADD_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(2)), instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.I64_ADD_OVF_S),
 		}),
 		values: []types.Value{types.I1(false), types.I64(5)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(math.MaxInt64)), instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.I64_ADD_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(math.MaxInt64)), instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.I64_ADD_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_ADD_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_ADD_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I64(math.MaxInt64)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(math.MaxInt64)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_ADD_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(math.MaxInt64)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_ADD_OVF_S),
 		}),
 		values: []types.Value{types.I1(false), types.I64(-1)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_ADD_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_ADD_OVF_S),
 		}),
 		values: []types.Value{types.I1(false), types.I64(math.MinInt64)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(5)), instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.I64_SUB_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(5)), instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.I64_SUB_OVF_S),
 		}),
 		values: []types.Value{types.I1(false), types.I64(2)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.I64_SUB_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.I64_SUB_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I64(math.MaxInt64)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(math.MaxInt64)), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_SUB_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(math.MaxInt64)), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_SUB_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_SUB_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_SUB_OVF_S),
 		}),
 		values: []types.Value{types.I1(false), types.I64(0)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_SUB_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_SUB_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.I64_CONST, i64operand(4)), instr.MustNew(instr.I64_MUL_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.I64_CONST, i64operand(4)), instr.MustNew(instr.I64_MUL_OVF_S),
 		}),
 		values: []types.Value{types.I1(false), types.I64(12)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_MUL_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_MUL_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_MUL_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_MUL_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(math.MaxInt64)), instr.MustNew(instr.I64_CONST, i64operand(2)), instr.MustNew(instr.I64_MUL_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(math.MaxInt64)), instr.MustNew(instr.I64_CONST, i64operand(2)), instr.MustNew(instr.I64_MUL_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I64(-2)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_MUL_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_MUL_OVF_S),
 		}),
 		values: []types.Value{types.I1(false), types.I64(0)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.I64_MUL_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.I64_MUL_OVF_S),
 		}),
 		values: []types.Value{types.I1(false), types.I64(math.MinInt64)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(1099511627776)), instr.MustNew(instr.I64_CONST, i64operand(1099511627776)), instr.MustNew(instr.I64_MUL_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(1099511627776)), instr.MustNew(instr.I64_CONST, i64operand(1099511627776)), instr.MustNew(instr.I64_MUL_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I64(0)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(4294967296)), instr.MustNew(instr.I64_CONST, i64operand(2147483648)), instr.MustNew(instr.I64_MUL_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(4294967296)), instr.MustNew(instr.I64_CONST, i64operand(2147483648)), instr.MustNew(instr.I64_MUL_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(-4294967296)), instr.MustNew(instr.I64_CONST, i64operand(2147483648)), instr.MustNew(instr.I64_MUL_OVF),
+			instr.MustNew(instr.I64_CONST, i64operand(-4294967296)), instr.MustNew(instr.I64_CONST, i64operand(2147483648)), instr.MustNew(instr.I64_MUL_OVF_S),
 		}),
 		values: []types.Value{types.I1(false), types.I64(math.MinInt64)},
 	},
 	{
 		program: program.New([]instr.Instruction{
-			instr.MustNew(instr.I64_CONST, i64operand(-4294967296)), instr.MustNew(instr.I64_CONST, i64operand(-2147483648)), instr.MustNew(instr.I64_MUL_OVF),
+			instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_ADD_OVF_U),
+		}),
+		values: []types.Value{types.I1(false), types.I32(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_CONST, i32operand(1)), instr.MustNew(instr.I32_ADD_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I32(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_ADD_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I32(-2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(-2147483648)), instr.MustNew(instr.I32_CONST, i32operand(-2147483648)), instr.MustNew(instr.I32_ADD_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I32(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_CONST, i32operand(1)), instr.MustNew(instr.I32_SUB_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I32(-1)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(5)), instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.I32_SUB_OVF_U),
+		}),
+		values: []types.Value{types.I1(false), types.I32(2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.I32_CONST, i32operand(5)), instr.MustNew(instr.I32_SUB_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I32(-2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_CONST, i32operand(2)), instr.MustNew(instr.I32_MUL_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I32(-2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_MUL_OVF_U),
+		}),
+		values: []types.Value{types.I1(false), types.I32(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(65536)), instr.MustNew(instr.I32_CONST, i32operand(65536)), instr.MustNew(instr.I32_MUL_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I32(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(65536)), instr.MustNew(instr.I32_CONST, i32operand(65535)), instr.MustNew(instr.I32_MUL_OVF_U),
+		}),
+		values: []types.Value{types.I1(false), types.I32(-65536)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_ADD_OVF_U),
+		}),
+		values: []types.Value{types.I1(false), types.I64(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.I64_ADD_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I64(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_ADD_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I64(-2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(-9223372036854775808)), instr.MustNew(instr.I64_CONST, i64operand(-9223372036854775808)), instr.MustNew(instr.I64_ADD_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I64(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.I64_SUB_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I64(-1)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(5)), instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.I64_SUB_OVF_U),
+		}),
+		values: []types.Value{types.I1(false), types.I64(2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.I64_CONST, i64operand(5)), instr.MustNew(instr.I64_SUB_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I64(-2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_CONST, i64operand(2)), instr.MustNew(instr.I64_MUL_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I64(-2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_MUL_OVF_U),
+		}),
+		values: []types.Value{types.I1(false), types.I64(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(4294967296)), instr.MustNew(instr.I64_CONST, i64operand(4294967296)), instr.MustNew(instr.I64_MUL_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I64(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(4294967296)), instr.MustNew(instr.I64_CONST, i64operand(4294967295)), instr.MustNew(instr.I64_MUL_OVF_U),
+		}),
+		values: []types.Value{types.I1(false), types.I64(-4294967296)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(-4294967296)), instr.MustNew(instr.I64_CONST, i64operand(-2147483648)), instr.MustNew(instr.I64_MUL_OVF_S),
 		}),
 		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
 	},
@@ -5470,9 +5602,9 @@ func TestWithThreshold(t *testing.T) {
 			exact := new(big.Int)
 			x, y := big.NewInt(c.x), big.NewInt(c.y)
 			switch c.op {
-			case instr.I32_ADD_OVF, instr.I64_ADD_OVF:
+			case instr.I32_ADD_OVF_S, instr.I64_ADD_OVF_S:
 				exact.Add(x, y)
-			case instr.I32_SUB_OVF, instr.I64_SUB_OVF:
+			case instr.I32_SUB_OVF_S, instr.I64_SUB_OVF_S:
 				exact.Sub(x, y)
 			default:
 				exact.Mul(x, y)
@@ -5533,10 +5665,10 @@ func TestWithThreshold(t *testing.T) {
 		var cases []tc
 		for _, wide := range []bool{false, true} {
 			lo, hi := int64(math.MinInt32), int64(math.MaxInt32)
-			ops := []instr.Opcode{instr.I32_ADD_OVF, instr.I32_SUB_OVF, instr.I32_MUL_OVF}
+			ops := []instr.Opcode{instr.I32_ADD_OVF_S, instr.I32_SUB_OVF_S, instr.I32_MUL_OVF_S}
 			if wide {
 				lo, hi = math.MinInt64, math.MaxInt64
-				ops = []instr.Opcode{instr.I64_ADD_OVF, instr.I64_SUB_OVF, instr.I64_MUL_OVF}
+				ops = []instr.Opcode{instr.I64_ADD_OVF_S, instr.I64_SUB_OVF_S, instr.I64_MUL_OVF_S}
 			}
 			edges := []int64{0, 1, -1, 2, lo, hi}
 			if wide {
@@ -13181,7 +13313,7 @@ func BenchmarkNew(b *testing.B) {
 
 func FuzzCheckedArithmetic(f *testing.F) {
 	edges := []int64{math.MinInt64, math.MaxInt64, math.MinInt64 + 1, math.MaxInt64 - 1, -1, 0, 1, 1 << 31, 1 << 32, 3037000500, 46341}
-	for op := byte(0); op < 6; op++ {
+	for op := byte(0); op < 12; op++ {
 		for _, x := range edges {
 			for _, y := range edges {
 				f.Add(op, x, y)
@@ -13190,19 +13322,27 @@ func FuzzCheckedArithmetic(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, operation byte, left, right int64) {
-		// operation picks one of the six checked opcodes; an i32 one takes the
+		// operation picks one of the twelve checked opcodes: i32 then i64, each
+		// add, sub, mul in a signed then an unsigned form. An i32 one takes the
 		// operands' low halves.
-		ops := []instr.Opcode{instr.I32_ADD_OVF, instr.I32_SUB_OVF, instr.I32_MUL_OVF, instr.I64_ADD_OVF, instr.I64_SUB_OVF, instr.I64_MUL_OVF}
-		op := ops[int(operation)%len(ops)]
-		wide := int(operation)%len(ops) >= 3
+		ops := []instr.Opcode{
+			instr.I32_ADD_OVF_S, instr.I32_ADD_OVF_U, instr.I32_SUB_OVF_S, instr.I32_SUB_OVF_U, instr.I32_MUL_OVF_S, instr.I32_MUL_OVF_U,
+			instr.I64_ADD_OVF_S, instr.I64_ADD_OVF_U, instr.I64_SUB_OVF_S, instr.I64_SUB_OVF_U, instr.I64_MUL_OVF_S, instr.I64_MUL_OVF_U,
+		}
+		index := int(operation) % len(ops)
+		op, wide, unsigned, arithmetic := ops[index], index >= 6, index%2 == 1, index%6/2
 		bits, code, a, b := uint(32), instr.I32_CONST, uint64(uint32(left)), uint64(uint32(right))
 		x, y := big.NewInt(int64(int32(left))), big.NewInt(int64(int32(right)))
 		if wide {
 			bits, code, a, b = 64, instr.I64_CONST, uint64(left), uint64(right)
 			x, y = big.NewInt(left), big.NewInt(right)
 		}
+		modulus := new(big.Int).Lsh(big.NewInt(1), bits)
+		if unsigned {
+			x, y = x.Mod(x, modulus), y.Mod(y, modulus)
+		}
 		exact := new(big.Int)
-		switch int(operation) % 3 {
+		switch arithmetic {
 		case 0:
 			exact.Add(x, y)
 		case 1:
@@ -13210,9 +13350,13 @@ func FuzzCheckedArithmetic(f *testing.F) {
 		default:
 			exact.Mul(x, y)
 		}
-		limit := new(big.Int).Lsh(big.NewInt(1), bits-1)
-		overflow := exact.Cmp(limit) >= 0 || exact.Cmp(new(big.Int).Neg(limit)) < 0
-		wrapped := new(big.Int).And(exact, new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), bits), big.NewInt(1))).Uint64()
+		low, high := new(big.Int), new(big.Int).Lsh(big.NewInt(1), bits-1)
+		low.Neg(high)
+		if unsigned {
+			low, high = big.NewInt(0), modulus
+		}
+		overflow := exact.Cmp(high) >= 0 || exact.Cmp(low) < 0
+		wrapped := new(big.Int).And(exact, new(big.Int).Sub(modulus, big.NewInt(1))).Uint64()
 		var want types.Value = types.I32(int32(uint32(wrapped)))
 		if wide {
 			want = types.I64(int64(wrapped))
@@ -13325,9 +13469,9 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 			name string
 			prog *program.Program
 		}{
-			{"add ovf", checked(instr.I64_ADD_OVF)},
+			{"add ovf", checked(instr.I64_ADD_OVF_S)},
 			{"add manual", manual},
-			{"mul ovf", checked(instr.I64_MUL_OVF)},
+			{"mul ovf", checked(instr.I64_MUL_OVF_S)},
 			{"mul plain", plain},
 		} {
 			for _, mode := range []string{"Threaded", "JIT"} {

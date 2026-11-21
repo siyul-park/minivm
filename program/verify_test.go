@@ -180,7 +180,7 @@ func TestVerify(t *testing.T) {
 			prog: program.New([]instr.Instruction{
 				instr.MustNew(instr.I64_CONST, 1),
 				instr.MustNew(instr.I64_CONST, 2),
-				instr.MustNew(instr.I64_ADD_OVF),
+				instr.MustNew(instr.I64_ADD_OVF_S),
 				instr.MustNew(instr.BR_IF, 0),
 				instr.MustNew(instr.I64_CONST, 3),
 				instr.MustNew(instr.I64_ADD),
@@ -188,17 +188,17 @@ func TestVerify(t *testing.T) {
 		},
 		{
 			name:    "stack/checked arithmetic underflow",
-			prog:    program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_MUL_OVF)}),
+			prog:    program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_MUL_OVF_S)}),
 			wantErr: program.ErrStackUnderflow,
 		},
 		{
 			name:    "types/checked arithmetic operand mismatch",
-			prog:    program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I64_SUB_OVF)}),
+			prog:    program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I64_SUB_OVF_S)}),
 			wantErr: program.ErrTypeMismatch,
 		},
 		{
 			name:    "types/checked arithmetic result is i1",
-			prog:    program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_ADD_OVF), instr.MustNew(instr.I64_CONST, 1), instr.MustNew(instr.I64_ADD)}),
+			prog:    program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_ADD_OVF_S), instr.MustNew(instr.I64_CONST, 1), instr.MustNew(instr.I64_ADD)}),
 			wantErr: program.ErrTypeMismatch,
 		},
 		{

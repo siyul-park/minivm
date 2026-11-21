@@ -13,7 +13,7 @@ import (
 // metadata it must match.
 var representatives = map[ssa.Op]instr.Opcode{
 	ssa.OpSelect: instr.SELECT, ssa.OpCall: instr.CALL,
-	ssa.OpIntAddOvf: instr.I32_ADD_OVF, ssa.OpIntSubOvf: instr.I64_SUB_OVF, ssa.OpIntMulOvf: instr.I32_MUL_OVF,
+	ssa.OpIntAddOvf: instr.I32_ADD_OVF_S, ssa.OpIntSubOvf: instr.I64_SUB_OVF_S, ssa.OpIntMulOvf: instr.I32_MUL_OVF_S,
 	ssa.OpIntAdd: instr.I32_ADD, ssa.OpIntSDiv: instr.I32_DIV_S, ssa.OpIntUDiv: instr.I64_DIV_U,
 	ssa.OpIntSRem: instr.I32_REM_S, ssa.OpIntURem: instr.I64_REM_U, ssa.OpIntCmp: instr.I32_EQ,
 	ssa.OpIntClz: instr.I32_CLZ, ssa.OpIntSExt: instr.I32_TO_I64_S, ssa.OpIntBitcast: instr.I32_REINTERPRET_F32,

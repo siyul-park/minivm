@@ -1506,7 +1506,7 @@ var (
 				i.fr.ip += 1
 			}
 		},
-		instr.I32_ADD_OVF: func(c *threader) func(i *Interpreter) {
+		instr.I32_ADD_OVF_S: func(c *threader) func(i *Interpreter) {
 			c.ip++
 			return func(i *Interpreter) {
 				if i.sp < 2 {
@@ -1521,7 +1521,22 @@ var (
 				i.fr.ip++
 			}
 		},
-		instr.I32_SUB_OVF: func(c *threader) func(i *Interpreter) {
+		instr.I32_ADD_OVF_U: func(c *threader) func(i *Interpreter) {
+			c.ip++
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				v0 := i.stack[i.sp-2].I32()
+				v1 := i.stack[i.sp-1].I32()
+				v2 := v0 + v1
+				v3 := uint32(v2) < uint32(v0)
+				i.stack[i.sp-2] = types.BoxI32(v2)
+				i.stack[i.sp-1] = types.BoxI1(v3)
+				i.fr.ip++
+			}
+		},
+		instr.I32_SUB_OVF_S: func(c *threader) func(i *Interpreter) {
 			c.ip++
 			return func(i *Interpreter) {
 				if i.sp < 2 {
@@ -1536,7 +1551,22 @@ var (
 				i.fr.ip++
 			}
 		},
-		instr.I32_MUL_OVF: func(c *threader) func(i *Interpreter) {
+		instr.I32_SUB_OVF_U: func(c *threader) func(i *Interpreter) {
+			c.ip++
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				v0 := i.stack[i.sp-2].I32()
+				v1 := i.stack[i.sp-1].I32()
+				v2 := v0 - v1
+				v3 := uint32(v0) < uint32(v1)
+				i.stack[i.sp-2] = types.BoxI32(v2)
+				i.stack[i.sp-1] = types.BoxI1(v3)
+				i.fr.ip++
+			}
+		},
+		instr.I32_MUL_OVF_S: func(c *threader) func(i *Interpreter) {
 			c.ip++
 			return func(i *Interpreter) {
 				if i.sp < 2 {
@@ -1547,6 +1577,22 @@ var (
 				v2 := int64(v0) * int64(v1)
 				v3 := int32(v2)
 				v4 := v2 != int64(v3)
+				i.stack[i.sp-2] = types.BoxI32(v3)
+				i.stack[i.sp-1] = types.BoxI1(v4)
+				i.fr.ip++
+			}
+		},
+		instr.I32_MUL_OVF_U: func(c *threader) func(i *Interpreter) {
+			c.ip++
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				v0 := i.stack[i.sp-2].I32()
+				v1 := i.stack[i.sp-1].I32()
+				v2 := uint64(uint32(v0)) * uint64(uint32(v1))
+				v3 := int32(v2)
+				v4 := v2>>32 != 0
 				i.stack[i.sp-2] = types.BoxI32(v3)
 				i.stack[i.sp-1] = types.BoxI1(v4)
 				i.fr.ip++
@@ -2027,7 +2073,7 @@ var (
 				i.fr.ip += 1
 			}
 		},
-		instr.I64_ADD_OVF: func(c *threader) func(i *Interpreter) {
+		instr.I64_ADD_OVF_S: func(c *threader) func(i *Interpreter) {
 			c.ip++
 			return func(i *Interpreter) {
 				if i.sp < 2 {
@@ -2042,7 +2088,22 @@ var (
 				i.fr.ip++
 			}
 		},
-		instr.I64_SUB_OVF: func(c *threader) func(i *Interpreter) {
+		instr.I64_ADD_OVF_U: func(c *threader) func(i *Interpreter) {
+			c.ip++
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				v0 := i.unboxI64(i.stack[i.sp-2])
+				v1 := i.unboxI64(i.stack[i.sp-1])
+				v2 := v0 + v1
+				v3 := uint64(v2) < uint64(v0)
+				i.stack[i.sp-2] = i.boxI64(v2)
+				i.stack[i.sp-1] = types.BoxI1(v3)
+				i.fr.ip++
+			}
+		},
+		instr.I64_SUB_OVF_S: func(c *threader) func(i *Interpreter) {
 			c.ip++
 			return func(i *Interpreter) {
 				if i.sp < 2 {
@@ -2057,7 +2118,22 @@ var (
 				i.fr.ip++
 			}
 		},
-		instr.I64_MUL_OVF: func(c *threader) func(i *Interpreter) {
+		instr.I64_SUB_OVF_U: func(c *threader) func(i *Interpreter) {
+			c.ip++
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				v0 := i.unboxI64(i.stack[i.sp-2])
+				v1 := i.unboxI64(i.stack[i.sp-1])
+				v2 := v0 - v1
+				v3 := uint64(v0) < uint64(v1)
+				i.stack[i.sp-2] = i.boxI64(v2)
+				i.stack[i.sp-1] = types.BoxI1(v3)
+				i.fr.ip++
+			}
+		},
+		instr.I64_MUL_OVF_S: func(c *threader) func(i *Interpreter) {
 			c.ip++
 			return func(i *Interpreter) {
 				if i.sp < 2 {
@@ -2069,6 +2145,22 @@ var (
 				v2 -= uint64(v0>>63)&uint64(v1) + uint64(v1>>63)&uint64(v0)
 				v4 := int64(v3)
 				v5 := int64(v2) != v4>>63
+				i.stack[i.sp-2] = i.boxI64(v4)
+				i.stack[i.sp-1] = types.BoxI1(v5)
+				i.fr.ip++
+			}
+		},
+		instr.I64_MUL_OVF_U: func(c *threader) func(i *Interpreter) {
+			c.ip++
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				v0 := i.unboxI64(i.stack[i.sp-2])
+				v1 := i.unboxI64(i.stack[i.sp-1])
+				v2, v3 := bits.Mul64(uint64(v0), uint64(v1))
+				v4 := int64(v3)
+				v5 := v2 != 0
 				i.stack[i.sp-2] = i.boxI64(v4)
 				i.stack[i.sp-1] = types.BoxI1(v5)
 				i.fr.ip++
@@ -23732,6 +23824,82 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
+					if !(v0+7 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.GLOBAL_GET && instr.Opcode(c.code[v0+6]) == instr.I64_ROTL) {
+						return nil
+					}
+					v1, v2 := c.global(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3, v4 := c.global(v0+3+1, types.KindI64)
+					if !v4 {
+						return nil
+					}
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(trapped{ErrStackOverflow, 0})
+						}
+						if v1 >= len(i.globals) {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.globals[v1]
+						v2 := i.borrowI64(v0)
+						if v3 >= len(i.globals) {
+							panic(trapped{ErrSegmentationFault, 3})
+						}
+						v4 := i.globals[v3]
+						v5 := i.borrowI64(v4)
+						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), int(v5))))
+						i.stack[i.sp] = v6
+						i.sp++
+						i.fr.ip += 7
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 6
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+7 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.GLOBAL_GET && instr.Opcode(c.code[v0+6]) == instr.I64_ROTR) {
+						return nil
+					}
+					v1, v2 := c.global(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3, v4 := c.global(v0+3+1, types.KindI64)
+					if !v4 {
+						return nil
+					}
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(trapped{ErrStackOverflow, 0})
+						}
+						if v1 >= len(i.globals) {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.globals[v1]
+						v2 := i.borrowI64(v0)
+						if v3 >= len(i.globals) {
+							panic(trapped{ErrSegmentationFault, 3})
+						}
+						v4 := i.globals[v3]
+						v5 := i.borrowI64(v4)
+						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), -int(v5))))
+						i.stack[i.sp] = v6
+						i.sp++
+						i.fr.ip += 7
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 6
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
 					if !(v0+7 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.GLOBAL_GET && instr.Opcode(c.code[v0+6]) == instr.I64_EQ) {
 						return nil
 					}
@@ -26920,82 +27088,6 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
-					if !(v0+7 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.GLOBAL_GET && instr.Opcode(c.code[v0+6]) == instr.I64_ROTL) {
-						return nil
-					}
-					v1, v2 := c.global(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3, v4 := c.global(v0+3+1, types.KindI64)
-					if !v4 {
-						return nil
-					}
-					c.ip += 3
-					return func(i *Interpreter) {
-						if i.sp == len(i.stack) {
-							panic(trapped{ErrStackOverflow, 0})
-						}
-						if v1 >= len(i.globals) {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.globals[v1]
-						v2 := i.borrowI64(v0)
-						if v3 >= len(i.globals) {
-							panic(trapped{ErrSegmentationFault, 3})
-						}
-						v4 := i.globals[v3]
-						v5 := i.borrowI64(v4)
-						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), int(v5))))
-						i.stack[i.sp] = v6
-						i.sp++
-						i.fr.ip += 7
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 6
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+7 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.GLOBAL_GET && instr.Opcode(c.code[v0+6]) == instr.I64_ROTR) {
-						return nil
-					}
-					v1, v2 := c.global(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3, v4 := c.global(v0+3+1, types.KindI64)
-					if !v4 {
-						return nil
-					}
-					c.ip += 3
-					return func(i *Interpreter) {
-						if i.sp == len(i.stack) {
-							panic(trapped{ErrStackOverflow, 0})
-						}
-						if v1 >= len(i.globals) {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.globals[v1]
-						v2 := i.borrowI64(v0)
-						if v3 >= len(i.globals) {
-							panic(trapped{ErrSegmentationFault, 3})
-						}
-						v4 := i.globals[v3]
-						v5 := i.borrowI64(v4)
-						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), -int(v5))))
-						i.stack[i.sp] = v6
-						i.sp++
-						i.fr.ip += 7
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 6
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
 					if !(v0+7 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.F64_EQ && instr.Opcode(c.code[v0+4]) == instr.BR_IF) {
 						return nil
 					}
@@ -27353,6 +27445,84 @@ var (
 				return nil
 			}(); v1 != nil {
 				return v1, 3
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+6 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.LOCAL_GET && instr.Opcode(c.code[v0+5]) == instr.I64_ROTL) {
+						return nil
+					}
+					v1, v2 := c.global(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3, v4 := c.local(v0+3+1, types.KindI64)
+					if !v4 {
+						return nil
+					}
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(trapped{ErrStackOverflow, 0})
+						}
+						if v1 >= len(i.globals) {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.globals[v1]
+						v2 := i.borrowI64(v0)
+						if i.fr.bp+v3 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 3})
+						}
+						v4 := i.fr.bp + v3
+						v5 := i.stack[v4]
+						v6 := i.borrowI64(v5)
+						v7 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), int(v6))))
+						i.stack[i.sp] = v7
+						i.sp++
+						i.fr.ip += 6
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 5
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+6 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.LOCAL_GET && instr.Opcode(c.code[v0+5]) == instr.I64_ROTR) {
+						return nil
+					}
+					v1, v2 := c.global(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3, v4 := c.local(v0+3+1, types.KindI64)
+					if !v4 {
+						return nil
+					}
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(trapped{ErrStackOverflow, 0})
+						}
+						if v1 >= len(i.globals) {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.globals[v1]
+						v2 := i.borrowI64(v0)
+						if i.fr.bp+v3 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 3})
+						}
+						v4 := i.fr.bp + v3
+						v5 := i.stack[v4]
+						v6 := i.borrowI64(v5)
+						v7 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), -int(v6))))
+						i.stack[i.sp] = v7
+						i.sp++
+						i.fr.ip += 6
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 5
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
@@ -30622,14 +30792,14 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
-					if !(v0+6 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.LOCAL_GET && instr.Opcode(c.code[v0+5]) == instr.I64_ROTL) {
+					if !(v0+6 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.UPVAL_GET && instr.Opcode(c.code[v0+5]) == instr.I64_ROTL) {
 						return nil
 					}
 					v1, v2 := c.global(v0+1, types.KindI64)
 					if !v2 {
 						return nil
 					}
-					v3, v4 := c.local(v0+3+1, types.KindI64)
+					v3, v4 := c.upval(v0+3+1, types.KindI64)
 					if !v4 {
 						return nil
 					}
@@ -30643,14 +30813,13 @@ var (
 						}
 						v0 := i.globals[v1]
 						v2 := i.borrowI64(v0)
-						if i.fr.bp+v3 >= i.sp {
+						if v3 >= len(i.fr.upvals) {
 							panic(trapped{ErrSegmentationFault, 3})
 						}
-						v4 := i.fr.bp + v3
-						v5 := i.stack[v4]
-						v6 := i.borrowI64(v5)
-						v7 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), int(v6))))
-						i.stack[i.sp] = v7
+						v4 := i.fr.upvals[v3]
+						v5 := i.borrowI64(v4)
+						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), int(v5))))
+						i.stack[i.sp] = v6
 						i.sp++
 						i.fr.ip += 6
 					}
@@ -30661,14 +30830,14 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
-					if !(v0+6 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.LOCAL_GET && instr.Opcode(c.code[v0+5]) == instr.I64_ROTR) {
+					if !(v0+6 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.UPVAL_GET && instr.Opcode(c.code[v0+5]) == instr.I64_ROTR) {
 						return nil
 					}
 					v1, v2 := c.global(v0+1, types.KindI64)
 					if !v2 {
 						return nil
 					}
-					v3, v4 := c.local(v0+3+1, types.KindI64)
+					v3, v4 := c.upval(v0+3+1, types.KindI64)
 					if !v4 {
 						return nil
 					}
@@ -30682,14 +30851,13 @@ var (
 						}
 						v0 := i.globals[v1]
 						v2 := i.borrowI64(v0)
-						if i.fr.bp+v3 >= i.sp {
+						if v3 >= len(i.fr.upvals) {
 							panic(trapped{ErrSegmentationFault, 3})
 						}
-						v4 := i.fr.bp + v3
-						v5 := i.stack[v4]
-						v6 := i.borrowI64(v5)
-						v7 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), -int(v6))))
-						i.stack[i.sp] = v7
+						v4 := i.fr.upvals[v3]
+						v5 := i.borrowI64(v4)
+						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), -int(v5))))
+						i.stack[i.sp] = v6
 						i.sp++
 						i.fr.ip += 6
 					}
@@ -33888,82 +34056,6 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
-					if !(v0+6 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.UPVAL_GET && instr.Opcode(c.code[v0+5]) == instr.I64_ROTL) {
-						return nil
-					}
-					v1, v2 := c.global(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3, v4 := c.upval(v0+3+1, types.KindI64)
-					if !v4 {
-						return nil
-					}
-					c.ip += 3
-					return func(i *Interpreter) {
-						if i.sp == len(i.stack) {
-							panic(trapped{ErrStackOverflow, 0})
-						}
-						if v1 >= len(i.globals) {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.globals[v1]
-						v2 := i.borrowI64(v0)
-						if v3 >= len(i.fr.upvals) {
-							panic(trapped{ErrSegmentationFault, 3})
-						}
-						v4 := i.fr.upvals[v3]
-						v5 := i.borrowI64(v4)
-						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), int(v5))))
-						i.stack[i.sp] = v6
-						i.sp++
-						i.fr.ip += 6
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 5
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+6 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.UPVAL_GET && instr.Opcode(c.code[v0+5]) == instr.I64_ROTR) {
-						return nil
-					}
-					v1, v2 := c.global(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3, v4 := c.upval(v0+3+1, types.KindI64)
-					if !v4 {
-						return nil
-					}
-					c.ip += 3
-					return func(i *Interpreter) {
-						if i.sp == len(i.stack) {
-							panic(trapped{ErrStackOverflow, 0})
-						}
-						if v1 >= len(i.globals) {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.globals[v1]
-						v2 := i.borrowI64(v0)
-						if v3 >= len(i.fr.upvals) {
-							panic(trapped{ErrSegmentationFault, 3})
-						}
-						v4 := i.fr.upvals[v3]
-						v5 := i.borrowI64(v4)
-						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), -int(v5))))
-						i.stack[i.sp] = v6
-						i.sp++
-						i.fr.ip += 6
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 5
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
 					if !(v0+7 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.REF_IS_NULL && instr.Opcode(c.code[v0+4]) == instr.BR_IF) {
 						return nil
 					}
@@ -35423,6 +35515,66 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
+					if !(v0+13 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.I64_CONST && instr.Opcode(c.code[v0+12]) == instr.I64_ROTL) {
+						return nil
+					}
+					v1, v2 := c.global(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3 := int64(instr.Instruction(c.code[v0+3:]).Operand(0))
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(trapped{ErrStackOverflow, 0})
+						}
+						if v1 >= len(i.globals) {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.globals[v1]
+						v2 := i.borrowI64(v0)
+						v4 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), int(v3))))
+						i.stack[i.sp] = v4
+						i.sp++
+						i.fr.ip += 13
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 12
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+13 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.I64_CONST && instr.Opcode(c.code[v0+12]) == instr.I64_ROTR) {
+						return nil
+					}
+					v1, v2 := c.global(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3 := int64(instr.Instruction(c.code[v0+3:]).Operand(0))
+					c.ip += 3
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(trapped{ErrStackOverflow, 0})
+						}
+						if v1 >= len(i.globals) {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.globals[v1]
+						v2 := i.borrowI64(v0)
+						v4 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), -int(v3))))
+						i.stack[i.sp] = v4
+						i.sp++
+						i.fr.ip += 13
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 12
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
 					if !(v0+13 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.I64_CONST && instr.Opcode(c.code[v0+12]) == instr.I64_EQ) {
 						return nil
 					}
@@ -36170,66 +36322,6 @@ var (
 						v0 := i.globals[v1]
 						v2 := i.borrowI64(v0)
 						v4 := i.boxI64(v2 | v3)
-						i.stack[i.sp] = v4
-						i.sp++
-						i.fr.ip += 13
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 12
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+13 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.I64_CONST && instr.Opcode(c.code[v0+12]) == instr.I64_ROTL) {
-						return nil
-					}
-					v1, v2 := c.global(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3 := int64(instr.Instruction(c.code[v0+3:]).Operand(0))
-					c.ip += 3
-					return func(i *Interpreter) {
-						if i.sp == len(i.stack) {
-							panic(trapped{ErrStackOverflow, 0})
-						}
-						if v1 >= len(i.globals) {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.globals[v1]
-						v2 := i.borrowI64(v0)
-						v4 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), int(v3))))
-						i.stack[i.sp] = v4
-						i.sp++
-						i.fr.ip += 13
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 12
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+13 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.I64_CONST && instr.Opcode(c.code[v0+12]) == instr.I64_ROTR) {
-						return nil
-					}
-					v1, v2 := c.global(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3 := int64(instr.Instruction(c.code[v0+3:]).Operand(0))
-					c.ip += 3
-					return func(i *Interpreter) {
-						if i.sp == len(i.stack) {
-							panic(trapped{ErrStackOverflow, 0})
-						}
-						if v1 >= len(i.globals) {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.globals[v1]
-						v2 := i.borrowI64(v0)
-						v4 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), -int(v3))))
 						i.stack[i.sp] = v4
 						i.sp++
 						i.fr.ip += 13
@@ -38330,6 +38422,62 @@ var (
 				return nil
 			}(); v1 != nil {
 				return v1, 8
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+4 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.I64_ROTL) {
+						return nil
+					}
+					v1, v2 := c.global(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					c.ip += 3
+					return func(i *Interpreter) {
+						if v1 >= len(i.globals) {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.globals[v1]
+						v2 := i.borrowI64(v0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v3 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), int(v2))))
+						i.stack[i.sp-1] = v3
+						i.fr.ip += 4
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 3
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+4 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.I64_ROTR) {
+						return nil
+					}
+					v1, v2 := c.global(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					c.ip += 3
+					return func(i *Interpreter) {
+						if v1 >= len(i.globals) {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.globals[v1]
+						v2 := i.borrowI64(v0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v3 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), -int(v2))))
+						i.stack[i.sp-1] = v3
+						i.fr.ip += 4
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 3
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
@@ -40730,62 +40878,6 @@ var (
 			}(); v1 != nil {
 				return v1, 3
 			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+4 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.I64_ROTL) {
-						return nil
-					}
-					v1, v2 := c.global(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					c.ip += 3
-					return func(i *Interpreter) {
-						if v1 >= len(i.globals) {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.globals[v1]
-						v2 := i.borrowI64(v0)
-						if i.sp < 1 {
-							panic(ErrStackUnderflow)
-						}
-						v3 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), int(v2))))
-						i.stack[i.sp-1] = v3
-						i.fr.ip += 4
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 3
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+4 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.I64_ROTR) {
-						return nil
-					}
-					v1, v2 := c.global(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					c.ip += 3
-					return func(i *Interpreter) {
-						if v1 >= len(i.globals) {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.globals[v1]
-						v2 := i.borrowI64(v0)
-						if i.sp < 1 {
-							panic(ErrStackUnderflow)
-						}
-						v3 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), -int(v2))))
-						i.stack[i.sp-1] = v3
-						i.fr.ip += 4
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 3
-			}
 			return nil, 0
 		},
 		instr.LOCAL_GET: func(c *threader) (func(*Interpreter), uint8) {
@@ -41881,6 +41973,104 @@ var (
 				return nil
 			}(); v1 != nil {
 				return v1, 11
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+7 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.LOCAL_GET && instr.Opcode(c.code[v0+4]) == instr.I64_ROTL && instr.Opcode(c.code[v0+5]) == instr.LOCAL_SET) {
+						return nil
+					}
+					v1, v2 := c.local(v0+6, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3, v4 := c.local(v0+1, types.KindI64)
+					if !v4 {
+						return nil
+					}
+					v5, v6 := c.local(v0+2+1, types.KindI64)
+					if !v6 {
+						return nil
+					}
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.fr.bp+v3 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.fr.bp + v3
+						v2 := i.stack[v0]
+						v4 := i.borrowI64(v2)
+						if i.fr.bp+v5 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 2})
+						}
+						v6 := i.fr.bp + v5
+						v7 := i.stack[v6]
+						v8 := i.borrowI64(v7)
+						v9 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), int(v8))))
+						v10 := i.fr.bp + v1
+						if v10 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 5})
+						}
+						v11 := i.stack[v10]
+						if v11 != v9 {
+							i.releaseBox(v11)
+						}
+						i.stack[v10] = v9
+						i.sp -= 0
+						i.fr.ip += 7
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 4
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+7 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.LOCAL_GET && instr.Opcode(c.code[v0+4]) == instr.I64_ROTR && instr.Opcode(c.code[v0+5]) == instr.LOCAL_SET) {
+						return nil
+					}
+					v1, v2 := c.local(v0+6, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3, v4 := c.local(v0+1, types.KindI64)
+					if !v4 {
+						return nil
+					}
+					v5, v6 := c.local(v0+2+1, types.KindI64)
+					if !v6 {
+						return nil
+					}
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.fr.bp+v3 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.fr.bp + v3
+						v2 := i.stack[v0]
+						v4 := i.borrowI64(v2)
+						if i.fr.bp+v5 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 2})
+						}
+						v6 := i.fr.bp + v5
+						v7 := i.stack[v6]
+						v8 := i.borrowI64(v7)
+						v9 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), -int(v8))))
+						v10 := i.fr.bp + v1
+						if v10 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 5})
+						}
+						v11 := i.stack[v10]
+						if v11 != v9 {
+							i.releaseBox(v11)
+						}
+						i.stack[v10] = v9
+						i.sp -= 0
+						i.fr.ip += 7
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 4
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
@@ -45594,104 +45784,6 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
-					if !(v0+7 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.LOCAL_GET && instr.Opcode(c.code[v0+4]) == instr.I64_ROTL && instr.Opcode(c.code[v0+5]) == instr.LOCAL_SET) {
-						return nil
-					}
-					v1, v2 := c.local(v0+6, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3, v4 := c.local(v0+1, types.KindI64)
-					if !v4 {
-						return nil
-					}
-					v5, v6 := c.local(v0+2+1, types.KindI64)
-					if !v6 {
-						return nil
-					}
-					c.ip += 2
-					return func(i *Interpreter) {
-						if i.fr.bp+v3 >= i.sp {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.fr.bp + v3
-						v2 := i.stack[v0]
-						v4 := i.borrowI64(v2)
-						if i.fr.bp+v5 >= i.sp {
-							panic(trapped{ErrSegmentationFault, 2})
-						}
-						v6 := i.fr.bp + v5
-						v7 := i.stack[v6]
-						v8 := i.borrowI64(v7)
-						v9 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), int(v8))))
-						v10 := i.fr.bp + v1
-						if v10 >= i.sp {
-							panic(trapped{ErrSegmentationFault, 5})
-						}
-						v11 := i.stack[v10]
-						if v11 != v9 {
-							i.releaseBox(v11)
-						}
-						i.stack[v10] = v9
-						i.sp -= 0
-						i.fr.ip += 7
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 4
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+7 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.LOCAL_GET && instr.Opcode(c.code[v0+4]) == instr.I64_ROTR && instr.Opcode(c.code[v0+5]) == instr.LOCAL_SET) {
-						return nil
-					}
-					v1, v2 := c.local(v0+6, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3, v4 := c.local(v0+1, types.KindI64)
-					if !v4 {
-						return nil
-					}
-					v5, v6 := c.local(v0+2+1, types.KindI64)
-					if !v6 {
-						return nil
-					}
-					c.ip += 2
-					return func(i *Interpreter) {
-						if i.fr.bp+v3 >= i.sp {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.fr.bp + v3
-						v2 := i.stack[v0]
-						v4 := i.borrowI64(v2)
-						if i.fr.bp+v5 >= i.sp {
-							panic(trapped{ErrSegmentationFault, 2})
-						}
-						v6 := i.fr.bp + v5
-						v7 := i.stack[v6]
-						v8 := i.borrowI64(v7)
-						v9 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), -int(v8))))
-						v10 := i.fr.bp + v1
-						if v10 >= i.sp {
-							panic(trapped{ErrSegmentationFault, 5})
-						}
-						v11 := i.stack[v10]
-						if v11 != v9 {
-							i.releaseBox(v11)
-						}
-						i.stack[v10] = v9
-						i.sp -= 0
-						i.fr.ip += 7
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 4
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
 					if !(v0+10 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I32_CONST && instr.Opcode(c.code[v0+7]) == instr.I32_ADD && instr.Opcode(c.code[v0+8]) == instr.LOCAL_SET) {
 						return nil
 					}
@@ -46635,6 +46727,86 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
+					if !(v0+14 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_CONST && instr.Opcode(c.code[v0+11]) == instr.I64_ROTL && instr.Opcode(c.code[v0+12]) == instr.LOCAL_SET) {
+						return nil
+					}
+					v1, v2 := c.local(v0+13, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3, v4 := c.local(v0+1, types.KindI64)
+					if !v4 {
+						return nil
+					}
+					v5 := int64(instr.Instruction(c.code[v0+2:]).Operand(0))
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.fr.bp+v3 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.fr.bp + v3
+						v2 := i.stack[v0]
+						v4 := i.borrowI64(v2)
+						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), int(v5))))
+						v7 := i.fr.bp + v1
+						if v7 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 12})
+						}
+						v8 := i.stack[v7]
+						if v8 != v6 {
+							i.releaseBox(v8)
+						}
+						i.stack[v7] = v6
+						i.sp -= 0
+						i.fr.ip += 14
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 11
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+14 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_CONST && instr.Opcode(c.code[v0+11]) == instr.I64_ROTR && instr.Opcode(c.code[v0+12]) == instr.LOCAL_SET) {
+						return nil
+					}
+					v1, v2 := c.local(v0+13, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3, v4 := c.local(v0+1, types.KindI64)
+					if !v4 {
+						return nil
+					}
+					v5 := int64(instr.Instruction(c.code[v0+2:]).Operand(0))
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.fr.bp+v3 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.fr.bp + v3
+						v2 := i.stack[v0]
+						v4 := i.borrowI64(v2)
+						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), -int(v5))))
+						v7 := i.fr.bp + v1
+						if v7 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 12})
+						}
+						v8 := i.stack[v7]
+						if v8 != v6 {
+							i.releaseBox(v8)
+						}
+						i.stack[v7] = v6
+						i.sp -= 0
+						i.fr.ip += 14
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 11
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
 					if !(v0+15 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_CONST && instr.Opcode(c.code[v0+11]) == instr.I64_EQ && instr.Opcode(c.code[v0+12]) == instr.BR_IF) {
 						return nil
 					}
@@ -47526,86 +47698,6 @@ var (
 						v2 := i.stack[v0]
 						v4 := i.borrowI64(v2)
 						v6 := i.boxI64(v4 | v5)
-						v7 := i.fr.bp + v1
-						if v7 >= i.sp {
-							panic(trapped{ErrSegmentationFault, 12})
-						}
-						v8 := i.stack[v7]
-						if v8 != v6 {
-							i.releaseBox(v8)
-						}
-						i.stack[v7] = v6
-						i.sp -= 0
-						i.fr.ip += 14
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 11
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+14 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_CONST && instr.Opcode(c.code[v0+11]) == instr.I64_ROTL && instr.Opcode(c.code[v0+12]) == instr.LOCAL_SET) {
-						return nil
-					}
-					v1, v2 := c.local(v0+13, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3, v4 := c.local(v0+1, types.KindI64)
-					if !v4 {
-						return nil
-					}
-					v5 := int64(instr.Instruction(c.code[v0+2:]).Operand(0))
-					c.ip += 2
-					return func(i *Interpreter) {
-						if i.fr.bp+v3 >= i.sp {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.fr.bp + v3
-						v2 := i.stack[v0]
-						v4 := i.borrowI64(v2)
-						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), int(v5))))
-						v7 := i.fr.bp + v1
-						if v7 >= i.sp {
-							panic(trapped{ErrSegmentationFault, 12})
-						}
-						v8 := i.stack[v7]
-						if v8 != v6 {
-							i.releaseBox(v8)
-						}
-						i.stack[v7] = v6
-						i.sp -= 0
-						i.fr.ip += 14
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 11
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+14 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_CONST && instr.Opcode(c.code[v0+11]) == instr.I64_ROTR && instr.Opcode(c.code[v0+12]) == instr.LOCAL_SET) {
-						return nil
-					}
-					v1, v2 := c.local(v0+13, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3, v4 := c.local(v0+1, types.KindI64)
-					if !v4 {
-						return nil
-					}
-					v5 := int64(instr.Instruction(c.code[v0+2:]).Operand(0))
-					c.ip += 2
-					return func(i *Interpreter) {
-						if i.fr.bp+v3 >= i.sp {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.fr.bp + v3
-						v2 := i.stack[v0]
-						v4 := i.borrowI64(v2)
-						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), -int(v5))))
 						v7 := i.fr.bp + v1
 						if v7 >= i.sp {
 							panic(trapped{ErrSegmentationFault, 12})
@@ -58817,6 +58909,86 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
+					if !(v0+5 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.LOCAL_GET && instr.Opcode(c.code[v0+4]) == instr.I64_ROTL) {
+						return nil
+					}
+					v1, v2 := c.local(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3, v4 := c.local(v0+2+1, types.KindI64)
+					if !v4 {
+						return nil
+					}
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(trapped{ErrStackOverflow, 0})
+						}
+						if i.fr.bp+v1 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.fr.bp + v1
+						v2 := i.stack[v0]
+						v4 := i.borrowI64(v2)
+						if i.fr.bp+v3 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 2})
+						}
+						v5 := i.fr.bp + v3
+						v6 := i.stack[v5]
+						v7 := i.borrowI64(v6)
+						v8 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), int(v7))))
+						i.stack[i.sp] = v8
+						i.sp++
+						i.fr.ip += 5
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 4
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+5 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.LOCAL_GET && instr.Opcode(c.code[v0+4]) == instr.I64_ROTR) {
+						return nil
+					}
+					v1, v2 := c.local(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3, v4 := c.local(v0+2+1, types.KindI64)
+					if !v4 {
+						return nil
+					}
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(trapped{ErrStackOverflow, 0})
+						}
+						if i.fr.bp+v1 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.fr.bp + v1
+						v2 := i.stack[v0]
+						v4 := i.borrowI64(v2)
+						if i.fr.bp+v3 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 2})
+						}
+						v5 := i.fr.bp + v3
+						v6 := i.stack[v5]
+						v7 := i.borrowI64(v6)
+						v8 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), -int(v7))))
+						i.stack[i.sp] = v8
+						i.sp++
+						i.fr.ip += 5
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 4
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
 					if !(v0+5 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.LOCAL_GET && instr.Opcode(c.code[v0+4]) == instr.I64_EQ) {
 						return nil
 					}
@@ -62161,86 +62333,6 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
-					if !(v0+5 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.LOCAL_GET && instr.Opcode(c.code[v0+4]) == instr.I64_ROTL) {
-						return nil
-					}
-					v1, v2 := c.local(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3, v4 := c.local(v0+2+1, types.KindI64)
-					if !v4 {
-						return nil
-					}
-					c.ip += 2
-					return func(i *Interpreter) {
-						if i.sp == len(i.stack) {
-							panic(trapped{ErrStackOverflow, 0})
-						}
-						if i.fr.bp+v1 >= i.sp {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.fr.bp + v1
-						v2 := i.stack[v0]
-						v4 := i.borrowI64(v2)
-						if i.fr.bp+v3 >= i.sp {
-							panic(trapped{ErrSegmentationFault, 2})
-						}
-						v5 := i.fr.bp + v3
-						v6 := i.stack[v5]
-						v7 := i.borrowI64(v6)
-						v8 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), int(v7))))
-						i.stack[i.sp] = v8
-						i.sp++
-						i.fr.ip += 5
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 4
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+5 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.LOCAL_GET && instr.Opcode(c.code[v0+4]) == instr.I64_ROTR) {
-						return nil
-					}
-					v1, v2 := c.local(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3, v4 := c.local(v0+2+1, types.KindI64)
-					if !v4 {
-						return nil
-					}
-					c.ip += 2
-					return func(i *Interpreter) {
-						if i.sp == len(i.stack) {
-							panic(trapped{ErrStackOverflow, 0})
-						}
-						if i.fr.bp+v1 >= i.sp {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.fr.bp + v1
-						v2 := i.stack[v0]
-						v4 := i.borrowI64(v2)
-						if i.fr.bp+v3 >= i.sp {
-							panic(trapped{ErrSegmentationFault, 2})
-						}
-						v5 := i.fr.bp + v3
-						v6 := i.stack[v5]
-						v7 := i.borrowI64(v6)
-						v8 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), -int(v7))))
-						i.stack[i.sp] = v8
-						i.sp++
-						i.fr.ip += 5
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 4
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
 					if !(v0+6 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.REF_IS_NULL && instr.Opcode(c.code[v0+3]) == instr.BR_IF) {
 						return nil
 					}
@@ -63747,6 +63839,68 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
+					if !(v0+12 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_CONST && instr.Opcode(c.code[v0+11]) == instr.I64_ROTL) {
+						return nil
+					}
+					v1, v2 := c.local(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3 := int64(instr.Instruction(c.code[v0+2:]).Operand(0))
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(trapped{ErrStackOverflow, 0})
+						}
+						if i.fr.bp+v1 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.fr.bp + v1
+						v2 := i.stack[v0]
+						v4 := i.borrowI64(v2)
+						v5 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), int(v3))))
+						i.stack[i.sp] = v5
+						i.sp++
+						i.fr.ip += 12
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 11
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+12 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_CONST && instr.Opcode(c.code[v0+11]) == instr.I64_ROTR) {
+						return nil
+					}
+					v1, v2 := c.local(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3 := int64(instr.Instruction(c.code[v0+2:]).Operand(0))
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(trapped{ErrStackOverflow, 0})
+						}
+						if i.fr.bp+v1 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.fr.bp + v1
+						v2 := i.stack[v0]
+						v4 := i.borrowI64(v2)
+						v5 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), -int(v3))))
+						i.stack[i.sp] = v5
+						i.sp++
+						i.fr.ip += 12
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 11
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
 					if !(v0+12 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_CONST && instr.Opcode(c.code[v0+11]) == instr.I64_EQ) {
 						return nil
 					}
@@ -64517,68 +64671,6 @@ var (
 						v2 := i.stack[v0]
 						v4 := i.borrowI64(v2)
 						v5 := i.boxI64(v4 | v3)
-						i.stack[i.sp] = v5
-						i.sp++
-						i.fr.ip += 12
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 11
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+12 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_CONST && instr.Opcode(c.code[v0+11]) == instr.I64_ROTL) {
-						return nil
-					}
-					v1, v2 := c.local(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3 := int64(instr.Instruction(c.code[v0+2:]).Operand(0))
-					c.ip += 2
-					return func(i *Interpreter) {
-						if i.sp == len(i.stack) {
-							panic(trapped{ErrStackOverflow, 0})
-						}
-						if i.fr.bp+v1 >= i.sp {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.fr.bp + v1
-						v2 := i.stack[v0]
-						v4 := i.borrowI64(v2)
-						v5 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), int(v3))))
-						i.stack[i.sp] = v5
-						i.sp++
-						i.fr.ip += 12
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 11
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+12 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_CONST && instr.Opcode(c.code[v0+11]) == instr.I64_ROTR) {
-						return nil
-					}
-					v1, v2 := c.local(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3 := int64(instr.Instruction(c.code[v0+2:]).Operand(0))
-					c.ip += 2
-					return func(i *Interpreter) {
-						if i.sp == len(i.stack) {
-							panic(trapped{ErrStackOverflow, 0})
-						}
-						if i.fr.bp+v1 >= i.sp {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.fr.bp + v1
-						v2 := i.stack[v0]
-						v4 := i.borrowI64(v2)
-						v5 := i.boxI64(int64(bits.RotateLeft64(uint64(v4), -int(v3))))
 						i.stack[i.sp] = v5
 						i.sp++
 						i.fr.ip += 12
@@ -66723,6 +66815,64 @@ var (
 				return nil
 			}(); v1 != nil {
 				return v1, 7
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+3 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_ROTL) {
+						return nil
+					}
+					v1, v2 := c.local(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.fr.bp+v1 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.fr.bp + v1
+						v2 := i.stack[v0]
+						v3 := i.borrowI64(v2)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v4 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), int(v3))))
+						i.stack[i.sp-1] = v4
+						i.fr.ip += 3
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 2
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+3 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_ROTR) {
+						return nil
+					}
+					v1, v2 := c.local(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.fr.bp+v1 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.fr.bp + v1
+						v2 := i.stack[v0]
+						v3 := i.borrowI64(v2)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v4 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), -int(v3))))
+						i.stack[i.sp-1] = v4
+						i.fr.ip += 3
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 2
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
@@ -69194,64 +69344,6 @@ var (
 							panic(ErrStackUnderflow)
 						}
 						v4 := i.boxI64(i.unboxI64(i.stack[i.sp-1]) | v3)
-						i.stack[i.sp-1] = v4
-						i.fr.ip += 3
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 2
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+3 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_ROTL) {
-						return nil
-					}
-					v1, v2 := c.local(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					c.ip += 2
-					return func(i *Interpreter) {
-						if i.fr.bp+v1 >= i.sp {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.fr.bp + v1
-						v2 := i.stack[v0]
-						v3 := i.borrowI64(v2)
-						if i.sp < 1 {
-							panic(ErrStackUnderflow)
-						}
-						v4 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), int(v3))))
-						i.stack[i.sp-1] = v4
-						i.fr.ip += 3
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 2
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+3 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_ROTR) {
-						return nil
-					}
-					v1, v2 := c.local(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					c.ip += 2
-					return func(i *Interpreter) {
-						if i.fr.bp+v1 >= i.sp {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.fr.bp + v1
-						v2 := i.stack[v0]
-						v3 := i.borrowI64(v2)
-						if i.sp < 1 {
-							panic(ErrStackUnderflow)
-						}
-						v4 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), -int(v3))))
 						i.stack[i.sp-1] = v4
 						i.fr.ip += 3
 					}
@@ -82272,6 +82364,54 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
+					if !(v0+4 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.I64_ROTL) {
+						return nil
+					}
+					v1, v2 := c.constant(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					c.ip += 3
+					return func(i *Interpreter) {
+						v0 := i.borrowI64(v1)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v2 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), int(v0))))
+						i.stack[i.sp-1] = v2
+						i.fr.ip += 4
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 3
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+4 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.I64_ROTR) {
+						return nil
+					}
+					v1, v2 := c.constant(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					c.ip += 3
+					return func(i *Interpreter) {
+						v0 := i.borrowI64(v1)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v2 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), -int(v0))))
+						i.stack[i.sp-1] = v2
+						i.fr.ip += 4
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 3
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
 					if !(v0+4 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.I64_EQ) {
 						return nil
 					}
@@ -82862,54 +83002,6 @@ var (
 							panic(ErrStackUnderflow)
 						}
 						v2 := i.boxI64(i.unboxI64(i.stack[i.sp-1]) | v0)
-						i.stack[i.sp-1] = v2
-						i.fr.ip += 4
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 3
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+4 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.I64_ROTL) {
-						return nil
-					}
-					v1, v2 := c.constant(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					c.ip += 3
-					return func(i *Interpreter) {
-						v0 := i.borrowI64(v1)
-						if i.sp < 1 {
-							panic(ErrStackUnderflow)
-						}
-						v2 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), int(v0))))
-						i.stack[i.sp-1] = v2
-						i.fr.ip += 4
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 3
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+4 <= len(c.code) && instr.Opcode(c.code[v0+3]) == instr.I64_ROTR) {
-						return nil
-					}
-					v1, v2 := c.constant(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					c.ip += 3
-					return func(i *Interpreter) {
-						v0 := i.borrowI64(v1)
-						if i.sp < 1 {
-							panic(ErrStackUnderflow)
-						}
-						v2 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), -int(v0))))
 						i.stack[i.sp-1] = v2
 						i.fr.ip += 4
 					}
@@ -101683,6 +101775,82 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
+					if !(v0+6 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.GLOBAL_GET && instr.Opcode(c.code[v0+5]) == instr.I64_ROTL) {
+						return nil
+					}
+					v1, v2 := c.upval(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3, v4 := c.global(v0+2+1, types.KindI64)
+					if !v4 {
+						return nil
+					}
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(trapped{ErrStackOverflow, 0})
+						}
+						if v1 >= len(i.fr.upvals) {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.fr.upvals[v1]
+						v2 := i.borrowI64(v0)
+						if v3 >= len(i.globals) {
+							panic(trapped{ErrSegmentationFault, 2})
+						}
+						v4 := i.globals[v3]
+						v5 := i.borrowI64(v4)
+						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), int(v5))))
+						i.stack[i.sp] = v6
+						i.sp++
+						i.fr.ip += 6
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 5
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+6 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.GLOBAL_GET && instr.Opcode(c.code[v0+5]) == instr.I64_ROTR) {
+						return nil
+					}
+					v1, v2 := c.upval(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3, v4 := c.global(v0+2+1, types.KindI64)
+					if !v4 {
+						return nil
+					}
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(trapped{ErrStackOverflow, 0})
+						}
+						if v1 >= len(i.fr.upvals) {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.fr.upvals[v1]
+						v2 := i.borrowI64(v0)
+						if v3 >= len(i.globals) {
+							panic(trapped{ErrSegmentationFault, 2})
+						}
+						v4 := i.globals[v3]
+						v5 := i.borrowI64(v4)
+						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), -int(v5))))
+						i.stack[i.sp] = v6
+						i.sp++
+						i.fr.ip += 6
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 5
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
 					if !(v0+6 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.GLOBAL_GET && instr.Opcode(c.code[v0+5]) == instr.I64_EQ) {
 						return nil
 					}
@@ -104871,82 +105039,6 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
-					if !(v0+6 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.GLOBAL_GET && instr.Opcode(c.code[v0+5]) == instr.I64_ROTL) {
-						return nil
-					}
-					v1, v2 := c.upval(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3, v4 := c.global(v0+2+1, types.KindI64)
-					if !v4 {
-						return nil
-					}
-					c.ip += 2
-					return func(i *Interpreter) {
-						if i.sp == len(i.stack) {
-							panic(trapped{ErrStackOverflow, 0})
-						}
-						if v1 >= len(i.fr.upvals) {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.fr.upvals[v1]
-						v2 := i.borrowI64(v0)
-						if v3 >= len(i.globals) {
-							panic(trapped{ErrSegmentationFault, 2})
-						}
-						v4 := i.globals[v3]
-						v5 := i.borrowI64(v4)
-						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), int(v5))))
-						i.stack[i.sp] = v6
-						i.sp++
-						i.fr.ip += 6
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 5
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+6 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.GLOBAL_GET && instr.Opcode(c.code[v0+5]) == instr.I64_ROTR) {
-						return nil
-					}
-					v1, v2 := c.upval(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3, v4 := c.global(v0+2+1, types.KindI64)
-					if !v4 {
-						return nil
-					}
-					c.ip += 2
-					return func(i *Interpreter) {
-						if i.sp == len(i.stack) {
-							panic(trapped{ErrStackOverflow, 0})
-						}
-						if v1 >= len(i.fr.upvals) {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.fr.upvals[v1]
-						v2 := i.borrowI64(v0)
-						if v3 >= len(i.globals) {
-							panic(trapped{ErrSegmentationFault, 2})
-						}
-						v4 := i.globals[v3]
-						v5 := i.borrowI64(v4)
-						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), -int(v5))))
-						i.stack[i.sp] = v6
-						i.sp++
-						i.fr.ip += 6
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 5
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
 					if !(v0+6 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.F64_EQ && instr.Opcode(c.code[v0+3]) == instr.BR_IF) {
 						return nil
 					}
@@ -105304,6 +105396,84 @@ var (
 				return nil
 			}(); v1 != nil {
 				return v1, 2
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+5 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.LOCAL_GET && instr.Opcode(c.code[v0+4]) == instr.I64_ROTL) {
+						return nil
+					}
+					v1, v2 := c.upval(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3, v4 := c.local(v0+2+1, types.KindI64)
+					if !v4 {
+						return nil
+					}
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(trapped{ErrStackOverflow, 0})
+						}
+						if v1 >= len(i.fr.upvals) {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.fr.upvals[v1]
+						v2 := i.borrowI64(v0)
+						if i.fr.bp+v3 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 2})
+						}
+						v4 := i.fr.bp + v3
+						v5 := i.stack[v4]
+						v6 := i.borrowI64(v5)
+						v7 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), int(v6))))
+						i.stack[i.sp] = v7
+						i.sp++
+						i.fr.ip += 5
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 4
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+5 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.LOCAL_GET && instr.Opcode(c.code[v0+4]) == instr.I64_ROTR) {
+						return nil
+					}
+					v1, v2 := c.upval(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3, v4 := c.local(v0+2+1, types.KindI64)
+					if !v4 {
+						return nil
+					}
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(trapped{ErrStackOverflow, 0})
+						}
+						if v1 >= len(i.fr.upvals) {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.fr.upvals[v1]
+						v2 := i.borrowI64(v0)
+						if i.fr.bp+v3 >= i.sp {
+							panic(trapped{ErrSegmentationFault, 2})
+						}
+						v4 := i.fr.bp + v3
+						v5 := i.stack[v4]
+						v6 := i.borrowI64(v5)
+						v7 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), -int(v6))))
+						i.stack[i.sp] = v7
+						i.sp++
+						i.fr.ip += 5
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 4
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
@@ -108573,14 +108743,14 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
-					if !(v0+5 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.LOCAL_GET && instr.Opcode(c.code[v0+4]) == instr.I64_ROTL) {
+					if !(v0+5 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.UPVAL_GET && instr.Opcode(c.code[v0+4]) == instr.I64_ROTL) {
 						return nil
 					}
 					v1, v2 := c.upval(v0+1, types.KindI64)
 					if !v2 {
 						return nil
 					}
-					v3, v4 := c.local(v0+2+1, types.KindI64)
+					v3, v4 := c.upval(v0+2+1, types.KindI64)
 					if !v4 {
 						return nil
 					}
@@ -108594,14 +108764,13 @@ var (
 						}
 						v0 := i.fr.upvals[v1]
 						v2 := i.borrowI64(v0)
-						if i.fr.bp+v3 >= i.sp {
+						if v3 >= len(i.fr.upvals) {
 							panic(trapped{ErrSegmentationFault, 2})
 						}
-						v4 := i.fr.bp + v3
-						v5 := i.stack[v4]
-						v6 := i.borrowI64(v5)
-						v7 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), int(v6))))
-						i.stack[i.sp] = v7
+						v4 := i.fr.upvals[v3]
+						v5 := i.borrowI64(v4)
+						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), int(v5))))
+						i.stack[i.sp] = v6
 						i.sp++
 						i.fr.ip += 5
 					}
@@ -108612,14 +108781,14 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
-					if !(v0+5 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.LOCAL_GET && instr.Opcode(c.code[v0+4]) == instr.I64_ROTR) {
+					if !(v0+5 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.UPVAL_GET && instr.Opcode(c.code[v0+4]) == instr.I64_ROTR) {
 						return nil
 					}
 					v1, v2 := c.upval(v0+1, types.KindI64)
 					if !v2 {
 						return nil
 					}
-					v3, v4 := c.local(v0+2+1, types.KindI64)
+					v3, v4 := c.upval(v0+2+1, types.KindI64)
 					if !v4 {
 						return nil
 					}
@@ -108633,14 +108802,13 @@ var (
 						}
 						v0 := i.fr.upvals[v1]
 						v2 := i.borrowI64(v0)
-						if i.fr.bp+v3 >= i.sp {
+						if v3 >= len(i.fr.upvals) {
 							panic(trapped{ErrSegmentationFault, 2})
 						}
-						v4 := i.fr.bp + v3
-						v5 := i.stack[v4]
-						v6 := i.borrowI64(v5)
-						v7 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), -int(v6))))
-						i.stack[i.sp] = v7
+						v4 := i.fr.upvals[v3]
+						v5 := i.borrowI64(v4)
+						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), -int(v5))))
+						i.stack[i.sp] = v6
 						i.sp++
 						i.fr.ip += 5
 					}
@@ -111839,82 +112007,6 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
-					if !(v0+5 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.UPVAL_GET && instr.Opcode(c.code[v0+4]) == instr.I64_ROTL) {
-						return nil
-					}
-					v1, v2 := c.upval(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3, v4 := c.upval(v0+2+1, types.KindI64)
-					if !v4 {
-						return nil
-					}
-					c.ip += 2
-					return func(i *Interpreter) {
-						if i.sp == len(i.stack) {
-							panic(trapped{ErrStackOverflow, 0})
-						}
-						if v1 >= len(i.fr.upvals) {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.fr.upvals[v1]
-						v2 := i.borrowI64(v0)
-						if v3 >= len(i.fr.upvals) {
-							panic(trapped{ErrSegmentationFault, 2})
-						}
-						v4 := i.fr.upvals[v3]
-						v5 := i.borrowI64(v4)
-						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), int(v5))))
-						i.stack[i.sp] = v6
-						i.sp++
-						i.fr.ip += 5
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 4
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+5 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.UPVAL_GET && instr.Opcode(c.code[v0+4]) == instr.I64_ROTR) {
-						return nil
-					}
-					v1, v2 := c.upval(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3, v4 := c.upval(v0+2+1, types.KindI64)
-					if !v4 {
-						return nil
-					}
-					c.ip += 2
-					return func(i *Interpreter) {
-						if i.sp == len(i.stack) {
-							panic(trapped{ErrStackOverflow, 0})
-						}
-						if v1 >= len(i.fr.upvals) {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.fr.upvals[v1]
-						v2 := i.borrowI64(v0)
-						if v3 >= len(i.fr.upvals) {
-							panic(trapped{ErrSegmentationFault, 2})
-						}
-						v4 := i.fr.upvals[v3]
-						v5 := i.borrowI64(v4)
-						v6 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), -int(v5))))
-						i.stack[i.sp] = v6
-						i.sp++
-						i.fr.ip += 5
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 4
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
 					if !(v0+6 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.REF_IS_NULL && instr.Opcode(c.code[v0+3]) == instr.BR_IF) {
 						return nil
 					}
@@ -113374,6 +113466,66 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
+					if !(v0+12 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_CONST && instr.Opcode(c.code[v0+11]) == instr.I64_ROTL) {
+						return nil
+					}
+					v1, v2 := c.upval(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3 := int64(instr.Instruction(c.code[v0+2:]).Operand(0))
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(trapped{ErrStackOverflow, 0})
+						}
+						if v1 >= len(i.fr.upvals) {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.fr.upvals[v1]
+						v2 := i.borrowI64(v0)
+						v4 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), int(v3))))
+						i.stack[i.sp] = v4
+						i.sp++
+						i.fr.ip += 12
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 11
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+12 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_CONST && instr.Opcode(c.code[v0+11]) == instr.I64_ROTR) {
+						return nil
+					}
+					v1, v2 := c.upval(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					v3 := int64(instr.Instruction(c.code[v0+2:]).Operand(0))
+					c.ip += 2
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(trapped{ErrStackOverflow, 0})
+						}
+						if v1 >= len(i.fr.upvals) {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.fr.upvals[v1]
+						v2 := i.borrowI64(v0)
+						v4 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), -int(v3))))
+						i.stack[i.sp] = v4
+						i.sp++
+						i.fr.ip += 12
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 11
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
 					if !(v0+12 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_CONST && instr.Opcode(c.code[v0+11]) == instr.I64_EQ) {
 						return nil
 					}
@@ -114121,66 +114273,6 @@ var (
 						v0 := i.fr.upvals[v1]
 						v2 := i.borrowI64(v0)
 						v4 := i.boxI64(v2 | v3)
-						i.stack[i.sp] = v4
-						i.sp++
-						i.fr.ip += 12
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 11
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+12 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_CONST && instr.Opcode(c.code[v0+11]) == instr.I64_ROTL) {
-						return nil
-					}
-					v1, v2 := c.upval(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3 := int64(instr.Instruction(c.code[v0+2:]).Operand(0))
-					c.ip += 2
-					return func(i *Interpreter) {
-						if i.sp == len(i.stack) {
-							panic(trapped{ErrStackOverflow, 0})
-						}
-						if v1 >= len(i.fr.upvals) {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.fr.upvals[v1]
-						v2 := i.borrowI64(v0)
-						v4 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), int(v3))))
-						i.stack[i.sp] = v4
-						i.sp++
-						i.fr.ip += 12
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 11
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+12 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_CONST && instr.Opcode(c.code[v0+11]) == instr.I64_ROTR) {
-						return nil
-					}
-					v1, v2 := c.upval(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					v3 := int64(instr.Instruction(c.code[v0+2:]).Operand(0))
-					c.ip += 2
-					return func(i *Interpreter) {
-						if i.sp == len(i.stack) {
-							panic(trapped{ErrStackOverflow, 0})
-						}
-						if v1 >= len(i.fr.upvals) {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.fr.upvals[v1]
-						v2 := i.borrowI64(v0)
-						v4 := i.boxI64(int64(bits.RotateLeft64(uint64(v2), -int(v3))))
 						i.stack[i.sp] = v4
 						i.sp++
 						i.fr.ip += 12
@@ -116281,6 +116373,62 @@ var (
 				return nil
 			}(); v1 != nil {
 				return v1, 7
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+3 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_ROTL) {
+						return nil
+					}
+					v1, v2 := c.upval(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					c.ip += 2
+					return func(i *Interpreter) {
+						if v1 >= len(i.fr.upvals) {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.fr.upvals[v1]
+						v2 := i.borrowI64(v0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v3 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), int(v2))))
+						i.stack[i.sp-1] = v3
+						i.fr.ip += 3
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 2
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+3 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_ROTR) {
+						return nil
+					}
+					v1, v2 := c.upval(v0+1, types.KindI64)
+					if !v2 {
+						return nil
+					}
+					c.ip += 2
+					return func(i *Interpreter) {
+						if v1 >= len(i.fr.upvals) {
+							panic(trapped{ErrSegmentationFault, 0})
+						}
+						v0 := i.fr.upvals[v1]
+						v2 := i.borrowI64(v0)
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v3 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), -int(v2))))
+						i.stack[i.sp-1] = v3
+						i.fr.ip += 3
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 2
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
@@ -118681,62 +118829,6 @@ var (
 			}(); v1 != nil {
 				return v1, 2
 			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+3 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_ROTL) {
-						return nil
-					}
-					v1, v2 := c.upval(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					c.ip += 2
-					return func(i *Interpreter) {
-						if v1 >= len(i.fr.upvals) {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.fr.upvals[v1]
-						v2 := i.borrowI64(v0)
-						if i.sp < 1 {
-							panic(ErrStackUnderflow)
-						}
-						v3 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), int(v2))))
-						i.stack[i.sp-1] = v3
-						i.fr.ip += 3
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 2
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+3 <= len(c.code) && instr.Opcode(c.code[v0+2]) == instr.I64_ROTR) {
-						return nil
-					}
-					v1, v2 := c.upval(v0+1, types.KindI64)
-					if !v2 {
-						return nil
-					}
-					c.ip += 2
-					return func(i *Interpreter) {
-						if v1 >= len(i.fr.upvals) {
-							panic(trapped{ErrSegmentationFault, 0})
-						}
-						v0 := i.fr.upvals[v1]
-						v2 := i.borrowI64(v0)
-						if i.sp < 1 {
-							panic(ErrStackUnderflow)
-						}
-						v3 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), -int(v2))))
-						i.stack[i.sp-1] = v3
-						i.fr.ip += 3
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 2
-			}
 			return nil, 0
 		},
 		instr.REF_NULL: func(c *threader) (func(*Interpreter), uint8) {
@@ -119699,26 +119791,6 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
-					if !(v0+6 <= len(c.code) && instr.Opcode(c.code[v0+5]) == instr.I32_EQ) {
-						return nil
-					}
-					v1 := int32(instr.Instruction(c.code[v0:]).Operand(0))
-					c.ip += 5
-					return func(i *Interpreter) {
-						if i.sp < 1 {
-							panic(ErrStackUnderflow)
-						}
-						v0 := types.BoxI1(i.stack[i.sp-1].I32() == v1)
-						i.stack[i.sp-1] = v0
-						i.fr.ip += 6
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 5
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
 					if !(v0+8 <= len(c.code) && instr.Opcode(c.code[v0+5]) == instr.BR_IF) {
 						return nil
 					}
@@ -119753,6 +119825,26 @@ var (
 				return nil
 			}(); v1 != nil {
 				return v1, 0
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+6 <= len(c.code) && instr.Opcode(c.code[v0+5]) == instr.I32_EQ) {
+						return nil
+					}
+					v1 := int32(instr.Instruction(c.code[v0:]).Operand(0))
+					c.ip += 5
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := types.BoxI1(i.stack[i.sp-1].I32() == v1)
+						i.stack[i.sp-1] = v0
+						i.fr.ip += 6
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 5
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
@@ -121312,6 +121404,46 @@ var (
 			}
 			if v1 := func() func(*Interpreter) {
 				for range 1 {
+					if !(v0+10 <= len(c.code) && instr.Opcode(c.code[v0+9]) == instr.I64_ROTL) {
+						return nil
+					}
+					v1 := int64(instr.Instruction(c.code[v0:]).Operand(0))
+					c.ip += 9
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), int(v1))))
+						i.stack[i.sp-1] = v0
+						i.fr.ip += 10
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 9
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
+					if !(v0+10 <= len(c.code) && instr.Opcode(c.code[v0+9]) == instr.I64_ROTR) {
+						return nil
+					}
+					v1 := int64(instr.Instruction(c.code[v0:]).Operand(0))
+					c.ip += 9
+					return func(i *Interpreter) {
+						if i.sp < 1 {
+							panic(ErrStackUnderflow)
+						}
+						v0 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), -int(v1))))
+						i.stack[i.sp-1] = v0
+						i.fr.ip += 10
+					}
+				}
+				return nil
+			}(); v1 != nil {
+				return v1, 9
+			}
+			if v1 := func() func(*Interpreter) {
+				for range 1 {
 					if !(v0+10 <= len(c.code) && instr.Opcode(c.code[v0+9]) == instr.I64_EQ) {
 						return nil
 					}
@@ -121810,46 +121942,6 @@ var (
 							panic(ErrStackUnderflow)
 						}
 						v0 := i.boxI64(i.unboxI64(i.stack[i.sp-1]) | v1)
-						i.stack[i.sp-1] = v0
-						i.fr.ip += 10
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 9
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+10 <= len(c.code) && instr.Opcode(c.code[v0+9]) == instr.I64_ROTL) {
-						return nil
-					}
-					v1 := int64(instr.Instruction(c.code[v0:]).Operand(0))
-					c.ip += 9
-					return func(i *Interpreter) {
-						if i.sp < 1 {
-							panic(ErrStackUnderflow)
-						}
-						v0 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), int(v1))))
-						i.stack[i.sp-1] = v0
-						i.fr.ip += 10
-					}
-				}
-				return nil
-			}(); v1 != nil {
-				return v1, 9
-			}
-			if v1 := func() func(*Interpreter) {
-				for range 1 {
-					if !(v0+10 <= len(c.code) && instr.Opcode(c.code[v0+9]) == instr.I64_ROTR) {
-						return nil
-					}
-					v1 := int64(instr.Instruction(c.code[v0:]).Operand(0))
-					c.ip += 9
-					return func(i *Interpreter) {
-						if i.sp < 1 {
-							panic(ErrStackUnderflow)
-						}
-						v0 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-1])), -int(v1))))
 						i.stack[i.sp-1] = v0
 						i.fr.ip += 10
 					}
