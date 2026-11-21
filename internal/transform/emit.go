@@ -40,12 +40,19 @@ type emitter struct {
 
 	locals []types.Type
 	code   []instr.Instruction
-	floor  int
-	starts []int
-	fixes  []fix
-	stack  []ssa.Value
-	needed ssa.Value
-	failed bool
+	// tracked reports whether any operation or terminator carries a source, its
+	// own or an inlined callee's; sources then runs parallel to code, each
+	// instruction with the source of the operation or terminator it serves,
+	// which at holds while one is lowered.
+	tracked bool
+	sources []uint32
+	at      uint32
+	floor   int
+	starts  []int
+	fixes   []fix
+	stack   []ssa.Value
+	needed  ssa.Value
+	failed  bool
 }
 
 type fix struct {
@@ -54,16 +61,25 @@ type fix struct {
 	block   int
 }
 
+// emission is the bytecode emit wrote for a function: its code, the locals the
+// code adds to the function's own, and its source positions, nil when
+// tracking is disabled.
+type emission struct {
+	code      []byte
+	locals    []types.Type
+	positions []instr.Position
+}
+
 var spaceOps = [...]struct{ read, write instr.Opcode }{
 	ssa.SpaceLocal:  {instr.LOCAL_GET, instr.LOCAL_SET},
 	ssa.SpaceGlobal: {instr.GLOBAL_GET, instr.GLOBAL_SET},
 	ssa.SpaceUpval:  {instr.UPVAL_GET, instr.UPVAL_SET},
 }
 
-func emit(function *ssa.Function, constants *pool, module bool, source *types.Function) ([]byte, []types.Type, bool) {
+func emit(function *ssa.Function, constants *pool, module bool, source *types.Function) (emission, bool) {
 	e := &emitter{function: function, constants: constants, module: module, declared: source.Declared(), captures: source.Captures}
 	if !e.collect() {
-		return nil, nil, false
+		return emission{}, false
 	}
 	e.layout()
 	e.liveness()
@@ -72,14 +88,14 @@ func emit(function *ssa.Function, constants *pool, module bool, source *types.Fu
 		e.provision()
 		walked := e.walk()
 		if e.failed {
-			return nil, nil, false
+			return emission{}, false
 		}
 		if walked {
 			if !e.assign() || !e.walk() || e.failed {
-				return nil, nil, false
+				return emission{}, false
 			}
-			code, ok := e.link()
-			return code, e.locals, ok
+			code, positions, ok := e.link()
+			return emission{code, e.locals, positions}, ok
 		}
 		if e.spare[e.needed] {
 			delete(e.spare, e.needed)
@@ -88,17 +104,17 @@ func emit(function *ssa.Function, constants *pool, module bool, source *types.Fu
 		}
 		if _, ok := e.source[e.needed]; ok {
 			if e.remat[e.needed] {
-				return nil, nil, false
+				return emission{}, false
 			}
 			e.remat[e.needed] = true
 			continue
 		}
 		if e.needed == ssa.NoValue || e.homed[e.needed] {
-			return nil, nil, false
+			return emission{}, false
 		}
 		e.homed[e.needed] = true
 	}
-	return nil, nil, false
+	return emission{}, false
 }
 
 func (e *emitter) collect() bool {
@@ -109,10 +125,12 @@ func (e *emitter) collect() bool {
 
 	for id := range e.function.Len() {
 		block := e.function.Block(id)
+		e.tracked = e.tracked || block.Terminator.Source != 0
 		for _, p := range block.Params {
 			e.defined[p] = id
 		}
 		for _, operation := range block.Operations {
+			e.tracked = e.tracked || operation.Source != 0
 			if !e.accept(id, operation) {
 				return false
 			}
@@ -636,11 +654,12 @@ func (e *emitter) live(id int, keep func(ssa.Value) bool, link func(a, b ssa.Val
 }
 
 func (e *emitter) walk() bool {
-	e.code, e.fixes, e.needed = nil, nil, ssa.NoValue
+	e.code, e.sources, e.fixes, e.needed = nil, nil, nil, ssa.NoValue
 	e.used, e.settled = map[ssa.Value]int{}, map[ssa.Value]bool{}
 	e.starts = make([]int, e.function.Len())
 	for _, id := range e.order {
 		e.starts[id], e.floor = len(e.code), len(e.code)
+		e.at = e.function.Block(id).Source()
 		if !e.open(id) {
 			return false
 		}
@@ -649,11 +668,13 @@ func (e *emitter) walk() bool {
 			if e.elided(operation) {
 				continue
 			}
+			e.at = operation.Source
 			if !e.preload(roots[i], id) || !e.perform(operation) {
 				return false
 			}
 			e.settle(id, i)
 		}
+		e.at = e.terms[id].Source
 		if !e.close(id) {
 			return false
 		}
@@ -1131,7 +1152,7 @@ func (e *emitter) constant(t ssa.Type, w uint64) bool {
 	return true
 }
 
-func (e *emitter) link() ([]byte, bool) {
+func (e *emitter) link() ([]byte, []instr.Position, bool) {
 	offsets := make([]int, len(e.code)+1)
 	at := 0
 	for i, inst := range e.code {
@@ -1147,21 +1168,36 @@ func (e *emitter) link() ([]byte, bool) {
 		}
 		delta := target - offsets[fix.at] - e.code[fix.at].Width()
 		if delta < math.MinInt16 || delta > math.MaxInt16 {
-			return nil, false
+			return nil, nil, false
 		}
 		e.code[fix.at].SetOperand(fix.operand, uint64(delta))
 	}
-	return instr.Marshal(e.code), true
+	var positions []instr.Position
+	if e.tracked {
+		// Source 0 runs are entries too, so the table covers all of the code.
+		for i, source := range e.sources {
+			if i == 0 || source != e.sources[i-1] {
+				positions = append(positions, instr.Position{IP: offsets[i], Source: source})
+			}
+		}
+	}
+	return instr.Marshal(e.code), positions, true
 }
 
 func (e *emitter) write(op instr.Opcode, operands ...uint64) {
+	source := e.at
 	if op == instr.LOCAL_GET && len(e.code) > e.floor {
 		// A reload of a typed ref recovers the type the local declares; a tee
 		// would keep the value's own, which the analysis may not know.
 		t := e.slot(int(operands[0]))
 		typed := t.Kind() == types.KindRef && !t.Equals(types.TypeAny())
 		if last := e.code[len(e.code)-1]; last.Opcode() == instr.LOCAL_SET && last.Operand(0) == operands[0] && !typed {
+			// The tee takes the set's place, and its source.
 			e.code = e.code[:len(e.code)-1]
+			if e.tracked {
+				source = e.sources[len(e.sources)-1]
+				e.sources = e.sources[:len(e.sources)-1]
+			}
 			op = instr.LOCAL_TEE
 		}
 	}
@@ -1171,6 +1207,9 @@ func (e *emitter) write(op instr.Opcode, operands ...uint64) {
 		return
 	}
 	e.code = append(e.code, inst)
+	if e.tracked {
+		e.sources = append(e.sources, source)
+	}
 }
 
 // slot returns the type of local slot, declared or new.

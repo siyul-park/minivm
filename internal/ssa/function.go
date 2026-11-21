@@ -55,6 +55,15 @@ func (f *Function) Pred(block int) []int {
 	return f.preds[block]
 }
 
+// Source returns the source of the block's first operation, or of its
+// terminator when it has none.
+func (b Block) Source() uint32 {
+	if len(b.Operations) > 0 {
+		return b.Operations[0].Source
+	}
+	return b.Terminator.Source
+}
+
 // Type returns v's type or zero for an invalid value.
 func (f *Function) Type(v Value) Type {
 	if !v.valid(len(f.types)) {

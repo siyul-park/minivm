@@ -145,6 +145,24 @@ func TestParse(t *testing.T) {
 		require.Equal(t, p0.Handlers, p1.Handlers)
 	})
 
+	t.Run("round trip preserves positions and names", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
+			Append(instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)).
+			MustBuild()
+		fn.Name = "f"
+		fn.Positions = []instr.Position{{IP: 0, Source: 3}, {IP: 5, Source: 0}}
+		p0 := program.New(
+			[]instr.Instruction{instr.MustNew(instr.NOP), instr.MustNew(instr.NOP)},
+			program.WithConstants(fn),
+			program.WithPositions(instr.Position{IP: 0, Source: 7}, instr.Position{IP: 1, Source: 8}),
+		)
+		p1, err := program.Parse(strings.NewReader(p0.String()))
+		require.NoError(t, err)
+		require.Equal(t, p0.Positions, p1.Positions)
+		require.Equal(t, p0.Constants, p1.Constants)
+		require.Equal(t, "f", p1.Constants[0].(*types.Function).Name)
+	})
+
 	t.Run("round trip preserves all sections", func(t *testing.T) {
 		p0 := program.New(
 			[]instr.Instruction{instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
@@ -206,6 +224,12 @@ func TestParse(t *testing.T) {
 		_, err := program.Parse(strings.NewReader(".code\n.unknown\n0000:\tnop\n"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "unknown section")
+	})
+
+	t.Run("rejects malformed position", func(t *testing.T) {
+		_, err := program.Parse(strings.NewReader(".code\n0000:\tnop\n.positions\n0000:\tip=x source=1\n"))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), ".positions")
 	})
 
 	t.Run("rejects duplicate section", func(t *testing.T) {

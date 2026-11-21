@@ -34,6 +34,7 @@ type Builder struct {
 	types  []Type
 	blocks []Block
 	entry  Frame
+	source uint32
 }
 
 // New returns a builder for a named function.
@@ -60,13 +61,25 @@ func (b *Builder) Value(t Type) Value {
 	return Value(len(b.types) - 1)
 }
 
+// At sets the source Add and Term give an operation or terminator that has
+// none, until the next At or Build; 0 gives none.
+func (b *Builder) At(source uint32) {
+	b.source = source
+}
+
 // Add appends operation to block.
 func (b *Builder) Add(block int, operation Operation) {
+	if operation.Source == 0 {
+		operation.Source = b.source
+	}
 	b.blocks[block].Operations = append(b.blocks[block].Operations, operation)
 }
 
 // Term sets the terminator for block.
 func (b *Builder) Term(block int, term Terminator) {
+	if term.Source == 0 {
+		term.Source = b.source
+	}
 	b.blocks[block].Terminator = term
 }
 
@@ -79,7 +92,7 @@ func (b *Builder) Entry(frame Frame) {
 // Build returns the function and resets the builder.
 func (b *Builder) Build() *Function {
 	f := newFunction(b.name, b.types, b.blocks, b.entry)
-	b.types, b.blocks, b.entry = make([]Type, 1), nil, Frame{}
+	b.types, b.blocks, b.entry, b.source = make([]Type, 1), nil, Frame{}, 0
 	return f
 }
 

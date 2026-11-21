@@ -26,9 +26,11 @@ func newRebuilder(function *ssa.Function) *rebuilder {
 // splice emits the CALL operation as body in the rebuilt function: id jumps
 // to the body's entry, every return jumps to a join whose params are the
 // CALL's results, and the join is the block the caller's code continues in.
-// Each body operation that has a state takes the CALL's.
+// Each body operation that has a state takes the CALL's, and each jump
+// splice makes takes its source; the rest keep the body's.
 func (r *rebuilder) splice(id int, call ssa.Operation, body *ssa.Function) int {
 	args, state := r.list(call.Args), r.value(call.State)
+	r.builder.At(call.Source)
 	join := r.builder.Block()
 	for _, result := range call.Results {
 		r.alias(result, r.builder.Param(join, r.from.Type(result)))
@@ -48,7 +50,7 @@ func (r *rebuilder) splice(id int, call ssa.Operation, body *ssa.Function) int {
 					inner.alias(operation.Results[0], args[operation.Slot.Index])
 					continue
 				}
-				operation = ssa.Operation{Op: ssa.OpConst, Results: operation.Results}
+				operation = ssa.Operation{Op: ssa.OpConst, Results: operation.Results, Source: operation.Source}
 			}
 			held := operation.State != ssa.NoValue
 			operation = inner.operation(operation)
@@ -60,7 +62,7 @@ func (r *rebuilder) splice(id int, call ssa.Operation, body *ssa.Function) int {
 		term := inner.terminator(b.Terminator)
 		term.State = ssa.NoValue
 		if term.Term == ssa.TermReturn {
-			term = ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: join, Args: term.Args}}}
+			term = ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: join, Args: term.Args}}, Source: call.Source}
 		}
 		r.builder.Term(at, term)
 	}
@@ -77,6 +79,9 @@ func (r *rebuilder) open(block int) int {
 }
 
 func (r *rebuilder) operation(operation ssa.Operation) ssa.Operation {
+	if operation.Source != 0 {
+		r.builder.At(operation.Source)
+	}
 	operation.Args = r.list(operation.Args)
 	if len(operation.Frames) > 0 {
 		frames := make([]ssa.Frame, len(operation.Frames))
@@ -128,6 +133,9 @@ func (r *rebuilder) prune(t ssa.Terminator, dead func(ssa.Value) bool) ssa.Termi
 }
 
 func (r *rebuilder) terminator(t ssa.Terminator) ssa.Terminator {
+	if t.Source != 0 {
+		r.builder.At(t.Source)
+	}
 	t.Args = r.list(t.Args)
 	if len(t.Edges) > 0 {
 		edges := make([]ssa.Edge, len(t.Edges))

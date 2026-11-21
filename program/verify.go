@@ -27,10 +27,11 @@ type VerifyError struct {
 type checker struct {
 	prog *Program
 
-	code     []byte
-	locals   []types.Type
-	captures []types.Type
-	table    []instr.Handler
+	code      []byte
+	locals    []types.Type
+	captures  []types.Type
+	table     []instr.Handler
+	positions []instr.Position
 
 	slot    int
 	returns int
@@ -85,6 +86,8 @@ var (
 	ErrHandlerRange = errors.New("invalid exception handler range")
 	// ErrHandlerTarget reports an exception handler whose catch target or depth is invalid.
 	ErrHandlerTarget = errors.New("invalid exception handler target")
+	// ErrPosition reports a source position that is unsorted, off an instruction boundary, or past the code.
+	ErrPosition = errors.New("invalid source position")
 	// ErrNil reports a nil program.
 	ErrNil = errors.New("nil program")
 )
@@ -97,7 +100,7 @@ func Verify(prog *Program) error {
 	if prog == nil {
 		return ErrNil
 	}
-	top := &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
+	top := &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers, Positions: prog.Positions}
 	if err := newChecker(prog, 0, top).run(); err != nil {
 		return err
 	}
@@ -150,7 +153,7 @@ func verifyConstant(prog *Program, slot int, v types.Value, seen map[any]bool) e
 }
 
 func newChecker(prog *Program, slot int, fn *types.Function) *checker {
-	c := &checker{prog: prog, code: fn.Code, captures: fn.Captures, table: fn.Handlers, slot: slot}
+	c := &checker{prog: prog, code: fn.Code, captures: fn.Captures, table: fn.Handlers, positions: fn.Positions, slot: slot}
 	if fn.Typ != nil {
 		c.locals = append(c.locals, fn.Typ.Params...)
 		c.returns = len(fn.Typ.Returns)
@@ -163,12 +166,15 @@ func newChecker(prog *Program, slot int, fn *types.Function) *checker {
 // graph (branch targets), termination, then the best-effort stack dataflow.
 func (c *checker) run() error {
 	if len(c.code) == 0 {
-		return nil
+		return c.sources()
 	}
 	if err := c.structure(); err != nil {
 		return err
 	}
 	if err := c.handlers(); err != nil {
+		return err
+	}
+	if err := c.sources(); err != nil {
 		return err
 	}
 	blocks, err := c.blocks()
@@ -197,6 +203,23 @@ func (c *checker) handlers() error {
 		if h.Catch < 0 || h.Catch >= len(c.code) || !starts[h.Catch] {
 			return c.fail(h.Catch, instr.THROW, ErrHandlerTarget)
 		}
+	}
+	return nil
+}
+
+// sources validates the source positions: IPs strictly ascend and each lands
+// on an instruction boundary inside the code.
+func (c *checker) sources() error {
+	if len(c.positions) == 0 {
+		return nil
+	}
+	starts := c.starts()
+	prev := -1
+	for _, p := range c.positions {
+		if p.IP <= prev || p.IP >= len(c.code) || !starts[p.IP] {
+			return c.fail(max(p.IP, 0), instr.NOP, ErrPosition)
+		}
+		prev = p.IP
 	}
 	return nil
 }

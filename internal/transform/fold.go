@@ -168,7 +168,7 @@ func collapse(r *rebuilder, constants map[ssa.Value]uint64, t ssa.Terminator) (s
 	default:
 		return t, false
 	}
-	return ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{edge}}, true
+	return ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{edge}, Source: t.Source}, true
 }
 
 func fold(r *rebuilder, id int, constants map[ssa.Value]uint64, computed map[ssa.Value]bool, operation ssa.Operation) (ssa.Operation, bool) {

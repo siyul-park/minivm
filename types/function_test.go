@@ -182,11 +182,13 @@ func TestFunction_Declared(t *testing.T) {
 func TestFunction_Clone(t *testing.T) {
 	typ := &types.FunctionType{Returns: []types.Type{types.TypeI32()}}
 	fn := &types.Function{
-		Typ:      typ,
-		Locals:   []types.Type{types.TypeI32()},
-		Captures: []types.Type{types.TypeI64()},
-		Code:     instr.Marshal([]instr.Instruction{instr.MustNew(instr.NOP)}),
-		Handlers: []instr.Handler{{Start: 0, End: 1, Catch: 2}},
+		Typ:       typ,
+		Locals:    []types.Type{types.TypeI32()},
+		Captures:  []types.Type{types.TypeI64()},
+		Code:      instr.Marshal([]instr.Instruction{instr.MustNew(instr.NOP)}),
+		Handlers:  []instr.Handler{{Start: 0, End: 1, Catch: 2}},
+		Name:      "f",
+		Positions: []instr.Position{{IP: 0, Source: 7}},
 	}
 	c := fn.Clone()
 	require.NotSame(t, fn, c)
@@ -197,10 +199,13 @@ func TestFunction_Clone(t *testing.T) {
 	c.Locals[0] = types.TypeI64()
 	c.Captures[0] = types.TypeI32()
 	c.Handlers[0].Catch = 9
+	c.Positions[0].Source = 8
 	require.Equal(t, byte(instr.NOP), fn.Code[0])
 	require.Equal(t, types.TypeI32(), fn.Locals[0])
 	require.Equal(t, types.TypeI64(), fn.Captures[0])
 	require.Equal(t, 2, fn.Handlers[0].Catch)
+	require.Equal(t, uint32(7), fn.Positions[0].Source)
+	require.Equal(t, "f", c.Name)
 }
 
 func TestFunction_Kind(t *testing.T) {
@@ -226,6 +231,13 @@ func TestFunction_String(t *testing.T) {
 			Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.RETURN)).
 			MustBuild()
 		require.Contains(t, fn.String(), "capture i32\ncapture any\n")
+	})
+
+	t.Run("with name and positions", func(t *testing.T) {
+		fn := types.NewFunction(nil, []types.Type{types.TypeI32()}, []instr.Instruction{instr.MustNew(instr.NOP)})
+		fn.Name = "a b"
+		fn.Positions = []instr.Position{{IP: 0, Source: 7}}
+		require.Equal(t, "func()\nname \"a b\"\nposition ip=0 source=7\ni32\n0000:\tnop\n", fn.String())
 	})
 }
 

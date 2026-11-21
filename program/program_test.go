@@ -42,6 +42,12 @@ func TestWithHandlers(t *testing.T) {
 	require.Equal(t, h, prog.Handlers[0])
 }
 
+func TestWithPositions(t *testing.T) {
+	p := instr.Position{IP: 0, Source: 7}
+	prog := program.New(nil, program.WithPositions(p))
+	require.Equal(t, []instr.Position{p}, prog.Positions)
+}
+
 func TestNew(t *testing.T) {
 	body := []instr.Instruction{instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.DROP)}
 	prog := program.New(body, program.WithLocals(types.TypeI32()), program.WithGlobals(types.TypeAny()))
@@ -64,6 +70,7 @@ func TestProgram_Clone(t *testing.T) {
 			program.WithConstants(types.I32(1)),
 			program.WithTypes(types.TypeF32()),
 			program.WithHandlers(h),
+			program.WithPositions(instr.Position{IP: 0, Source: 7}),
 		)
 		clone := prog.Clone()
 		require.Equal(t, prog, clone)
@@ -74,12 +81,14 @@ func TestProgram_Clone(t *testing.T) {
 		clone.Constants[0] = types.I32(2)
 		clone.Types[0] = types.TypeF64()
 		clone.Handlers[0].Catch = 9
+		clone.Positions[0].Source = 8
 		require.Equal(t, byte(instr.NOP), prog.Code[0])
 		require.Equal(t, types.TypeI32(), prog.Locals[0])
 		require.Equal(t, types.TypeI64(), prog.Globals[0])
 		require.Equal(t, types.I32(1), prog.Constants[0])
 		require.Equal(t, types.TypeF32(), prog.Types[0])
 		require.Equal(t, 2, prog.Handlers[0].Catch)
+		require.Equal(t, uint32(7), prog.Positions[0].Source)
 	})
 
 	t.Run("copies function constants", func(t *testing.T) {
@@ -192,5 +201,9 @@ func TestProgram_String(t *testing.T) {
 		require.Contains(t, prog.String(), "end=10")
 		require.Contains(t, prog.String(), "catch=20")
 		require.Contains(t, prog.String(), "depth=1")
+	})
+	t.Run("with positions", func(t *testing.T) {
+		prog := program.New(nil, program.WithPositions(instr.Position{IP: 0, Source: 7}, instr.Position{IP: 3, Source: 0}))
+		require.Equal(t, ".code\n.positions\n0000:\tip=0 source=7\n0001:\tip=3 source=0\n", prog.String())
 	})
 }

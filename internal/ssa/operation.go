@@ -28,6 +28,9 @@ type Operation struct {
 	Args []Value
 	// State identifies the resume state.
 	State Value
+	// Source is the opaque front-end source id of the bytecode instruction the
+	// operation came from, 0 for none (see instr.Position).
+	Source uint32
 	// Results are operation outputs.
 	Results []Value
 }
@@ -40,6 +43,9 @@ type Terminator struct {
 	Args []Value
 	// State identifies the resume state.
 	State Value
+	// Source is the opaque front-end source id of the bytecode instruction the
+	// terminator came from, 0 for none (see instr.Position).
+	Source uint32
 	// Edges identify successor blocks and arguments.
 	Edges []Edge
 }

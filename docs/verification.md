@@ -19,7 +19,7 @@ Static validation of untrusted bytecode.
 |---|---|
 | Admission | Malformed bytecode `MUST` be rejected before execution. |
 | Independence | Verification `MUST NOT` depend on interpretation, `analysis`, or `pass`. |
-| Structure | Boundaries, widths, targets, handler ranges, and termination `MUST` be valid. |
+| Structure | Boundaries, widths, targets, handler ranges, source positions, and termination `MUST` be valid. |
 | Stack | Height and statically known kinds `MUST` be tracked conservatively. |
 | Dynamic effects | Arity `MUST` resolve only from known operands/metadata and `MUST NOT` be guessed; an op whose count is a runtime value `MUST` end stack tracking on its path, leaving the rest to its runtime guard. |
 | Runtime-dependent cases | Definite static mismatches `MUST` be rejected; remaining checks belong to runtime guards. |
@@ -29,6 +29,10 @@ Static validation of untrusted bytecode.
 Order: structure → control flow → termination → stack → calls.
 
 Dynamic arity `MUST` use statically known counts/metadata and never a guessed count. An op whose pop count is a runtime value (`array.new`, `map.new`, `closure.new`, `struct.new` of a non-struct type) ends stack tracking on its path; its runtime underflow guard covers the rest. Every function reachable from a constant is verified, including one nested in an array, map, or struct literal; it reports slot `j+1` of its top-level constant `j`. Errors `MUST` identify the location and violated rule. Heap, dynamic refs, and host state remain runtime concerns.
+
+## Source Positions
+
+Verification rejects with `ErrPosition` source positions (`instr.Position`, owned by `debugging.md`) whose IPs are not strictly ascending, lie off an instruction boundary, or reach `len(code)`; empty positions are valid.
 
 ## Related
 
