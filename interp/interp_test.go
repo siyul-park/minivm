@@ -4311,6 +4311,119 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, want, result)
 	})
 
+	t.Run("records a native trap's frames on the caught Error", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		fn := divFunction(t)
+		b := instr.NewBuilder()
+		loop, done, start, end, catch := b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(1000)).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.CONST_GET, 0).Emit(instr.CALL).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done)
+		b.Bind(start).Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		b.Bind(end)
+		b.Bind(catch).Emit(instr.NOP)
+		b.Try(start, end, catch, 1)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithConstants(fn), program.WithHandlers(b.Handlers()...))
+		want, ok := runProgram(t, prog).(*types.Error)
+		require.True(t, ok)
+		require.NotEmpty(t, want.Frames())
+
+		var runErr, popErr error
+		var result types.Value
+		var exits float64
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		poll(t, func() bool {
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			result, popErr = vm.Pop()
+			if popErr != nil {
+				return true
+			}
+			vm.Reset()
+			vm.Flush()
+			exits, _ = profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "deopt"})
+			return exits > 0
+		})
+		require.NoError(t, runErr)
+		require.NoError(t, popErr)
+		got, ok := result.(*types.Error)
+		require.True(t, ok)
+		require.Equal(t, want.Frames(), got.Frames())
+	})
+
+	t.Run("records a served callee's caught trap frames under its native callers", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+		catcher := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeString(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}})
+		start, end, catch := catcher.Label(), catcher.Label(), catcher.Label()
+		refuse(catcher)
+		catcher.Bind(start).Append(
+			instr.MustNew(instr.I32_CONST, 100), instr.MustNew(instr.I32_CONST, 60), instr.MustNew(instr.LOCAL_GET, 1),
+			instr.MustNew(instr.I32_SUB), instr.MustNew(instr.I32_DIV_S), instr.MustNew(instr.RETURN),
+		)
+		catcher.Bind(end)
+		catcher.Bind(catch).Append(instr.MustNew(instr.GLOBAL_SET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.RETURN))
+		catcher.Try(start, end, catch, 2)
+
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 200).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.CONST_GET, 2).Emit(instr.I32_CONST, 100).Emit(instr.CONST_GET, 3).Emit(instr.CALL).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithGlobals(types.TypeAny()),
+			program.WithConstants(catcher.MustBuild(), loopFunction(0, false), types.String("s"), relayFunction(1, false)))
+
+		caught := func(t *testing.T, vm *interp.Interpreter) []types.Frame {
+			t.Helper()
+			boxed, err := vm.Global(0)
+			require.NoError(t, err)
+			value, err := vm.Load(boxed.Ref())
+			require.NoError(t, err)
+			e, ok := value.(*types.Error)
+			require.True(t, ok)
+			return e.Frames()
+		}
+
+		want := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer want.Close()
+		require.NoError(t, want.Run(context.Background()))
+		wantFrames := caught(t, want)
+		require.Len(t, wantFrames, 4)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		var runErr error
+		poll(t, func() bool {
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			vm.Flush()
+			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
+			if exits > 0 {
+				return true
+			}
+			vm.Reset()
+			return false
+		})
+		require.NoError(t, runErr)
+		require.Equal(t, wantFrames, caught(t, vm))
+	})
+
 	t.Run("reports an uncaught division by zero's stack trace", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 		fn := divFunction(t)
@@ -9776,6 +9889,56 @@ func TestNew(t *testing.T) {
 }
 
 func TestInterpreter_Run(t *testing.T) {
+	t.Run("records the frames of its first raise on a caught Error", func(t *testing.T) {
+		throws := func(t *testing.T) *types.Function {
+			b := instr.NewBuilder()
+			b.Emit(instr.I32_CONST, 5).Emit(instr.LOCAL_GET, 0).Emit(instr.ERROR_NEW).Emit(instr.THROW)
+			code, err := b.Assemble()
+			require.NoError(t, err)
+			return &types.Function{
+				Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
+				Code: instr.Marshal(code),
+			}
+		}
+		fails := interp.NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}},
+			func(*interp.Interpreter, []types.Boxed) ([]types.Boxed, error) {
+				return nil, errors.New("boom")
+			})
+
+		callees := map[string]types.Value{"trap": divFunction(t), "host error": fails, "throw": throws(t)}
+		for name, callee := range callees {
+			for _, rethrow := range []bool{false, true} {
+				if rethrow {
+					name += " rethrown"
+				}
+				t.Run(name, func(t *testing.T) {
+					b := instr.NewBuilder()
+					outer, inner, innerEnd, innerCatch, outerEnd, outerCatch := b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
+					b.Bind(outer).Bind(inner).Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+					b.Bind(innerEnd)
+					if rethrow {
+						b.Bind(innerCatch).Emit(instr.THROW)
+						b.Try(inner, innerEnd, innerCatch, 1)
+					}
+					b.Bind(outerEnd)
+					b.Bind(outerCatch).Emit(instr.NOP)
+					b.Try(outer, outerEnd, outerCatch, 1)
+					code, err := b.Assemble()
+					require.NoError(t, err)
+
+					escaped := runProgramErr(t, program.New(code, program.WithLocals(types.TypeI32()), program.WithConstants(callee)), interp.WithThreshold(-1))
+					var want *interp.RuntimeError
+					require.ErrorAs(t, escaped, &want)
+					require.NotEmpty(t, want.Frames)
+
+					caught, ok := runProgram(t, program.New(code, program.WithLocals(types.TypeI32()), program.WithConstants(callee), program.WithHandlers(b.Handlers()...))).(*types.Error)
+					require.True(t, ok)
+					require.Equal(t, want.Frames, caught.Frames())
+				})
+			}
+		}
+	})
+
 	t.Run("runs a finalizer as host code that writes no local or global", func(t *testing.T) {
 		const n = 200000
 		b := instr.NewBuilder()

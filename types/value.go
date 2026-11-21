@@ -55,7 +55,7 @@ type sliceIdentity struct {
 // cloner is implemented by the mutable value types, each returning a shallow
 // copy of itself.
 type cloner interface {
-	cloneValue() Value
+	clone() Value
 }
 
 const (
@@ -91,7 +91,7 @@ func IsNull(v Value) bool {
 // alone; boxed elements are shared. An immutable value is returned as is.
 func Clone(v Value) Value {
 	if c, ok := v.(cloner); ok {
-		return c.cloneValue()
+		return c.clone()
 	}
 	return v
 }

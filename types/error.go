@@ -8,12 +8,21 @@ import (
 // optional numeric code, an optional payload (any boxed value, traced when it is
 // a ref), and an optional wrapped Go error so an uncaught throw or a converted
 // host/runtime failure stays compatible with errors.Is / errors.As through
-// Unwrap.
+// Unwrap. Its frames are recorded where it was raised; it is mutable, so Clone
+// copies it.
 type Error struct {
 	cause   error
 	value   Boxed
+	frames  []Frame
 	code    ErrorCode
 	message string
+}
+
+// Frame locates one VM call frame by function address and instruction
+// pointer.
+type Frame struct {
+	Func int
+	IP   int
 }
 
 // ErrorCode is the numeric code of an Error.
@@ -69,6 +78,18 @@ func (e *Error) Code() ErrorCode {
 	return e.code
 }
 
+// Frames returns the call frames recorded where the error was raised,
+// innermost first, or nil when none were recorded.
+func (e *Error) Frames() []Frame {
+	return e.frames
+}
+
+// SetFrames records the call frames where the error was raised, innermost
+// first.
+func (e *Error) SetFrames(frames []Frame) {
+	e.frames = frames
+}
+
 func (e *Error) Kind() Kind {
 	return KindRef
 }
@@ -112,6 +133,11 @@ func (errorType) Equals(other Type) bool {
 
 func (errorType) String() string {
 	return "error"
+}
+
+func (e *Error) clone() Value {
+	c := *e
+	return &c
 }
 
 func (e *Error) wrap(err error) {

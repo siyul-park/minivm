@@ -275,6 +275,6 @@ func (s *Struct) field(i int, f StructField) Boxed {
 	return BoxWord(f.Kind, s.Data[i])
 }
 
-func (s *Struct) cloneValue() Value {
+func (s *Struct) clone() Value {
 	return s.Clone()
 }

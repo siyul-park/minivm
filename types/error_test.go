@@ -37,6 +37,23 @@ func TestError_Code(t *testing.T) {
 	require.ErrorIs(t, e, sentinel)
 }
 
+func TestError_Frames(t *testing.T) {
+	e := types.NewError(types.ErrorCodeNone, "", types.BoxedNull)
+	require.Nil(t, e.Frames())
+
+	frames := []types.Frame{{Func: 2, IP: 7}, {Func: 1, IP: 3}}
+	e.SetFrames(frames)
+	require.Equal(t, frames, e.Frames())
+}
+
+func TestError_SetFrames(t *testing.T) {
+	e := types.WrapError(types.ErrorCodeNone, errors.New("cause"))
+	e.SetFrames([]types.Frame{{Func: 1, IP: 4}})
+	e.SetFrames([]types.Frame{{Func: 0, IP: 2}})
+	require.Equal(t, []types.Frame{{Func: 0, IP: 2}}, e.Frames())
+	require.Equal(t, "cause", e.Error())
+}
+
 func TestError_Kind(t *testing.T) {
 	require.Equal(t, types.KindRef, types.NewError(types.ErrorCodeNone, "", types.BoxedNull).Kind())
 }

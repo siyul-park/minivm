@@ -220,10 +220,10 @@ func formatSlice(typ Type, n int, elem func(int) string) string {
 	return sb.String()
 }
 
-func (a TypedArray[T]) cloneValue() Value {
+func (a TypedArray[T]) clone() Value {
 	return a.Clone()
 }
 
-func (a *Array) cloneValue() Value {
+func (a *Array) clone() Value {
 	return a.Clone()
 }
