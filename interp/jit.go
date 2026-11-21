@@ -315,6 +315,8 @@ func (e *engine) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 			e.tcache.flush(i)
 		}
 	}
+	// Native execution finished; any fault during return cleanup belongs to CALL.
+	i.fr.ip -= advance
 	for _, v := range owned {
 		i.releaseBox(v)
 	}
@@ -323,6 +325,7 @@ func (e *engine) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 		i.release(addr)
 	}
 	i.sp = bp + returns
+	i.fr.ip += advance
 	return false, nil
 }
 

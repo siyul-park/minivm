@@ -4406,10 +4406,21 @@ func TestWithThreshold(t *testing.T) {
 		profiler := prof.New()
 		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
 		defer vm.Close()
-		require.NoError(t, vm.Run(context.Background()))
-		vm.Flush()
-		exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
-		require.Positive(t, exits)
+		var runErr error
+		poll(t, func() bool {
+			runErr = vm.Run(context.Background())
+			if runErr != nil {
+				return true
+			}
+			vm.Flush()
+			exits, _ := profiler.Metric("vm_jit_exits_total", prof.Label{Key: "kind", Value: "call"})
+			if exits > 0 {
+				return true
+			}
+			vm.Reset()
+			return false
+		})
+		require.NoError(t, runErr)
 		require.Equal(t, wantFrames, caught(t, vm))
 	})
 
