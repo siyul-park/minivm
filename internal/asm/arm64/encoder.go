@@ -105,6 +105,13 @@ var reg3Opcodes = map[Op]uint32{
 	OpROR:  0x9AC02C00,
 }
 
+// smulOpcodes maps each widening-multiply opcode to its base word: SMULH and
+// SMULL encode as SMULH and SMADDL (the SMULL alias) with Ra=XZR.
+var smulOpcodes = map[Op]uint32{
+	OpSMULH: 0x9B407C00,
+	OpSMULL: 0x9B207C00,
+}
+
 // arithImmOpcodes maps each arithmetic-immediate opcode (imm12) to its base word.
 var arithImmOpcodes = map[Op]uint32{
 	OpADDI:  0x91000000,
@@ -218,6 +225,26 @@ func (Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 			return nil, o.err
 		}
 		return encR3(reg3Opcodes[op], d, n, m)
+
+	case OpSMULH, OpSMULL:
+		var o operands
+		d, n, m := o.reg(inst.Dst, ErrMissingDestinationReg), o.reg(inst.Src1, ErrMissingSourceRegs), o.reg(inst.Src2, ErrMissingSourceRegs)
+		if o.err != nil {
+			return nil, o.err
+		}
+		sources := []asm.PReg{d, n, m}
+		sourceWidth := asm.Width64
+		if op == OpSMULL {
+			sources = []asm.PReg{n, m}
+			sourceWidth = asm.Width32
+		}
+		if width, err := sameKind(asm.RegTypeInt, d); err != nil || width != asm.Width64 {
+			return nil, asm.ErrInvalidOperand
+		}
+		if width, err := sameKind(asm.RegTypeInt, sources...); err != nil || width != sourceWidth {
+			return nil, asm.ErrInvalidOperand
+		}
+		return enc(smulOpcodes[op] | reg(m)<<16 | reg(n)<<5 | reg(d)), nil
 
 	case OpNEG, OpNEGS:
 		var o operands

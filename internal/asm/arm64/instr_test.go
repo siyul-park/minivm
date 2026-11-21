@@ -106,6 +106,18 @@ func TestMNEG(t *testing.T) {
 	require.NotEmpty(t, inst.String())
 }
 
+func TestSMULH(t *testing.T) {
+	inst := arm64.SMULH(arm64.X0, arm64.X0, arm64.X0)
+	require.Equal(t, uint16(arm64.OpSMULH), inst.Op)
+	require.NotEmpty(t, inst.String())
+}
+
+func TestSMULL(t *testing.T) {
+	inst := arm64.SMULL(arm64.X0, arm64.W0, arm64.W0)
+	require.Equal(t, uint16(arm64.OpSMULL), inst.Op)
+	require.NotEmpty(t, inst.String())
+}
+
 func TestADC(t *testing.T) {
 	inst := arm64.ADC(arm64.X0, arm64.X0, arm64.X0)
 	require.Equal(t, uint16(arm64.OpADC), inst.Op)

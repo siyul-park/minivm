@@ -22,6 +22,8 @@ const (
 	OpMADD
 	OpMSUB
 	OpMNEG
+	OpSMULH
+	OpSMULL
 	OpSDIV
 	OpUDIV
 	OpADC
@@ -304,6 +306,16 @@ func MSUB(dst, src1, src2, acc asm.Reg) asm.Instruction {
 // MNEG Xd, Xn, Xm  →  Xd = -(Xn*Xm)
 func MNEG(dst, src1, src2 asm.Reg) asm.Instruction {
 	return newReg3(OpMNEG, dst, src1, src2)
+}
+
+// SMULH Xd, Xn, Xm  →  Xd = high 64 bits of the signed 128-bit product Xn*Xm
+func SMULH(dst, src1, src2 asm.Reg) asm.Instruction {
+	return newReg3(OpSMULH, dst, src1, src2)
+}
+
+// SMULL Xd, Wn, Wm  →  Xd = signed 64-bit product Wn*Wm
+func SMULL(dst, src1, src2 asm.Reg) asm.Instruction {
+	return newReg3(OpSMULL, dst, src1, src2)
 }
 
 // ADC / SBC — add/subtract with carry
