@@ -190,6 +190,15 @@ func TestSSAPass_Run(t *testing.T) {
 				b.Emit(instr.I32_CONST, 1).BrIf(done)
 				b.Emit(instr.I32_CONST, 2).Emit(instr.LOCAL_SET, 0)
 				b.Bind(done)
+			}),
+			"backward branch at the end": assemble(func(b *program.Builder) {
+				header := b.Label()
+				b.Locals(types.TypeI32()).Globals(types.TypeI32())
+				b.Emit(instr.I32_CONST, 3).Emit(instr.LOCAL_SET, 0)
+				b.Bind(header)
+				b.Emit(instr.GLOBAL_GET, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_ADD).Emit(instr.GLOBAL_SET, 0)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB).Emit(instr.LOCAL_TEE, 0)
+				b.Emit(instr.I32_CONST, 0).Emit(instr.I32_GT_S).BrIf(header)
 			})} {
 			require.NoError(t, program.Verify(prog))
 			want, wantErr := executionResult(t, prog)
