@@ -94,6 +94,7 @@ func promote(function *ssa.Function, localTypes map[int]ssa.Type) *ssa.Function 
 			}
 		}
 		if block == 0 {
+			r.builder.At(b.Source())
 			state := ssa.NoValue
 			if wide {
 				state = seed(r, id)

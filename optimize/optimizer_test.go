@@ -2,6 +2,8 @@ package optimize_test
 
 import (
 	"context"
+	"fmt"
+	"maps"
 	"math"
 	"strings"
 	"testing"
@@ -58,6 +60,125 @@ func TestOptimizer_Optimize(t *testing.T) {
 		optimized, err := optimize.New(optimize.O3).Optimize(prog)
 		require.NoError(t, err)
 		require.Contains(t, instr.Format(optimized.Constants[0].(*types.Function).Code), "i32.div_s")
+	})
+
+	t.Run("keeps a source on every instruction and still optimizes", func(t *testing.T) {
+		i32 := &types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}
+		corpus := []struct {
+			name  string
+			build func() *program.Program
+		}{
+			{"constant fold", func() *program.Program {
+				return program.New(
+					[]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.GLOBAL_SET, 0)},
+					program.WithGlobals(types.TypeI32()))
+			}},
+			{"inlined callees", func() *program.Program {
+				redundant := types.NewFunctionBuilder(i32).Append(
+					instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_ADD),
+					instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_ADD),
+					instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN)).MustBuild()
+				branchy := types.NewFunctionBuilder(i32)
+				l := branchy.Label()
+				branchy.Append(
+					instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_ADD),
+					instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_GT_S))
+				branchy.BrIf(l)
+				branchy.Append(instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN))
+				branchy.Bind(l)
+				branchy.Append(instr.MustNew(instr.RETURN))
+				return program.New(
+					[]instr.Instruction{
+						instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.GLOBAL_GET, 1), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.GLOBAL_SET, 2),
+						instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.GLOBAL_GET, 1), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL), instr.MustNew(instr.GLOBAL_SET, 3)},
+					program.WithGlobals(types.TypeI32(), types.TypeI32(), types.TypeI32(), types.TypeI32()),
+					program.WithConstants(redundant, branchy.MustBuild()))
+			}},
+			{"loop", func() *program.Program {
+				loop := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Locals(types.TypeI32())
+				head, done := loop.Label(), loop.Label()
+				loop.Bind(head).Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_GE_S))
+				loop.BrIf(done)
+				loop.Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 1))
+				loop.Br(head)
+				loop.Bind(done).Append(instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.RETURN))
+				return program.New(
+					[]instr.Instruction{instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.GLOBAL_SET, 0)},
+					program.WithGlobals(types.TypeI32()),
+					program.WithConstants(loop.MustBuild()))
+			}},
+		}
+		// annotate gives every instruction of a body a source unique across
+		// bodies: owner<<16 + ip+1.
+		annotate := func(code []byte, owner int) (positions []instr.Position, sources map[uint32]bool) {
+			sources = map[uint32]bool{}
+			for ip := 0; ip < len(code); ip += instr.Instruction(code[ip:]).Width() {
+				source := uint32(owner<<16 + ip + 1)
+				positions = append(positions, instr.Position{IP: ip, Source: source})
+				sources[source] = true
+			}
+			return positions, sources
+		}
+
+		check := func(t *testing.T, code []byte, positions []instr.Position, allowed map[uint32]bool, level optimize.Level) {
+			require.NotEmpty(t, positions, level)
+			for ip := 0; ip < len(code); ip += instr.Instruction(code[ip:]).Width() {
+				source := instr.Find(positions, ip)
+				require.NotZero(t, source, "level %d ip %d", level, ip)
+				require.True(t, allowed[source], "level %d ip %d source %#x", level, ip, source)
+			}
+		}
+
+		for _, tc := range corpus {
+			for _, level := range []optimize.Level{optimize.O1, optimize.O2, optimize.O3} {
+				t.Run(fmt.Sprintf("%s O%d", tc.name, level), func(t *testing.T) {
+					prog := tc.build()
+					size := len(prog.Code)
+					var own map[uint32]bool
+					prog.Positions, own = annotate(prog.Code, 0)
+					inputs := map[*types.Function]map[uint32]bool{}
+					for i, c := range prog.Constants {
+						if fn, ok := c.(*types.Function); ok {
+							fn.Positions, inputs[fn] = annotate(fn.Code, i+1)
+						}
+					}
+					// The module may take the sources of the callees it calls, which
+					// callees that call nothing never do.
+					allowed := maps.Clone(own)
+					for _, inst := range instr.Unmarshal(prog.Code) {
+						if inst.Opcode() == instr.CONST_GET {
+							if fn, ok := prog.Constants[inst.Operand(0)].(*types.Function); ok {
+								maps.Copy(allowed, inputs[fn])
+							}
+						}
+					}
+					if level != optimize.O3 {
+						allowed = own
+					}
+
+					got, err := optimize.New(level).Optimize(prog)
+					require.NoError(t, err)
+					require.NoError(t, program.Verify(got))
+					if tc.name == "constant fold" {
+						require.Less(t, len(got.Code), size)
+					}
+					check(t, got.Code, got.Positions, allowed, level)
+					for _, c := range got.Constants {
+						if fn, ok := c.(*types.Function); ok {
+							check(t, fn.Code, fn.Positions, inputs[fn], level)
+						}
+					}
+					if tc.name == "inlined callees" && level == optimize.O3 {
+						require.NotContains(t, instr.Format(got.Code), "call")
+						owners := map[uint32]bool{}
+						for ip := 0; ip < len(got.Code); ip += instr.Instruction(got.Code[ip:]).Width() {
+							owners[instr.Find(got.Positions, ip)>>16] = true
+						}
+						require.True(t, owners[1] && owners[2], "%v %s", owners, instr.Format(got.Code))
+					}
+				})
+			}
+		}
 	})
 
 	t.Run("O0 passthrough", func(t *testing.T) {

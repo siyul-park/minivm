@@ -60,6 +60,7 @@ func (p *BCEPass) Run(_ *pass.Manager, function *ssa.Function) (bool, error) {
 		// Each guard reads the array's length under the loop's entry state,
 		// then compares it against the limit.
 		for _, guard := range guards[b] {
+			r.builder.At(guard.Source)
 			state, length := r.builder.Value(ssa.TypeState), r.builder.Value(ssa.TypeI32)
 			r.builder.Add(id, r.operation(ssa.Operation{Op: ssa.OpState, Frames: guard.Frames, Results: []ssa.Value{state}}))
 			r.builder.Add(id, ssa.Operation{Op: ssa.OpArrayLen, Args: []ssa.Value{r.value(guard.Args[1])}, State: state, Results: []ssa.Value{length}})
@@ -93,7 +94,7 @@ func (n *nest) bounds(profiles Profiles) (map[site]bool, map[int][]ssa.Operation
 				}
 				if !guarded[operation.Args[0]] {
 					guarded[operation.Args[0]] = true
-					guards[loop.preheader] = append(guards[loop.preheader], ssa.Operation{Args: []ssa.Value{loop.limit, operation.Args[0]}, Frames: loop.frames})
+					guards[loop.preheader] = append(guards[loop.preheader], ssa.Operation{Args: []ssa.Value{loop.limit, operation.Args[0]}, Frames: loop.frames, Source: operation.Source})
 				}
 				bounded[site{b, i}] = true
 			}

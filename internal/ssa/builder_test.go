@@ -54,6 +54,33 @@ func TestBuilder_Value(t *testing.T) {
 	})
 }
 
+func TestBuilder_At(t *testing.T) {
+	t.Run("gives each operation and terminator that has no source the current one", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst})
+		b.At(7)
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst})
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst, Source: 3})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermComplete})
+
+		f := b.Build()
+		require.Equal(t, uint32(0), f.Block(entry).Operations[0].Source)
+		require.Equal(t, uint32(7), f.Block(entry).Operations[1].Source)
+		require.Equal(t, uint32(3), f.Block(entry).Operations[2].Source)
+		require.Equal(t, uint32(7), f.Block(entry).Terminator.Source)
+	})
+
+	t.Run("ends with Build", func(t *testing.T) {
+		b := ssa.New("f")
+		b.At(7)
+		b.Build()
+		entry := b.Block()
+		b.Add(entry, ssa.Operation{Op: ssa.OpConst})
+		require.Equal(t, uint32(0), b.Build().Block(entry).Operations[0].Source)
+	})
+}
+
 func TestBuilder_Add(t *testing.T) {
 	t.Run("appends instructions in order", func(t *testing.T) {
 		b := ssa.New("f")

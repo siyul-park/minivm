@@ -242,7 +242,7 @@ func rotate(f *ssa.Function) *ssa.Function {
 		}
 		r.builder.Term(id, r.terminator(b.Terminator))
 	}
-	r.builder.Term(first, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: r.block(0), Args: args}}})
+	r.builder.Term(first, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: r.block(0), Args: args}}, Source: f.Block(0).Source()})
 	return r.builder.Build()
 }
 

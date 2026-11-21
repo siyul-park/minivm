@@ -44,6 +44,25 @@ func pipeline() *pass.Pipeline[*ssa.Function] {
 	return pipeline
 }
 
+// positioned gives the instruction at index i of code the source base+i+1.
+func positioned(code []byte, base uint32) []instr.Position {
+	var positions []instr.Position
+	for ip, i := 0, uint32(0); ip < len(code); i++ {
+		positions = append(positions, instr.Position{IP: ip, Source: base + i + 1})
+		ip += instr.Instruction(code[ip:]).Width()
+	}
+	return positions
+}
+
+// sourcesOf returns the source covering each instruction of code.
+func sourcesOf(code []byte, positions []instr.Position) []uint32 {
+	var sources []uint32
+	for ip := 0; ip < len(code); ip += instr.Instruction(code[ip:]).Width() {
+		sources = append(sources, instr.Find(positions, ip))
+	}
+	return sources
+}
+
 func duplicateConstants(input *program.Program) *program.Program {
 	out := *input
 	out.Code = append([]byte(nil), input.Code...)
@@ -1833,6 +1852,94 @@ func TestSSAPass_Run(t *testing.T) {
 		require.Equal(t, []types.Type{types.TypeI32()}, input.Locals)
 	})
 
+	t.Run("keeps the source of the operation that survives a merge of repeated computations", func(t *testing.T) {
+		pipeline := pass.NewPipeline[*ssa.Function]()
+		pipeline.Add(transform.NewForwardPass())
+		pipeline.Add(transform.NewCSEPass())
+		pipeline.Add(transform.NewDCEPass())
+
+		reloaded := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32(), types.TypeI32()},
+			Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_ADD),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_ADD),
+			instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN)).MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_CONST, 4), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+			program.WithConstants(reloaded))
+		plain := duplicateConstants(prog)
+		reloaded.Positions = positioned(reloaded.Code, 0)
+
+		_, err := transform.NewSSAPass(pipeline, false).Run(pass.NewManager(), prog)
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+		_, err = transform.NewSSAPass(pipeline, false).Run(pass.NewManager(), plain)
+		require.NoError(t, err)
+
+		// The second addition of the pair is gone: sources 4 to 6 with it. The
+		// first addition (3), the outer addition (7) and the return (8) stay.
+		sources := sourcesOf(reloaded.Code, reloaded.Positions)
+		require.Subset(t, []uint32{1, 2, 3, 7, 8}, sources)
+		require.Contains(t, sources, uint32(3))
+		require.Contains(t, sources, uint32(7))
+		require.Equal(t, plain.Constants[0].(*types.Function).Code, reloaded.Code)
+		require.Nil(t, plain.Constants[0].(*types.Function).Positions)
+	})
+
+	t.Run("keeps the sources of a callee inlined into its caller", func(t *testing.T) {
+		optimized := pass.NewPipeline[*ssa.Function]()
+		for _, p := range transform.O3() {
+			optimized.Add(p)
+		}
+		leaf := types.NewFunctionBuilder(&types.FunctionType{
+			Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN)).MustBuild()
+		caller := types.NewFunctionBuilder(&types.FunctionType{
+			Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.RETURN)).MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, 4), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL)},
+			program.WithConstants(leaf, caller))
+		leaf.Positions, caller.Positions = positioned(leaf.Code, 1000), positioned(caller.Code, 2000)
+
+		_, err := transform.NewSSAPass(optimized, true).Run(pass.NewManager(), prog)
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+		require.NotContains(t, instr.Format(caller.Code), "call")
+
+		sources := sourcesOf(caller.Code, caller.Positions)
+		require.Subset(t, []uint32{1001, 1002, 1003, 1004, 2001, 2002, 2003, 2004}, sources)
+		require.NotContains(t, sources, uint32(0))
+		require.True(t, slices.ContainsFunc(sources, func(s uint32) bool { return s > 1000 && s < 2000 }))
+	})
+
+	t.Run("gives an inlined callee without positions the source of the call", func(t *testing.T) {
+		optimized := pass.NewPipeline[*ssa.Function]()
+		for _, p := range transform.O3() {
+			optimized.Add(p)
+		}
+		leaf := types.NewFunctionBuilder(&types.FunctionType{
+			Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.RETURN)).MustBuild()
+		caller := types.NewFunctionBuilder(&types.FunctionType{
+			Params: []types.Type{types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.RETURN)).MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, 4), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL)},
+			program.WithConstants(leaf, caller))
+		caller.Positions = positioned(caller.Code, 2000)
+
+		_, err := transform.NewSSAPass(optimized, true).Run(pass.NewManager(), prog)
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+		require.NotContains(t, instr.Format(caller.Code), "call")
+		require.Nil(t, leaf.Positions)
+
+		sources := sourcesOf(caller.Code, caller.Positions)
+		require.NotContains(t, sources, uint32(0))
+		require.Subset(t, []uint32{2001, 2002, 2003, 2004}, sources)
+	})
+
 	t.Run("restores a function whose fault is reported at a literal holding it", func(t *testing.T) {
 		fn := sliceFunction(types.TypeAny())
 		literal := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeAny()), Elems: []types.Value{fn}}
@@ -1857,7 +1964,9 @@ func TestSSAPass_Run(t *testing.T) {
 			instr.MustNew(instr.CONST_GET, 3), instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.CALL)},
 			program.WithConstants(good, first, second, types.TypedArray[int8]{1, 2, 3, 4}), program.WithGlobals(bytes))
 		require.NoError(t, program.Verify(prog))
+		good.Positions, first.Positions, second.Positions = positioned(good.Code, 0), positioned(first.Code, 0), positioned(second.Code, 0)
 		goodBefore, firstBefore, secondBefore := good.Code, first.Code, second.Code
+		firstPositions, secondPositions := first.Positions, second.Positions
 
 		preserved, err := transform.NewSSAPass(pass.NewPipeline[*ssa.Function](), false).Run(pass.NewManager(), prog)
 		require.NoError(t, err)
@@ -1866,6 +1975,9 @@ func TestSSAPass_Run(t *testing.T) {
 		require.NotEqual(t, goodBefore, good.Code)
 		require.Equal(t, firstBefore, first.Code)
 		require.Equal(t, secondBefore, second.Code)
+		require.Equal(t, firstPositions, first.Positions)
+		require.Equal(t, secondPositions, second.Positions)
+		require.NotEmpty(t, good.Positions)
 	})
 
 	t.Run("returns an invalid program unchanged", func(t *testing.T) {
