@@ -2879,6 +2879,74 @@ func TestMachine_Lower(t *testing.T) {
 			},
 			lower: true,
 		},
+		{
+			name: "ref.test of an i32 compares the word's tag, yielding 1 on a match and 0 otherwise",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeI1},
+			op:   ssa.Operation{Op: ssa.OpRefTest, Shape: ssa.Shape{Elem: types.KindI32, Index: 3}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+			rows: append(append([]asm.Instruction{target.LSRI(target.X16, reg(ssa.TypeRef, 1), 49)},
+				target.LDI(target.X17, types.Tag(types.KindI32)>>49)...),
+				target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, asm.Label(2)),
+				target.LDI(reg(ssa.TypeI1, 2), 1)[0], target.BLabel(asm.Label(3)),
+				target.LDI(reg(ssa.TypeI1, 2), 0)[0]),
+			lower: true,
+		},
+		{
+			name: "ref.test of an f64 misses only the seven tagged positive NaNs",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeI1},
+			op:   ssa.Operation{Op: ssa.OpRefTest, Shape: ssa.Shape{Elem: types.KindF64, Index: 3}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+			rows: append(append([]asm.Instruction{target.LSRI(target.X16, reg(ssa.TypeRef, 1), 49)},
+				target.LDI(target.X17, 0x3FF9)...),
+				target.SUB(target.X16, target.X16, target.X17), target.CMPI(target.X16, 6), target.BCondLabel(target.OpBLS, asm.Label(2)),
+				target.LDI(reg(ssa.TypeI1, 2), 1)[0], target.BLabel(asm.Label(3)),
+				target.LDI(reg(ssa.TypeI1, 2), 0)[0]),
+			lower: true,
+		},
+		{
+			name: "ref.test of an i64 matches an inline i64 or a heap-promoted types.I64",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeI1},
+			op:   ssa.Operation{Op: ssa.OpRefTest, Shape: ssa.Shape{Elem: types.KindI64, Index: 3}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{target.LSRI(target.X16, reg(ssa.TypeRef, 1), 49)}
+				rows = append(rows, target.LDI(target.X17, types.Tag(types.KindI64)>>49)...)
+				rows = append(rows, target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBEQ, asm.Label(4)))
+				rows = append(rows, target.LDI(target.X17, types.Tag(types.KindRef)>>49)...)
+				rows = append(rows, target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, asm.Label(2)),
+					target.SBFX(vr(1), reg(ssa.TypeRef, 1), 0, 32), target.LSLI(vr(1), vr(1), 4),
+					target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
+					target.ADD(vr(1), target.X16, vr(1)),
+					target.LDR(target.X16, vr(1), 0))
+				rows = append(rows, target.LDI(target.X17, uint64(jit.Itab(types.I64(0))))...)
+				return append(rows, target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, asm.Label(2)),
+					target.LDI(reg(ssa.TypeI1, 2), 1)[0], target.BLabel(asm.Label(3)),
+					target.LDI(reg(ssa.TypeI1, 2), 0)[0])
+			}(),
+			lower: true,
+		},
+		{
+			name: "ref.cast of an i8 traps on a miss and otherwise keeps the word",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpRefCast, Shape: ssa.Shape{Elem: types.KindI8, Index: 3}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+			rows: append(append([]asm.Instruction{target.LSRI(target.X16, reg(ssa.TypeRef, 1), 49)},
+				target.LDI(target.X17, types.Tag(types.KindI8)>>49)...),
+				target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, exit),
+				target.MOV(reg(ssa.TypeRef, 2), reg(ssa.TypeRef, 1))),
+			lower: true,
+		},
+		{
+			name: "ref.test declines a type that is not scalar",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeI1},
+			op:   ssa.Operation{Op: ssa.OpRefTest, Shape: ssa.Shape{Elem: types.KindRef, Index: 3}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+		},
+		{
+			name: "ref.cast declines a type that is not scalar",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpRefCast, Shape: ssa.Shape{Elem: types.KindRef, Index: 3}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+		},
+		{
+			name: "ref.test declines an operand that is not a ref",
+			regs: regs{1: i32, 2: ssa.TypeI1},
+			op:   ssa.Operation{Op: ssa.OpRefTest, Shape: ssa.Shape{Elem: types.KindI32, Index: 3}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+		},
 	}...)
 
 	iv := func(n int, w asm.RegWidth) asm.VReg { return asm.NewVReg(int32(-2-n), asm.RegTypeInt, w) }
