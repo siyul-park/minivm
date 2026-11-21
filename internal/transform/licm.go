@@ -234,7 +234,7 @@ func hoistable(function *ssa.Function, operation ssa.Operation) bool {
 // overflows reports i64 operations whose result can exceed the boxed i64 payload.
 func overflows(function *ssa.Function, operation ssa.Operation) bool {
 	switch operation.Op {
-	case ssa.OpIntAdd, ssa.OpIntSub, ssa.OpIntMul, ssa.OpIntShl, ssa.OpIntLShr, ssa.OpIntSDiv, ssa.OpIntUDiv:
+	case ssa.OpIntAdd, ssa.OpIntSub, ssa.OpIntMul, ssa.OpIntAddOvf, ssa.OpIntSubOvf, ssa.OpIntMulOvf, ssa.OpIntShl, ssa.OpIntLShr, ssa.OpIntSDiv, ssa.OpIntUDiv:
 		return function.Type(operation.Results[0]) == ssa.TypeI64
 	default:
 		return false

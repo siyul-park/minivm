@@ -276,7 +276,7 @@ func modelled(function *Function, o Operation) error {
 		in, out = 3, 0
 	case o.Op == OpMapDelete:
 		in, out = 2, 0
-	case o.Op == OpMapLookup:
+	case o.Op == OpMapLookup, o.Op >= OpIntAddOvf && o.Op <= OpIntMulOvf:
 		out = 2
 	}
 	if in >= 0 && len(o.Args) != in || out >= 0 && len(o.Results) != out {
@@ -285,9 +285,9 @@ func modelled(function *Function, o Operation) error {
 	isInt := func(t Type) bool { return t >= TypeI1 && t <= TypeI64 }
 	isFloat := func(t Type) bool { return t == TypeF32 || t == TypeF64 }
 	switch {
-	case o.Op >= OpIntAdd && o.Op <= OpIntRotr:
-		if !isInt(arg(0)) || arg(0).Lane() != arg(1).Lane() || !isInt(arg(1)) || !isInt(res(0)) || res(0).Lane() != arg(0).Lane() {
-			return bad("takes lanes that differ or are not integers")
+	case o.Op >= OpIntAdd && o.Op <= OpIntRotr, o.Op >= OpIntAddOvf && o.Op <= OpIntMulOvf:
+		if !isInt(arg(0)) || arg(0).Lane() != arg(1).Lane() || !isInt(arg(1)) || !isInt(res(0)) || res(0).Lane() != arg(0).Lane() || len(o.Results) == 2 && res(1) != TypeI1 {
+			return bad("takes lanes that differ or are not integers, or yields a flag that is not i1")
 		}
 	case o.Op >= OpIntClz && o.Op <= OpIntSExt32:
 		if o.Op == OpIntSExt32 && arg(0) != TypeI64 {

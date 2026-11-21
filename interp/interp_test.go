@@ -3,8 +3,10 @@ package interp_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"math"
+	"math/big"
 	"regexp"
 	"slices"
 	"strings"
@@ -5445,6 +5447,118 @@ func TestWithThreshold(t *testing.T) {
 				return exitsOf(profiler)["deopt"] > 0
 			})
 		})
+	})
+
+	t.Run("checks integer arithmetic natively as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		const n = 200
+		type tc struct {
+			name string
+			op   instr.Opcode
+			wide bool
+			x, y int64
+		}
+		// reference folds one iteration the way the loop does: the wrapped result
+		// (an i64 as its low half plus three times its high half) into the fold,
+		// and a hit count for the overflow flag.
+		reference := func(c tc) int32 {
+			bits := 32
+			if c.wide {
+				bits = 64
+			}
+			exact := new(big.Int)
+			x, y := big.NewInt(c.x), big.NewInt(c.y)
+			switch c.op {
+			case instr.I32_ADD_OVF, instr.I64_ADD_OVF:
+				exact.Add(x, y)
+			case instr.I32_SUB_OVF, instr.I64_SUB_OVF:
+				exact.Sub(x, y)
+			default:
+				exact.Mul(x, y)
+			}
+			limit := new(big.Int).Lsh(big.NewInt(1), uint(bits-1))
+			overflow := exact.Cmp(limit) >= 0 || exact.Cmp(new(big.Int).Neg(limit)) < 0
+			wrapped := new(big.Int).And(exact, new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), uint(bits)), big.NewInt(1))).Uint64()
+			var fold, hits int32
+			for range n {
+				if c.wide {
+					fold += int32(uint32(wrapped))
+					fold += 3 * int32(uint32(wrapped>>32))
+				} else {
+					fold += int32(uint32(wrapped))
+				}
+				if overflow {
+					hits++
+				}
+				if overflow {
+					fold += 7
+				}
+			}
+			return fold + 31*hits
+		}
+		build := func(c tc) *program.Program {
+			b := instr.NewBuilder()
+			loop, done, hit, skip := b.Label(), b.Label(), b.Label(), b.Label()
+			constant, operand := instr.I32_CONST, i32operand(int32(c.x))
+			other := i32operand(int32(c.y))
+			if c.wide {
+				constant, operand, other = instr.I64_CONST, i64operand(c.x), i64operand(c.y)
+			}
+			b.Emit(constant, operand).Emit(instr.LOCAL_SET, 4).Emit(constant, other).Emit(instr.LOCAL_SET, 5)
+			b.Bind(loop)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, n).Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.LOCAL_GET, 4).Emit(instr.LOCAL_GET, 5).Emit(c.op).Emit(instr.LOCAL_SET, 3)
+			if c.wide {
+				b.Emit(instr.DUP).Emit(instr.I64_TO_I32).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+				b.Emit(instr.I64_CONST, 32).Emit(instr.I64_SHR_S).Emit(instr.I64_TO_I32).Emit(instr.I32_CONST, 3).Emit(instr.I32_MUL)
+			}
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+			b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 7).Emit(instr.I32_MUL).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+			b.Emit(instr.LOCAL_GET, 3).BrIf(hit).Br(skip)
+			b.Bind(hit)
+			b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+			b.Bind(skip)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+			b.Bind(done).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 31).Emit(instr.I32_MUL).Emit(instr.I32_ADD)
+			code, err := b.Assemble()
+			require.NoError(t, err)
+			operandType := types.TypeI32()
+			if c.wide {
+				operandType = types.TypeI64()
+			}
+			return program.New(code, program.WithLocals(types.TypeI32(), types.TypeI32(), types.TypeI32(), types.TypeI32(), operandType, operandType))
+		}
+
+		var cases []tc
+		for _, wide := range []bool{false, true} {
+			lo, hi := int64(math.MinInt32), int64(math.MaxInt32)
+			ops := []instr.Opcode{instr.I32_ADD_OVF, instr.I32_SUB_OVF, instr.I32_MUL_OVF}
+			if wide {
+				lo, hi = math.MinInt64, math.MaxInt64
+				ops = []instr.Opcode{instr.I64_ADD_OVF, instr.I64_SUB_OVF, instr.I64_MUL_OVF}
+			}
+			edges := []int64{0, 1, -1, 2, lo, hi}
+			if wide {
+				edges = append(edges, 1<<32, -(1 << 32), 1<<31, 3037000500)
+			} else {
+				edges = append(edges, 46341, -46341)
+			}
+			for _, op := range ops {
+				for _, x := range edges {
+					for _, y := range edges {
+						cases = append(cases, tc{name: fmt.Sprintf("%s %d %d", instr.TypeOf(op).Mnemonic, x, y), op: op, wide: wide, x: x, y: y})
+					}
+				}
+			}
+		}
+		for _, c := range cases {
+			t.Run(c.name, func(t *testing.T) {
+				prog := build(c)
+				require.Equal(t, types.I32(reference(c)), runProgram(t, prog))
+				requireNative(t, prog)
+			})
+		}
 	})
 
 	t.Run("compares strings and refs natively as threaded does", func(t *testing.T) {

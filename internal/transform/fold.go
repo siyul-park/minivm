@@ -282,7 +282,7 @@ func reflexive(o ssa.Operation) (w uint64, alias, ok bool) {
 // commutative reports whether o gives the same result for swapped integer operands.
 func commutative(o ssa.Operation) bool {
 	switch o.Op {
-	case ssa.OpIntAdd, ssa.OpIntMul, ssa.OpIntAnd, ssa.OpIntOr, ssa.OpIntXor:
+	case ssa.OpIntAdd, ssa.OpIntMul, ssa.OpIntAddOvf, ssa.OpIntMulOvf, ssa.OpIntAnd, ssa.OpIntOr, ssa.OpIntXor:
 		return true
 	case ssa.OpIntCmp:
 		return o.Cond == ssa.CondEQ || o.Cond == ssa.CondNE

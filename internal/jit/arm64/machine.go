@@ -610,6 +610,8 @@ func (m *Machine) data(a *asm.Assembler, op ssa.Operation, s compile.Site) bool 
 		return arith(a, op, s, result(s, op), false)
 	case ssa.OpIntMul:
 		return binary(a, op, s, target.MUL)
+	case ssa.OpIntAddOvf, ssa.OpIntSubOvf, ssa.OpIntMulOvf:
+		return checked(a, op, s)
 	case ssa.OpIntAnd:
 		return binary(a, op, s, target.AND)
 	case ssa.OpIntOr:
@@ -1759,6 +1761,39 @@ func immediate(s compile.Site, v ssa.Value, width asm.RegWidth) (int64, bool) {
 		n = int64(int32(word))
 	}
 	return n, n >= -imm12 && n <= imm12
+}
+
+// checked lowers the overflow-checked add, sub, and mul: the wrapped result,
+// then an i1 set when the exact signed result does not fit the lane. Add and
+// sub read the overflow flag. A mul compares the high half of the full product
+// with the sign of the low half, in scratch X16 and X17 so the operands survive
+// a result that shares their register.
+func checked(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
+	if !has(op, 2, 2) {
+		return false
+	}
+	x, y, dst, flag := s.Reg(op.Args[0]), s.Reg(op.Args[1]), s.Reg(op.Results[0]), s.Reg(op.Results[1])
+	if !same(x, y, dst) || x.Type() != asm.RegTypeInt || !match(asm.RegTypeInt, asm.Width32, flag) {
+		return false
+	}
+	wide := x.Width() == asm.Width64
+	switch {
+	case op.Op == ssa.OpIntAddOvf:
+		a.Emit(target.ADDS(dst, x, y), target.CSET(flag, target.CondVS))
+	case op.Op == ssa.OpIntSubOvf:
+		a.Emit(target.SUBS(dst, x, y), target.CSET(flag, target.CondVS))
+	case wide:
+		a.Emit(
+			target.SMULH(target.X16, x, y), target.MUL(dst, x, y), target.ASRI(target.X17, dst, 63),
+			target.CMP(target.X16, target.X17), target.CSET(flag, target.CondNE),
+		)
+	default:
+		a.Emit(
+			target.SMULL(target.X16, x, y), target.SXTW(target.X17, target.W16),
+			target.CMP(target.X16, target.X17), target.MOVW(dst, target.X16), target.CSET(flag, target.CondNE),
+		)
+	}
+	return true
 }
 
 func binary(a *asm.Assembler, op ssa.Operation, s compile.Site, emit func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
