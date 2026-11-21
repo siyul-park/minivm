@@ -5584,7 +5584,9 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("checks integer arithmetic natively as threaded does", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 
-		const n = 200
+		// n is odd, so it is invertible modulo 2^32: n copies of a wrong
+		// result never fold to the same checksum as n copies of the right one.
+		const n = 201
 		type tc struct {
 			name string
 			op   instr.Opcode
