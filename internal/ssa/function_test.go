@@ -130,6 +130,20 @@ func TestFunction_Pred(t *testing.T) {
 	})
 }
 
+func TestBlock_Source(t *testing.T) {
+	t.Run("is the source of the first operation, else of the terminator", func(t *testing.T) {
+		b := ssa.New("f")
+		first, second := b.Block(), b.Block()
+		b.Add(first, ssa.Operation{Op: ssa.OpConst, Source: 4})
+		b.Term(first, ssa.Terminator{Term: ssa.TermJump, Edges: []ssa.Edge{{Block: second}}, Source: 5})
+		b.Term(second, ssa.Terminator{Term: ssa.TermComplete, Source: 6})
+
+		f := b.Build()
+		require.Equal(t, uint32(4), f.Block(first).Source())
+		require.Equal(t, uint32(6), f.Block(second).Source())
+	})
+}
+
 func TestFunction_Type(t *testing.T) {
 	t.Run("returns the type a value was reserved with", func(t *testing.T) {
 		b := ssa.New("f")

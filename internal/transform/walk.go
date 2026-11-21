@@ -873,6 +873,11 @@ func (w *walker) retain(value ssa.Value) {
 
 func (w *walker) begin(ip int) {
 	w.ip, w.state = ip, ssa.NoValue
+	var source uint32
+	if positions := w.activation.function.Positions; len(positions) > 0 {
+		source = instr.Find(positions, ip)
+	}
+	w.builder.At(source)
 	w.before = append(w.before[:0], w.stack...)
 }
 

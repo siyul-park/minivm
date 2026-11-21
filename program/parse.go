@@ -208,6 +208,8 @@ func parseSection(prog *Program, section string, lineStart int, lines []string) 
 		prog.Types, err = parseTypes(lines)
 	case ".handlers":
 		prog.Handlers, err = parseHandlers(lines)
+	case ".positions":
+		prog.Positions, err = parsePositions(lines)
 	default:
 		return fmt.Errorf("line %d: unknown section %s", lineStart, section)
 	}
@@ -420,6 +422,22 @@ func parseHandlers(lines []string) ([]instr.Handler, error) {
 		handlers = append(handlers, h)
 	}
 	return handlers, nil
+}
+
+func parsePositions(lines []string) ([]instr.Position, error) {
+	var positions []instr.Position
+	for _, line := range lines {
+		trimmed := stripIndexPrefix(strings.TrimSpace(line))
+		if trimmed == "" {
+			continue
+		}
+		p, err := instr.ParsePosition(trimmed)
+		if err != nil {
+			return nil, err
+		}
+		positions = append(positions, p)
+	}
+	return positions, nil
 }
 
 func parseLiteral(s string) (types.Value, error) {

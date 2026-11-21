@@ -315,6 +315,66 @@ func TestVerify(t *testing.T) {
 			wantErr: program.ErrHandlerRange,
 		},
 		{
+			name: "positions/valid",
+			prog: program.New([]instr.Instruction{
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.DROP),
+			}, program.WithPositions(instr.Position{IP: 0, Source: 1}, instr.Position{IP: 5, Source: 0})),
+		},
+		{
+			name: "positions/unsorted",
+			prog: program.New([]instr.Instruction{
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.DROP),
+			}, program.WithPositions(instr.Position{IP: 5, Source: 1}, instr.Position{IP: 0, Source: 2})),
+			wantErr: program.ErrPosition,
+		},
+		{
+			name: "positions/duplicate ip",
+			prog: program.New([]instr.Instruction{
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.DROP),
+			}, program.WithPositions(instr.Position{IP: 0, Source: 1}, instr.Position{IP: 0, Source: 2})),
+			wantErr: program.ErrPosition,
+		},
+		{
+			name: "positions/mid instruction",
+			prog: program.New([]instr.Instruction{
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.DROP),
+			}, program.WithPositions(instr.Position{IP: 1, Source: 1})),
+			wantErr: program.ErrPosition,
+		},
+		{
+			name: "positions/ip past code",
+			prog: program.New([]instr.Instruction{
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.DROP),
+			}, program.WithPositions(instr.Position{IP: 6, Source: 1})),
+			wantErr: program.ErrPosition,
+		},
+		{
+			name:    "positions/empty code",
+			prog:    program.New(nil, program.WithPositions(instr.Position{IP: 0, Source: 1})),
+			wantErr: program.ErrPosition,
+		},
+		{
+			name: "positions/negative ip",
+			prog: program.New([]instr.Instruction{instr.MustNew(instr.NOP)},
+				program.WithPositions(instr.Position{IP: -1, Source: 1})),
+			wantErr: program.ErrPosition,
+		},
+		{
+			name: "positions/function mid instruction",
+			prog: withFunction(&types.Function{
+				Typ:       &types.FunctionType{},
+				Code:      instr.Marshal([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.DROP), instr.MustNew(instr.RETURN)}),
+				Positions: []instr.Position{{IP: 2, Source: 1}},
+			}),
+			wantErr:  program.ErrPosition,
+			wantSlot: 1,
+		},
+		{
 			// array.new pops a runtime count of elements: dataflow ends on its path.
 			name: "valid/array.new with several elements before a merge",
 			prog: assemble(func(b *program.Builder) {

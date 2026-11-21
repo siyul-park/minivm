@@ -60,6 +60,20 @@ func TestParseFunction(t *testing.T) {
 				Append(instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.RETURN)).
 				MustBuild(),
 		},
+		{
+			name:  "name and positions before locals",
+			lines: []string{"func() i32", "name \"a b\"", "capture i32", "position ip=0 source=7", "position ip=5 source=0", "i64", "i32.const 42", "return"},
+			want: func() *types.Function {
+				fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32()}}).
+					Captures(types.TypeI32()).
+					Locals(types.TypeI64()).
+					Append(instr.MustNew(instr.I32_CONST, 42), instr.MustNew(instr.RETURN)).
+					MustBuild()
+				fn.Name = "a b"
+				fn.Positions = []instr.Position{{IP: 0, Source: 7}, {IP: 5, Source: 0}}
+				return fn
+			}(),
+		},
 	}
 
 	for _, tt := range tests {
@@ -72,6 +86,18 @@ func TestParseFunction(t *testing.T) {
 			require.NoError(t, err, lines[0])
 			require.NotNil(t, fn, lines[0])
 			require.Equal(t, tt.want.String(), fn.String(), lines[0])
+			require.Equal(t, tt.want.Name, fn.Name)
+			require.Equal(t, tt.want.Positions, fn.Positions)
+		})
+	}
+
+	for name, lines := range map[string][]string{
+		"bad name":     {"func()", "name unquoted", "return"},
+		"bad position": {"func()", "position ip=0", "return"},
+	} {
+		t.Run("rejects "+name, func(t *testing.T) {
+			_, err := types.ParseFunction(lines)
+			require.Error(t, err)
 		})
 	}
 }

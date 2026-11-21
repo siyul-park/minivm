@@ -18,6 +18,7 @@ type Program struct {
 	Constants []types.Value
 	Types     []types.Type
 	Handlers  []instr.Handler
+	Positions []instr.Position
 }
 
 // WithConstants sets the constant pool.
@@ -62,6 +63,13 @@ func WithHandlers(handlers ...instr.Handler) func(*Program) {
 	}
 }
 
+// WithPositions attaches the source positions for the top-level code (slot 0).
+func WithPositions(positions ...instr.Position) func(*Program) {
+	return func(p *Program) {
+		p.Positions = positions
+	}
+}
+
 // New returns a program for instrs configured by options.
 func New(instrs []instr.Instruction, options ...func(*Program)) *Program {
 	p := &Program{Code: instr.Marshal(instrs)}
@@ -72,10 +80,10 @@ func New(instrs []instr.Instruction, options ...func(*Program)) *Program {
 }
 
 // Clone returns a snapshot that shares no mutable state with p: Code, Locals,
-// Globals, Constants, Types, and Handlers get fresh slices, and the constant
+// Globals, Constants, Types, Handlers, and Positions get fresh slices, and the constant
 // graph is copied. Every *types.Function, including one nested in an array,
 // map, or struct literal, is replaced by a copy owning its Code, Locals,
-// Captures, and Handlers; literals are rebuilt around copied children and other
+// Captures, Handlers, and Positions; literals are rebuilt around copied children and other
 // mutable constants are cloned (types.Clone). An object reachable from several
 // positions is copied once, so the snapshot shares it as p does. Type objects,
 // including each function's signature, stay shared and must not be mutated. A
@@ -91,6 +99,7 @@ func (p *Program) Clone() *Program {
 		Constants: slices.Clone(p.Constants),
 		Types:     slices.Clone(p.Types),
 		Handlers:  slices.Clone(p.Handlers),
+		Positions: slices.Clone(p.Positions),
 	}
 	copies := make(map[any]types.Value)
 	for i, v := range c.Constants {
@@ -130,6 +139,10 @@ func (p *Program) String() string {
 		for i, h := range p.Handlers {
 			sb.WriteString(fmt.Sprintf("%04d:\tstart=%d end=%d catch=%d depth=%d\n", i, h.Start, h.End, h.Catch, h.Depth))
 		}
+	}
+	if len(p.Positions) > 0 {
+		sb.WriteString(".positions\n")
+		writeIndexed(&sb, p.Positions)
 	}
 	return sb.String()
 }

@@ -35,10 +35,12 @@ type change struct {
 	before, after original
 }
 
-// original is the code and locals of a function before a round trip.
+// original is the code, locals, and source positions of a function before a
+// round trip.
 type original struct {
-	code   []byte
-	locals []types.Type
+	code      []byte
+	locals    []types.Type
+	positions []instr.Position
 }
 
 var _ pass.Pass[*program.Program] = (*SSAPass)(nil)
@@ -73,15 +75,15 @@ func (p *SSAPass) Run(_ *pass.Manager, prog *program.Program) (bool, error) {
 	manager := pass.NewManager()
 
 	var changes []change
-	root := &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
-	before := original{root.Code, root.Locals}
+	root := &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers, Positions: prog.Positions}
+	before := original{root.Code, root.Locals, root.Positions}
 	changed, err := p.roundtrip(manager, constants, 0, root)
 	if err != nil {
 		return false, err
 	}
 	if changed {
-		prog.Code, prog.Locals = root.Code, root.Locals
-		changes = append(changes, change{before: before, after: original{root.Code, root.Locals}})
+		prog.Code, prog.Locals, prog.Positions = root.Code, root.Locals, root.Positions
+		changes = append(changes, change{before: before, after: original{root.Code, root.Locals, root.Positions}})
 	}
 	seen := map[*types.Function]bool{}
 	for i, v := range prog.Constants {
@@ -90,13 +92,13 @@ func (p *SSAPass) Run(_ *pass.Manager, prog *program.Program) (bool, error) {
 			continue
 		}
 		seen[function] = true
-		before := original{function.Code, function.Locals}
+		before := original{function.Code, function.Locals, function.Positions}
 		done, err := p.roundtrip(manager, constants, i+1, function)
 		if err != nil {
 			return false, err
 		}
 		if done {
-			changes = append(changes, change{function: function, before: before, after: original{function.Code, function.Locals}})
+			changes = append(changes, change{function: function, before: before, after: original{function.Code, function.Locals, function.Positions}})
 		}
 	}
 
@@ -123,13 +125,13 @@ func (p *SSAPass) Run(_ *pass.Manager, prog *program.Program) (bool, error) {
 	return kept == 0, nil
 }
 
-// use sets the code and locals of the changed function.
+// use sets the code, locals, and positions of the changed function.
 func (c change) use(prog *program.Program, o original) {
 	if c.function == nil {
-		prog.Code, prog.Locals = o.code, o.locals
+		prog.Code, prog.Locals, prog.Positions = o.code, o.locals, o.positions
 		return
 	}
-	c.function.Code, c.function.Locals = o.code, o.locals
+	c.function.Code, c.function.Locals, c.function.Positions = o.code, o.locals, o.positions
 }
 
 func newPool(prog *program.Program) *pool {
@@ -177,13 +179,13 @@ func (p *SSAPass) roundtrip(manager *pass.Manager, constants *pool, address int,
 	if _, err := p.pipeline.Run(manager, f); err != nil {
 		return false, err
 	}
-	code, locals, ok := emit(f, constants, address == 0, function)
-	if !ok || (len(locals) == 0 && slices.Equal(code, function.Code)) {
+	out, ok := emit(f, constants, address == 0, function)
+	if !ok || (len(out.locals) == 0 && slices.Equal(out.code, function.Code)) {
 		return false, nil
 	}
-	function.Code = code
-	if len(locals) > 0 {
-		function.Locals = append(slices.Clone(function.Locals), locals...)
+	function.Code, function.Positions = out.code, out.positions
+	if len(out.locals) > 0 {
+		function.Locals = append(slices.Clone(function.Locals), out.locals...)
 	}
 	return true, nil
 }

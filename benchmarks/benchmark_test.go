@@ -2,6 +2,8 @@ package benchmarks_test
 
 import (
 	"context"
+	"fmt"
+	"maps"
 	"runtime"
 	"slices"
 	"strings"
@@ -10,6 +12,7 @@ import (
 
 	_ "github.com/siyul-park/minivm/benchmarks/fixtures"
 	"github.com/siyul-park/minivm/benchmarks/registry"
+	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/optimize"
 	"github.com/siyul-park/minivm/program"
@@ -49,6 +52,80 @@ func TestKernels(t *testing.T) {
 		spec := spec
 		t.Run(spec.Name, func(t *testing.T) {
 			result := spec.Result()
+			t.Run("optimizing keeps a source of the program on every instruction", func(t *testing.T) {
+				for _, level := range []optimize.Level{optimize.O1, optimize.O2, optimize.O3} {
+					prog, err := program.Parse(strings.NewReader(spec.Source.MVM))
+					require.NoError(t, err)
+					// Each instruction gets a source unique across the program:
+					// owner<<16 + ip+1, the module owning 0 and a function its
+					// constant index + 1.
+					owned := map[*types.Function]map[uint32]bool{}
+					annotate := func(code []byte, owner int) ([]instr.Position, map[uint32]bool) {
+						var positions []instr.Position
+						sources := map[uint32]bool{}
+						for ip := 0; ip < len(code); ip += instr.Instruction(code[ip:]).Width() {
+							source := uint32(owner<<16 + ip + 1)
+							positions = append(positions, instr.Position{IP: ip, Source: source})
+							sources[source] = true
+						}
+						return positions, sources
+					}
+					var module map[uint32]bool
+					prog.Positions, module = annotate(prog.Code, 0)
+					for i, c := range prog.Constants {
+						if fn, ok := c.(*types.Function); ok {
+							fn.Positions, owned[fn] = annotate(fn.Code, i+1)
+						}
+					}
+					// A body may take the sources of the functions it reaches
+					// through CONST_GET, which is what O3 inlines.
+					reach := func(code []byte, own map[uint32]bool) map[uint32]bool {
+						allowed, seen := maps.Clone(own), map[*types.Function]bool{}
+						queue := [][]byte{code}
+						for len(queue) > 0 {
+							for _, inst := range instr.Unmarshal(queue[0]) {
+								if inst.Opcode() != instr.CONST_GET {
+									continue
+								}
+								if fn, ok := prog.Constants[inst.Operand(0)].(*types.Function); ok && !seen[fn] {
+									seen[fn] = true
+									maps.Copy(allowed, owned[fn])
+									queue = append(queue, fn.Code)
+								}
+							}
+							queue = queue[1:]
+						}
+						return allowed
+					}
+					allowed := map[*types.Function]map[uint32]bool{}
+					for fn, own := range owned {
+						allowed[fn] = own
+						if level == optimize.O3 {
+							allowed[fn] = reach(fn.Code, own)
+						}
+					}
+					moduleAllowed := module
+					if level == optimize.O3 {
+						moduleAllowed = reach(prog.Code, module)
+					}
+
+					prog, err = optimize.New(level).Optimize(prog)
+					require.NoError(t, err)
+					require.NoError(t, program.Verify(prog))
+					check := func(name string, code []byte, positions []instr.Position, allowed map[uint32]bool) {
+						for ip := 0; ip < len(code); ip += instr.Instruction(code[ip:]).Width() {
+							source := instr.Find(positions, ip)
+							require.True(t, allowed[source], "O%d %s ip %d source %#x", level, name, ip, source)
+						}
+					}
+					check("module", prog.Code, prog.Positions, moduleAllowed)
+					for i, c := range prog.Constants {
+						if fn, ok := c.(*types.Function); ok {
+							check(fmt.Sprint(i), fn.Code, fn.Positions, allowed[fn])
+						}
+					}
+				}
+			})
 			for _, mode := range modes {
 				t.Run(mode.name, func(t *testing.T) {
 					prog := readProgram(spec, mode.optimize)
