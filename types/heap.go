@@ -10,7 +10,7 @@ import (
 
 // Heap holds the values a runtime references by address, counting each slot's
 // references and collecting unreachable cycles. It is not safe for concurrent
-// use, and it MUST NOT be copied after NewHeap.
+// use, and it MUST NOT be copied after first use.
 //
 // Address 0 is the runtime's null slot: Inc counts it like any slot, and
 // callers of Dec skip it. The methods that name an address take it unchecked,
@@ -195,7 +195,8 @@ func (h *Heap) Dispose(addr int, old Value) {
 
 // Recount takes the heap as the baseline every Reset returns to and rebuilds
 // its counts from roots, one reference each, and from the edges between
-// values, for the runtime that owns the heap. It sets the collection pace: a
+// values, for the runtime that owns the heap. The heap MUST already hold the
+// null slot at address 0. It sets the collection pace: a
 // fresh heap first collects once its capacity is in use, a reloaded one once
 // the live set has grown by the pace's runway.
 func (h *Heap) Recount(roots []Boxed) {

@@ -115,6 +115,7 @@ Additional rules:
 - Storing another heap address returns `ErrTypeMismatch`; share it with `Alloc(ref)`.
 - Concrete pointers passed to `Alloc`, `Store`, or `Push` transfer unique ownership and `MUST NOT` already be VM-owned.
 - Owned refs `MUST` transfer or release; leaked host ownership keeps objects alive.
+- `vm.Heap()` returns the interpreter's `*types.Heap`, which containers take to reuse its storage (`types.MakeArray`, `types.NewArray`, `types.NewStruct`). Its address methods are unchecked and serve the runtime: a host `MUST` use the checked `Interpreter` methods above to read, write, or count a slot.
 
 `Store`/`Alloc` track crossed pointers to reject double ownership. Heap-stored dynamic functions receive callable dispatch slots and follow normal heap lifetime.
 

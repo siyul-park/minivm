@@ -6,7 +6,7 @@ Heap storage, reference ownership, RC, cycle collection.
 
 | Concern | Owner |
 |---|---|
-| Heap / RC | `interp/interp.go` |
+| Heap / RC | `types/heap.go` |
 | Threaded ownership | `interp/threaded.go` |
 | Host heap API | `interp/host.go` |
 | Heap object types | `types/array.go`, `struct.go`, `map.go` |
@@ -17,15 +17,8 @@ Heap storage, reference ownership, RC, cycle collection.
 - Heap refs are stable indexes; `0` is permanent null.
 - Only `KindRef` is reference-counted.
 - Ref-containing heap values `MUST` implement `types.Traceable`.
-- `release` is iterative.
-
-```text
-heap  []types.Value
-rc    []int
-free  []int
-trial []int
-work  []int
-```
+- `Heap.Dec` is iterative.
+- `types.Heap` holds the slots, their counts, the free list, and the struct and array free lists; `interp.Interpreter` embeds it by value and reaches its runtime through `Hooks` (`Exhaust`, `Fault`, `Finalize`, `Collect`).
 
 Native execution MUST preserve the threaded ownership totals.
 
@@ -87,7 +80,7 @@ Implementations `MUST` append child refs without mutating existing entries and `
 
 Trial deletion subtracts heap-to-heap edges from exact counts, marks from externally owned objects, reclaims unmarked allocated objects, then repairs surviving counts.
 
-Heap indexes never move. Collection runs adaptively and before the hard heap limit. After construction and after `Reset`, the heap collects when it holds the baseline plus `max(live - baseline, 64)` slots, capped at the limit; every collection sets the pace again the same way.
+Heap indexes never move. Collection runs adaptively and before the hard heap limit. After construction, the heap first collects when it holds `max(capacity, baseline + 64)` slots, capped at the limit. After `Reset`, and after every collection, it collects when it holds the live slots plus `max(live - baseline, 64)`, capped at the limit.
 
 ## Strings
 

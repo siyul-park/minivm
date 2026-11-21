@@ -198,6 +198,20 @@ func TestHeap_Add(t *testing.T) {
 		require.Equal(t, a, h.Add(types.I32(4)))
 	})
 
+	t.Run("paces the next collection from the live set's growth", func(t *testing.T) {
+		h := types.NewHeap(256, 0, types.Hooks{})
+		h.Add(types.Null)
+		h.Recount(nil)
+		h.Reset()
+		h.Add(types.Null)
+		h.Recount(nil)
+		for n := range 150 {
+			h.Add(types.I32(n))
+		}
+		// Collections at 65 and 129 live slots set the target to 129 + 128.
+		require.Equal(t, 257-h.Live(), h.Room())
+	})
+
 	t.Run("grows past its capacity", func(t *testing.T) {
 		h := types.NewHeap(0, 0, types.Hooks{})
 		for n := range 9 {
@@ -235,6 +249,14 @@ func TestHeap_Dec(t *testing.T) {
 		require.False(t, h.Alive(parent))
 		require.False(t, h.Alive(child))
 		require.False(t, h.Alive(grandchild))
+	})
+
+	t.Run("does not reuse an array someone may still hold", func(t *testing.T) {
+		typ := types.NewArrayType(types.TypeAny())
+		h := types.NewHeap(4, 0, types.Hooks{})
+		array := types.NewArray(nil, typ)
+		h.Dec(h.Add(array))
+		require.NotSame(t, array, types.MakeArray(h, typ, 0))
 	})
 }
 
@@ -371,6 +393,19 @@ func TestHeap_Reset(t *testing.T) {
 
 		h.Reset()
 		require.Same(t, s, types.NewStruct(h, typ))
+	})
+
+	t.Run("keeps freed arrays with their cleared storage", func(t *testing.T) {
+		typ := types.NewArrayType(types.TypeAny())
+		h := types.NewHeap(4, 0, types.Hooks{})
+		h.Add(types.Null)
+		h.Recount(nil)
+		array := types.NewArray(nil, typ, types.BoxI32(1), types.BoxI32(2))
+		h.Add(array)
+
+		h.Reset()
+		require.Same(t, array, types.MakeArray(h, typ, 2))
+		require.Equal(t, make([]types.Boxed, 2), array.Elems)
 	})
 }
 
