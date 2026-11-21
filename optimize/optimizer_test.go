@@ -181,6 +181,64 @@ func TestOptimizer_Optimize(t *testing.T) {
 		}
 	})
 
+	t.Run("resolves runtime error frames to sources", func(t *testing.T) {
+		build := func() *program.Program {
+			div := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Append(
+				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_DIV_S), instr.MustNew(instr.RETURN)).MustBuild()
+			b := program.NewBuilder().Locals(types.TypeI32()).Globals(types.TypeI32())
+			head := b.Label()
+			b.Emit(instr.I32_CONST, 3).Emit(instr.LOCAL_SET, 0)
+			b.Bind(head).Emit(instr.I32_CONST, 7).Emit(instr.LOCAL_GET, 0).ConstGet(div).Emit(instr.CALL).Emit(instr.DROP)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB).Emit(instr.LOCAL_TEE, 0)
+			b.Emit(instr.I32_CONST, 0).Emit(instr.I32_GE_S).BrIf(head).Emit(instr.I32_CONST, 0).Emit(instr.GLOBAL_SET, 0)
+			return b.MustBuild()
+		}
+		// Every instruction's source is owner<<16 + ip + 1; div is owner 1.
+		annotate := func(code []byte, owner int) []instr.Position {
+			var positions []instr.Position
+			for ip := 0; ip < len(code); ip += instr.Instruction(code[ip:]).Width() {
+				positions = append(positions, instr.Position{IP: ip, Source: uint32(owner<<16 + ip + 1)})
+			}
+			return positions
+		}
+		at := func(code []byte, op instr.Opcode) int {
+			for ip := 0; ip < len(code); ip += instr.Instruction(code[ip:]).Width() {
+				if instr.Opcode(code[ip]) == op {
+					return ip
+				}
+			}
+			return -1
+		}
+
+		input := build()
+		div := input.Constants[0].(*types.Function)
+		input.Positions, div.Positions = annotate(input.Code, 0), annotate(div.Code, 1)
+		want := []uint32{uint32(1<<16 + at(div.Code, instr.I32_DIV_S) + 1), uint32(at(input.Code, instr.CALL) + 1)}
+
+		got, err := optimize.New(optimize.O3).Optimize(input)
+		require.NoError(t, err)
+
+		for _, threshold := range []int{-1, 1} {
+			vm := interp.MustNew(got, interp.WithThreshold(threshold))
+			err := vm.Run(context.Background())
+			var runtimeErr *interp.RuntimeError
+			require.ErrorAs(t, err, &runtimeErr)
+			require.ErrorIs(t, err, interp.ErrDivideByZero)
+			require.Len(t, runtimeErr.Frames, 2)
+
+			// The innermost frame names the faulting instruction; an outer frame's
+			// IP is its return address, so its call is the instruction before it.
+			callee, err := vm.Load(runtimeErr.Frames[0].Func)
+			require.NoError(t, err)
+			sources := []uint32{
+				instr.Find(callee.(*types.Function).Positions, runtimeErr.Frames[0].IP),
+				instr.Find(got.Positions, runtimeErr.Frames[1].IP-1),
+			}
+			require.Equal(t, want, sources, "threshold %d", threshold)
+			vm.Close()
+		}
+	})
+
 	t.Run("O0 passthrough", func(t *testing.T) {
 		o := optimize.New(optimize.O0)
 		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})

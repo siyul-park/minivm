@@ -79,7 +79,9 @@ dbg.BreakIf(0, 10, func(vm *interp.Interpreter) bool { return vm.Len() > 0 })
 
 ## Source Positions
 
-A front-end maps bytecode back to its source through two optional fields beside `Handlers`: `types.Function.Positions` and, for module code, `program.Program.Positions`. Each `instr.Position` maps the instructions from its `IP` up to the next entry's to an opaque front-end source ID, ID `0` being none; IPs strictly ascend and lie on instruction boundaries; `instr.Find` returns the ID covering an ip. `types.Function.Name` is the function's source name. The VM never interprets either, and the interpreter never reads them, so a program without them pays nothing. Resolving IDs to files, lines, and names stays in the front-end, as a source map's `sources` and `names` do. Text form: `name "<quoted>"` and `position ip=N source=M` lines in a function, and a `.positions` section in a program.
+A front-end maps bytecode back to its source through two optional fields beside `Handlers`: `types.Function.Positions` and, for module code, `program.Program.Positions`. Each `instr.Position` maps the instructions from its `IP` up to the next entry's to an opaque front-end source ID, ID `0` being none; IPs strictly ascend and lie on instruction boundaries; `instr.Find` returns the ID covering an ip. `types.Function.Name` is the function's source name. The VM never interprets either and execution never reads them, so a program without them pays nothing; optimization keeps them (`pass-system.md`, Bytecode). Resolving IDs to files, lines, and names stays in the front-end, as a source map's `sources` and `names` do. Text form: `name "<quoted>"` and `position ip=N source=M` lines in a function, and a `.positions` section in a program.
+
+A `types.Frame` (`RuntimeError.Frames`, `types.Error.Frames`) resolves to a source in either tier: `Func` `0` reads the program's `Positions`, any other `Func` is the heap address `Interpreter.Load` returns the `*types.Function` for. The innermost frame's `IP` names the faulting instruction; an outer frame's `IP` is its return address, so its call is found at `IP-1`.
 
 ## Precision
 
