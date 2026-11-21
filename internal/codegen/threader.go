@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/dave/jennifer/jen"
@@ -26,7 +27,11 @@ func threaderType(file *jen.File) {
 	)
 }
 
-func fusionTable(patterns []pattern) (jen.Code, error) {
+// fusionTable is the table of fusion matchers by first opcode. Each matcher is
+// a named function the table's entry calls, marked go:noinline: a matcher only
+// runs while threading, and inlining it would put the handler closure it
+// returns into a clone the compiler builds without inlining.
+func fusionTable(file *jen.File, patterns []pattern) (jen.Code, error) {
 	var groups [256][]pattern
 	for _, pattern := range patterns {
 		groups[pattern[0].op] = append(groups[pattern[0].op], pattern)
@@ -38,7 +43,11 @@ func fusionTable(patterns []pattern) (jen.Code, error) {
 			continue
 		}
 		body := []jen.Code{jen.Id("start").Op(":=").Id("c").Dot("ip")}
-		for _, pattern := range patterns {
+		var name strings.Builder
+		for _, part := range strings.FieldsFunc(instr.TypeOf(instr.Opcode(opcode)).Mnemonic, func(r rune) bool { return r == '.' || r == '_' }) {
+			name.WriteString(strings.ToUpper(part[:1]) + part[1:])
+		}
+		for n, pattern := range patterns {
 			size := pattern.width()
 			statements, trap, err := compose(pattern, size, "")
 			if err != nil {
@@ -49,10 +58,14 @@ func fusionTable(patterns []pattern) (jen.Code, error) {
 				statements = append([]jen.Code{jen.Id("offset").Op(":=").Qual(instrPkg, "ParseI16").Call(jen.Id("c").Dot("code"), jen.Id("start").Op("+").Lit(offset))}, statements...)
 			}
 			statements = append([]jen.Code{jen.If(jen.Op("!").Parens(matchGuard(pattern))).Block(jen.Return(jen.Nil()))}, statements...)
-			attempt := jen.Func().Params().Func().Params(jen.Op("*").Id("Interpreter")).Block(
+			matcher := fmt.Sprintf("fuse%s%d", name.String(), n)
+			file.Comment("//go:noinline")
+			file.Func().Id(matcher).Params(jen.Id("c").Op("*").Id("threader"), jen.Id("start").Int()).Func().Params(jen.Op("*").Id("Interpreter")).Block(
 				jen.For(jen.Range().Lit(1)).Block(statements...),
 				jen.Return(jen.Nil()),
-			).Call()
+			)
+			file.Line()
+			attempt := jen.Id(matcher).Call(jen.Id("c"), jen.Id("start"))
 			body = append(body, jen.If(jen.Id("fn").Op(":=").Add(attempt), jen.Id("fn").Op("!=").Nil()).Block(
 				jen.Return(jen.Id("fn"), jen.Lit(trap)),
 			))

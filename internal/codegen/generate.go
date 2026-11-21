@@ -41,7 +41,7 @@ func render(patterns []pattern) ([]byte, error) {
 	file.ImportName("github.com/siyul-park/minivm/types", "types")
 
 	threaderType(file)
-	table, err := fusionTable(patterns)
+	table, err := fusionTable(file, patterns)
 	if err != nil {
 		return nil, err
 	}
