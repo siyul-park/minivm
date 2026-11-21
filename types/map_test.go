@@ -12,16 +12,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func entryLines[K comparable](rangeFn func(func(K, types.Boxed))) []string {
+// orderedLines renders the entries rangeFn produces, in its order.
+func orderedLines[K comparable](rangeFn func(func(K, types.Boxed))) []string {
 	var out []string
 	rangeFn(func(key K, value types.Boxed) {
 		out = append(out, fmt.Sprintf("%v/%d", key, uint64(value)))
 	})
-	sort.Strings(out)
 	return out
 }
 
-// TestTypedMap owns the whole-map contract: every key kind behaves exactly as the Go-map model.
+// TestTypedMap owns the whole-map contract: every key kind behaves exactly as
+// the insertion-ordered model.
 func TestTypedMap(t *testing.T) {
 	negZero32 := float32(math.Copysign(0, -1))
 	negZero64 := math.Copysign(0, -1)
@@ -92,60 +93,95 @@ func TestTypedMap(t *testing.T) {
 	}
 }
 
-// replay applies one random operation sequence to a TypedMap and to a Go map,
-// the reference model, and requires every observable result to agree.
+// replay applies one random operation sequence to a TypedMap and to a
+// reference model, an insertion log indexed by a Go map, and requires every
+// observable result to agree, iteration order included.
 func replay[K types.Scalar](t *testing.T, typ *types.MapType, pool []K, ops int, seed uint64) {
+	type entry struct {
+		key   K
+		value types.Boxed
+		live  bool
+	}
 	rng := rand.New(rand.NewPCG(seed, 1))
 	m := types.NewTypedMap[K](typ, rng.IntN(4)*8)
-	model := map[K]types.Boxed{}
+	var log []entry
+	index := map[K]int{}
+	live := 0
 	modelLines := func() []string {
-		return entryLines[K](func(fn func(K, types.Boxed)) {
-			for k, v := range model {
-				fn(k, v)
+		var out []string
+		for _, e := range log {
+			if e.live {
+				out = append(out, fmt.Sprintf("%v/%d", e.key, uint64(e.value)))
 			}
-		})
+		}
+		return out
 	}
 	for n := 0; n < ops; n++ {
 		key := pool[rng.IntN(len(pool))]
 		value := types.BoxI32(int32(rng.IntN(1 << 20)))
+		i, found := index[key]
 		switch op := rng.IntN(100); {
 		case op < 40:
-			wantOld, wantOK := model[key]
-			model[key] = value
+			var wantOld types.Boxed
+			if found {
+				wantOld = log[i].value
+				log[i].value = value
+			} else {
+				var zero K
+				stored := key
+				if key == zero {
+					stored = zero
+				}
+				log = append(log, entry{key: stored, value: value, live: true})
+				live++
+				if key == key {
+					index[key] = len(log) - 1
+				}
+			}
 			gotOld, gotOK := m.Set(key, value)
-			require.Equal(t, wantOK, gotOK, "set %v", key)
+			require.Equal(t, found, gotOK, "set %v", key)
 			require.Equal(t, wantOld, gotOld, "set %v", key)
 		case op < 60:
-			want, wantOK := model[key]
+			var want types.Boxed
+			if found {
+				want = log[i].value
+			}
 			got, gotOK := m.Get(key)
-			require.Equal(t, wantOK, gotOK, "get %v", key)
+			require.Equal(t, found, gotOK, "get %v", key)
 			require.Equal(t, want, got, "get %v", key)
 		case op < 90:
-			wantOld, wantOK := model[key]
-			delete(model, key)
+			var wantOld types.Boxed
+			if found {
+				wantOld = log[i].value
+				log[i].live = false
+				live--
+				delete(index, key)
+			}
 			gotOld, gotOK := m.Delete(key)
-			require.Equal(t, wantOK, gotOK, "delete %v", key)
+			require.Equal(t, found, gotOK, "delete %v", key)
 			require.Equal(t, wantOld, gotOld, "delete %v", key)
 		case op < 92:
-			var want, got []string
-			for _, v := range model {
-				want = append(want, fmt.Sprint(uint64(v)))
+			var want, got []types.Boxed
+			for _, e := range log {
+				if e.live {
+					want = append(want, e.value)
+				}
 			}
-			clear(model)
-			m.Clear(func(v types.Boxed) { got = append(got, fmt.Sprint(uint64(v))) })
-			require.ElementsMatch(t, want, got, "clear")
+			log, index, live = nil, map[K]int{}, 0
+			m.Clear(func(v types.Boxed) { got = append(got, v) })
+			require.Equal(t, want, got, "clear")
 		case op < 96:
-			require.Equal(t, modelLines(), entryLines[K](m.Range), "range")
+			require.Equal(t, modelLines(), orderedLines[K](m.Range), "range")
 		default:
 			c := m.Clone()
-			require.Equal(t, modelLines(), entryLines[K](c.Range), "clone")
+			require.Equal(t, modelLines(), orderedLines[K](c.Range), "clone")
 			c.Set(key, value)
 			c.Delete(key)
-			require.Equal(t, modelLines(), entryLines[K](m.Range), "clone shares storage")
+			require.Equal(t, modelLines(), orderedLines[K](m.Range), "clone shares storage")
 		}
-		require.Equal(t, len(model), m.Len(), "len after op %d", n)
+		require.Equal(t, live, m.Len(), "len after op %d", n)
 	}
-	require.Equal(t, modelLines(), entryLines[K](m.Range))
+	require.Equal(t, modelLines(), orderedLines[K](m.Range))
 }
 
 func TestMapLiteral(t *testing.T) {
@@ -317,65 +353,53 @@ func TestTypedMap_Set(t *testing.T) {
 		require.Equal(t, 40, visited)
 	})
 
-	t.Run("f64 reports the latest written zero", func(t *testing.T) {
+	t.Run("f64 stores a zero key as +0", func(t *testing.T) {
 		m := types.NewTypedMap[float64](types.NewMapType(types.TypeF64(), types.TypeI32()), 0)
-		for _, key := range []float64{0, math.Copysign(0, -1), 0, math.Copysign(0, -1)} {
+		for _, key := range []float64{math.Copysign(0, -1), 0, math.Copysign(0, -1)} {
 			m.Set(key, types.BoxI32(1))
 			m.Range(func(got float64, _ types.Boxed) {
-				require.Equal(t, math.Signbit(key), math.Signbit(got))
+				require.False(t, math.Signbit(got))
 			})
 		}
 	})
 
-	t.Run("keys crafted against the unseeded hash do not cluster", func(t *testing.T) {
-		const multiplier = uint64(0x9E3779B97F4A7C15)
-		inverse := multiplier
-		for range 6 {
-			inverse *= 2 - multiplier*inverse
+	t.Run("an update keeps the entry's position", func(t *testing.T) {
+		m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32(), types.TypeI32()), 0)
+		for _, key := range []int32{3, 1, 2} {
+			m.Set(key, types.BoxI32(key))
 		}
-		require.Equal(t, uint64(1), inverse*multiplier)
-
-		const n = 64
-		m := types.NewTypedMap[int64](types.NewMapType(types.TypeI64(), types.TypeI32()), 0)
-		for k := uint64(1); k <= n; k++ {
-			m.Set(int64(k*inverse), types.BoxI32(1))
-		}
-		var order []int64
-		m.Range(func(key int64, _ types.Boxed) { order = append(order, key) })
-		require.Len(t, order, n)
-		runs := 0
-		for i := 1; i < len(order); i++ {
-			if uint64(order[i]) == uint64(order[i-1])+inverse {
-				runs++
-			}
-		}
-		require.Less(t, runs, n/2, "crafted keys share one probe cluster")
+		m.Set(1, types.BoxI32(10))
+		var keys []int32
+		var values []types.Boxed
+		m.Range(func(key int32, value types.Boxed) { keys, values = append(keys, key), append(values, value) })
+		require.Equal(t, []int32{3, 1, 2}, keys)
+		require.Equal(t, []types.Boxed{types.BoxI32(3), types.BoxI32(10), types.BoxI32(2)}, values)
 	})
 
-	t.Run("tables built the same way hash with different seeds", func(t *testing.T) {
+	t.Run("a deleted key set again moves to the end", func(t *testing.T) {
+		m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32(), types.TypeI32()), 0)
+		for _, key := range []int32{1, 2, 3} {
+			m.Set(key, types.BoxI32(key))
+		}
+		m.Delete(1)
+		m.Set(1, types.BoxI32(1))
+		var keys []int32
+		m.Range(func(key int32, _ types.Boxed) { keys = append(keys, key) })
+		require.Equal(t, []int32{2, 3, 1}, keys)
+	})
+
+	t.Run("tables with different seeds iterate in one order", func(t *testing.T) {
 		orders := map[string]bool{}
 		for range 16 {
 			m := types.NewTypedMap[int64](types.NewMapType(types.TypeI64(), types.TypeI32()), 0)
 			for k := range int64(24) {
-				m.Set(k, types.BoxI32(1))
+				m.Set(k*7919, types.BoxI32(1))
 			}
 			var order []int64
 			m.Range(func(key int64, _ types.Boxed) { order = append(order, key) })
 			orders[fmt.Sprint(order)] = true
 		}
-		require.Greater(t, len(orders), 1, "every table walked its slots in the same order")
-	})
-
-	t.Run("reuses deleted slots without rehashing", func(t *testing.T) {
-		m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32(), types.TypeI32()), 0)
-		m.Set(1, types.BoxI32(1))
-		allocs := testing.AllocsPerRun(5, func() {
-			for range 64 {
-				m.Set(100, types.BoxI32(1))
-				m.Delete(100)
-			}
-		})
-		require.Zero(t, allocs)
+		require.Len(t, orders, 1)
 	})
 }
 
@@ -414,6 +438,7 @@ func TestTypedMap_Delete(t *testing.T) {
 		require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(4096), "tombstones alone grew the table")
 	})
 }
+
 func TestTypedMap_Clear(t *testing.T) {
 	t.Run("integer keys", func(t *testing.T) {
 		m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32(), types.TypeI32()), 0)
@@ -695,6 +720,26 @@ func TestMapIterator_Next(t *testing.T) {
 		}
 	})
 
+	t.Run("entries inserted during the walk are produced once, across rehashes", func(t *testing.T) {
+		m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32(), types.TypeI32()), 0)
+		for k := range int32(4) {
+			m.Set(k, 1)
+		}
+		it := types.NewMapIterator(1, m)
+		var produced []int32
+		for it.Next() {
+			key := int32(it.Current().(types.I32))
+			produced = append(produced, key)
+			if key < 100 {
+				m.Delete(key)
+				m.Set(key+100, 1)
+				m.Set(key+200, 1)
+				m.Delete(key + 200)
+			}
+		}
+		require.Equal(t, []int32{0, 1, 2, 3, 100, 101, 102, 103}, produced)
+	})
+
 	t.Run("clear ends a string map walk", func(t *testing.T) {
 		m := types.NewStringMap(types.NewMapType(types.TypeString(), types.TypeI32()), 0)
 		for _, key := range []string{"a", "b", "c", "d", "e", "f"} {
@@ -775,7 +820,7 @@ func TestMapIterator_Next(t *testing.T) {
 			}},
 			{"growth every step", func(m *types.TypedMap[int32], rng *rand.Rand, del func(int32)) {
 				for range 64 {
-					m.Set(int32(present+rng.IntN(1<<20)), 1)
+					m.Set(int32(present+rng.IntN(4096)), 1)
 				}
 				del(int32(rng.IntN(present)))
 			}},
@@ -1052,7 +1097,7 @@ func TestMapLiteral_Type(t *testing.T) {
 func TestMapLiteral_String(t *testing.T) {
 	typ := types.NewMapType(types.TypeI32(), types.TypeString())
 	value := &types.MapLiteral{Typ: typ, Keys: []types.Value{types.I32(2), types.I32(1)}, Values: []types.Value{types.String("b"), types.String("a")}}
-	require.Equal(t, `map[i32]string{1: "a", 2: "b"}`, value.String())
+	require.Equal(t, `map[i32]string{2: "b", 1: "a"}`, value.String())
 }
 
 func TestMapKey_String(t *testing.T) {

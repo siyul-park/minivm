@@ -338,7 +338,7 @@ Primitive keys use value identity; `i1`/`i8` use their `i32` representation. Str
 
 `(*Interpreter).mapKey` owns the rule for map operations and `Marshal`. Missing keys return element zero values. `MAP_LOOKUP` also returns an `i1` presence flag.
 
-`MAP_KEYS` and `MAP_ITER` produce keys in an unspecified order; programs `MUST NOT` depend on it. `memory-model.md` owns the guarantee under mutation during `MAP_ITER`.
+`MAP_KEYS` and `MAP_ITER` produce the keys of a numeric-keyed map in insertion order: an update keeps the key's place, and a key deleted and set again goes last. The order over any other key kind is unspecified; programs `MUST NOT` depend on it. `memory-model.md` owns the guarantee under mutation during `MAP_ITER`.
 
 ### Structured Errors
 

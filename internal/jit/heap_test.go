@@ -64,11 +64,12 @@ func TestHeap_Layout(t *testing.T) {
 			require.Equal(t, uintptr(8), jit.OffsetMapZero)
 			require.Equal(t, uintptr(16), jit.OffsetMapCtrl)
 			require.Equal(t, uintptr(40), jit.OffsetMapSlots)
-			require.Equal(t, uintptr(64), jit.OffsetMapMask)
-			require.Equal(t, uintptr(72), jit.OffsetMapShift)
-			require.Equal(t, uintptr(80), jit.OffsetMapSeed)
-			require.Equal(t, uintptr(88), jit.OffsetMapCount)
-			require.Equal(t, uintptr(96), jit.OffsetMapUsed)
+			require.Equal(t, uintptr(64), jit.OffsetMapOrder)
+			require.Equal(t, uintptr(88), jit.OffsetMapMask)
+			require.Equal(t, uintptr(96), jit.OffsetMapShift)
+			require.Equal(t, uintptr(104), jit.OffsetMapSeed)
+			require.Equal(t, uintptr(112), jit.OffsetMapCount)
+			require.Equal(t, uintptr(120), jit.OffsetMapUsed)
 		})
 
 		t.Run("reads the fields of every key kind's table", func(t *testing.T) {
@@ -89,6 +90,7 @@ func TestHeap_Layout(t *testing.T) {
 				require.Equal(t, uint64(table.FieldByName("used").Int()), word(jit.OffsetMapUsed))
 				require.Equal(t, uint64(table.FieldByName("ctrl").Pointer()), word(jit.OffsetMapCtrl))
 				require.Equal(t, uint64(table.FieldByName("slots").Pointer()), word(jit.OffsetMapSlots))
+				require.Equal(t, uint64(table.FieldByName("order").Pointer()), word(jit.OffsetMapOrder))
 			}
 		})
 
@@ -97,12 +99,14 @@ func TestHeap_Layout(t *testing.T) {
 			const key = 12345
 			m.Set(key, types.BoxI32(7))
 			table := reflect.ValueOf(m).Elem().FieldByName("table")
-			seed := table.FieldByName("seed").Uint()
-			home := ((uint64(key) ^ seed) * jit.MapHash >> table.FieldByName("shift").Uint()) & table.FieldByName("mask").Uint()
+			seed, shift := table.FieldByName("seed").Uint(), table.FieldByName("shift").Uint()
+			hash := (uint64(key) ^ seed) * jit.MapHash
+			home := (hash >> shift) & table.FieldByName("mask").Uint()
 
 			ctrl := table.FieldByName("ctrl")
 			slots := table.FieldByName("slots")
-			require.Equal(t, uint64(jit.SlotFull), ctrl.Index(int(home)).Uint())
+			require.Equal(t, uint64(jit.SlotFull|(hash>>(shift-7))&0x7F), ctrl.Index(int(home)).Uint())
+			require.Equal(t, home, table.FieldByName("order").Index(0).Uint())
 			require.Equal(t, uint64(key), slots.Index(int(2*home)).Uint())
 			require.Equal(t, uint64(types.BoxI32(7)), slots.Index(int(2*home+1)).Uint())
 

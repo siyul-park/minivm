@@ -1997,6 +1997,22 @@ var runTests = []struct {
 		values: []types.Value{types.I32(2)},
 	},
 	{
+		// Keys come back in insertion order: an update keeps its place, a deleted
+		// key set again goes last.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_CONST, 30), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10),
+			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.MAP_DELETE),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 11), instr.MustNew(instr.MAP_SET),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_CONST, 31), instr.MustNew(instr.MAP_SET),
+			instr.MustNew(instr.MAP_KEYS), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_GET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeI32(), types.TypeI32())), program.WithLocals(types.NewArrayType(types.TypeI32()))),
+		values: []types.Value{types.I32(3), types.I32(2), types.I32(1)},
+	},
+	{
 		program: program.New([]instr.Instruction{
 			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT),
 			instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
@@ -10157,7 +10173,7 @@ func TestWithThreshold(t *testing.T) {
 				typ := types.NewMapType(tt.key, types.TypeI32())
 				prog := mapProgram(t, typ, 128, 3000, nil, nil, mapBody(mapKey{tt.key, tt.shift, tt.wide}, tt.space, identity, identity))
 				exits := compareNative(t, prog)
-				require.Zero(t, exits["bridge"], "the map operations stay native")
+				require.LessOrEqual(t, exits["bridge"], float64(rehashes(128, 3000, 61)), "only a rehash bridges")
 				require.Zero(t, exits["deopt"])
 			})
 		}
@@ -10178,7 +10194,7 @@ func TestWithThreshold(t *testing.T) {
 				typ := types.NewMapType(types.TypeI32(), tt.elem)
 				prog := mapProgram(t, typ, 128, 3000, nil, nil, mapBody(mapKey{types.TypeI32(), 0, false}, 61, tt.in, tt.out))
 				exits := compareNative(t, prog)
-				require.Zero(t, exits["bridge"], "the map operations stay native")
+				require.LessOrEqual(t, exits["bridge"], float64(rehashes(128, 3000, 61)), "only a rehash bridges")
 			})
 		}
 	})
@@ -10235,7 +10251,7 @@ func TestWithThreshold(t *testing.T) {
 					b.Bind(next)
 				})
 				exits := compareNative(t, prog)
-				require.Zero(t, exits["bridge"], "the map operations stay native")
+				require.LessOrEqual(t, exits["bridge"], float64(rehashes(128, 3000, 61)), "only a rehash bridges")
 			})
 		}
 	})

@@ -41,7 +41,7 @@ type known struct {
 
 // table is the state of a TypedMap's table, read through reflection (snapshot).
 type table struct {
-	ctrl, slots            []uint64
+	ctrl, slots, order     []uint64
 	mask, shift, seed, gen uint64
 	count, used            int
 	capacity               int
@@ -142,12 +142,15 @@ func snapshot(m any) table {
 		mask: v.FieldByName("mask").Uint(), shift: v.FieldByName("shift").Uint(), seed: v.FieldByName("seed").Uint(), gen: v.FieldByName("gen").Uint(),
 		count: int(v.FieldByName("count").Int()), used: int(v.FieldByName("used").Int()),
 	}
-	ctrl, slots := v.FieldByName("ctrl"), v.FieldByName("slots")
+	ctrl, slots, order := v.FieldByName("ctrl"), v.FieldByName("slots"), v.FieldByName("order")
 	for i := range ctrl.Len() {
 		t.ctrl = append(t.ctrl, ctrl.Index(i).Uint())
 	}
 	for i := range slots.Len() {
 		t.slots = append(t.slots, slots.Index(i).Uint())
+	}
+	for i := range order.Len() {
+		t.order = append(t.order, order.Index(i).Uint())
 	}
 	t.capacity = ctrl.Len()
 	return t
@@ -3109,15 +3112,9 @@ func TestMachine_Lower(t *testing.T) {
 	// address it reads, so the operation's own registers count from vr(2).
 	guarded := vr
 	vr := func(n int) asm.VReg { return guarded(n + 1) }
-	type walk struct{ data, ctrl, slots, mask, index, free, state, slot, word int }
-	layout := func(data, ctrl int, tracked bool) walk {
-		w := walk{data: data, ctrl: ctrl, slots: ctrl + 1, mask: ctrl + 2, index: ctrl + 3}
-		next := ctrl + 4
-		if tracked {
-			w.free, next = next, next+1
-		}
-		w.state, w.slot, w.word = next, next+1, next+2
-		return w
+	type walk struct{ data, ctrl, slots, mask, index, tag, state, slot, word int }
+	layout := func(data, ctrl int) walk {
+		return walk{data: data, ctrl: ctrl, slots: ctrl + 1, mask: ctrl + 2, index: ctrl + 3, tag: ctrl + 4, state: ctrl + 5, slot: ctrl + 6, word: ctrl + 7}
 	}
 	intMap := func(key, elem types.Kind) *ssa.Operation {
 		return &ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormMap, Key: key, Elem: elem}, Args: []ssa.Value{1}, Results: []ssa.Value{2}}
@@ -3138,31 +3135,29 @@ func TestMachine_Lower(t *testing.T) {
 			target.LDR(vr(w.mask), vr(w.data), offset(jit.OffsetMapMask)),
 		}
 	}
+	// home hashes the key into the home slot (w.index) and the control byte a full
+	// slot holding it carries (w.tag): the seven hash bits below the slot's.
 	home := func(w walk, key asm.Reg) []asm.Instruction {
-		rows := []asm.Instruction{target.LDR(target.X16, vr(w.data), offset(jit.OffsetMapSeed)), target.EOR(vr(w.index), key, target.X16)}
+		rows := []asm.Instruction{target.LDR(target.X16, vr(w.data), offset(jit.OffsetMapSeed)), target.EOR(vr(w.tag), key, target.X16)}
 		rows = append(rows, target.LDI(target.X17, 0x9E3779B97F4A7C15)...)
 		return append(rows,
-			target.MUL(vr(w.index), vr(w.index), target.X17),
+			target.MUL(vr(w.tag), vr(w.tag), target.X17),
 			target.LDR(target.X16, vr(w.data), offset(jit.OffsetMapShift)),
-			target.LSR(vr(w.index), vr(w.index), target.X16),
+			target.LSR(vr(w.index), vr(w.tag), target.X16),
 			target.AND(vr(w.index), vr(w.index), vr(w.mask)),
+			target.SUBI(target.X16, target.X16, 7),
+			target.LSR(vr(w.tag), vr(w.tag), target.X16),
+			target.ANDI(vr(w.tag), vr(w.tag), 0x7F),
+			target.ORRI(vr(w.tag), vr(w.tag), 0x80),
 		)
 	}
-	// probe walks from the home slot. An empty slot goes to miss, a matching key to
-	// hit. A tracked walk remembers the first dead slot in w.free; full labels the
-	// code past that bookkeeping.
-	probe := func(w walk, key asm.Reg, loop, next, full, hit, miss asm.Label) []asm.Instruction {
+	// probe walks from the home slot. An empty slot goes to miss, a slot whose
+	// control byte is the tag and whose key matches to hit; any other slot, a
+	// dead one included, is passed over.
+	probe := func(w walk, key asm.Reg, loop, next, hit, miss asm.Label) []asm.Instruction {
 		rows := []asm.Instruction{
 			target.LDRBR(vr(w.state), vr(w.ctrl), vr(w.index)), target.CBZLabel(vr(w.state), miss),
-			target.CMPI(vr(w.state), 1),
-		}
-		if w.free == 0 {
-			rows = append(rows, target.BCondLabel(target.OpBNE, next))
-		} else {
-			rows = append(rows,
-				target.BCondLabel(target.OpBEQ, full),
-				target.CMNI(vr(w.free), 1), target.CSEL(vr(w.free), vr(w.index), vr(w.free), target.CondEQ), target.BLabel(next),
-			)
+			target.CMP(vr(w.state), vr(w.tag)), target.BCondLabel(target.OpBNE, next),
 		}
 		return append(rows,
 			target.LSLI(vr(w.slot), vr(w.index), 4), target.ADD(vr(w.slot), vr(w.slots), vr(w.slot)),
@@ -3205,8 +3200,8 @@ func TestMachine_Lower(t *testing.T) {
 	// get is map.get or map.lookup; hit, miss, and done are labels 2, 3, and 4, and
 	// the probe's loop and next 5 and 6. The heap slot is vr(1), the table vr(2).
 	get := func(ref, dst asm.VReg, key asm.Reg, keyRows []asm.Instruction, flag asm.VReg, extra []asm.Instruction) []asm.Instruction {
-		w := layout(2, 3+min(len(keyRows), 1), false)
-		rows := slices.Concat(tableOf(ref, 1), keyRows, words(w), home(w, key), probe(w, key, 5, 6, 0, 2, 3))
+		w := layout(2, 3+min(len(keyRows), 1))
+		rows := slices.Concat(tableOf(ref, 1), keyRows, words(w), home(w, key), probe(w, key, 5, 6, 2, 3))
 		rows = append(rows, target.LDR(dst, vr(w.slot), 8))
 		if flag != (asm.VReg{}) {
 			rows = append(rows, target.LDI(flag, 1)...)
@@ -3218,27 +3213,24 @@ func TestMachine_Lower(t *testing.T) {
 		return append(rows, extra...)
 	}
 	// set is map.set. A value that boxes into a register (valueRows) is vr(1), so
-	// the heap slot follows it; labels hit, empty, and claim are 2, 3, and 4, and
-	// the probe's loop, next, and full 5, 6, and 7. The table is only changed once
-	// the load factor admits the insert, else the set bridges untouched.
+	// the heap slot follows it; labels hit and empty are 2 and 3, and the probe's
+	// loop and next 4 and 5. The table is only changed once the load factor admits
+	// the insert, else the set bridges untouched; an insert fills the empty slot
+	// with the tag, the key, and the value, and appends the slot to the order.
 	set := func(ref asm.VReg, key asm.Reg, keyRows, valueRows []asm.Instruction, value asm.Reg, release bool) []asm.Instruction {
 		first := 1 + min(len(valueRows), 1)
-		w := layout(first+1, first+2+min(len(keyRows), 1), true)
-		used, want, limit, state, count := w.word+1, w.word+2, w.word+3, w.word+4, w.word+5
-		rows := slices.Concat(valueRows, tableOf(ref, first), keyRows, words(w), home(w, key), target.LDI(vr(w.free), ^uint64(0)), probe(w, key, 5, 6, 7, 2, 3))
+		w := layout(first+1, first+2+min(len(keyRows), 1))
+		used, want, limit, order, count := w.word+1, w.word+2, w.word+3, w.word+4, w.word+5
+		rows := slices.Concat(valueRows, tableOf(ref, first), keyRows, words(w), home(w, key), probe(w, key, 4, 5, 2, 3))
 		rows = append(rows,
-			target.CMNI(vr(w.free), 1), target.CSEL(vr(w.free), vr(w.index), vr(w.free), target.CondEQ),
-			target.LDRBR(vr(state), vr(w.ctrl), vr(w.free)), target.CBNZLabel(vr(state), 4),
-			target.LDR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)), target.ADDI(vr(used), vr(used), 1), target.LSLI(vr(want), vr(used), 2),
+			target.LDR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)), target.ADDI(vr(want), vr(used), 1), target.LSLI(vr(want), vr(want), 2),
 			target.ADDI(vr(limit), vr(w.mask), 1), target.LSLI(target.X16, vr(limit), 1), target.ADD(vr(limit), vr(limit), target.X16),
 			target.CMP(vr(want), vr(limit)), target.BCondLabel(target.OpBGT, exit),
-			target.STR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)),
-		)
-		rows = append(rows, target.LDI(vr(state), jit.SlotFull)...)
-		rows = append(rows,
-			target.STRBR(vr(state), vr(w.ctrl), vr(w.free)),
-			target.LSLI(vr(w.slot), vr(w.free), 4), target.ADD(vr(w.slot), vr(w.slots), vr(w.slot)),
+			target.STRBR(vr(w.tag), vr(w.ctrl), vr(w.index)),
+			target.LSLI(vr(w.slot), vr(w.index), 4), target.ADD(vr(w.slot), vr(w.slots), vr(w.slot)),
 			target.STR(key, vr(w.slot), 0), target.STR(value, vr(w.slot), 8),
+			target.LDR(vr(order), vr(w.data), offset(jit.OffsetMapOrder)), target.STRWR(vr(w.index), vr(order), vr(used)),
+			target.ADDI(vr(used), vr(used), 1), target.STR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)),
 			target.LDR(vr(count), vr(w.data), offset(jit.OffsetMapCount)), target.ADDI(vr(count), vr(count), 1), target.STR(vr(count), vr(w.data), offset(jit.OffsetMapCount)),
 			target.BLabel(resume),
 		)
@@ -3251,8 +3243,8 @@ func TestMachine_Lower(t *testing.T) {
 	}
 	// del is map.delete; hit and done are labels 2 and 3, the probe's loop and next 4 and 5.
 	del := func(ref asm.VReg, key asm.Reg, keyRows []asm.Instruction, release bool) []asm.Instruction {
-		w := layout(2, 3+min(len(keyRows), 1), false)
-		rows := slices.Concat(tableOf(ref, 1), keyRows, words(w), home(w, key), probe(w, key, 4, 5, 0, 2, 3))
+		w := layout(2, 3+min(len(keyRows), 1))
+		rows := slices.Concat(tableOf(ref, 1), keyRows, words(w), home(w, key), probe(w, key, 4, 5, 2, 3))
 		state, count := w.word+1, w.word+2
 		rows = append(rows, target.LDI(vr(state), jit.SlotDead)...)
 		rows = append(rows,
@@ -3320,7 +3312,7 @@ func TestMachine_Lower(t *testing.T) {
 			rows: get(reg(ref, 2), reg(i32, 4), vr(3), zext(reg(i32, 3), 3), reg(ssa.TypeI1, 5), nil), lower: true,
 		},
 		{
-			name: "map.set stores the boxed value in the first dead slot or the empty one that ended the probe, bridging when the table must rehash",
+			name: "map.set stores the boxed value in the empty slot that ended the probe and appends it to the order, bridging when the table must rehash",
 			regs: regs{1: ref, 2: ref, 3: i32, 4: i32}, guard: intMap(types.KindI32, types.KindI32),
 			op:   ssa.Operation{Op: ssa.OpMapSet, Args: []ssa.Value{2, 3, 4}},
 			rows: set(reg(ref, 2), vr(4), zext(reg(i32, 3), 4), box32(reg(i32, 4)), vr(1), false), lower: true,

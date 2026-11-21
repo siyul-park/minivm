@@ -1271,6 +1271,15 @@ func mapProgramFrom(t *testing.T, typ *types.MapType, start func(b *instr.Builde
 	return program.New(code, program.WithLocals(locals...), program.WithTypes(typ), program.WithConstants(constants...))
 }
 
+// rehashes bounds how often a mapProgram loop of iterations steps over at most
+// space keys can rehash a map built with capacity: an insert never reuses a
+// deleted slot, so the table rehashes once its order fills, and the order of a
+// table built for capacity holds at least capacity entries, of which at most
+// space stay live across a rehash.
+func rehashes(capacity, iterations int, space uint64) int {
+	return iterations / (capacity - int(space))
+}
+
 // mapBody is one iteration over local 0 that sets, deletes every third time,
 // gets, and looks up keys of key's kind, folding the elements it reads into the
 // accumulator. in and out convert between the i32 it stores and the element type.

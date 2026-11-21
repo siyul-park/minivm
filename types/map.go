@@ -7,6 +7,7 @@ import (
 	"math/bits"
 	"math/rand/v2"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"unsafe"
@@ -15,7 +16,7 @@ import (
 // TypedMap is a map from a numeric key to boxed values. Its entries live in a
 // pointer-free open-addressing table, so native code can read them without
 // touching a Go map. A TypedMap `MUST` come from NewTypedMap; its zero value is
-// not usable. Iteration follows slot order, which is unspecified to callers.
+// not usable. Iteration follows insertion order.
 type TypedMap[K Scalar] struct {
 	Typ   *MapType
 	Zero  Boxed
@@ -73,14 +74,14 @@ type MapType struct {
 // MAP_DELETE on an entry still queued in the snapshot could free it before the
 // iterator reached it. Each entry present for the whole walk is produced once,
 // and a key deleted before the iterator reaches it is never produced. A string
-// or generic map relies on Go's range guarantee. A numeric table walks slots in
-// order; after a rehash it keeps walking the slots it started on and produces a
-// key only while the live table still holds it. Clear ends every walk.
+// or generic map relies on Go's range guarantee. A numeric table walks its
+// live insertion order, so an entry inserted during the walk is produced too. A
+// rehash moves the walk to the new order through the epoch it started on, so it
+// never reads an entry the table gave up. Clear ends every walk.
 type MapIterator struct {
 	iter    *reflect.MapIter
 	table   *table
-	slots   []uint64
-	ctrl    []byte
+	epoch   *epoch
 	pos     int
 	gen     uint64
 	current Value
@@ -92,24 +93,46 @@ type MapIterator struct {
 }
 
 // table is an open-addressing hash table from a numeric key word to a Boxed
-// value word. It holds no Go pointers besides its two slices. Slot i keeps its
-// key at slots[2i] and its value at slots[2i+1], and its state at ctrl[i]. The
-// capacity is a power of two, and a key's home slot is its word xor seed,
-// times tableHash, shifted right by shift. seed is random per table, so keys
-// crafted to collide for the bare constant spread out. Probing is linear; a deleted slot becomes a
-// tombstone that a later insert reuses, and a rehash into fresh arrays drops
-// tombstones. Keys compare as their Go values, so floats follow Go map keys:
-// -0 and +0 are one key whose latest written bits are kept, and a NaN never
-// matches, so every Set of NaN adds an entry that only Clear removes.
+// value word that remembers insertion order. Native code reaches only its three
+// slices and integer words. Slot i keeps its key at slots[2i], its value at
+// slots[2i+1], and its state at ctrl[i]: slotEmpty, slotDead, or slotFull with
+// seven hash bits, so a probe passes most occupied slots on the control byte
+// alone. order lists the slots in insertion order; slot order[p] is live while
+// its control byte is full.
+//
+// The capacity is a power of two. A key's hash is its word xor seed times
+// tableHash; its home slot is the hash shifted right by shift, and its tag the
+// seven bits below those. seed is random per table, so keys crafted to collide
+// for the bare constant spread out; it never affects order. Probing is linear.
+// An insert takes the empty slot that ended its probe, never a tombstone, so
+// used, the non-empty slots, is also the length of order. A rehash moves the
+// live entries, in order, into fresh arrays and, once a walk has begun, starts
+// a new epoch. Keys
+// compare as their Go values, so floats follow Go map keys, except that a zero
+// key is stored as +0: -0 and +0 are one key, and a NaN never matches, so
+// every Set of NaN adds an entry that only Clear removes.
 type table struct {
 	ctrl  []byte
 	slots []uint64
+	order []uint32
 	mask  uint64
 	shift uint64
 	seed  uint64
 	count int
 	used  int
 	gen   uint64
+	epoch *epoch
+}
+
+// epoch is one rehash generation of a table's order, after V8's obsolete
+// OrderedHashTable. A rehash ends the current epoch by recording the next one
+// and the positions of its order that held dead entries, so an iterator at
+// position p of the old order resumes at p minus the holes before p of the
+// new one, and never reads the old arrays. A table has no epoch until its first
+// walk, so a map nobody iterates never pays for one.
+type epoch struct {
+	next  *epoch
+	holes []uint32
 }
 
 type mapIteratorKind byte
@@ -120,9 +143,9 @@ type mapIteratorKind byte
 const KindText Kind = 0xFE
 
 const (
-	slotEmpty byte = iota
-	slotFull
-	slotDead
+	slotEmpty byte = 0
+	slotDead  byte = 1
+	slotFull  byte = 0x80
 )
 
 const (
@@ -287,7 +310,7 @@ func (m *TypedMap[K]) Len() int {
 	return m.table.count
 }
 
-// Range calls fn on every entry in slot order. fn must not modify m.
+// Range calls fn on every entry in insertion order. fn must not modify m.
 func (m *TypedMap[K]) Range(fn func(K, Boxed)) {
 	m.table.each(func(key, value uint64) { fn(wordKey[K](key), Boxed(value)) })
 }
@@ -469,6 +492,8 @@ func (m *TypedMap[K]) Clone() *TypedMap[K] {
 	c := *m
 	c.table.ctrl = append([]byte(nil), m.table.ctrl...)
 	c.table.slots = append([]uint64(nil), m.table.slots...)
+	c.table.order = append([]uint32(nil), m.table.order...)
+	c.table.epoch = nil
 	return &c
 }
 
@@ -519,6 +544,7 @@ func (m *StringMap) String() string {
 	m.Range(func(key string, value Boxed) {
 		parts = append(parts, fmt.Sprintf("%s: %s", String(key).String(), value.String()))
 	})
+	sort.Strings(parts)
 	return formatMap(m.Typ, parts)
 }
 
@@ -566,6 +592,7 @@ func (m *Map) String() string {
 	m.Range(func(key MapKey, entry MapEntry) {
 		parts = append(parts, fmt.Sprintf("%s: %s", key.String(), entry.Value.String()))
 	})
+	sort.Strings(parts)
 	return formatMap(m.Typ, parts)
 }
 
@@ -579,7 +606,7 @@ func (m *MapLiteral) Type() Type {
 	return m.Typ
 }
 
-// String returns the canonical map literal.
+// String returns the canonical map literal, its entries in literal order.
 func (m *MapLiteral) String() string {
 	parts := make([]string, len(m.Keys))
 	for i := range m.Keys {
@@ -681,7 +708,6 @@ func formatKey(k any) string {
 }
 
 func formatMap(typ Type, parts []string) string {
-	sort.Strings(parts)
 	return fmt.Sprintf("%s{%s}", typ, strings.Join(parts, ", "))
 }
 
@@ -697,28 +723,29 @@ func (m *Map) clone() Value {
 	return m.Clone()
 }
 
-// nextSlot advances to the next full slot. A rehash leaves the iterator on the
-// slots it started on, so a key found there is produced only while the live
-// table still holds it.
+// nextSlot advances to the next live entry in insertion order. It first
+// follows every rehash since its last step to the table's current epoch, then
+// walks the live order, which grows with every insert.
 func (it *MapIterator) nextSlot() bool {
-	if it.gen != it.table.gen {
+	t := it.table
+	if it.gen != t.gen {
 		it.current = BoxedNull
 		it.done = true
 		return false
 	}
-	rehashed := unsafe.SliceData(it.slots) != unsafe.SliceData(it.table.slots)
-	for it.pos < len(it.ctrl) {
-		i := it.pos
+	for e := it.epoch; e.next != nil; e = e.next {
+		holes, _ := slices.BinarySearch(e.holes, uint32(it.pos))
+		it.pos -= holes
+		it.epoch = e.next
+	}
+	for it.pos < t.used {
+		slot := t.order[it.pos]
 		it.pos++
-		if it.ctrl[i] != slotFull {
-			continue
-		}
-		key := it.slots[2*i]
-		if rehashed && !it.live(key) {
+		if t.ctrl[slot]&slotFull == 0 {
 			continue
 		}
 		it.done = false
-		it.current = it.decode(key)
+		it.current = it.decode(t.slots[2*slot])
 		return true
 	}
 	it.current = BoxedNull
@@ -743,41 +770,17 @@ func (it *MapIterator) decode(key uint64) Value {
 	}
 }
 
-// live reports whether the live table still holds the key word, which a rehash
-// may have moved off the slots the walk started on.
-func (it *MapIterator) live(word uint64) bool {
-	switch it.kind {
-	case mapIteratorI8:
-		return holds[int8](it.table, word)
-	case mapIteratorI1:
-		return holds[bool](it.table, word)
-	case mapIteratorI32:
-		return holds[int32](it.table, word)
-	case mapIteratorI64:
-		return holds[int64](it.table, word)
-	case mapIteratorF32:
-		return holds[float32](it.table, word)
-	default:
-		return holds[float64](it.table, word)
-	}
-}
-
-// holds reports whether t holds the key. A NaN key cannot be deleted, so it is
-// always held.
-func holds[K Scalar](t *table, word uint64) bool {
-	key := wordKey[K](word)
-	_, ok := get(t, key)
-	return ok || key != key
-}
-
-// walk starts it on m's current slots.
+// walk starts it on m's current arrays.
 func walk[K Scalar](it *MapIterator, m *TypedMap[K]) {
 	t := &m.table
-	it.table, it.slots, it.ctrl, it.gen = t, t.slots, t.ctrl, t.gen
+	if t.epoch == nil {
+		t.epoch = &epoch{}
+	}
+	it.table, it.epoch, it.gen = t, t.epoch, t.gen
 }
 
 func get[K Scalar](t *table, key K) (uint64, bool) {
-	hit, _ := probe(t, key)
+	hit, _, _ := probe(t, key)
 	if hit < 0 {
 		return 0, false
 	}
@@ -785,83 +788,82 @@ func get[K Scalar](t *table, key K) (uint64, bool) {
 }
 
 func set[K Scalar](t *table, key K, value uint64) (uint64, bool) {
-	hit, free := probe(t, key)
+	hit, free, tag := probe(t, key)
 	if hit >= 0 {
 		old := t.slots[2*hit+1]
-		t.slots[2*hit], t.slots[2*hit+1] = keyWord(key), value
+		t.slots[2*hit+1] = value
 		return old, true
 	}
-	if t.ctrl[free] == slotEmpty {
-		if (t.used+1)*4 > len(t.ctrl)*3 {
-			rehash[K](t)
-			_, free = probe(t, key)
-		}
-		t.used++
+	if (t.used+1)*4 > len(t.ctrl)*3 {
+		rehash[K](t)
+		_, free, tag = probe(t, key)
 	}
-	t.ctrl[free] = slotFull
-	t.slots[2*free], t.slots[2*free+1] = keyWord(key), value
+	t.ctrl[free] = tag
+	t.slots[2*free], t.slots[2*free+1] = fold(key), value
+	t.order[t.used] = uint32(free)
+	t.used++
 	t.count++
 	return 0, false
 }
 
-// rehash moves every entry into fresh arrays, doubling them when more than
-// three eighths of the slots hold live entries and keeping the size otherwise
-// so tombstones alone never force growth.
+// rehash moves every live entry, in insertion order, into fresh arrays,
+// doubling them when more than three eighths of the slots hold live entries
+// and keeping the size otherwise, so tombstones alone never force growth. If a
+// walk has begun, it ends the current epoch with the order positions it
+// dropped.
 func rehash[K Scalar](t *table) {
-	ctrl, slots := t.ctrl, t.slots
+	ctrl, slots, order := t.ctrl, t.slots, t.order[:t.used]
 	n := len(ctrl)
 	if t.count*8 > n*3 {
 		n *= 2
 	}
 	t.alloc(n)
-	for i, state := range ctrl {
-		if state != slotFull {
+	old := t.epoch
+	var holes []uint32
+	for p, slot := range order {
+		if ctrl[slot]&slotFull == 0 {
+			if old != nil {
+				holes = append(holes, uint32(p))
+			}
 			continue
 		}
-		_, free := probe(t, wordKey[K](slots[2*i]))
-		t.ctrl[free] = slotFull
-		t.slots[2*free], t.slots[2*free+1] = slots[2*i], slots[2*i+1]
-		t.count++
+		_, free, tag := probe(t, wordKey[K](slots[2*slot]))
+		t.ctrl[free] = tag
+		t.slots[2*free], t.slots[2*free+1] = slots[2*slot], slots[2*slot+1]
+		t.order[t.used] = uint32(free)
 		t.used++
+		t.count++
+	}
+	if old != nil {
+		t.epoch = &epoch{}
+		old.next, old.holes = t.epoch, holes
 	}
 }
 
 func remove[K Scalar](t *table, key K) (uint64, bool) {
-	hit, _ := probe(t, key)
+	hit, _, _ := probe(t, key)
 	if hit < 0 {
 		return 0, false
 	}
-	old := t.slots[2*hit+1]
 	t.ctrl[hit] = slotDead
 	t.count--
-	return old, true
+	return t.slots[2*hit+1], true
 }
 
-// probe returns the slot holding key, or -1, and the slot a new key would
-// take: the first tombstone on the path, else the empty slot that ended it.
-// Slots compare as Go values, so a NaN key never hits and -0 hits +0.
-func probe[K Scalar](t *table, key K) (hit, free int) {
-	var zero K
-	word := keyWord(key)
-	if key == zero {
-		word = 0
-	}
-	i := ((word ^ t.seed) * tableHash >> t.shift) & t.mask
-	free = -1
+// probe returns the slot holding key, or -1, the empty slot that ended the
+// probe, where a new key goes, and the control byte of key. Slots compare as
+// Go values, so a NaN key never hits and -0 hits +0.
+func probe[K Scalar](t *table, key K) (hit, free int, tag byte) {
+	h := (fold(key) ^ t.seed) * tableHash
+	i := (h >> t.shift) & t.mask
+	tag = slotFull | byte(h>>(t.shift-7))&^slotFull
 	for {
 		switch t.ctrl[i] {
 		case slotEmpty:
-			if free < 0 {
-				free = int(i)
-			}
-			return -1, free
-		case slotDead:
-			if free < 0 {
-				free = int(i)
-			}
-		default:
+			return -1, int(i), tag
+		case tag:
 			if wordKey[K](t.slots[2*i]) == key {
-				return int(i), free
+				return int(i), -1, tag
 			}
 		}
 		i = (i + 1) & t.mask
@@ -883,21 +885,35 @@ func (t *table) clear(fn func(uint64)) {
 	t.gen++
 }
 
+// alloc gives t fresh empty arrays of n slots: order holds the most entries an
+// insert admits before it rehashes, three quarters of them.
 func (t *table) alloc(n int) {
 	t.ctrl = make([]byte, n)
 	t.slots = make([]uint64, 2*n)
+	t.order = make([]uint32, n*3/4)
 	t.mask = uint64(n - 1)
 	t.shift = uint64(64 - bits.TrailingZeros(uint(n)))
 	t.count, t.used = 0, 0
 }
 
+// each calls fn on every live entry in insertion order.
 func (t *table) each(fn func(key, value uint64)) {
 	slots, ctrl := t.slots, t.ctrl
-	for i, state := range ctrl {
-		if state == slotFull {
-			fn(slots[2*i], slots[2*i+1])
+	for _, slot := range t.order[:t.used] {
+		if ctrl[slot]&slotFull != 0 {
+			fn(slots[2*slot], slots[2*slot+1])
 		}
 	}
+}
+
+// fold returns the word of key a table stores and hashes: a zero key, -0
+// included, is the zero word.
+func fold[K Scalar](key K) uint64 {
+	var zero K
+	if key == zero {
+		return 0
+	}
+	return keyWord(key)
 }
 
 // keyWord returns the key in the low bits of a word; wordKey inverts it.

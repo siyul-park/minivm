@@ -49,10 +49,12 @@ const (
 	OffsetMapZero = unsafe.Offsetof(types.TypedMap[int64]{}.Zero)
 )
 
-// Slot states a table's control byte holds, and the home slot's multiplier.
+// Control bytes of a table slot, and the hash multiplier. An empty slot is 0, a
+// dead one SlotDead; a full one is SlotFull with the key's seven tag bits
+// below it.
 const (
-	SlotFull = 1
-	SlotDead = 2
+	SlotFull = 0x80
+	SlotDead = 1
 	MapHash  = 0x9E3779B97F4A7C15
 )
 
@@ -61,18 +63,21 @@ const (
 // taken from reflection, since the table is unexported, and TestHeap_Layout pins
 // every value. Every key kind shares one layout: only the methods differ.
 var (
-	// OffsetMapCtrl and OffsetMapSlots are the data words of the control bytes
-	// and of the key and value words: slot i has its state at ctrl[i], its key
-	// word at slots[2i], and its value word at slots[2i+1].
+	// OffsetMapCtrl, OffsetMapSlots, and OffsetMapOrder are the data words of
+	// the control bytes, of the key and value words, and of the insertion
+	// order: slot i has its state at ctrl[i], its key word at slots[2i], and
+	// its value word at slots[2i+1]; order[p] is the slot of the p-th insert.
 	OffsetMapCtrl  = mapField("ctrl")
 	OffsetMapSlots = mapField("slots")
-	// OffsetMapMask, OffsetMapShift, and OffsetMapSeed are the home slot's
-	// words: ((key ^ seed) * MapHash >> shift) & mask.
+	OffsetMapOrder = mapField("order")
+	// OffsetMapMask, OffsetMapShift, and OffsetMapSeed are the hash words: the
+	// hash is (key ^ seed) * MapHash, the home slot is hash >> shift & mask,
+	// and the tag is hash >> (shift-7) & 0x7F.
 	OffsetMapMask  = mapField("mask")
 	OffsetMapShift = mapField("shift")
 	OffsetMapSeed  = mapField("seed")
 	// OffsetMapCount is the live entry count, OffsetMapUsed the slots that
-	// are not empty, tombstones included.
+	// are not empty, tombstones included, which is also the length of order.
 	OffsetMapCount = mapField("count")
 	OffsetMapUsed  = mapField("used")
 )

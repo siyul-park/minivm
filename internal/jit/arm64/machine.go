@@ -1376,7 +1376,8 @@ func (m *Machine) mapGet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 	data := m.container(a, s.Reg(op.Args[0]))
 	key := m.key(a, s, shape, op.Args[1])
 	t := m.table(a, data)
-	slot := m.probe(a, t, key, m.home(a, t, key), asm.VReg{}, hit, miss)
+	index, tag := m.home(a, t, key)
+	slot := m.probe(a, t, key, index, tag, hit, miss)
 
 	a.Bind(hit)
 	a.Emit(target.LDR(dst, slot, 8))
@@ -1406,10 +1407,11 @@ func (m *Machine) retain(a *asm.Assembler, ref asm.VReg) {
 }
 
 // mapSet stores a value under a key of a guarded map, as types.set does: it
-// replaces the value of a full slot holding the key, else takes the first dead
-// slot on the probe, else the empty slot that ended it. An insert that would
-// rehash changes nothing and bridges, so the Go set owns growth. A map of
-// references (or wide i64s) adopts the value and releases the one it replaced.
+// replaces the value of a full slot holding the key, else fills the empty slot
+// that ended the probe and appends that slot to the insertion order. An insert
+// that would rehash changes nothing and bridges, so the Go set owns growth. A
+// map of references (or wide i64s) adopts the value and releases the one it
+// replaced.
 func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	if !has(op, 3, 0) {
 		return false
@@ -1419,7 +1421,7 @@ func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 		return false
 	}
 	exit, resume := s.Bridge()
-	hit, empty, claim := a.Label(), a.Label(), a.Label()
+	hit, empty := a.Label(), a.Label()
 	word := box(a, s, op.Args[2])
 	if _, ok := word.(asm.VReg); !ok {
 		boxed := m.vreg()
@@ -1429,28 +1431,21 @@ func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 	data := m.container(a, s.Reg(op.Args[0]))
 	key := m.key(a, s, shape, op.Args[1])
 	t := m.table(a, data)
-	index, free := m.home(a, t, key), m.vreg()
-	a.Emit(target.LDI(free, ^uint64(0))...)
-	slot := m.probe(a, t, key, index, free, hit, empty)
+	index, tag := m.home(a, t, key)
+	slot := m.probe(a, t, key, index, tag, hit, empty)
 
 	a.Bind(empty)
-	used, want, limit, state := m.vreg(), m.vreg(), m.vreg(), m.vreg()
+	used, want, limit, order, count := m.vreg(), m.vreg(), m.vreg(), m.vreg(), m.vreg()
 	a.Emit(
-		target.CMNI(free, 1), target.CSEL(free, index, free, target.CondEQ),
-		target.LDRBR(state, t.ctrl, free), target.CBNZLabel(state, claim),
 		// (used+1)*4 > (mask+1)*3 is the load factor at which table.set rehashes.
-		target.LDR(used, data, int16(jit.OffsetMapUsed)), target.ADDI(used, used, 1), target.LSLI(want, used, 2),
+		target.LDR(used, data, int16(jit.OffsetMapUsed)), target.ADDI(want, used, 1), target.LSLI(want, want, 2),
 		target.ADDI(limit, t.mask, 1), target.LSLI(target.X16, limit, 1), target.ADD(limit, limit, target.X16),
 		target.CMP(want, limit), target.BCondLabel(target.OpBGT, exit),
-		target.STR(used, data, int16(jit.OffsetMapUsed)),
-	)
-	a.Bind(claim)
-	a.Emit(target.LDI(state, jit.SlotFull)...)
-	count := m.vreg()
-	a.Emit(
-		target.STRBR(state, t.ctrl, free),
-		target.LSLI(slot, free, 4), target.ADD(slot, t.slots, slot),
+		target.STRBR(tag, t.ctrl, index),
+		target.LSLI(slot, index, 4), target.ADD(slot, t.slots, slot),
 		target.STR(key, slot, 0), target.STR(word, slot, 8),
+		target.LDR(order, data, int16(jit.OffsetMapOrder)), target.STRWR(index, order, used),
+		target.ADDI(used, used, 1), target.STR(used, data, int16(jit.OffsetMapUsed)),
 		target.LDR(count, data, int16(jit.OffsetMapCount)), target.ADDI(count, count, 1), target.STR(count, data, int16(jit.OffsetMapCount)),
 		target.BLabel(resume),
 	)
@@ -1465,8 +1460,8 @@ func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 }
 
 // mapDelete removes a key from a guarded map, as types.remove does: the slot
-// becomes a tombstone and the count drops, leaving the key and value words in
-// place. A map of references releases the removed value.
+// becomes a tombstone the order passes over and the count drops, leaving the key
+// and value words in place. A map of references releases the removed value.
 func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	if !has(op, 2, 0) {
 		return false
@@ -1479,8 +1474,8 @@ func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 	data := m.container(a, s.Reg(op.Args[0]))
 	key := m.key(a, s, shape, op.Args[1])
 	t := m.table(a, data)
-	index := m.home(a, t, key)
-	slot := m.probe(a, t, key, index, asm.VReg{}, hit, done)
+	index, tag := m.home(a, t, key)
+	slot := m.probe(a, t, key, index, tag, hit, done)
 
 	a.Bind(hit)
 	state, count := m.vreg(), m.vreg()
@@ -1535,42 +1530,37 @@ func (m *Machine) table(a *asm.Assembler, data asm.VReg) table {
 	return t
 }
 
-// home is the home slot of key: ((key ^ seed) * hash >> shift) & mask, as the
-// table computes it.
-func (m *Machine) home(a *asm.Assembler, t table, key asm.VReg) asm.VReg {
-	index := m.vreg()
-	a.Emit(target.LDR(target.X16, t.data, int16(jit.OffsetMapSeed)), target.EOR(index, key, target.X16))
+// home is the home slot and control byte of key, as types.probe computes them
+// from the hash (key ^ seed) * MapHash: the slot is hash >> shift & mask, and
+// the control byte SlotFull with the seven hash bits below the slot's.
+func (m *Machine) home(a *asm.Assembler, t table, key asm.VReg) (index, tag asm.VReg) {
+	index, tag = m.vreg(), m.vreg()
+	a.Emit(target.LDR(target.X16, t.data, int16(jit.OffsetMapSeed)), target.EOR(tag, key, target.X16))
 	a.Emit(target.LDI(target.X17, jit.MapHash)...)
 	a.Emit(
-		target.MUL(index, index, target.X17),
+		target.MUL(tag, tag, target.X17),
 		target.LDR(target.X16, t.data, int16(jit.OffsetMapShift)),
-		target.LSR(index, index, target.X16),
+		target.LSR(index, tag, target.X16),
 		target.AND(index, index, t.mask),
+		target.SUBI(target.X16, target.X16, 7),
+		target.LSR(tag, tag, target.X16),
+		target.ANDI(tag, tag, 0x7F),
+		target.ORRI(tag, tag, jit.SlotFull),
 	)
-	return index
+	return index, tag
 }
 
 // probe walks the table linearly from index, as types.probe does. It branches
 // to miss at an empty slot and to hit at a full slot holding key, leaving the
-// slot's index in index and its address in the returned register; a dead slot is
-// passed over. A free register (not the zero VReg) holds -1 on entry and ends
-// holding the first dead slot passed, if any.
-func (m *Machine) probe(a *asm.Assembler, t table, key, index, free asm.VReg, hit, miss asm.Label) asm.VReg {
+// slot's index in index and its address in the returned register. A slot whose
+// control byte is not tag, a dead one included, is passed over.
+func (m *Machine) probe(a *asm.Assembler, t table, key, index, tag asm.VReg, hit, miss asm.Label) asm.VReg {
 	loop, next := a.Label(), a.Label()
 	state, slot, word := m.vreg(), m.vreg(), m.vreg()
 	a.Bind(loop)
-	a.Emit(target.LDRBR(state, t.ctrl, index), target.CBZLabel(state, miss), target.CMPI(state, jit.SlotFull))
-	if free == (asm.VReg{}) {
-		a.Emit(target.BCondLabel(target.OpBNE, next))
-	} else {
-		full := a.Label()
-		a.Emit(
-			target.BCondLabel(target.OpBEQ, full),
-			target.CMNI(free, 1), target.CSEL(free, index, free, target.CondEQ), target.BLabel(next),
-		)
-		a.Bind(full)
-	}
 	a.Emit(
+		target.LDRBR(state, t.ctrl, index), target.CBZLabel(state, miss),
+		target.CMP(state, tag), target.BCondLabel(target.OpBNE, next),
 		target.LSLI(slot, index, 4), target.ADD(slot, t.slots, slot),
 		target.LDR(word, slot, 0), target.CMP(word, key), target.BCondLabel(target.OpBEQ, hit),
 	)
