@@ -24,6 +24,8 @@ const (
 	OpMNEG
 	OpSMULH
 	OpSMULL
+	OpUMULH
+	OpUMULL
 	OpSDIV
 	OpUDIV
 	OpADC
@@ -316,6 +318,16 @@ func SMULH(dst, src1, src2 asm.Reg) asm.Instruction {
 // SMULL Xd, Wn, Wm  →  Xd = signed 64-bit product Wn*Wm
 func SMULL(dst, src1, src2 asm.Reg) asm.Instruction {
 	return newReg3(OpSMULL, dst, src1, src2)
+}
+
+// UMULH Xd, Xn, Xm  →  Xd = high 64 bits of the unsigned 128-bit product Xn*Xm
+func UMULH(dst, src1, src2 asm.Reg) asm.Instruction {
+	return newReg3(OpUMULH, dst, src1, src2)
+}
+
+// UMULL Xd, Wn, Wm  →  Xd = unsigned 64-bit product Wn*Wm
+func UMULL(dst, src1, src2 asm.Reg) asm.Instruction {
+	return newReg3(OpUMULL, dst, src1, src2)
 }
 
 // ADC / SBC — add/subtract with carry

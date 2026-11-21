@@ -118,6 +118,18 @@ func TestSMULL(t *testing.T) {
 	require.NotEmpty(t, inst.String())
 }
 
+func TestUMULH(t *testing.T) {
+	inst := arm64.UMULH(arm64.X0, arm64.X0, arm64.X0)
+	require.Equal(t, uint16(arm64.OpUMULH), inst.Op)
+	require.NotEmpty(t, inst.String())
+}
+
+func TestUMULL(t *testing.T) {
+	inst := arm64.UMULL(arm64.X0, arm64.W0, arm64.W0)
+	require.Equal(t, uint16(arm64.OpUMULL), inst.Op)
+	require.NotEmpty(t, inst.String())
+}
+
 func TestADC(t *testing.T) {
 	inst := arm64.ADC(arm64.X0, arm64.X0, arm64.X0)
 	require.Equal(t, uint16(arm64.OpADC), inst.Op)
