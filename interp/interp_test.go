@@ -5588,42 +5588,50 @@ func TestWithThreshold(t *testing.T) {
 		type tc struct {
 			name string
 			op   instr.Opcode
-			wide bool
-			x, y int64
+			// arithmetic is 0 for add, 1 for sub, 2 for mul.
+			arithmetic int
+			unsigned   bool
+			wide       bool
+			x, y       int64
 		}
 		// reference folds one iteration the way the loop does: the wrapped result
 		// (an i64 as its low half plus three times its high half) into the fold,
 		// and a hit count for the overflow flag.
 		reference := func(c tc) int32 {
-			bits := 32
+			bits := uint(32)
 			if c.wide {
 				bits = 64
 			}
-			exact := new(big.Int)
+			unsigned := c.unsigned
+			modulus := new(big.Int).Lsh(big.NewInt(1), bits)
 			x, y := big.NewInt(c.x), big.NewInt(c.y)
-			switch c.op {
-			case instr.I32_ADD_OVF_S, instr.I64_ADD_OVF_S:
+			if unsigned {
+				x, y = x.Mod(x, modulus), y.Mod(y, modulus)
+			}
+			exact := new(big.Int)
+			switch c.arithmetic {
+			case 0:
 				exact.Add(x, y)
-			case instr.I32_SUB_OVF_S, instr.I64_SUB_OVF_S:
+			case 1:
 				exact.Sub(x, y)
 			default:
 				exact.Mul(x, y)
 			}
-			limit := new(big.Int).Lsh(big.NewInt(1), uint(bits-1))
-			overflow := exact.Cmp(limit) >= 0 || exact.Cmp(new(big.Int).Neg(limit)) < 0
-			wrapped := new(big.Int).And(exact, new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), uint(bits)), big.NewInt(1))).Uint64()
+			low, high := new(big.Int), new(big.Int).Lsh(big.NewInt(1), bits-1)
+			low.Neg(high)
+			if unsigned {
+				low, high = big.NewInt(0), modulus
+			}
+			overflow := exact.Cmp(high) >= 0 || exact.Cmp(low) < 0
+			wrapped := new(big.Int).And(exact, new(big.Int).Sub(modulus, big.NewInt(1))).Uint64()
 			var fold, hits int32
 			for range n {
+				fold += int32(uint32(wrapped))
 				if c.wide {
-					fold += int32(uint32(wrapped))
 					fold += 3 * int32(uint32(wrapped>>32))
-				} else {
-					fold += int32(uint32(wrapped))
 				}
 				if overflow {
 					hits++
-				}
-				if overflow {
 					fold += 7
 				}
 			}
@@ -5665,21 +5673,30 @@ func TestWithThreshold(t *testing.T) {
 		var cases []tc
 		for _, wide := range []bool{false, true} {
 			lo, hi := int64(math.MinInt32), int64(math.MaxInt32)
-			ops := []instr.Opcode{instr.I32_ADD_OVF_S, instr.I32_SUB_OVF_S, instr.I32_MUL_OVF_S}
+			ops := []instr.Opcode{
+				instr.I32_ADD_OVF_S, instr.I32_ADD_OVF_U, instr.I32_SUB_OVF_S, instr.I32_SUB_OVF_U, instr.I32_MUL_OVF_S, instr.I32_MUL_OVF_U,
+			}
 			if wide {
 				lo, hi = math.MinInt64, math.MaxInt64
-				ops = []instr.Opcode{instr.I64_ADD_OVF_S, instr.I64_SUB_OVF_S, instr.I64_MUL_OVF_S}
+				ops = []instr.Opcode{
+					instr.I64_ADD_OVF_S, instr.I64_ADD_OVF_U, instr.I64_SUB_OVF_S, instr.I64_SUB_OVF_U, instr.I64_MUL_OVF_S, instr.I64_MUL_OVF_U,
+				}
 			}
-			edges := []int64{0, 1, -1, 2, lo, hi}
+			// -1 is the largest unsigned value and lo the smallest sign-set one.
+			edges := []int64{0, 1, -1, 2, lo, hi, lo | 1}
 			if wide {
-				edges = append(edges, 1<<32, -(1 << 32), 1<<31, 3037000500)
+				edges = append(edges, 1<<32, 1<<32-1, -(1 << 32), 1<<31, 3037000500)
 			} else {
-				edges = append(edges, 46341, -46341)
+				edges = append(edges, 65536, 65535, 46341, -46341)
 			}
-			for _, op := range ops {
+			// ops lists add, sub, mul, each signed then unsigned.
+			for index, op := range ops {
 				for _, x := range edges {
 					for _, y := range edges {
-						cases = append(cases, tc{name: fmt.Sprintf("%s %d %d", instr.TypeOf(op).Mnemonic, x, y), op: op, wide: wide, x: x, y: y})
+						cases = append(cases, tc{
+							name: fmt.Sprintf("%s %d %d", instr.TypeOf(op).Mnemonic, x, y), op: op,
+							arithmetic: index / 2, unsigned: index%2 == 1, wide: wide, x: x, y: y,
+						})
 					}
 				}
 			}
@@ -13312,7 +13329,7 @@ func BenchmarkNew(b *testing.B) {
 }
 
 func FuzzCheckedArithmetic(f *testing.F) {
-	edges := []int64{math.MinInt64, math.MaxInt64, math.MinInt64 + 1, math.MaxInt64 - 1, -1, 0, 1, 1 << 31, 1 << 32, 3037000500, 46341}
+	edges := []int64{math.MinInt64, math.MaxInt64, math.MinInt64 + 1, math.MaxInt64 - 1, math.MinInt64 | 1, -1, 0, 1, 1 << 31, 1<<31 | 1, 1 << 32, 3037000500, 46341}
 	for op := byte(0); op < 12; op++ {
 		for _, x := range edges {
 			for _, y := range edges {

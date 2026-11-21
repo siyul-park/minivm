@@ -1668,13 +1668,20 @@ func TestMachine_Lower(t *testing.T) {
 	}
 	for _, typ := range []ssa.Type{i32, i64} {
 		x, y, dst, flag := reg(typ, 1), reg(typ, 2), reg(typ, 3), reg(ssa.TypeI1, 4)
-		product := []asm.Instruction{
+		signedProduct := []asm.Instruction{
 			target.SMULH(target.X16, x, y), target.MUL(dst, x, y), target.ASRI(target.X17, dst, 63),
 			target.CMP(target.X16, target.X17), target.CSET(flag, target.CondNE),
 		}
+		unsignedProduct := []asm.Instruction{
+			target.UMULH(target.X16, x, y), target.MUL(dst, x, y), target.CMPI(target.X16, 0), target.CSET(flag, target.CondNE),
+		}
 		if typ == i32 {
-			product = []asm.Instruction{
+			signedProduct = []asm.Instruction{
 				target.SMULL(target.X16, x, y), target.SXTW(target.X17, target.W16),
+				target.CMP(target.X16, target.X17), target.MOVW(dst, target.X16), target.CSET(flag, target.CondNE),
+			}
+			unsignedProduct = []asm.Instruction{
+				target.UMULL(target.X16, x, y), target.UXTW(target.X17, target.W16),
 				target.CMP(target.X16, target.X17), target.MOVW(dst, target.X16), target.CSET(flag, target.CondNE),
 			}
 		}
@@ -1682,9 +1689,12 @@ func TestMachine_Lower(t *testing.T) {
 			op   ssa.Op
 			rows []asm.Instruction
 		}{
-			{ssa.OpIntAddOvf, []asm.Instruction{target.ADDS(dst, x, y), target.CSET(flag, target.CondVS)}},
-			{ssa.OpIntSubOvf, []asm.Instruction{target.SUBS(dst, x, y), target.CSET(flag, target.CondVS)}},
-			{ssa.OpIntMulOvf, product},
+			{ssa.OpIntSAddOvf, []asm.Instruction{target.ADDS(dst, x, y), target.CSET(flag, target.CondVS)}},
+			{ssa.OpIntSSubOvf, []asm.Instruction{target.SUBS(dst, x, y), target.CSET(flag, target.CondVS)}},
+			{ssa.OpIntSMulOvf, signedProduct},
+			{ssa.OpIntUAddOvf, []asm.Instruction{target.ADDS(dst, x, y), target.CSET(flag, target.CondCS)}},
+			{ssa.OpIntUSubOvf, []asm.Instruction{target.SUBS(dst, x, y), target.CSET(flag, target.CondCC)}},
+			{ssa.OpIntUMulOvf, unsignedProduct},
 		} {
 			tests = append(tests, test{
 				name: c.op.String() + " " + typ.String(),
@@ -1694,7 +1704,7 @@ func TestMachine_Lower(t *testing.T) {
 			})
 		}
 	}
-	for _, op := range []ssa.Op{ssa.OpIntAddOvf, ssa.OpIntSubOvf, ssa.OpIntMulOvf} {
+	for _, op := range []ssa.Op{ssa.OpIntSAddOvf, ssa.OpIntSSubOvf, ssa.OpIntSMulOvf, ssa.OpIntUAddOvf, ssa.OpIntUSubOvf, ssa.OpIntUMulOvf} {
 		tests = append(tests,
 			test{name: op.String() + " declines mixed lanes", regs: regs{1: i32, 2: i64, 3: i32, 4: ssa.TypeI1}, op: overflowing(op)},
 			test{name: op.String() + " declines a wide flag", regs: regs{1: i64, 2: i64, 3: i64, 4: i64}, op: overflowing(op)},

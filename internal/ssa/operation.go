@@ -207,11 +207,15 @@ const (
 	OpIntSIToFP
 	OpIntUIToFP
 	OpIntBitcast
-	// OpIntAddOvf, OpIntSubOvf, and OpIntMulOvf yield the wrapped result of
-	// their two lanes and an i1 set when the exact signed result does not fit.
-	OpIntAddOvf
-	OpIntSubOvf
-	OpIntMulOvf
+	// OpIntSAddOvf, OpIntSSubOvf, and OpIntSMulOvf yield the wrapped result of
+	// their two lanes and an i1 set when the exact signed result does not fit;
+	// OpIntUAddOvf, OpIntUSubOvf, and OpIntUMulOvf the same for the unsigned.
+	OpIntSAddOvf
+	OpIntSSubOvf
+	OpIntSMulOvf
+	OpIntUAddOvf
+	OpIntUSubOvf
+	OpIntUMulOvf
 
 	OpFloatAdd
 	OpFloatSub
@@ -343,7 +347,8 @@ var opNames = [...]string{
 	OpIntSExt8: "int.sext8", OpIntSExt16: "int.sext16", OpIntSExt32: "int.sext32",
 	OpIntCmp: "int.cmp", OpIntSExt: "int.sext", OpIntZExt: "int.zext", OpIntWrap: "int.wrap",
 	OpIntSIToFP: "int.sitofp", OpIntUIToFP: "int.uitofp", OpIntBitcast: "int.bitcast",
-	OpIntAddOvf: "int.add_ovf", OpIntSubOvf: "int.sub_ovf", OpIntMulOvf: "int.mul_ovf",
+	OpIntSAddOvf: "int.sadd_ovf", OpIntSSubOvf: "int.ssub_ovf", OpIntSMulOvf: "int.smul_ovf",
+	OpIntUAddOvf: "int.uadd_ovf", OpIntUSubOvf: "int.usub_ovf", OpIntUMulOvf: "int.umul_ovf",
 	OpFloatAdd: "float.add", OpFloatSub: "float.sub", OpFloatMul: "float.mul", OpFloatDiv: "float.div",
 	OpFloatMin: "float.min", OpFloatMax: "float.max", OpFloatCopysign: "float.copysign",
 	OpFloatNeg: "float.neg", OpFloatAbs: "float.abs", OpFloatSqrt: "float.sqrt",

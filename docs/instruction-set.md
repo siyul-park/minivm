@@ -129,11 +129,11 @@ One opcode per row, in opcode-value order.
 | Integers | `I32_SHR_S` | `i32.shr_s` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I32_SHR_U` | `i32.shr_u` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I32_ADD_OVF_S` | `i32.add_ovf_s` | ✅ | 🔲 | pushes the wrapped result, then an `i1` set when the exact signed result overflows; lowered on ARM64 |
-| Integers | `I32_ADD_OVF_U` | `i32.add_ovf_u` | ⬜ | 🔲 | pushes the wrapped result, then an `i1` set when the exact unsigned result overflows; bridges and resumes native code on ARM64 |
+| Integers | `I32_ADD_OVF_U` | `i32.add_ovf_u` | ✅ | 🔲 | pushes the wrapped result, then an `i1` set when the exact unsigned result overflows; lowered on ARM64 |
 | Integers | `I32_SUB_OVF_S` | `i32.sub_ovf_s` | ✅ | 🔲 | pushes the wrapped result, then an `i1` set when the exact signed result overflows; lowered on ARM64 |
-| Integers | `I32_SUB_OVF_U` | `i32.sub_ovf_u` | ⬜ | 🔲 | pushes the wrapped result, then an `i1` set when the exact unsigned result overflows; bridges and resumes native code on ARM64 |
+| Integers | `I32_SUB_OVF_U` | `i32.sub_ovf_u` | ✅ | 🔲 | pushes the wrapped result, then an `i1` set when the exact unsigned result overflows; lowered on ARM64 |
 | Integers | `I32_MUL_OVF_S` | `i32.mul_ovf_s` | ✅ | 🔲 | pushes the wrapped result, then an `i1` set when the exact signed result overflows; lowered on ARM64 |
-| Integers | `I32_MUL_OVF_U` | `i32.mul_ovf_u` | ⬜ | 🔲 | pushes the wrapped result, then an `i1` set when the exact unsigned result overflows; bridges and resumes native code on ARM64 |
+| Integers | `I32_MUL_OVF_U` | `i32.mul_ovf_u` | ✅ | 🔲 | pushes the wrapped result, then an `i1` set when the exact unsigned result overflows; lowered on ARM64 |
 | Integers | `I32_XOR` | `i32.xor` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I32_AND` | `i32.and` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I32_OR` | `i32.or` | ✅ | 🔲 | lowered on ARM64 |
@@ -174,11 +174,11 @@ One opcode per row, in opcode-value order.
 | Integers | `I64_SHR_S` | `i64.shr_s` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I64_SHR_U` | `i64.shr_u` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I64_ADD_OVF_S` | `i64.add_ovf_s` | ✅ | 🔲 | pushes the wrapped result, then an `i1` set when the exact signed result overflows; lowered on ARM64 |
-| Integers | `I64_ADD_OVF_U` | `i64.add_ovf_u` | ⬜ | 🔲 | pushes the wrapped result, then an `i1` set when the exact unsigned result overflows; bridges and resumes native code on ARM64 |
+| Integers | `I64_ADD_OVF_U` | `i64.add_ovf_u` | ✅ | 🔲 | pushes the wrapped result, then an `i1` set when the exact unsigned result overflows; lowered on ARM64 |
 | Integers | `I64_SUB_OVF_S` | `i64.sub_ovf_s` | ✅ | 🔲 | pushes the wrapped result, then an `i1` set when the exact signed result overflows; lowered on ARM64 |
-| Integers | `I64_SUB_OVF_U` | `i64.sub_ovf_u` | ⬜ | 🔲 | pushes the wrapped result, then an `i1` set when the exact unsigned result overflows; bridges and resumes native code on ARM64 |
+| Integers | `I64_SUB_OVF_U` | `i64.sub_ovf_u` | ✅ | 🔲 | pushes the wrapped result, then an `i1` set when the exact unsigned result overflows; lowered on ARM64 |
 | Integers | `I64_MUL_OVF_S` | `i64.mul_ovf_s` | ✅ | 🔲 | pushes the wrapped result, then an `i1` set when the exact signed result overflows; lowered on ARM64 |
-| Integers | `I64_MUL_OVF_U` | `i64.mul_ovf_u` | ⬜ | 🔲 | pushes the wrapped result, then an `i1` set when the exact unsigned result overflows; bridges and resumes native code on ARM64 |
+| Integers | `I64_MUL_OVF_U` | `i64.mul_ovf_u` | ✅ | 🔲 | pushes the wrapped result, then an `i1` set when the exact unsigned result overflows; lowered on ARM64 |
 | Integers | `I64_XOR` | `i64.xor` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I64_AND` | `i64.and` | ✅ | 🔲 | lowered on ARM64 |
 | Integers | `I64_OR` | `i64.or` | ✅ | 🔲 | lowered on ARM64 |

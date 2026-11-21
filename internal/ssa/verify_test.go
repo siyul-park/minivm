@@ -550,8 +550,10 @@ func TestVerify(t *testing.T) {
 	t.Run("accepts well-typed data operations", func(t *testing.T) {
 		require.NoError(t, data(ssa.Operation{Op: ssa.OpIntAdd}, []ssa.Type{i32, ssa.TypeI8}, []ssa.Type{i32}, true))
 		require.NoError(t, data(ssa.Operation{Op: ssa.OpIntCmp, Cond: ssa.CondSLT}, []ssa.Type{i64, i64}, []ssa.Type{i1}, true))
-		require.NoError(t, data(ssa.Operation{Op: ssa.OpIntAddOvf}, []ssa.Type{i32, i32}, []ssa.Type{i32, i1}, true))
-		require.NoError(t, data(ssa.Operation{Op: ssa.OpIntMulOvf}, []ssa.Type{i64, i64}, []ssa.Type{i64, i1}, true))
+		require.NoError(t, data(ssa.Operation{Op: ssa.OpIntSAddOvf}, []ssa.Type{i32, i32}, []ssa.Type{i32, i1}, true))
+		require.NoError(t, data(ssa.Operation{Op: ssa.OpIntSMulOvf}, []ssa.Type{i64, i64}, []ssa.Type{i64, i1}, true))
+		require.NoError(t, data(ssa.Operation{Op: ssa.OpIntUAddOvf}, []ssa.Type{i32, i32}, []ssa.Type{i32, i1}, true))
+		require.NoError(t, data(ssa.Operation{Op: ssa.OpIntUMulOvf}, []ssa.Type{i64, i64}, []ssa.Type{i64, i1}, true))
 		require.NoError(t, data(ssa.Operation{Op: ssa.OpFloatCmp, Cond: ssa.CondOLT}, []ssa.Type{f64, f64}, []ssa.Type{i1}, true))
 		require.NoError(t, data(ssa.Operation{Op: ssa.OpFloatAdd}, []ssa.Type{f64, f64}, []ssa.Type{f64}, true))
 		require.NoError(t, data(ssa.Operation{Op: ssa.OpRefCmp, Cond: ssa.CondEQ}, []ssa.Type{ref, ref}, []ssa.Type{i1}, true))
@@ -579,11 +581,13 @@ func TestVerify(t *testing.T) {
 	})
 
 	t.Run("rejects checked arithmetic of the wrong shape", func(t *testing.T) {
-		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntSubOvf}, []ssa.Type{i32, i32}, []ssa.Type{i32}, true), ssa.ErrForm)
-		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntSubOvf}, []ssa.Type{i32, i32}, []ssa.Type{i32, i32}, true), ssa.ErrType)
-		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntAddOvf}, []ssa.Type{i32, i64}, []ssa.Type{i32, i1}, true), ssa.ErrType)
-		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntMulOvf}, []ssa.Type{i64, i64}, []ssa.Type{i32, i1}, true), ssa.ErrType)
-		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntMulOvf}, []ssa.Type{f64, f64}, []ssa.Type{f64, i1}, true), ssa.ErrType)
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntSSubOvf}, []ssa.Type{i32, i32}, []ssa.Type{i32}, true), ssa.ErrForm)
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntSSubOvf}, []ssa.Type{i32, i32}, []ssa.Type{i32, i32}, true), ssa.ErrType)
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntSAddOvf}, []ssa.Type{i32, i64}, []ssa.Type{i32, i1}, true), ssa.ErrType)
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntSMulOvf}, []ssa.Type{i64, i64}, []ssa.Type{i32, i1}, true), ssa.ErrType)
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntSMulOvf}, []ssa.Type{f64, f64}, []ssa.Type{f64, i1}, true), ssa.ErrType)
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntUSubOvf}, []ssa.Type{i32, i32}, []ssa.Type{i32, i32}, true), ssa.ErrType)
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpIntUMulOvf}, []ssa.Type{i32, i64}, []ssa.Type{i32, i1}, true), ssa.ErrType)
 	})
 
 	t.Run("rejects int.add across lanes", func(t *testing.T) {

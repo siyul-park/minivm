@@ -13,7 +13,8 @@ import (
 // metadata it must match.
 var representatives = map[ssa.Op]instr.Opcode{
 	ssa.OpSelect: instr.SELECT, ssa.OpCall: instr.CALL,
-	ssa.OpIntAddOvf: instr.I32_ADD_OVF_S, ssa.OpIntSubOvf: instr.I64_SUB_OVF_S, ssa.OpIntMulOvf: instr.I32_MUL_OVF_S,
+	ssa.OpIntSAddOvf: instr.I32_ADD_OVF_S, ssa.OpIntSSubOvf: instr.I64_SUB_OVF_S, ssa.OpIntSMulOvf: instr.I32_MUL_OVF_S,
+	ssa.OpIntUAddOvf: instr.I32_ADD_OVF_U, ssa.OpIntUSubOvf: instr.I64_SUB_OVF_U, ssa.OpIntUMulOvf: instr.I32_MUL_OVF_U,
 	ssa.OpIntAdd: instr.I32_ADD, ssa.OpIntSDiv: instr.I32_DIV_S, ssa.OpIntUDiv: instr.I64_DIV_U,
 	ssa.OpIntSRem: instr.I32_REM_S, ssa.OpIntURem: instr.I64_REM_U, ssa.OpIntCmp: instr.I32_EQ,
 	ssa.OpIntClz: instr.I32_CLZ, ssa.OpIntSExt: instr.I32_TO_I64_S, ssa.OpIntBitcast: instr.I32_REINTERPRET_F32,
@@ -175,7 +176,7 @@ func TestOp_String(t *testing.T) {
 		{ssa.OpGuardKind, "guard.kind"}, {ssa.OpGuardShape, "guard.shape"}, {ssa.OpGuardBounds, "guard.bounds"}, {ssa.OpGuardValue, "guard.value"},
 		{ssa.OpRefRetain, "ref.retain"}, {ssa.OpRefRelease, "ref.release"}, {ssa.OpState, "state"},
 		{ssa.OpArrayView, "array.view"}, {ssa.OpArrayBound, "array.bound"}, {ssa.OpSelect, "select"}, {ssa.OpCall, "call"},
-		{ssa.OpIntAddOvf, "int.add_ovf"}, {ssa.OpIntSubOvf, "int.sub_ovf"}, {ssa.OpIntMulOvf, "int.mul_ovf"}, {ssa.OpIntAdd, "int.add"}, {ssa.OpIntSub, "int.sub"}, {ssa.OpIntMul, "int.mul"}, {ssa.OpIntSDiv, "int.sdiv"},
+		{ssa.OpIntSAddOvf, "int.sadd_ovf"}, {ssa.OpIntSSubOvf, "int.ssub_ovf"}, {ssa.OpIntSMulOvf, "int.smul_ovf"}, {ssa.OpIntUAddOvf, "int.uadd_ovf"}, {ssa.OpIntUSubOvf, "int.usub_ovf"}, {ssa.OpIntUMulOvf, "int.umul_ovf"}, {ssa.OpIntAdd, "int.add"}, {ssa.OpIntSub, "int.sub"}, {ssa.OpIntMul, "int.mul"}, {ssa.OpIntSDiv, "int.sdiv"},
 		{ssa.OpIntUDiv, "int.udiv"}, {ssa.OpIntSRem, "int.srem"}, {ssa.OpIntURem, "int.urem"}, {ssa.OpIntAnd, "int.and"},
 		{ssa.OpIntOr, "int.or"}, {ssa.OpIntXor, "int.xor"}, {ssa.OpIntShl, "int.shl"}, {ssa.OpIntAShr, "int.ashr"},
 		{ssa.OpIntLShr, "int.lshr"}, {ssa.OpIntRotl, "int.rotl"}, {ssa.OpIntRotr, "int.rotr"}, {ssa.OpIntClz, "int.clz"},
