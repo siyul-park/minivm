@@ -12,10 +12,12 @@ import (
 )
 
 // numeric reports whether code pops and pushes plain numeric values only, with
-// no operand, so that a function of constants and code translates alone.
+// no operand, so that a function of constants and code translates alone. A
+// checked operation pushes its numeric result and then an i1 flag.
 func numeric(code instr.Opcode) bool {
 	typ := instr.TypeOf(code)
-	if len(typ.Widths) > 0 || len(typ.Push) != 1 || !typ.Push[0].IsNumeric() || len(typ.Pop) == 0 {
+	checked := len(typ.Push) == 2 && typ.Push[1] == instr.KindI1
+	if len(typ.Widths) > 0 || len(typ.Push) != 1 && !checked || !typ.Push[0].IsNumeric() || len(typ.Pop) == 0 {
 		return false
 	}
 	for _, kind := range typ.Pop {
@@ -106,7 +108,11 @@ func performed(t *testing.T, code instr.Opcode) (*ssa.Function, ssa.Operation) {
 				b.Emit(instr.I32_CONST, 1)
 			}
 		}
-		b.Emit(code).Emit(instr.RETURN)
+		b.Emit(code)
+		if len(instr.TypeOf(code).Push) == 2 {
+			b.Emit(instr.DROP)
+		}
+		b.Emit(instr.RETURN)
 	})
 	fn := &types.Function{Typ: &types.FunctionType{Returns: []types.Type{types.TypeI32()}}, Code: body}
 
@@ -116,7 +122,7 @@ func performed(t *testing.T, code instr.Opcode) (*ssa.Function, ssa.Operation) {
 	require.NoError(t, ssa.Verify(out))
 	var result ssa.Operation
 	for _, o := range out.Block(0).Operations {
-		if o.Op != ssa.OpState && o.Op != ssa.OpConst && len(o.Results) == 1 {
+		if o.Op != ssa.OpState && o.Op != ssa.OpConst && len(o.Results) > 0 {
 			result = o
 		}
 	}

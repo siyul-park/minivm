@@ -108,6 +108,13 @@ var types = map[Opcode]Type{
 	I32_SHR_S: {Mnemonic: "i32.shr_s", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
 	I32_SHR_U: {Mnemonic: "i32.shr_u", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
 
+	I32_ADD_OVF_S: {Mnemonic: "i32.add_ovf_s", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32, KindI1}},
+	I32_ADD_OVF_U: {Mnemonic: "i32.add_ovf_u", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32, KindI1}},
+	I32_SUB_OVF_S: {Mnemonic: "i32.sub_ovf_s", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32, KindI1}},
+	I32_SUB_OVF_U: {Mnemonic: "i32.sub_ovf_u", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32, KindI1}},
+	I32_MUL_OVF_S: {Mnemonic: "i32.mul_ovf_s", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32, KindI1}},
+	I32_MUL_OVF_U: {Mnemonic: "i32.mul_ovf_u", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32, KindI1}},
+
 	I32_EQZ:  {Mnemonic: "i32.eqz", Pop: []Kind{KindI32}, Push: []Kind{KindI1}},
 	I32_EQ:   {Mnemonic: "i32.eq", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI1}},
 	I32_NE:   {Mnemonic: "i32.ne", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI1}},
@@ -141,6 +148,13 @@ var types = map[Opcode]Type{
 	I64_SHL:   {Mnemonic: "i64.shl", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}},
 	I64_SHR_S: {Mnemonic: "i64.shr_s", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}},
 	I64_SHR_U: {Mnemonic: "i64.shr_u", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}},
+
+	I64_ADD_OVF_S: {Mnemonic: "i64.add_ovf_s", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64, KindI1}},
+	I64_ADD_OVF_U: {Mnemonic: "i64.add_ovf_u", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64, KindI1}},
+	I64_SUB_OVF_S: {Mnemonic: "i64.sub_ovf_s", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64, KindI1}},
+	I64_SUB_OVF_U: {Mnemonic: "i64.sub_ovf_u", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64, KindI1}},
+	I64_MUL_OVF_S: {Mnemonic: "i64.mul_ovf_s", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64, KindI1}},
+	I64_MUL_OVF_U: {Mnemonic: "i64.mul_ovf_u", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64, KindI1}},
 
 	I64_XOR: {Mnemonic: "i64.xor", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}},
 	I64_AND: {Mnemonic: "i64.and", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI64}},

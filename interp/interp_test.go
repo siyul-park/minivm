@@ -3,8 +3,10 @@ package interp_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"math"
+	"math/big"
 	"regexp"
 	"slices"
 	"strings"
@@ -360,6 +362,102 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(2)), instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.I32_ADD_OVF_S),
+		}),
+		values: []types.Value{types.I1(false), types.I32(5)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MaxInt32)), instr.MustNew(instr.I32_CONST, i32operand(1)), instr.MustNew(instr.I32_ADD_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I32(math.MinInt32)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_ADD_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I32(math.MaxInt32)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MaxInt32)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_ADD_OVF_S),
+		}),
+		values: []types.Value{types.I1(false), types.I32(-1)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_ADD_OVF_S),
+		}),
+		values: []types.Value{types.I1(false), types.I32(math.MinInt32)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(5)), instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.I32_SUB_OVF_S),
+		}),
+		values: []types.Value{types.I1(false), types.I32(2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(1)), instr.MustNew(instr.I32_SUB_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I32(math.MaxInt32)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MaxInt32)), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_SUB_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I32(math.MinInt32)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_SUB_OVF_S),
+		}),
+		values: []types.Value{types.I1(false), types.I32(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_SUB_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I32(math.MinInt32)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.I32_CONST, i32operand(4)), instr.MustNew(instr.I32_MUL_OVF_S),
+		}),
+		values: []types.Value{types.I1(false), types.I32(12)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_MUL_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I32(math.MinInt32)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_MUL_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I32(math.MinInt32)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MaxInt32)), instr.MustNew(instr.I32_CONST, i32operand(2)), instr.MustNew(instr.I32_MUL_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I32(-2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_MUL_OVF_S),
+		}),
+		values: []types.Value{types.I1(false), types.I32(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(1)), instr.MustNew(instr.I32_MUL_OVF_S),
+		}),
+		values: []types.Value{types.I1(false), types.I32(math.MinInt32)},
+	},
+	{
+		program: program.New([]instr.Instruction{
 			instr.MustNew(instr.I32_CONST, i32operand(-7)), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_DIV_S),
 		}),
 		values: []types.Value{types.I32(-3)},
@@ -525,6 +623,258 @@ var runTests = []struct {
 	{
 		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 3), instr.MustNew(instr.I64_CONST, 4), instr.MustNew(instr.I64_MUL)}),
 		values:  []types.Value{types.I64(12)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(2)), instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.I64_ADD_OVF_S),
+		}),
+		values: []types.Value{types.I1(false), types.I64(5)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MaxInt64)), instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.I64_ADD_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_ADD_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I64(math.MaxInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MaxInt64)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_ADD_OVF_S),
+		}),
+		values: []types.Value{types.I1(false), types.I64(-1)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_ADD_OVF_S),
+		}),
+		values: []types.Value{types.I1(false), types.I64(math.MinInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(5)), instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.I64_SUB_OVF_S),
+		}),
+		values: []types.Value{types.I1(false), types.I64(2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.I64_SUB_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I64(math.MaxInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MaxInt64)), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_SUB_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_SUB_OVF_S),
+		}),
+		values: []types.Value{types.I1(false), types.I64(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_SUB_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.I64_CONST, i64operand(4)), instr.MustNew(instr.I64_MUL_OVF_S),
+		}),
+		values: []types.Value{types.I1(false), types.I64(12)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_MUL_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_MUL_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MaxInt64)), instr.MustNew(instr.I64_CONST, i64operand(2)), instr.MustNew(instr.I64_MUL_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I64(-2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_MUL_OVF_S),
+		}),
+		values: []types.Value{types.I1(false), types.I64(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.I64_MUL_OVF_S),
+		}),
+		values: []types.Value{types.I1(false), types.I64(math.MinInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(1099511627776)), instr.MustNew(instr.I64_CONST, i64operand(1099511627776)), instr.MustNew(instr.I64_MUL_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I64(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(4294967296)), instr.MustNew(instr.I64_CONST, i64operand(2147483648)), instr.MustNew(instr.I64_MUL_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(-4294967296)), instr.MustNew(instr.I64_CONST, i64operand(2147483648)), instr.MustNew(instr.I64_MUL_OVF_S),
+		}),
+		values: []types.Value{types.I1(false), types.I64(math.MinInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_ADD_OVF_U),
+		}),
+		values: []types.Value{types.I1(false), types.I32(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_CONST, i32operand(1)), instr.MustNew(instr.I32_ADD_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I32(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_ADD_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I32(-2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(-2147483648)), instr.MustNew(instr.I32_CONST, i32operand(-2147483648)), instr.MustNew(instr.I32_ADD_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I32(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_CONST, i32operand(1)), instr.MustNew(instr.I32_SUB_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I32(-1)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(5)), instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.I32_SUB_OVF_U),
+		}),
+		values: []types.Value{types.I1(false), types.I32(2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.I32_CONST, i32operand(5)), instr.MustNew(instr.I32_SUB_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I32(-2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_CONST, i32operand(2)), instr.MustNew(instr.I32_MUL_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I32(-2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_MUL_OVF_U),
+		}),
+		values: []types.Value{types.I1(false), types.I32(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(65536)), instr.MustNew(instr.I32_CONST, i32operand(65536)), instr.MustNew(instr.I32_MUL_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I32(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(65536)), instr.MustNew(instr.I32_CONST, i32operand(65535)), instr.MustNew(instr.I32_MUL_OVF_U),
+		}),
+		values: []types.Value{types.I1(false), types.I32(-65536)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_ADD_OVF_U),
+		}),
+		values: []types.Value{types.I1(false), types.I64(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.I64_ADD_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I64(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_ADD_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I64(-2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(-9223372036854775808)), instr.MustNew(instr.I64_CONST, i64operand(-9223372036854775808)), instr.MustNew(instr.I64_ADD_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I64(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.I64_SUB_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I64(-1)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(5)), instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.I64_SUB_OVF_U),
+		}),
+		values: []types.Value{types.I1(false), types.I64(2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.I64_CONST, i64operand(5)), instr.MustNew(instr.I64_SUB_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I64(-2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_CONST, i64operand(2)), instr.MustNew(instr.I64_MUL_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I64(-2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_MUL_OVF_U),
+		}),
+		values: []types.Value{types.I1(false), types.I64(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(4294967296)), instr.MustNew(instr.I64_CONST, i64operand(4294967296)), instr.MustNew(instr.I64_MUL_OVF_U),
+		}),
+		values: []types.Value{types.I1(true), types.I64(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(4294967296)), instr.MustNew(instr.I64_CONST, i64operand(4294967295)), instr.MustNew(instr.I64_MUL_OVF_U),
+		}),
+		values: []types.Value{types.I1(false), types.I64(-4294967296)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(-4294967296)), instr.MustNew(instr.I64_CONST, i64operand(-2147483648)), instr.MustNew(instr.I64_MUL_OVF_S),
+		}),
+		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
 	},
 	{
 		program: program.New([]instr.Instruction{
@@ -5229,6 +5579,137 @@ func TestWithThreshold(t *testing.T) {
 				return exitsOf(profiler)["deopt"] > 0
 			})
 		})
+	})
+
+	t.Run("checks integer arithmetic natively as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		// n is odd, so it is invertible modulo 2^32: n copies of a wrong
+		// result never fold to the same checksum as n copies of the right one.
+		const n = 201
+		type tc struct {
+			name string
+			op   instr.Opcode
+			// arithmetic is 0 for add, 1 for sub, 2 for mul.
+			arithmetic int
+			unsigned   bool
+			wide       bool
+			x, y       int64
+		}
+		// reference folds one iteration the way the loop does: the wrapped result
+		// (an i64 as its low half plus three times its high half) into the fold,
+		// and a hit count for the overflow flag.
+		reference := func(c tc) int32 {
+			bits := uint(32)
+			if c.wide {
+				bits = 64
+			}
+			unsigned := c.unsigned
+			modulus := new(big.Int).Lsh(big.NewInt(1), bits)
+			x, y := big.NewInt(c.x), big.NewInt(c.y)
+			if unsigned {
+				x, y = x.Mod(x, modulus), y.Mod(y, modulus)
+			}
+			exact := new(big.Int)
+			switch c.arithmetic {
+			case 0:
+				exact.Add(x, y)
+			case 1:
+				exact.Sub(x, y)
+			default:
+				exact.Mul(x, y)
+			}
+			low, high := new(big.Int), new(big.Int).Lsh(big.NewInt(1), bits-1)
+			low.Neg(high)
+			if unsigned {
+				low, high = big.NewInt(0), modulus
+			}
+			overflow := exact.Cmp(high) >= 0 || exact.Cmp(low) < 0
+			wrapped := new(big.Int).And(exact, new(big.Int).Sub(modulus, big.NewInt(1))).Uint64()
+			var fold, hits int32
+			for range n {
+				fold += int32(uint32(wrapped))
+				if c.wide {
+					fold += 3 * int32(uint32(wrapped>>32))
+				}
+				if overflow {
+					hits++
+					fold += 7
+				}
+			}
+			return fold + 31*hits
+		}
+		build := func(c tc) *program.Program {
+			b := instr.NewBuilder()
+			loop, done, hit, skip := b.Label(), b.Label(), b.Label(), b.Label()
+			constant, operand := instr.I32_CONST, i32operand(int32(c.x))
+			other := i32operand(int32(c.y))
+			if c.wide {
+				constant, operand, other = instr.I64_CONST, i64operand(c.x), i64operand(c.y)
+			}
+			b.Emit(constant, operand).Emit(instr.LOCAL_SET, 4).Emit(constant, other).Emit(instr.LOCAL_SET, 5)
+			b.Bind(loop)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, n).Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.LOCAL_GET, 4).Emit(instr.LOCAL_GET, 5).Emit(c.op).Emit(instr.LOCAL_SET, 3)
+			if c.wide {
+				b.Emit(instr.DUP).Emit(instr.I64_TO_I32).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+				b.Emit(instr.I64_CONST, 32).Emit(instr.I64_SHR_S).Emit(instr.I64_TO_I32).Emit(instr.I32_CONST, 3).Emit(instr.I32_MUL)
+			}
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+			b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 7).Emit(instr.I32_MUL).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+			b.Emit(instr.LOCAL_GET, 3).BrIf(hit).Br(skip)
+			b.Bind(hit)
+			b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+			b.Bind(skip)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+			b.Bind(done).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 31).Emit(instr.I32_MUL).Emit(instr.I32_ADD)
+			code, err := b.Assemble()
+			require.NoError(t, err)
+			operandType := types.TypeI32()
+			if c.wide {
+				operandType = types.TypeI64()
+			}
+			return program.New(code, program.WithLocals(types.TypeI32(), types.TypeI32(), types.TypeI32(), types.TypeI32(), operandType, operandType))
+		}
+
+		var cases []tc
+		for _, wide := range []bool{false, true} {
+			lo, hi := int64(math.MinInt32), int64(math.MaxInt32)
+			ops := []instr.Opcode{
+				instr.I32_ADD_OVF_S, instr.I32_ADD_OVF_U, instr.I32_SUB_OVF_S, instr.I32_SUB_OVF_U, instr.I32_MUL_OVF_S, instr.I32_MUL_OVF_U,
+			}
+			if wide {
+				lo, hi = math.MinInt64, math.MaxInt64
+				ops = []instr.Opcode{
+					instr.I64_ADD_OVF_S, instr.I64_ADD_OVF_U, instr.I64_SUB_OVF_S, instr.I64_SUB_OVF_U, instr.I64_MUL_OVF_S, instr.I64_MUL_OVF_U,
+				}
+			}
+			// -1 is the largest unsigned value and lo the smallest sign-set one.
+			edges := []int64{0, 1, -1, 2, lo, hi, lo | 1}
+			if wide {
+				edges = append(edges, 1<<32, 1<<32-1, -(1 << 32), 1<<31, 3037000500)
+			} else {
+				edges = append(edges, 65536, 65535, 46341, -46341)
+			}
+			// ops lists add, sub, mul, each signed then unsigned.
+			for index, op := range ops {
+				for _, x := range edges {
+					for _, y := range edges {
+						cases = append(cases, tc{
+							name: fmt.Sprintf("%s %d %d", instr.TypeOf(op).Mnemonic, x, y), op: op,
+							arithmetic: index / 2, unsigned: index%2 == 1, wide: wide, x: x, y: y,
+						})
+					}
+				}
+			}
+		}
+		for _, c := range cases {
+			t.Run(c.name, func(t *testing.T) {
+				prog := build(c)
+				require.Equal(t, types.I32(reference(c)), runProgram(t, prog))
+				requireNative(t, prog)
+			})
+		}
 	})
 
 	t.Run("compares strings and refs natively as threaded does", func(t *testing.T) {
@@ -12849,6 +13330,73 @@ func BenchmarkNew(b *testing.B) {
 	})
 }
 
+func FuzzCheckedArithmetic(f *testing.F) {
+	edges := []int64{math.MinInt64, math.MaxInt64, math.MinInt64 + 1, math.MaxInt64 - 1, math.MinInt64 | 1, -1, 0, 1, 1 << 31, 1<<31 | 1, 1 << 32, 3037000500, 46341}
+	for op := byte(0); op < 12; op++ {
+		for _, x := range edges {
+			for _, y := range edges {
+				f.Add(op, x, y)
+			}
+		}
+	}
+
+	f.Fuzz(func(t *testing.T, operation byte, left, right int64) {
+		// operation picks one of the twelve checked opcodes: i32 then i64, each
+		// add, sub, mul in a signed then an unsigned form. An i32 one takes the
+		// operands' low halves.
+		ops := []instr.Opcode{
+			instr.I32_ADD_OVF_S, instr.I32_ADD_OVF_U, instr.I32_SUB_OVF_S, instr.I32_SUB_OVF_U, instr.I32_MUL_OVF_S, instr.I32_MUL_OVF_U,
+			instr.I64_ADD_OVF_S, instr.I64_ADD_OVF_U, instr.I64_SUB_OVF_S, instr.I64_SUB_OVF_U, instr.I64_MUL_OVF_S, instr.I64_MUL_OVF_U,
+		}
+		index := int(operation) % len(ops)
+		op, wide, unsigned, arithmetic := ops[index], index >= 6, index%2 == 1, index%6/2
+		bits, code, a, b := uint(32), instr.I32_CONST, uint64(uint32(left)), uint64(uint32(right))
+		x, y := big.NewInt(int64(int32(left))), big.NewInt(int64(int32(right)))
+		if wide {
+			bits, code, a, b = 64, instr.I64_CONST, uint64(left), uint64(right)
+			x, y = big.NewInt(left), big.NewInt(right)
+		}
+		modulus := new(big.Int).Lsh(big.NewInt(1), bits)
+		if unsigned {
+			x, y = x.Mod(x, modulus), y.Mod(y, modulus)
+		}
+		exact := new(big.Int)
+		switch arithmetic {
+		case 0:
+			exact.Add(x, y)
+		case 1:
+			exact.Sub(x, y)
+		default:
+			exact.Mul(x, y)
+		}
+		low, high := new(big.Int), new(big.Int).Lsh(big.NewInt(1), bits-1)
+		low.Neg(high)
+		if unsigned {
+			low, high = big.NewInt(0), modulus
+		}
+		overflow := exact.Cmp(high) >= 0 || exact.Cmp(low) < 0
+		wrapped := new(big.Int).And(exact, new(big.Int).Sub(modulus, big.NewInt(1))).Uint64()
+		var want types.Value = types.I32(int32(uint32(wrapped)))
+		if wide {
+			want = types.I64(int64(wrapped))
+		}
+
+		prog := program.New([]instr.Instruction{instr.MustNew(code, a), instr.MustNew(code, b), instr.MustNew(op)})
+		require.NoError(t, program.Verify(prog))
+		for _, opts := range [][]interp.Option{{interp.WithThreshold(-1)}, {interp.WithTick(1), interp.WithThreshold(-1)}} {
+			vm := interp.MustNew(prog, opts...)
+			require.NoError(t, vm.Run(context.Background()))
+			flag, err := vm.Pop()
+			require.NoError(t, err)
+			result, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I1(overflow), flag)
+			require.Equal(t, want, result)
+			require.NoError(t, vm.Close())
+		}
+	})
+}
+
 func BenchmarkInterpreter_Run(b *testing.B) {
 	for _, tt := range runTests {
 		b.Run(runTestName(tt.program), func(b *testing.B) {
@@ -12899,6 +13447,93 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 			}
 		})
 	}
+
+	// Checked compares a hot i64 loop of 10000 iterations that tests overflow
+	// with the checked opcode against the manual sequence (add) or the plain
+	// opcode as a floor (mul, which has no cheap manual sequence).
+	b.Run("Checked", func(b *testing.B) {
+		const iterations = 10000
+		build := func(carries bool, body func(b *instr.Builder, out instr.Label)) *program.Program {
+			code := instr.NewBuilder()
+			loop, out, done := code.Label(), code.Label(), code.Label()
+			code.Emit(instr.I64_CONST, 1).Emit(instr.LOCAL_SET, 1).Emit(instr.I64_CONST, 1).Emit(instr.LOCAL_SET, 2)
+			code.Bind(loop)
+			code.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, iterations).Emit(instr.I32_GE_S).BrIf(done)
+			body(code, out)
+			code.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+			code.Bind(out)
+			if carries {
+				code.Emit(instr.DROP)
+			}
+			code.Bind(done).Emit(instr.LOCAL_GET, 0)
+			assembled, err := code.Assemble()
+			require.NoError(b, err)
+			return program.New(assembled, program.WithLocals(types.TypeI32(), types.TypeI64(), types.TypeI64(), types.TypeI64()))
+		}
+		checked := func(op instr.Opcode) *program.Program {
+			return build(true, func(code *instr.Builder, out instr.Label) {
+				code.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(op).BrIf(out).Emit(instr.LOCAL_SET, 1)
+			})
+		}
+		manual := build(false, func(code *instr.Builder, out instr.Label) {
+			code.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I64_ADD).Emit(instr.LOCAL_TEE, 3)
+			code.Emit(instr.LOCAL_GET, 1).Emit(instr.I64_XOR).Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 2).Emit(instr.I64_XOR)
+			code.Emit(instr.I64_AND).Emit(instr.I64_CONST, 0).Emit(instr.I64_LT_S).BrIf(out)
+			code.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_SET, 1)
+		})
+		plain := build(false, func(code *instr.Builder, out instr.Label) {
+			code.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I64_MUL).Emit(instr.LOCAL_SET, 1)
+		})
+		for _, tt := range []struct {
+			name string
+			prog *program.Program
+		}{
+			{"add ovf", checked(instr.I64_ADD_OVF_S)},
+			{"add manual", manual},
+			{"mul ovf", checked(instr.I64_MUL_OVF_S)},
+			{"mul plain", plain},
+		} {
+			for _, mode := range []string{"Threaded", "JIT"} {
+				b.Run(tt.name+"/"+mode, func(b *testing.B) {
+					ctx := context.Background()
+					opts := []interp.Option{interp.WithThreshold(-1)}
+					var profiler *prof.Profiler
+					if mode == "JIT" {
+						testenv.MustHaveJIT(b)
+						profiler = prof.New()
+						opts = []interp.Option{interp.WithThreshold(1), interp.WithProfiler(profiler)}
+					}
+					vm := interp.MustNew(tt.prog, opts...)
+					b.Cleanup(func() { require.NoError(b, vm.Close()) })
+					run := func() {
+						require.NoError(b, vm.Run(ctx))
+						got, err := vm.Pop()
+						require.NoError(b, err)
+						require.Equal(b, types.I32(iterations), got)
+						vm.Reset()
+						vm.Flush()
+					}
+					run()
+					if profiler != nil {
+						for deadline := time.Now().Add(10 * time.Second); ; {
+							before := nativeEntries(profiler)
+							run()
+							if nativeEntries(profiler) > before {
+								break
+							}
+							require.True(b, time.Now().Before(deadline), "never entered native code")
+						}
+					}
+					b.ReportAllocs()
+					b.ResetTimer()
+					for b.Loop() {
+						run()
+					}
+					b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/iterations, "ns/iter")
+				})
+			}
+		}
+	})
 
 	b.Run("PerOp", func(b *testing.B) {
 		for _, tt := range runTests {
