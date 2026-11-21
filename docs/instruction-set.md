@@ -332,6 +332,8 @@ Primitive keys use value identity; `i1`/`i8` use their `i32` representation. Str
 
 Handler tables own exception routing. `types.Error` is the structured payload. Code `0` is unclassified; VM traps use negative codes; source errors use `types.ErrorCodeUserBase` and above.
 
+A handler that receives an `Error` without frames first records the active ones on it, innermost first, as `RuntimeError.Frames` reports them had the error escaped: a trap, a host error, or a thrown `Error` alike, in both tiers. A rethrown `Error` keeps the frames of its first raise.
+
 ## Fusion
 
 Threaded fusion rules are owned by `fusion.md`.

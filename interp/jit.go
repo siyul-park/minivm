@@ -37,6 +37,10 @@ type engine struct {
 	// interpreter runs for them (reenter): the next entry starts its records
 	// above them.
 	depth uint64
+	// spans are the native activations reenter suspends, outermost
+	// first: frame slots their materialization would fill hold stale state
+	// until then, which trace reads from the activations instead.
+	spans []span
 	// borrows caches transform.Borrows by address for entries above depth
 	// 0, whose activation's return keeps its borrowed parameters (it
 	// releases them only at depth 1).
@@ -50,6 +54,12 @@ type engine struct {
 	// Calling i.compile here directly creates the threaded/fusions
 	// initialization cycle.
 	compile func(fn *types.Function, exact bool) ([]func(*Interpreter), []uint8)
+}
+
+// span is one reenter's suspended native activations: levels from
+// depth fill frame slots from start, below the stand-in frame at.
+type span struct {
+	start, at, depth int
 }
 
 // hold is one heap operand of a bridge attempt and its count before it.
@@ -283,11 +293,14 @@ func (e *engine) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 		}
 	}
 
+	// The caller's ip moves past its CALL before native code runs, so the
+	// frames a served call records see the return address threaded code would.
+	i.fr.ip += advance
 	if trap := jit.Enter(code.Entry(), ctx); trap != jit.TrapReturn {
 		start := i.fp
 		ok, invalidate, fault := e.settle(i, code, trap, e.policy.ledger(addr), mark, start,
 
-			func(exit *jit.Exit) { i.fr.ip += advance; e.materialize(i, exit, start, addr, release) },
+			func(exit *jit.Exit) { e.materialize(i, exit, start, addr, release) },
 			func() bool { return e.policy.refute(addr, code.Tier) },
 		)
 		if e.depth == 0 && e.tcache.dirty {
@@ -310,7 +323,6 @@ func (e *engine) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 		i.release(addr)
 	}
 	i.sp = bp + returns
-	i.fr.ip += advance
 	return false, nil
 }
 
@@ -384,13 +396,7 @@ func (e *engine) materialize(i *Interpreter, exit *jit.Exit, start, ref int, rel
 	maps[depth-floor-1] = exit.Frame
 	refs[0], owns[0] = ref, release
 	for k := depth - 2; k >= floor; k-- {
-		pc := ctx.Records[k+1].PC
-		code := e.policy.cache().Find(pc)
-		id, ok := code.Site(pc)
-		if !ok {
-			panic("interp: native return address with no call site")
-		}
-		call := &code.Exits[id]
+		call := e.site(k)
 		maps[k-floor] = call.Frame
 		refs[k-floor+1] = e.callee(k, call)
 		owns[k-floor+1] = call.Owned
@@ -415,6 +421,28 @@ func (e *engine) materialize(i *Interpreter, exit *jit.Exit, start, ref int, rel
 	i.fp = start + len(maps)
 	i.fr = &i.frames[i.fp-1]
 	ctx.Abandon()
+}
+
+// trace replaces the entries of frames, innermost first over fp frame slots,
+// that suspended native activations leave stale with their call sites.
+func (e *engine) trace(frames []types.Frame, fp int) {
+	for _, s := range e.spans {
+		for slot := s.start; slot < s.at && slot < fp; slot++ {
+			m := e.site(s.depth + slot - s.start).Frame
+			frames[fp-1-slot] = types.Frame{Func: m.Address, IP: m.IP}
+		}
+	}
+}
+
+// site returns the exit of the call suspended native activation k makes.
+func (e *engine) site(k int) *jit.Exit {
+	pc := e.ctx.Records[k+1].PC
+	code := e.policy.cache().Find(pc)
+	id, ok := code.Site(pc)
+	if !ok {
+		panic("interp: native return address with no call site")
+	}
+	return &code.Exits[id]
 }
 
 // frame materializes activation k from m as frame at, entered through ref.
@@ -836,7 +864,9 @@ func (e *engine) reenter(i *Interpreter, exit *jit.Exit, ref, start int, deopt f
 		i.retainBox(i.stack[args+p])
 	}
 	e.depth, i.floor = uint64(k+1), at+1
+	e.spans = append(e.spans, span{start: start, at: at, depth: int(depth)})
 	fault, err := dispatch(i)
+	e.spans = e.spans[:len(e.spans)-1]
 	e.depth, i.floor = depth, floor
 
 	if err == nil && fault == nil {

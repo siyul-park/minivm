@@ -56,7 +56,7 @@ func TestRuntimeError_Error(t *testing.T) {
 			name: "frames",
 			err: &interp.RuntimeError{
 				Err: interp.ErrDivideByZero,
-				Frames: []interp.FrameInfo{
+				Frames: []types.Frame{
 					{Func: 2, IP: 7},
 					{Func: 1, IP: 3}}},
 			want: "divide by zero: fn=2 ip=7 <- fn=1 ip=3"}}

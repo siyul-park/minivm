@@ -12,14 +12,7 @@ import (
 // point of failure. Frames are innermost first.
 type RuntimeError struct {
 	Err    error
-	Frames []FrameInfo
-}
-
-// FrameInfo locates one frame of a RuntimeError by function address and
-// instruction pointer.
-type FrameInfo struct {
-	Func int
-	IP   int
+	Frames []types.Frame
 }
 
 // escape carries a guest throw that found no handler out of the dispatch loop.

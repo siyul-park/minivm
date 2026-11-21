@@ -685,15 +685,15 @@ func formatMap(typ Type, parts []string) string {
 	return fmt.Sprintf("%s{%s}", typ, strings.Join(parts, ", "))
 }
 
-func (m *TypedMap[K]) cloneValue() Value {
+func (m *TypedMap[K]) clone() Value {
 	return m.Clone()
 }
 
-func (m *StringMap) cloneValue() Value {
+func (m *StringMap) clone() Value {
 	return m.Clone()
 }
 
-func (m *Map) cloneValue() Value {
+func (m *Map) clone() Value {
 	return m.Clone()
 }
 

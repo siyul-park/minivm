@@ -1772,8 +1772,15 @@ func (i *Interpreter) wrap(err error) types.Boxed {
 // land unwinds to the handler frame, discarding the frames and operand values
 // above the protected region's entry depth, then delivers exc as the sole
 // operand and resumes at the catch IP. exc keeps the single reference it already
-// owned (popped off the stack by THROW, or freshly allocated for a trap).
+// owned (popped off the stack by THROW, or freshly allocated for a trap). An
+// Error without frames first records the active ones, so a rethrow keeps those
+// of its first raise.
 func (i *Interpreter) land(fp int, h instr.Handler, exc types.Boxed) {
+	if exc.Kind() == types.KindRef {
+		if e, ok := i.heap[exc.Ref()].(*types.Error); ok && e.Frames() == nil {
+			e.SetFrames(i.trace())
+		}
+	}
 	for i.fp > fp {
 		i.discard(&i.frames[i.fp-1])
 		i.fp--
@@ -1825,12 +1832,20 @@ func (i *Interpreter) locate(r any) any {
 }
 
 func (i *Interpreter) fault(r any) error {
-	frames := make([]FrameInfo, 0, i.fp)
+	return &RuntimeError{Err: i.cause(r), Frames: i.trace()}
+}
+
+// trace returns the active frames, innermost first.
+func (i *Interpreter) trace() []types.Frame {
+	frames := make([]types.Frame, 0, i.fp)
 	for idx := i.fp - 1; idx >= 0; idx-- {
 		f := &i.frames[idx]
-		frames = append(frames, FrameInfo{Func: f.addr, IP: f.ip})
+		frames = append(frames, types.Frame{Func: f.addr, IP: f.ip})
 	}
-	return &RuntimeError{Err: i.cause(r), Frames: frames}
+	if i.jit != nil {
+		i.jit.trace(frames, i.fp)
+	}
+	return frames
 }
 
 func (i *Interpreter) guard(err *error) {

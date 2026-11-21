@@ -58,6 +58,15 @@ func TestClone(t *testing.T) {
 		c[0] = 9
 		require.Equal(t, int8(1), src[0])
 	})
+
+	t.Run("error", func(t *testing.T) {
+		src := types.NewError(types.ErrorCodeUserBase, "boom", types.BoxI32(1))
+		c := types.Clone(src).(*types.Error)
+		require.NotSame(t, src, c)
+		require.Equal(t, src.Error(), c.Error())
+		c.SetFrames([]types.Frame{{Func: 1, IP: 2}})
+		require.Nil(t, src.Frames())
+	})
 }
 
 func TestIdentity(t *testing.T) {
