@@ -112,8 +112,8 @@ One opcode per row, in opcode-value order.
 | References | `REF_NEW` | `ref.new` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | References | `REF_GET` | `ref.get` | ⬜ | 🔲 | its result kind is not static: the translator declines the whole unit |
 | References | `REF_SET` | `ref.set` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
-| References | `REF_TEST` | `ref.test` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
-| References | `REF_CAST` | `ref.cast` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
+| References | `REF_TEST` | `ref.test` | ⬜ | 🔲 | lowered on ARM64 for scalar types; bridges for ref, struct, array and any |
+| References | `REF_CAST` | `ref.cast` | ⬜ | 🔲 | lowered on ARM64 for scalar types, a miss deoptimizes to the trap; bridges for ref, struct, array and any |
 | References | `REF_IS_NULL` | `ref.is_null` | ✅ | 🔲 | |
 | References | `REF_EQ` | `ref.eq` | ✅ | 🔲 | lowered on ARM64 |
 | References | `REF_NE` | `ref.ne` | ✅ | 🔲 | lowered on ARM64 |
