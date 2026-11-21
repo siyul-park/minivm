@@ -554,6 +554,8 @@ func TestVerify(t *testing.T) {
 		require.NoError(t, data(ssa.Operation{Op: ssa.OpFloatAdd}, []ssa.Type{f64, f64}, []ssa.Type{f64}, true))
 		require.NoError(t, data(ssa.Operation{Op: ssa.OpRefCmp, Cond: ssa.CondEQ}, []ssa.Type{ref, ref}, []ssa.Type{i1}, true))
 		require.NoError(t, data(ssa.Operation{Op: ssa.OpIntSExt}, []ssa.Type{i32}, []ssa.Type{i64}, true))
+		require.NoError(t, data(ssa.Operation{Op: ssa.OpRefTest, Shape: ssa.Shape{Elem: types.KindI64, Index: 3}}, []ssa.Type{ref}, []ssa.Type{i1}, true))
+		require.NoError(t, data(ssa.Operation{Op: ssa.OpRefCast, Shape: ssa.Shape{Elem: types.KindI64, Index: 3}}, []ssa.Type{ref}, []ssa.Type{ref}, true))
 		require.NoError(t, data(ssa.Operation{Op: ssa.OpSelect}, []ssa.Type{f64, f64, i32}, []ssa.Type{f64}, true))
 	})
 
@@ -588,6 +590,11 @@ func TestVerify(t *testing.T) {
 
 	t.Run("rejects ref.cmp slt", func(t *testing.T) {
 		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpRefCmp, Cond: ssa.CondSLT}, []ssa.Type{ref, ref}, []ssa.Type{i1}, true), ssa.ErrType)
+	})
+
+	t.Run("rejects ref.test into a non-i1 and ref.cast into another type", func(t *testing.T) {
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpRefTest}, []ssa.Type{ref}, []ssa.Type{i32}, true), ssa.ErrType)
+		require.ErrorIs(t, data(ssa.Operation{Op: ssa.OpRefCast}, []ssa.Type{ref}, []ssa.Type{i32}, true), ssa.ErrType)
 	})
 
 	t.Run("rejects a condition on a non-compare operation", func(t *testing.T) {

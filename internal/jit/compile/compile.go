@@ -867,7 +867,7 @@ func (l *lowering) exit(k jit.Kind) int {
 		decoded := instr.Instruction(code[f.IP:])
 		performs = decoded.Opcode()
 		if !transform.Performs(l.f, l.op, performs) ||
-			(l.op.Op == ssa.OpStructNewDefault || l.op.Op == ssa.OpArrayNewDefault) && decoded.Operand(0) != uint64(l.op.Shape.Index) {
+			(l.op.Op == ssa.OpStructNewDefault || l.op.Op == ssa.OpArrayNewDefault || l.op.Op == ssa.OpRefTest || l.op.Op == ssa.OpRefCast) && decoded.Operand(0) != uint64(l.op.Shape.Index) {
 			l.fail(fmt.Errorf("%w: bridge of %s at ip %d", ErrInlined, l.op.Op, f.IP))
 			return id
 		}

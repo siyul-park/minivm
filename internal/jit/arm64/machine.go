@@ -702,6 +702,8 @@ func (m *Machine) data(a *asm.Assembler, op ssa.Operation, s compile.Site) bool 
 		return choose(a, op, s)
 	case ssa.OpRefIsNull:
 		return refIsNull(a, op, s)
+	case ssa.OpRefTest, ssa.OpRefCast:
+		return m.refType(a, op, s)
 	case ssa.OpArrayGet:
 		return m.arrayGet(a, op, s)
 	case ssa.OpArraySet:

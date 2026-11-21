@@ -5103,6 +5103,134 @@ func TestWithThreshold(t *testing.T) {
 		require.Less(t, entries, float64(n/2))
 	})
 
+	t.Run("tests and casts scalar kinds natively as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		const n = 1000
+		scalars := []types.Type{types.TypeI1(), types.TypeI8(), types.TypeI32(), types.TypeI64(), types.TypeF32(), types.TypeF64()}
+		names := []string{"i1", "i8", "i32", "i64", "f32", "f64"}
+		cell := func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0).Emit(instr.REF_NEW) }
+		values := []struct {
+			name  string
+			load  func(b *instr.Builder)
+			value types.Value
+			cast  int
+		}{
+			{"inline i1", nil, types.I1(true), 0},
+			{"inline i8", nil, types.I8(-5), 1},
+			{"inline i32", nil, types.I32(7), 2},
+			{"inline i64", nil, types.I64(9), 3},
+			{"wide heap i64", func(b *instr.Builder) { b.Emit(instr.I64_CONST, 1<<60) }, nil, 3},
+			{"inline f32", nil, types.F32(1.5), 4},
+			{"inline f64", nil, types.F64(2.5), 5},
+			{"positive NaN", nil, types.F64(math.NaN()), 5},
+			{"negative NaN", nil, types.F64(math.Float64frombits(0xFFF8000000000001)), 5},
+			{"positive infinity", nil, types.F64(math.Inf(1)), 5},
+			{"heap i1 cell", cell, types.I1(true), 0},
+			{"heap i8 cell", cell, types.I8(-5), 1},
+			{"heap i32 cell", cell, types.I32(7), 2},
+			{"heap i64 cell", cell, types.I64(9), 3},
+			{"heap f32 cell", cell, types.F32(1.5), 4},
+			{"heap f64 cell", cell, types.F64(2.5), 5},
+			{"string", nil, types.String("hello"), -1},
+			{"null", func(b *instr.Builder) { b.Emit(instr.REF_NULL) }, nil, -1},
+		}
+		build := func(load func(b *instr.Builder), value types.Value, body func(b *instr.Builder)) *program.Program {
+			b := instr.NewBuilder()
+			loop, done := b.Label(), b.Label()
+			if load == nil {
+				load = func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0) }
+			}
+			load(b)
+			b.Emit(instr.LOCAL_SET, 0)
+			b.Bind(loop)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, n).Emit(instr.I32_GE_S).BrIf(done)
+			body(b)
+			b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).Br(loop)
+			b.Bind(done).Emit(instr.LOCAL_GET, 2)
+			code, err := b.Assemble()
+			require.NoError(t, err)
+			opts := []func(*program.Program){program.WithLocals(types.TypeAny(), types.TypeI32(), types.TypeI32()), program.WithTypes(scalars...)}
+			if value != nil {
+				opts = append(opts, program.WithConstants(value))
+			}
+			return program.New(code, opts...)
+		}
+
+		for _, v := range values {
+			for k, name := range names {
+				t.Run("ref.test "+v.name+" against "+name, func(t *testing.T) {
+					requireNative(t, build(v.load, v.value, func(b *instr.Builder) {
+						b.Emit(instr.LOCAL_GET, 0).Emit(instr.REF_TEST, uint64(k))
+					}))
+				})
+			}
+			if v.cast >= 0 {
+				t.Run("ref.cast "+v.name+" as "+names[v.cast], func(t *testing.T) {
+					requireNative(t, build(v.load, v.value, func(b *instr.Builder) {
+						b.Emit(instr.LOCAL_GET, 0).Emit(instr.REF_CAST, uint64(v.cast)).Emit(instr.DROP).Emit(instr.I32_CONST, 1)
+					}))
+				})
+			}
+		}
+
+		t.Run("ref.cast of a non-scalar type bridges and keeps the ref counts", func(t *testing.T) {
+			prog := build(func(b *instr.Builder) { b.Emit(instr.I64_CONST, 1<<60) }, nil, func(b *instr.Builder) {
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.REF_CAST, 6).Emit(instr.DROP).Emit(instr.I32_CONST, 1)
+			})
+			prog.Types = append(prog.Types, types.TypeAny())
+			require.Positive(t, compareNative(t, prog)["bridge"])
+		})
+
+		t.Run("accumulates an i64 behind two ref.test", func(t *testing.T) {
+			b := instr.NewBuilder()
+			loop, done := b.Label(), b.Label()
+			b.Emit(instr.I64_CONST, 5).Emit(instr.LOCAL_SET, 0)
+			b.Bind(loop)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, n).Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.REF_TEST, 3).Emit(instr.LOCAL_GET, 0).Emit(instr.REF_TEST, 3).Emit(instr.I32_ADD)
+			b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+			b.Emit(instr.LOCAL_GET, 3).Emit(instr.I64_CONST, 1).Emit(instr.I64_ADD).Emit(instr.LOCAL_SET, 3)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).Br(loop)
+			b.Bind(done).Emit(instr.LOCAL_GET, 2)
+			code, err := b.Assemble()
+			require.NoError(t, err)
+			requireNative(t, program.New(code,
+				program.WithLocals(types.TypeAny(), types.TypeI32(), types.TypeI32(), types.TypeI64()),
+				program.WithTypes(scalars...)))
+		})
+
+		t.Run("ref.cast of a miss fails as threaded does", func(t *testing.T) {
+			b := instr.NewBuilder()
+			loop, done, keep := b.Label(), b.Label(), b.Label()
+			b.Emit(instr.F64_CONST, uint64(math.Float64bits(2.5))).Emit(instr.LOCAL_SET, 0)
+			b.Bind(loop)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, n).Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, n-100).Emit(instr.I32_NE).BrIf(keep)
+			b.Emit(instr.I32_CONST, 7).Emit(instr.LOCAL_SET, 0)
+			b.Bind(keep)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.REF_CAST, 5).Emit(instr.DROP)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).Br(loop)
+			b.Bind(done).Emit(instr.LOCAL_GET, 1)
+			code, err := b.Assemble()
+			require.NoError(t, err)
+			prog := program.New(code, program.WithLocals(types.TypeAny(), types.TypeI32()), program.WithTypes(scalars...))
+
+			require.ErrorIs(t, runProgramErr(t, prog, interp.WithThreshold(-1)), interp.ErrTypeMismatch)
+
+			profiler := prof.New()
+			vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+			defer vm.Close()
+			poll(t, func() bool {
+				require.ErrorIs(t, vm.Run(context.Background()), interp.ErrTypeMismatch)
+				vm.Reset()
+				vm.Flush()
+				return exitsOf(profiler)["deopt"] > 0
+			})
+		})
+	})
+
 	t.Run("compares strings and refs natively as threaded does", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 

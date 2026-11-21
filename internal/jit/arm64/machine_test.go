@@ -1484,6 +1484,18 @@ func TestMachine_Lower(t *testing.T) {
 		rows = append(rows, target.LDI(target.X17, types.Tag(k))...)
 		return append(rows, target.ORR(target.X16, target.X16, target.X17))
 	}
+	// cell is the tail of a scalar ref.test or ref.cast: a word of no inline
+	// match must refer to a heap cell of value's type, else it misses.
+	cell := func(value types.Value, miss asm.Label) []asm.Instruction {
+		rows := target.LDI(target.X17, types.Tag(types.KindRef)>>49)
+		rows = append(rows, target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, miss),
+			target.SBFX(vr(1), reg(ssa.TypeRef, 1), 0, 32), target.LSLI(vr(1), vr(1), 4),
+			target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
+			target.ADD(vr(1), target.X16, vr(1)),
+			target.LDR(target.X16, vr(1), 0))
+		rows = append(rows, target.LDI(target.X17, uint64(jit.Itab(value)))...)
+		return append(rows, target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, miss))
+	}
 	local := func(i int) ssa.Slot { return ssa.Slot{Space: ssa.SpaceLocal, Index: i} }
 	globals := asm.NewVReg(-2, asm.RegTypeInt, asm.Width64)
 	old := asm.NewVReg(-3, asm.RegTypeInt, asm.Width64)
@@ -2878,6 +2890,77 @@ func TestMachine_Lower(t *testing.T) {
 				target.CSET(reg(ssa.TypeI1, 2), target.CondEQ),
 			},
 			lower: true,
+		},
+		{
+			name: "ref.test of an i32 matches its inline tag or a heap types.I32 cell, yielding 1 on a match and 0 otherwise",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeI1},
+			op:   ssa.Operation{Op: ssa.OpRefTest, Shape: ssa.Shape{Elem: types.KindI32, Index: 3}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{target.LSRI(target.X16, reg(ssa.TypeRef, 1), 49)}
+				rows = append(rows, target.LDI(target.X17, types.Tag(types.KindI32)>>49)...)
+				rows = append(rows, target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBEQ, asm.Label(4)))
+				rows = append(rows, cell(types.I32(0), asm.Label(2))...)
+				return append(rows, target.LDI(reg(ssa.TypeI1, 2), 1)[0], target.BLabel(asm.Label(3)),
+					target.LDI(reg(ssa.TypeI1, 2), 0)[0])
+			}(),
+			lower: true,
+		},
+		{
+			name: "ref.test of an f64 matches every word but the seven tagged positive NaNs, or a heap types.F64 cell",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeI1},
+			op:   ssa.Operation{Op: ssa.OpRefTest, Shape: ssa.Shape{Elem: types.KindF64, Index: 3}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{target.LSRI(target.X16, reg(ssa.TypeRef, 1), 49)}
+				rows = append(rows, target.LDI(target.X17, 0x3FF9)...)
+				rows = append(rows, target.SUB(target.X16, target.X16, target.X17), target.CMPI(target.X16, 6), target.BCondLabel(target.OpBHI, asm.Label(4)),
+					target.ADD(target.X16, target.X16, target.X17))
+				rows = append(rows, cell(types.F64(0), asm.Label(2))...)
+				return append(rows, target.LDI(reg(ssa.TypeI1, 2), 1)[0], target.BLabel(asm.Label(3)),
+					target.LDI(reg(ssa.TypeI1, 2), 0)[0])
+			}(),
+			lower: true,
+		},
+		{
+			name: "ref.test of an i64 matches its inline tag or a heap types.I64, promoted or a cell",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeI1},
+			op:   ssa.Operation{Op: ssa.OpRefTest, Shape: ssa.Shape{Elem: types.KindI64, Index: 3}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{target.LSRI(target.X16, reg(ssa.TypeRef, 1), 49)}
+				rows = append(rows, target.LDI(target.X17, types.Tag(types.KindI64)>>49)...)
+				rows = append(rows, target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBEQ, asm.Label(4)))
+				rows = append(rows, cell(types.I64(0), asm.Label(2))...)
+				return append(rows, target.LDI(reg(ssa.TypeI1, 2), 1)[0], target.BLabel(asm.Label(3)),
+					target.LDI(reg(ssa.TypeI1, 2), 0)[0])
+			}(),
+			lower: true,
+		},
+		{
+			name: "ref.cast of an i8 traps unless the word is an inline i8 or a heap types.I8 cell, and keeps the word",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpRefCast, Shape: ssa.Shape{Elem: types.KindI8, Index: 3}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+			rows: func() []asm.Instruction {
+				rows := []asm.Instruction{target.LSRI(target.X16, reg(ssa.TypeRef, 1), 49)}
+				rows = append(rows, target.LDI(target.X17, types.Tag(types.KindI8)>>49)...)
+				rows = append(rows, target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBEQ, asm.Label(2)))
+				rows = append(rows, cell(types.I8(0), exit)...)
+				return append(rows, target.MOV(reg(ssa.TypeRef, 2), reg(ssa.TypeRef, 1)))
+			}(),
+			lower: true,
+		},
+		{
+			name: "ref.test declines a type that is not scalar",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeI1},
+			op:   ssa.Operation{Op: ssa.OpRefTest, Shape: ssa.Shape{Elem: types.KindRef, Index: 3}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+		},
+		{
+			name: "ref.cast declines a type that is not scalar",
+			regs: regs{1: ssa.TypeRef, 2: ssa.TypeRef},
+			op:   ssa.Operation{Op: ssa.OpRefCast, Shape: ssa.Shape{Elem: types.KindRef, Index: 3}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
+		},
+		{
+			name: "ref.test declines an operand that is not a ref",
+			regs: regs{1: i32, 2: ssa.TypeI1},
+			op:   ssa.Operation{Op: ssa.OpRefTest, Shape: ssa.Shape{Elem: types.KindI32, Index: 3}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
 		},
 	}...)
 

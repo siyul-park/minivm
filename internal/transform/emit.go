@@ -390,7 +390,7 @@ func (e *emitter) accept(id int, operation ssa.Operation) bool {
 		if len(instr.TypeOf(operation.Code).Widths) > 0 {
 			return false
 		}
-	case ssa.OpArrayNewDefault, ssa.OpStructNewDefault:
+	case ssa.OpArrayNewDefault, ssa.OpStructNewDefault, ssa.OpRefTest, ssa.OpRefCast:
 		return false
 	case ssa.OpConst:
 	case ssa.OpLoad, ssa.OpStore:

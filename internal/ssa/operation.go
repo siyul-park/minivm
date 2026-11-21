@@ -86,7 +86,8 @@ type Slot struct {
 // Captures upvals. An array.new_default or struct.new_default names the
 // declared type it allocates by a FormArray or FormStruct. A call whose
 // callee is unknown carries FormSignature: Type alone, the function type
-// every callee shares. The zero Shape is none.
+// every callee shares. A ref.test or ref.cast names the type it checks by
+// Index and that type's kind by Elem. The zero Shape is none.
 type Shape struct {
 	// Form identifies the admitted representation.
 	Form Form
@@ -230,6 +231,8 @@ const (
 
 	OpRefCmp
 	OpRefIsNull
+	OpRefTest
+	OpRefCast
 
 	OpStringCmp
 	OpStringLen
@@ -341,7 +344,7 @@ var opNames = [...]string{
 	OpFloatCeil: "float.ceil", OpFloatFloor: "float.floor", OpFloatTrunc: "float.trunc", OpFloatNearest: "float.nearest",
 	OpFloatCmp: "float.cmp", OpFloatFPExt: "float.fpext", OpFloatFPTrunc: "float.fptrunc",
 	OpFloatFPToSISat: "float.fptosi.sat", OpFloatFPToUISat: "float.fptoui.sat", OpFloatBitcast: "float.bitcast",
-	OpRefCmp: "ref.cmp", OpRefIsNull: "ref.is_null",
+	OpRefCmp: "ref.cmp", OpRefIsNull: "ref.is_null", OpRefTest: "ref.test", OpRefCast: "ref.cast",
 	OpStringCmp: "string.cmp", OpStringLen: "string.len",
 	OpArrayNewDefault: "array.new_default", OpArrayGet: "array.get", OpArraySet: "array.set", OpArrayLen: "array.len",
 	OpStructNewDefault: "struct.new_default", OpStructGet: "struct.get", OpStructSet: "struct.set",
@@ -374,6 +377,8 @@ var inverses = [...]Cond{
 var effects = map[Op]effect{
 	OpIntSDiv: {traps: true}, OpIntUDiv: {traps: true}, OpIntSRem: {traps: true}, OpIntURem: {traps: true},
 	OpCall:             {reads: EffectGlobal | EffectUpval | EffectHeap, writes: EffectGlobal | EffectUpval | EffectHeap | EffectFrame | EffectBranch},
+	OpRefTest:          {reads: EffectHeap},
+	OpRefCast:          {reads: EffectHeap, traps: true},
 	OpStringCmp:        {reads: EffectHeap},
 	OpStringLen:        {reads: EffectHeap},
 	OpArrayNewDefault:  {writes: EffectHeap},

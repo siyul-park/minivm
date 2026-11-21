@@ -401,15 +401,6 @@ func (w *walker) dup() bool {
 	return true
 }
 
-// named is the type inst's type operand names, nil when it names none.
-func (w *walker) named(inst instr.Instruction) types.Type {
-	idx := int(inst.Operand(0))
-	if idx >= len(w.Types) {
-		return nil
-	}
-	return w.Types[idx]
-}
-
 // element resolves array's declared element kind, when known: the array's
 // type is declared on the fact or resolved through a constant cell. A []any
 // resolves to KindRef: its elements are Boxed words.
@@ -578,6 +569,13 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 		if r.op == ssa.OpArrayNewDefault || r.op == ssa.OpStructNewDefault {
 			operation.Shape = w.allocation(results[0])
 		}
+		if r.op == ssa.OpRefTest || r.op == ssa.OpRefCast {
+			inst := instr.Instruction(w.activation.function.Code[w.ip:])
+			operation.Shape = ssa.Shape{Elem: types.KindRef, Index: int(inst.Operand(0))}
+			if t := w.named(inst); t != nil {
+				operation.Shape.Elem = t.Kind()
+			}
+		}
 	}
 	operation.State = w.deopt()
 	w.builder.Add(w.block, operation)
@@ -599,6 +597,15 @@ func (w *walker) emit(opcode instr.Opcode, pops int, results []fact) bool {
 		}
 	}
 	return true
+}
+
+// named is the type inst's type operand names, nil when it names none.
+func (w *walker) named(inst instr.Instruction) types.Type {
+	idx := int(inst.Operand(0))
+	if idx >= len(w.Types) {
+		return nil
+	}
+	return w.Types[idx]
 }
 
 // allocation is the Shape of the object a default allocation at the current

@@ -231,7 +231,7 @@ func attributes(o Operation) error {
 	}
 	compares := o.Op == OpIntCmp || o.Op == OpFloatCmp || o.Op == OpRefCmp || o.Op == OpStringCmp
 	callee := o.Op == OpExec || o.Op == OpCall
-	shaped := o.Op == OpGuardShape || o.Op == OpArrayNewDefault || o.Op == OpStructNewDefault
+	shaped := o.Op == OpGuardShape || o.Op == OpArrayNewDefault || o.Op == OpStructNewDefault || o.Op == OpRefTest || o.Op == OpRefCast
 	for _, err := range []error{
 		used(compares || o.Cond == 0, "condition"),
 		used(o.Op == OpExec || o.Code == 0, "opcode"),
@@ -263,7 +263,7 @@ func modelled(function *Function, o Operation) error {
 	switch {
 	case o.Op >= OpIntClz && o.Op <= OpIntSExt32, o.Op >= OpFloatNeg && o.Op <= OpFloatNearest,
 		o.Op == OpIntSExt, o.Op == OpIntZExt, o.Op == OpIntWrap, o.Op == OpIntSIToFP, o.Op == OpIntUIToFP, o.Op == OpIntBitcast,
-		o.Op >= OpFloatFPExt && o.Op <= OpFloatBitcast, o.Op == OpRefIsNull, o.Op == OpStringLen,
+		o.Op >= OpFloatFPExt && o.Op <= OpFloatBitcast, o.Op == OpRefIsNull, o.Op == OpRefTest, o.Op == OpRefCast, o.Op == OpStringLen,
 		o.Op == OpArrayNewDefault, o.Op == OpArrayLen, o.Op == OpMapLen:
 		in = 1
 	case o.Op == OpSelect:
@@ -368,6 +368,14 @@ func modelled(function *Function, o Operation) error {
 	case o.Op == OpRefIsNull:
 		if arg(0) != TypeRef || res(0) != TypeI1 {
 			return bad("tests a non-ref into a non-i1")
+		}
+	case o.Op == OpRefTest:
+		if res(0) != TypeI1 {
+			return bad("tests into a non-i1")
+		}
+	case o.Op == OpRefCast:
+		if res(0) != arg(0) {
+			return bad("casts into another type")
 		}
 	case o.Op == OpStringCmp:
 		if arg(0) != TypeRef || arg(1) != TypeRef || res(0) != TypeI1 {
