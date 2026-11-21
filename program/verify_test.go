@@ -176,6 +176,32 @@ func TestVerify(t *testing.T) {
 			wantErr: program.ErrStackUnderflow,
 		},
 		{
+			name: "valid/checked arithmetic",
+			prog: program.New([]instr.Instruction{
+				instr.MustNew(instr.I64_CONST, 1),
+				instr.MustNew(instr.I64_CONST, 2),
+				instr.MustNew(instr.I64_ADD_OVF),
+				instr.MustNew(instr.BR_IF, 0),
+				instr.MustNew(instr.I64_CONST, 3),
+				instr.MustNew(instr.I64_ADD),
+			}),
+		},
+		{
+			name:    "stack/checked arithmetic underflow",
+			prog:    program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_MUL_OVF)}),
+			wantErr: program.ErrStackUnderflow,
+		},
+		{
+			name:    "types/checked arithmetic operand mismatch",
+			prog:    program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I64_SUB_OVF)}),
+			wantErr: program.ErrTypeMismatch,
+		},
+		{
+			name:    "types/checked arithmetic result is i1",
+			prog:    program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_ADD_OVF), instr.MustNew(instr.I64_CONST, 1), instr.MustNew(instr.I64_ADD)}),
+			wantErr: program.ErrTypeMismatch,
+		},
+		{
 			// ARRAY_APPEND is variable-arity, so the verifier treats it as
 			// indeterminate (stopping dataflow); ARRAY_DELETE/ARRAY_SLICE verify
 			// by their fixed operand kinds.

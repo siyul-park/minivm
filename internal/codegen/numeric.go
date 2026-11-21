@@ -399,6 +399,62 @@ func compute(op instr.Opcode, operands ...jen.Code) jen.Code {
 	}
 }
 
+// checked lowers a signed overflow-checked add, sub, or mul: it replaces the
+// operands with the wrapped result and an i1 that is set when the exact result
+// does not fit the signed width.
+func checked(op instr.Opcode) jen.Code {
+	lhs, rhs, result := jen.Id("lhs"), jen.Id("rhs"), jen.Id("result")
+	exclusive := func(x, y jen.Code) *jen.Statement { return jen.Parens(jen.Add(x).Op("^").Add(y)) }
+	sign := func(x *jen.Statement) jen.Code { return x.Op("<").Lit(0) }
+
+	var body []jen.Code
+	var overflow jen.Code
+	switch op {
+	case instr.I32_ADD_OVF, instr.I64_ADD_OVF:
+		body = []jen.Code{result.Clone().Op(":=").Add(lhs).Op("+").Add(rhs)}
+		overflow = sign(exclusive(lhs, result).Op("&").Add(exclusive(rhs, result)))
+	case instr.I32_SUB_OVF, instr.I64_SUB_OVF:
+		body = []jen.Code{result.Clone().Op(":=").Add(lhs).Op("-").Add(rhs)}
+		overflow = sign(exclusive(lhs, rhs).Op("&").Add(exclusive(lhs, result)))
+	case instr.I32_MUL_OVF:
+		body = []jen.Code{
+			jen.Id("wide").Op(":=").Int64().Call(lhs).Op("*").Int64().Call(rhs),
+			result.Clone().Op(":=").Int32().Call(jen.Id("wide")),
+		}
+		overflow = jen.Id("wide").Op("!=").Int64().Call(result)
+	case instr.I64_MUL_OVF:
+		high := jen.Uint64().Call(jen.Add(lhs).Op(">>").Lit(63)).Op("&").Uint64().Call(rhs).
+			Op("+").Uint64().Call(jen.Add(rhs).Op(">>").Lit(63)).Op("&").Uint64().Call(lhs)
+		body = []jen.Code{
+			jen.List(jen.Id("high"), jen.Id("low")).Op(":=").Qual("math/bits", "Mul64").Call(jen.Uint64().Call(lhs), jen.Uint64().Call(rhs)),
+			jen.Id("high").Op("-=").Add(high),
+			result.Clone().Op(":=").Int64().Call(jen.Id("low")),
+		}
+		overflow = jen.Int64().Call(jen.Id("high")).Op("!=").Add(result).Op(">>").Lit(63)
+	default:
+		panic(fmt.Sprintf("unsupported checked opcode %s", instr.TypeOf(op).Mnemonic))
+	}
+
+	k := instr.TypeOf(op).Pop[0]
+	kind := "I32"
+	if k == instr.KindI64 {
+		kind = "I64"
+	}
+	code := []jen.Code{
+		underflow(2),
+		lhs.Clone().Op(":=").Add(unbox(k, jen.Id("i").Dot("sp").Op("-").Lit(2))),
+		rhs.Clone().Op(":=").Add(unbox(k, jen.Id("i").Dot("sp").Op("-").Lit(1))),
+	}
+	code = append(code, body...)
+	code = append(code,
+		jen.Id("flag").Op(":=").Add(overflow),
+		top(2).Op("=").Add(boxed(kind, result)),
+		top(1).Op("=").Qual(typesPkg, "BoxI1").Call(jen.Id("flag")),
+		next(),
+	)
+	return handler(code...)
+}
+
 func unbox(kind instr.Kind, index jen.Code) jen.Code {
 	value := jen.Id("i").Dot("stack").Index(index)
 	if kind.Repr() == instr.KindI64 {

@@ -22,7 +22,7 @@ End-to-end checklist.
 
 ## Opcode
 
-The agent `MUST` append to `instr/opcode.go` and `MUST NOT` insert between existing values. `iota` is the encoded byte.
+The agent `MUST` place the opcode in its family's group in `instr/opcode.go`. `iota` is the encoded byte, so later values shift; encoded values are not a stable format.
 
 ## Metadata
 

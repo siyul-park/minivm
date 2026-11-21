@@ -360,6 +360,102 @@ var runTests = []struct {
 	},
 	{
 		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(2)), instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.I32_ADD_OVF),
+		}),
+		values: []types.Value{types.I1(false), types.I32(5)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MaxInt32)), instr.MustNew(instr.I32_CONST, i32operand(1)), instr.MustNew(instr.I32_ADD_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I32(math.MinInt32)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_ADD_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I32(math.MaxInt32)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MaxInt32)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_ADD_OVF),
+		}),
+		values: []types.Value{types.I1(false), types.I32(-1)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_ADD_OVF),
+		}),
+		values: []types.Value{types.I1(false), types.I32(math.MinInt32)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(5)), instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.I32_SUB_OVF),
+		}),
+		values: []types.Value{types.I1(false), types.I32(2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(1)), instr.MustNew(instr.I32_SUB_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I32(math.MaxInt32)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MaxInt32)), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_SUB_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I32(math.MinInt32)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_SUB_OVF),
+		}),
+		values: []types.Value{types.I1(false), types.I32(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_SUB_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I32(math.MinInt32)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(3)), instr.MustNew(instr.I32_CONST, i32operand(4)), instr.MustNew(instr.I32_MUL_OVF),
+		}),
+		values: []types.Value{types.I1(false), types.I32(12)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_MUL_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I32(math.MinInt32)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(-1)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_MUL_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I32(math.MinInt32)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MaxInt32)), instr.MustNew(instr.I32_CONST, i32operand(2)), instr.MustNew(instr.I32_MUL_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I32(-2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(0)), instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_MUL_OVF),
+		}),
+		values: []types.Value{types.I1(false), types.I32(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, i32operand(math.MinInt32)), instr.MustNew(instr.I32_CONST, i32operand(1)), instr.MustNew(instr.I32_MUL_OVF),
+		}),
+		values: []types.Value{types.I1(false), types.I32(math.MinInt32)},
+	},
+	{
+		program: program.New([]instr.Instruction{
 			instr.MustNew(instr.I32_CONST, i32operand(-7)), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_DIV_S),
 		}),
 		values: []types.Value{types.I32(-3)},
@@ -525,6 +621,126 @@ var runTests = []struct {
 	{
 		program: program.New([]instr.Instruction{instr.MustNew(instr.I64_CONST, 3), instr.MustNew(instr.I64_CONST, 4), instr.MustNew(instr.I64_MUL)}),
 		values:  []types.Value{types.I64(12)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(2)), instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.I64_ADD_OVF),
+		}),
+		values: []types.Value{types.I1(false), types.I64(5)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MaxInt64)), instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.I64_ADD_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_ADD_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I64(math.MaxInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MaxInt64)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_ADD_OVF),
+		}),
+		values: []types.Value{types.I1(false), types.I64(-1)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_ADD_OVF),
+		}),
+		values: []types.Value{types.I1(false), types.I64(math.MinInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(5)), instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.I64_SUB_OVF),
+		}),
+		values: []types.Value{types.I1(false), types.I64(2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.I64_SUB_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I64(math.MaxInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MaxInt64)), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_SUB_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_SUB_OVF),
+		}),
+		values: []types.Value{types.I1(false), types.I64(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_SUB_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(3)), instr.MustNew(instr.I64_CONST, i64operand(4)), instr.MustNew(instr.I64_MUL_OVF),
+		}),
+		values: []types.Value{types.I1(false), types.I64(12)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_MUL_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(-1)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_MUL_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MaxInt64)), instr.MustNew(instr.I64_CONST, i64operand(2)), instr.MustNew(instr.I64_MUL_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I64(-2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(0)), instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_MUL_OVF),
+		}),
+		values: []types.Value{types.I1(false), types.I64(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(math.MinInt64)), instr.MustNew(instr.I64_CONST, i64operand(1)), instr.MustNew(instr.I64_MUL_OVF),
+		}),
+		values: []types.Value{types.I1(false), types.I64(math.MinInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(1099511627776)), instr.MustNew(instr.I64_CONST, i64operand(1099511627776)), instr.MustNew(instr.I64_MUL_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I64(0)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(4294967296)), instr.MustNew(instr.I64_CONST, i64operand(2147483648)), instr.MustNew(instr.I64_MUL_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(-4294967296)), instr.MustNew(instr.I64_CONST, i64operand(2147483648)), instr.MustNew(instr.I64_MUL_OVF),
+		}),
+		values: []types.Value{types.I1(false), types.I64(math.MinInt64)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, i64operand(-4294967296)), instr.MustNew(instr.I64_CONST, i64operand(-2147483648)), instr.MustNew(instr.I64_MUL_OVF),
+		}),
+		values: []types.Value{types.I1(true), types.I64(math.MinInt64)},
 	},
 	{
 		program: program.New([]instr.Instruction{
