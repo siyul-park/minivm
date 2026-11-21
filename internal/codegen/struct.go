@@ -52,7 +52,7 @@ func structGet(state *state, current step) (value, error) {
 			jen.Id("result").Op(":=").Add(boxField(kind, jen.Id("value").Dot("Data").Index(jen.Id("at")))),
 		}
 		if kind == instr.KindRef {
-			structBody = append(structBody, jen.Id("i").Dot("retainBox").Call(jen.Id("result")))
+			structBody = append(structBody, jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("result")))
 		}
 		structBody = append(structBody, tail(jen.Id("result"))...)
 
@@ -137,7 +137,7 @@ func structSet() jen.Code {
 				jen.Case(jen.Qual(typesPkg, "KindF32")).Block(jen.Id("s").Dot("Data").Index(jen.Id("idx")).Op("=").Id("uint64").Call(jen.Qual("math", "Float32bits").Call(jen.Id("val").Dot("F32").Call()))),
 				jen.Case(jen.Qual(typesPkg, "KindF64")).Block(jen.Id("s").Dot("Data").Index(jen.Id("idx")).Op("=").Qual("math", "Float64bits").Call(jen.Id("val").Dot("F64").Call())),
 				jen.Case(jen.Qual(typesPkg, "KindRef")).Block(jen.Id("old").Op(":=").Qual(typesPkg, "Boxed").Call(jen.Id("s").Dot("Data").Index(jen.Id("idx"))),
-					jen.Id("i").Dot("releaseBox").Call(jen.Id("old")),
+					jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("old")),
 					jen.Id("s").Dot("Data").Index(jen.Id("idx")).Op("=").Id("uint64").Call(jen.Id("val"))),
 				jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))))),
 			jen.Case(jen.Op("*").Id("HostStruct")).Block(check(jen.Id("s").Dot("SetField").Call(jen.Id("i"), jen.Id("idx"), jen.Id("val")))),

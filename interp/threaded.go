@@ -21664,7 +21664,7 @@ func fuseGlobalGet394(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -21675,7 +21675,7 @@ func fuseGlobalGet394(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v3 := i.globals[v2]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 3
@@ -21719,7 +21719,7 @@ func fuseGlobalGet395(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -21730,7 +21730,7 @@ func fuseGlobalGet395(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v3 := i.globals[v2]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 3
@@ -21774,7 +21774,7 @@ func fuseGlobalGet396(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -21785,7 +21785,7 @@ func fuseGlobalGet396(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v3 := i.globals[v2]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 3
@@ -21829,7 +21829,7 @@ func fuseGlobalGet397(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -21840,7 +21840,7 @@ func fuseGlobalGet397(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v3 := i.globals[v2]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 3
@@ -25358,7 +25358,7 @@ func fuseGlobalGet480(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -25370,7 +25370,7 @@ func fuseGlobalGet480(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.fr.bp + v2
 			v4 := i.stack[v3]
-			i.retainBox(v4)
+			i.heap.Retain(v4)
 			i.stack[i.sp] = v4
 			i.sp++
 			i.fr.ip += 2
@@ -25414,7 +25414,7 @@ func fuseGlobalGet481(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -25426,7 +25426,7 @@ func fuseGlobalGet481(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.fr.bp + v2
 			v4 := i.stack[v3]
-			i.retainBox(v4)
+			i.heap.Retain(v4)
 			i.stack[i.sp] = v4
 			i.sp++
 			i.fr.ip += 2
@@ -25470,7 +25470,7 @@ func fuseGlobalGet482(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -25482,7 +25482,7 @@ func fuseGlobalGet482(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.fr.bp + v2
 			v4 := i.stack[v3]
-			i.retainBox(v4)
+			i.heap.Retain(v4)
 			i.stack[i.sp] = v4
 			i.sp++
 			i.fr.ip += 2
@@ -25526,7 +25526,7 @@ func fuseGlobalGet483(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -25538,7 +25538,7 @@ func fuseGlobalGet483(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.fr.bp + v2
 			v4 := i.stack[v3]
-			i.retainBox(v4)
+			i.heap.Retain(v4)
 			i.stack[i.sp] = v4
 			i.sp++
 			i.fr.ip += 2
@@ -28632,7 +28632,7 @@ func fuseGlobalGet560(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -28643,7 +28643,7 @@ func fuseGlobalGet560(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v3 := i.fr.upvals[v2]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 2
@@ -28687,7 +28687,7 @@ func fuseGlobalGet561(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -28698,7 +28698,7 @@ func fuseGlobalGet561(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v3 := i.fr.upvals[v2]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 2
@@ -28742,7 +28742,7 @@ func fuseGlobalGet562(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -28753,7 +28753,7 @@ func fuseGlobalGet562(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v3 := i.fr.upvals[v2]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 2
@@ -28797,7 +28797,7 @@ func fuseGlobalGet563(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -28808,7 +28808,7 @@ func fuseGlobalGet563(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v3 := i.fr.upvals[v2]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 2
@@ -30986,7 +30986,7 @@ func fuseGlobalGet621(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -31033,7 +31033,7 @@ func fuseGlobalGet622(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -31080,7 +31080,7 @@ func fuseGlobalGet623(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -31127,7 +31127,7 @@ func fuseGlobalGet624(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -31572,7 +31572,7 @@ func fuseGlobalGet631(c *threader, start int) func(*Interpreter) {
 						panic(ErrTypeMismatch)
 					}
 					v1 := types.Boxed(v0.Data[v7])
-					i.retainBox(v1)
+					i.heap.Retain(v1)
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 7
@@ -31824,7 +31824,7 @@ func fuseGlobalGet632(c *threader, start int) func(*Interpreter) {
 						panic(ErrTypeMismatch)
 					}
 					v1 := types.Boxed(v0.Data[v5])
-					i.retainBox(v1)
+					i.heap.Retain(v1)
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 9
@@ -35572,7 +35572,7 @@ func fuseGlobalGet735(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -35612,7 +35612,7 @@ func fuseGlobalGet736(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -35652,7 +35652,7 @@ func fuseGlobalGet737(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -35692,7 +35692,7 @@ func fuseGlobalGet738(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.globals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 3
@@ -37012,7 +37012,7 @@ func fuseLocalGet24(c *threader, start int) func(*Interpreter) {
 			}
 			v11 := i.stack[v10]
 			if v11 != v9 {
-				i.releaseBox(v11)
+				i.heap.Release(v11)
 			}
 			i.stack[v10] = v9
 			i.sp -= 0
@@ -37061,7 +37061,7 @@ func fuseLocalGet25(c *threader, start int) func(*Interpreter) {
 			}
 			v11 := i.stack[v10]
 			if v11 != v9 {
-				i.releaseBox(v11)
+				i.heap.Release(v11)
 			}
 			i.stack[v10] = v9
 			i.sp -= 0
@@ -40379,7 +40379,7 @@ func fuseLocalGet81(c *threader, start int) func(*Interpreter) {
 			}
 			v11 := i.stack[v10]
 			if v11 != v9 {
-				i.releaseBox(v11)
+				i.heap.Release(v11)
 			}
 			i.stack[v10] = v9
 			i.sp -= 0
@@ -40428,7 +40428,7 @@ func fuseLocalGet82(c *threader, start int) func(*Interpreter) {
 			}
 			v11 := i.stack[v10]
 			if v11 != v9 {
-				i.releaseBox(v11)
+				i.heap.Release(v11)
 			}
 			i.stack[v10] = v9
 			i.sp -= 0
@@ -40477,7 +40477,7 @@ func fuseLocalGet83(c *threader, start int) func(*Interpreter) {
 			}
 			v11 := i.stack[v10]
 			if v11 != v9 {
-				i.releaseBox(v11)
+				i.heap.Release(v11)
 			}
 			i.stack[v10] = v9
 			i.sp -= 0
@@ -40526,7 +40526,7 @@ func fuseLocalGet84(c *threader, start int) func(*Interpreter) {
 			}
 			v11 := i.stack[v10]
 			if v11 != v9 {
-				i.releaseBox(v11)
+				i.heap.Release(v11)
 			}
 			i.stack[v10] = v9
 			i.sp -= 0
@@ -40575,7 +40575,7 @@ func fuseLocalGet85(c *threader, start int) func(*Interpreter) {
 			}
 			v11 := i.stack[v10]
 			if v11 != v9 {
-				i.releaseBox(v11)
+				i.heap.Release(v11)
 			}
 			i.stack[v10] = v9
 			i.sp -= 0
@@ -40624,7 +40624,7 @@ func fuseLocalGet86(c *threader, start int) func(*Interpreter) {
 			}
 			v11 := i.stack[v10]
 			if v11 != v9 {
-				i.releaseBox(v11)
+				i.heap.Release(v11)
 			}
 			i.stack[v10] = v9
 			i.sp -= 0
@@ -40673,7 +40673,7 @@ func fuseLocalGet87(c *threader, start int) func(*Interpreter) {
 			}
 			v11 := i.stack[v10]
 			if v11 != v9 {
-				i.releaseBox(v11)
+				i.heap.Release(v11)
 			}
 			i.stack[v10] = v9
 			i.sp -= 0
@@ -40722,7 +40722,7 @@ func fuseLocalGet88(c *threader, start int) func(*Interpreter) {
 			}
 			v11 := i.stack[v10]
 			if v11 != v9 {
-				i.releaseBox(v11)
+				i.heap.Release(v11)
 			}
 			i.stack[v10] = v9
 			i.sp -= 0
@@ -40771,7 +40771,7 @@ func fuseLocalGet89(c *threader, start int) func(*Interpreter) {
 			}
 			v11 := i.stack[v10]
 			if v11 != v9 {
-				i.releaseBox(v11)
+				i.heap.Release(v11)
 			}
 			i.stack[v10] = v9
 			i.sp -= 0
@@ -41754,7 +41754,7 @@ func fuseLocalGet111(c *threader, start int) func(*Interpreter) {
 			}
 			v8 := i.stack[v7]
 			if v8 != v6 {
-				i.releaseBox(v8)
+				i.heap.Release(v8)
 			}
 			i.stack[v7] = v6
 			i.sp -= 0
@@ -41794,7 +41794,7 @@ func fuseLocalGet112(c *threader, start int) func(*Interpreter) {
 			}
 			v8 := i.stack[v7]
 			if v8 != v6 {
-				i.releaseBox(v8)
+				i.heap.Release(v8)
 			}
 			i.stack[v7] = v6
 			i.sp -= 0
@@ -42384,7 +42384,7 @@ func fuseLocalGet123(c *threader, start int) func(*Interpreter) {
 			}
 			v8 := i.stack[v7]
 			if v8 != v6 {
-				i.releaseBox(v8)
+				i.heap.Release(v8)
 			}
 			i.stack[v7] = v6
 			i.sp -= 0
@@ -42424,7 +42424,7 @@ func fuseLocalGet124(c *threader, start int) func(*Interpreter) {
 			}
 			v8 := i.stack[v7]
 			if v8 != v6 {
-				i.releaseBox(v8)
+				i.heap.Release(v8)
 			}
 			i.stack[v7] = v6
 			i.sp -= 0
@@ -42464,7 +42464,7 @@ func fuseLocalGet125(c *threader, start int) func(*Interpreter) {
 			}
 			v8 := i.stack[v7]
 			if v8 != v6 {
-				i.releaseBox(v8)
+				i.heap.Release(v8)
 			}
 			i.stack[v7] = v6
 			i.sp -= 0
@@ -42504,7 +42504,7 @@ func fuseLocalGet126(c *threader, start int) func(*Interpreter) {
 			}
 			v8 := i.stack[v7]
 			if v8 != v6 {
-				i.releaseBox(v8)
+				i.heap.Release(v8)
 			}
 			i.stack[v7] = v6
 			i.sp -= 0
@@ -42544,7 +42544,7 @@ func fuseLocalGet127(c *threader, start int) func(*Interpreter) {
 			}
 			v8 := i.stack[v7]
 			if v8 != v6 {
-				i.releaseBox(v8)
+				i.heap.Release(v8)
 			}
 			i.stack[v7] = v6
 			i.sp -= 0
@@ -42584,7 +42584,7 @@ func fuseLocalGet128(c *threader, start int) func(*Interpreter) {
 			}
 			v8 := i.stack[v7]
 			if v8 != v6 {
-				i.releaseBox(v8)
+				i.heap.Release(v8)
 			}
 			i.stack[v7] = v6
 			i.sp -= 0
@@ -42624,7 +42624,7 @@ func fuseLocalGet129(c *threader, start int) func(*Interpreter) {
 			}
 			v8 := i.stack[v7]
 			if v8 != v6 {
-				i.releaseBox(v8)
+				i.heap.Release(v8)
 			}
 			i.stack[v7] = v6
 			i.sp -= 0
@@ -42664,7 +42664,7 @@ func fuseLocalGet130(c *threader, start int) func(*Interpreter) {
 			}
 			v8 := i.stack[v7]
 			if v8 != v6 {
-				i.releaseBox(v8)
+				i.heap.Release(v8)
 			}
 			i.stack[v7] = v6
 			i.sp -= 0
@@ -42704,7 +42704,7 @@ func fuseLocalGet131(c *threader, start int) func(*Interpreter) {
 			}
 			v8 := i.stack[v7]
 			if v8 != v6 {
-				i.releaseBox(v8)
+				i.heap.Release(v8)
 			}
 			i.stack[v7] = v6
 			i.sp -= 0
@@ -56886,7 +56886,7 @@ func fuseLocalGet404(c *threader, start int) func(*Interpreter) {
 			}
 			v1 := i.fr.bp + v0
 			v3 := i.stack[v1]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 2
@@ -56898,7 +56898,7 @@ func fuseLocalGet404(c *threader, start int) func(*Interpreter) {
 			}
 			v4 := i.fr.bp + v2
 			v5 := i.stack[v4]
-			i.retainBox(v5)
+			i.heap.Retain(v5)
 			i.stack[i.sp] = v5
 			i.sp++
 			i.fr.ip += 2
@@ -56943,7 +56943,7 @@ func fuseLocalGet405(c *threader, start int) func(*Interpreter) {
 			}
 			v1 := i.fr.bp + v0
 			v3 := i.stack[v1]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 2
@@ -56955,7 +56955,7 @@ func fuseLocalGet405(c *threader, start int) func(*Interpreter) {
 			}
 			v4 := i.fr.bp + v2
 			v5 := i.stack[v4]
-			i.retainBox(v5)
+			i.heap.Retain(v5)
 			i.stack[i.sp] = v5
 			i.sp++
 			i.fr.ip += 2
@@ -57000,7 +57000,7 @@ func fuseLocalGet406(c *threader, start int) func(*Interpreter) {
 			}
 			v1 := i.fr.bp + v0
 			v3 := i.stack[v1]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 2
@@ -57012,7 +57012,7 @@ func fuseLocalGet406(c *threader, start int) func(*Interpreter) {
 			}
 			v4 := i.fr.bp + v2
 			v5 := i.stack[v4]
-			i.retainBox(v5)
+			i.heap.Retain(v5)
 			i.stack[i.sp] = v5
 			i.sp++
 			i.fr.ip += 2
@@ -57057,7 +57057,7 @@ func fuseLocalGet407(c *threader, start int) func(*Interpreter) {
 			}
 			v1 := i.fr.bp + v0
 			v3 := i.stack[v1]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 2
@@ -57069,7 +57069,7 @@ func fuseLocalGet407(c *threader, start int) func(*Interpreter) {
 			}
 			v4 := i.fr.bp + v2
 			v5 := i.stack[v4]
-			i.retainBox(v5)
+			i.heap.Retain(v5)
 			i.stack[i.sp] = v5
 			i.sp++
 			i.fr.ip += 2
@@ -59322,7 +59322,7 @@ func fuseLocalGet465(c *threader, start int) func(*Interpreter) {
 			}
 			v1 := i.fr.bp + v0
 			v3 := i.stack[v1]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 2
@@ -59370,7 +59370,7 @@ func fuseLocalGet466(c *threader, start int) func(*Interpreter) {
 			}
 			v1 := i.fr.bp + v0
 			v3 := i.stack[v1]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 2
@@ -59418,7 +59418,7 @@ func fuseLocalGet467(c *threader, start int) func(*Interpreter) {
 			}
 			v1 := i.fr.bp + v0
 			v3 := i.stack[v1]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 2
@@ -59466,7 +59466,7 @@ func fuseLocalGet468(c *threader, start int) func(*Interpreter) {
 			}
 			v1 := i.fr.bp + v0
 			v3 := i.stack[v1]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 2
@@ -59924,7 +59924,7 @@ func fuseLocalGet475(c *threader, start int) func(*Interpreter) {
 						panic(ErrTypeMismatch)
 					}
 					v1 := types.Boxed(v0.Data[v7])
-					i.retainBox(v1)
+					i.heap.Retain(v1)
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 6
@@ -60183,7 +60183,7 @@ func fuseLocalGet476(c *threader, start int) func(*Interpreter) {
 						panic(ErrTypeMismatch)
 					}
 					v1 := types.Boxed(v0.Data[v5])
-					i.retainBox(v1)
+					i.heap.Retain(v1)
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 8
@@ -64033,7 +64033,7 @@ func fuseLocalGet579(c *threader, start int) func(*Interpreter) {
 			}
 			v1 := i.fr.bp + v0
 			v2 := i.stack[v1]
-			i.retainBox(v2)
+			i.heap.Retain(v2)
 			i.stack[i.sp] = v2
 			i.sp++
 			i.fr.ip += 2
@@ -64074,7 +64074,7 @@ func fuseLocalGet580(c *threader, start int) func(*Interpreter) {
 			}
 			v1 := i.fr.bp + v0
 			v2 := i.stack[v1]
-			i.retainBox(v2)
+			i.heap.Retain(v2)
 			i.stack[i.sp] = v2
 			i.sp++
 			i.fr.ip += 2
@@ -64115,7 +64115,7 @@ func fuseLocalGet581(c *threader, start int) func(*Interpreter) {
 			}
 			v1 := i.fr.bp + v0
 			v2 := i.stack[v1]
-			i.retainBox(v2)
+			i.heap.Retain(v2)
 			i.stack[i.sp] = v2
 			i.sp++
 			i.fr.ip += 2
@@ -64156,7 +64156,7 @@ func fuseLocalGet582(c *threader, start int) func(*Interpreter) {
 			}
 			v1 := i.fr.bp + v0
 			v2 := i.stack[v1]
-			i.retainBox(v2)
+			i.heap.Retain(v2)
 			i.stack[i.sp] = v2
 			i.sp++
 			i.fr.ip += 2
@@ -75427,7 +75427,7 @@ func fuseConstGet213(c *threader, start int) func(*Interpreter) {
 					if v0.Kind() != types.KindRef {
 						continue
 					}
-					i.releaseBox(v0)
+					i.heap.Release(v0)
 				}
 				copy(i.stack[v6:v6+v1], i.stack[i.sp-v1:i.sp])
 				if v5.release {
@@ -75511,7 +75511,7 @@ func fuseConstGet213(c *threader, start int) func(*Interpreter) {
 					if v0.Kind() != types.KindRef {
 						continue
 					}
-					i.releaseBox(v0)
+					i.heap.Release(v0)
 				}
 				copy(i.stack[v7:v7+v4], i.stack[i.sp-v4:i.sp])
 				if v3.release {
@@ -75586,12 +75586,12 @@ func fuseConstGet213(c *threader, start int) func(*Interpreter) {
 						}
 						if v0.returns > 0 {
 							for _, v1 := range i.stack[v0.bp : i.sp-1] {
-								i.releaseBox(v1)
+								i.heap.Release(v1)
 							}
 							v2.value = i.stack[i.sp-1]
 						} else {
 							for _, v1 := range i.stack[v0.bp:i.sp] {
-								i.releaseBox(v1)
+								i.heap.Release(v1)
 							}
 							i.heap.Inc(0, 1)
 							v2.value = types.BoxedNull
@@ -75619,7 +75619,7 @@ func fuseConstGet213(c *threader, start int) func(*Interpreter) {
 					// under them is released here. land does the same when an exception
 					// unwinds the frame, and the cycle collector needs counts to be exact.
 					for _, v1 := range i.stack[v0.bp : i.sp-v0.returns] {
-						i.releaseBox(v1)
+						i.heap.Release(v1)
 					}
 					switch v0.returns {
 					case 0:
@@ -75931,7 +75931,7 @@ func fuseConstGet219(c *threader, start int) func(*Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
 			}
-			i.retainBox(v0)
+			i.heap.Retain(v0)
 			i.stack[i.sp] = v0
 			i.sp++
 			i.fr.ip += 3
@@ -75967,7 +75967,7 @@ func fuseConstGet220(c *threader, start int) func(*Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
 			}
-			i.retainBox(v0)
+			i.heap.Retain(v0)
 			i.stack[i.sp] = v0
 			i.sp++
 			i.fr.ip += 3
@@ -76003,7 +76003,7 @@ func fuseConstGet221(c *threader, start int) func(*Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
 			}
-			i.retainBox(v0)
+			i.heap.Retain(v0)
 			i.stack[i.sp] = v0
 			i.sp++
 			i.fr.ip += 3
@@ -76333,7 +76333,7 @@ func fuseConstGet234(c *threader, start int) func(*Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
 			}
-			i.retainBox(v0)
+			i.heap.Retain(v0)
 			i.stack[i.sp] = v0
 			i.sp++
 			i.fr.ip += 3
@@ -76369,7 +76369,7 @@ func fuseConstGet235(c *threader, start int) func(*Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
 			}
-			i.retainBox(v0)
+			i.heap.Retain(v0)
 			i.stack[i.sp] = v0
 			i.sp++
 			i.fr.ip += 3
@@ -76405,7 +76405,7 @@ func fuseConstGet236(c *threader, start int) func(*Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
 			}
-			i.retainBox(v0)
+			i.heap.Retain(v0)
 			i.stack[i.sp] = v0
 			i.sp++
 			i.fr.ip += 3
@@ -76799,7 +76799,7 @@ func fuseConstGet251(c *threader, start int) func(*Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
 			}
-			i.retainBox(v0)
+			i.heap.Retain(v0)
 			i.stack[i.sp] = v0
 			i.sp++
 			i.fr.ip += 3
@@ -76835,7 +76835,7 @@ func fuseConstGet252(c *threader, start int) func(*Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
 			}
-			i.retainBox(v0)
+			i.heap.Retain(v0)
 			i.stack[i.sp] = v0
 			i.sp++
 			i.fr.ip += 3
@@ -76871,7 +76871,7 @@ func fuseConstGet253(c *threader, start int) func(*Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
 			}
-			i.retainBox(v0)
+			i.heap.Retain(v0)
 			i.stack[i.sp] = v0
 			i.sp++
 			i.fr.ip += 3
@@ -76907,7 +76907,7 @@ func fuseConstGet254(c *threader, start int) func(*Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
 			}
-			i.retainBox(v0)
+			i.heap.Retain(v0)
 			i.stack[i.sp] = v0
 			i.sp++
 			i.fr.ip += 3
@@ -77732,7 +77732,7 @@ func fuseConstGet288(c *threader, start int) func(*Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
 			}
-			i.retainBox(v0)
+			i.heap.Retain(v0)
 			i.stack[i.sp] = v0
 			i.sp++
 			i.fr.ip += 3
@@ -77768,7 +77768,7 @@ func fuseConstGet289(c *threader, start int) func(*Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
 			}
-			i.retainBox(v0)
+			i.heap.Retain(v0)
 			i.stack[i.sp] = v0
 			i.sp++
 			i.fr.ip += 3
@@ -77804,7 +77804,7 @@ func fuseConstGet290(c *threader, start int) func(*Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
 			}
-			i.retainBox(v0)
+			i.heap.Retain(v0)
 			i.stack[i.sp] = v0
 			i.sp++
 			i.fr.ip += 3
@@ -77840,7 +77840,7 @@ func fuseConstGet291(c *threader, start int) func(*Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
 			}
-			i.retainBox(v0)
+			i.heap.Retain(v0)
 			i.stack[i.sp] = v0
 			i.sp++
 			i.fr.ip += 3
@@ -99603,7 +99603,7 @@ func fuseUpvalGet394(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -99614,7 +99614,7 @@ func fuseUpvalGet394(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v3 := i.globals[v2]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 3
@@ -99658,7 +99658,7 @@ func fuseUpvalGet395(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -99669,7 +99669,7 @@ func fuseUpvalGet395(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v3 := i.globals[v2]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 3
@@ -99713,7 +99713,7 @@ func fuseUpvalGet396(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -99724,7 +99724,7 @@ func fuseUpvalGet396(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v3 := i.globals[v2]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 3
@@ -99768,7 +99768,7 @@ func fuseUpvalGet397(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -99779,7 +99779,7 @@ func fuseUpvalGet397(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v3 := i.globals[v2]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 3
@@ -103297,7 +103297,7 @@ func fuseUpvalGet480(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -103309,7 +103309,7 @@ func fuseUpvalGet480(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.fr.bp + v2
 			v4 := i.stack[v3]
-			i.retainBox(v4)
+			i.heap.Retain(v4)
 			i.stack[i.sp] = v4
 			i.sp++
 			i.fr.ip += 2
@@ -103353,7 +103353,7 @@ func fuseUpvalGet481(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -103365,7 +103365,7 @@ func fuseUpvalGet481(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.fr.bp + v2
 			v4 := i.stack[v3]
-			i.retainBox(v4)
+			i.heap.Retain(v4)
 			i.stack[i.sp] = v4
 			i.sp++
 			i.fr.ip += 2
@@ -103409,7 +103409,7 @@ func fuseUpvalGet482(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -103421,7 +103421,7 @@ func fuseUpvalGet482(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.fr.bp + v2
 			v4 := i.stack[v3]
-			i.retainBox(v4)
+			i.heap.Retain(v4)
 			i.stack[i.sp] = v4
 			i.sp++
 			i.fr.ip += 2
@@ -103465,7 +103465,7 @@ func fuseUpvalGet483(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -103477,7 +103477,7 @@ func fuseUpvalGet483(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.fr.bp + v2
 			v4 := i.stack[v3]
-			i.retainBox(v4)
+			i.heap.Retain(v4)
 			i.stack[i.sp] = v4
 			i.sp++
 			i.fr.ip += 2
@@ -106571,7 +106571,7 @@ func fuseUpvalGet560(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -106582,7 +106582,7 @@ func fuseUpvalGet560(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v3 := i.fr.upvals[v2]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 2
@@ -106626,7 +106626,7 @@ func fuseUpvalGet561(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -106637,7 +106637,7 @@ func fuseUpvalGet561(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v3 := i.fr.upvals[v2]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 2
@@ -106681,7 +106681,7 @@ func fuseUpvalGet562(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -106692,7 +106692,7 @@ func fuseUpvalGet562(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v3 := i.fr.upvals[v2]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 2
@@ -106736,7 +106736,7 @@ func fuseUpvalGet563(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -106747,7 +106747,7 @@ func fuseUpvalGet563(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v3 := i.fr.upvals[v2]
-			i.retainBox(v3)
+			i.heap.Retain(v3)
 			i.stack[i.sp] = v3
 			i.sp++
 			i.fr.ip += 2
@@ -108925,7 +108925,7 @@ func fuseUpvalGet621(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -108972,7 +108972,7 @@ func fuseUpvalGet622(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -109019,7 +109019,7 @@ func fuseUpvalGet623(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -109066,7 +109066,7 @@ func fuseUpvalGet624(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -109511,7 +109511,7 @@ func fuseUpvalGet631(c *threader, start int) func(*Interpreter) {
 						panic(ErrTypeMismatch)
 					}
 					v1 := types.Boxed(v0.Data[v7])
-					i.retainBox(v1)
+					i.heap.Retain(v1)
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 6
@@ -109763,7 +109763,7 @@ func fuseUpvalGet632(c *threader, start int) func(*Interpreter) {
 						panic(ErrTypeMismatch)
 					}
 					v1 := types.Boxed(v0.Data[v5])
-					i.retainBox(v1)
+					i.heap.Retain(v1)
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 8
@@ -113511,7 +113511,7 @@ func fuseUpvalGet735(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -113551,7 +113551,7 @@ func fuseUpvalGet736(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -113591,7 +113591,7 @@ func fuseUpvalGet737(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -113631,7 +113631,7 @@ func fuseUpvalGet738(c *threader, start int) func(*Interpreter) {
 				panic(ErrSegmentationFault)
 			}
 			v1 := i.fr.upvals[v0]
-			i.retainBox(v1)
+			i.heap.Retain(v1)
 			i.stack[i.sp] = v1
 			i.sp++
 			i.fr.ip += 2
@@ -116863,7 +116863,7 @@ func fuseI64Add0(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.stack[v2]
 			if v3 != v1 {
-				i.releaseBox(v3)
+				i.heap.Release(v3)
 			}
 			i.stack[v2] = v1
 			i.sp -= 2
@@ -116895,7 +116895,7 @@ func fuseI64Sub0(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.stack[v2]
 			if v3 != v1 {
-				i.releaseBox(v3)
+				i.heap.Release(v3)
 			}
 			i.stack[v2] = v1
 			i.sp -= 2
@@ -116927,7 +116927,7 @@ func fuseI64Mul0(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.stack[v2]
 			if v3 != v1 {
-				i.releaseBox(v3)
+				i.heap.Release(v3)
 			}
 			i.stack[v2] = v1
 			i.sp -= 2
@@ -116959,7 +116959,7 @@ func fuseI64Shl0(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.stack[v2]
 			if v3 != v1 {
-				i.releaseBox(v3)
+				i.heap.Release(v3)
 			}
 			i.stack[v2] = v1
 			i.sp -= 2
@@ -116991,7 +116991,7 @@ func fuseI64ShrS0(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.stack[v2]
 			if v3 != v1 {
-				i.releaseBox(v3)
+				i.heap.Release(v3)
 			}
 			i.stack[v2] = v1
 			i.sp -= 2
@@ -117023,7 +117023,7 @@ func fuseI64ShrU0(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.stack[v2]
 			if v3 != v1 {
-				i.releaseBox(v3)
+				i.heap.Release(v3)
 			}
 			i.stack[v2] = v1
 			i.sp -= 2
@@ -117055,7 +117055,7 @@ func fuseI64Xor0(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.stack[v2]
 			if v3 != v1 {
-				i.releaseBox(v3)
+				i.heap.Release(v3)
 			}
 			i.stack[v2] = v1
 			i.sp -= 2
@@ -117087,7 +117087,7 @@ func fuseI64And0(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.stack[v2]
 			if v3 != v1 {
-				i.releaseBox(v3)
+				i.heap.Release(v3)
 			}
 			i.stack[v2] = v1
 			i.sp -= 2
@@ -117119,7 +117119,7 @@ func fuseI64Or0(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.stack[v2]
 			if v3 != v1 {
-				i.releaseBox(v3)
+				i.heap.Release(v3)
 			}
 			i.stack[v2] = v1
 			i.sp -= 2
@@ -117151,7 +117151,7 @@ func fuseI64Rotl0(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.stack[v2]
 			if v3 != v1 {
-				i.releaseBox(v3)
+				i.heap.Release(v3)
 			}
 			i.stack[v2] = v1
 			i.sp -= 2
@@ -117183,7 +117183,7 @@ func fuseI64Rotr0(c *threader, start int) func(*Interpreter) {
 			}
 			v3 := i.stack[v2]
 			if v3 != v1 {
-				i.releaseBox(v3)
+				i.heap.Release(v3)
 			}
 			i.stack[v2] = v1
 			i.sp -= 2
@@ -119864,7 +119864,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.stack[i.sp-1]
-				i.releaseBox(v0)
+				i.heap.Release(v0)
 				i.sp--
 				i.fr.ip += 1
 			}
@@ -119879,7 +119879,7 @@ var (
 					panic(ErrStackOverflow)
 				}
 				v0 := i.stack[i.sp-1]
-				i.retainBox(v0)
+				i.heap.Retain(v0)
 				i.stack[i.sp] = v0
 				i.sp++
 				i.fr.ip++
@@ -119992,7 +119992,7 @@ var (
 					v3 = v1
 					v4 = v2
 				}
-				i.releaseBox(v4)
+				i.heap.Release(v4)
 				i.stack[i.sp-3] = v3
 				i.sp -= 2
 				i.fr.ip++
@@ -120233,7 +120233,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								continue
 							}
-							i.releaseBox(v0)
+							i.heap.Release(v0)
 						}
 						copy(i.stack[v9:v9+v5], i.stack[i.sp-v5-1:i.sp-1])
 						if v8.release {
@@ -120316,7 +120316,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								continue
 							}
-							i.releaseBox(v0)
+							i.heap.Release(v0)
 						}
 						copy(i.stack[v10:v10+v6], i.stack[i.sp-v6-1:i.sp-1])
 						if v9.release {
@@ -120406,12 +120406,12 @@ var (
 							}
 							if v0.returns > 0 {
 								for _, v1 := range i.stack[v0.bp : i.sp-1] {
-									i.releaseBox(v1)
+									i.heap.Release(v1)
 								}
 								v2.value = i.stack[i.sp-1]
 							} else {
 								for _, v1 := range i.stack[v0.bp:i.sp] {
-									i.releaseBox(v1)
+									i.heap.Release(v1)
 								}
 								i.heap.Inc(0, 1)
 								v2.value = types.BoxedNull
@@ -120439,7 +120439,7 @@ var (
 						// under them is released here. land does the same when an exception
 						// unwinds the frame, and the cycle collector needs counts to be exact.
 						for _, v1 := range i.stack[v0.bp : i.sp-v0.returns] {
-							i.releaseBox(v1)
+							i.heap.Release(v1)
 						}
 						switch v0.returns {
 						case 0:
@@ -120529,7 +120529,7 @@ var (
 							if v6+len(v4.image)+1 > len(i.stack) {
 								panic(ErrStackOverflow)
 							}
-							i.releaseBox(v4.value)
+							i.heap.Release(v4.value)
 							v4.value = types.Boxed(0)
 							copy(i.stack[v6:], v4.image)
 							i.sp = v6 + len(v4.image)
@@ -120560,7 +120560,7 @@ var (
 							if v2.Done() {
 								panic(ErrCoroutineDone)
 							}
-							i.releaseBox(v3)
+							i.heap.Release(v3)
 							{
 								v0 := v2
 								if v0.Done() {
@@ -120571,7 +120571,7 @@ var (
 										v1 := v0.Current()
 										switch v0 := v1.(type) {
 										case types.Boxed:
-											i.releaseBox(v0)
+											i.heap.Release(v0)
 										case types.Ref:
 											i.heap.Dec(int(v0))
 										}
@@ -120590,7 +120590,7 @@ var (
 										v1 := v0.Current()
 										switch v0 := v1.(type) {
 										case types.Boxed:
-											i.retainBox(v0)
+											i.heap.Retain(v0)
 										case types.Ref:
 											i.heap.Inc(int(v0), 1)
 										}
@@ -120630,7 +120630,7 @@ var (
 				default:
 					panic(ErrTypeMismatch)
 				}
-				i.releaseBox(v0)
+				i.heap.Release(v0)
 				i.stack[i.sp-1] = types.BoxI1(v1 != 0)
 				i.fr.ip++
 			}
@@ -120649,7 +120649,7 @@ var (
 				switch v2 := i.heap.At(v0.Ref()).(type) {
 				case *coroutine:
 					v1 = v2.value
-					i.retainBox(v1)
+					i.heap.Retain(v1)
 				case types.Iterator:
 					v0 := v2.Current()
 					if v0 == nil {
@@ -120659,7 +120659,7 @@ var (
 						v1 = i.box(v0)
 						switch v1 := v0.(type) {
 						case types.Boxed:
-							i.retainBox(v1)
+							i.heap.Retain(v1)
 						case types.Ref:
 							i.heap.Inc(int(v1), 1)
 						}
@@ -120667,7 +120667,7 @@ var (
 				default:
 					panic(ErrTypeMismatch)
 				}
-				i.releaseBox(v0)
+				i.heap.Release(v0)
 				i.stack[i.sp-1] = v1
 				i.fr.ip++
 			}
@@ -120700,7 +120700,7 @@ var (
 					panic(ErrSegmentationFault)
 				}
 				v1 := i.globals[v0]
-				i.retainBox(v1)
+				i.heap.Retain(v1)
 				i.stack[i.sp] = v1
 				i.sp++
 				i.fr.ip += 3
@@ -120735,7 +120735,7 @@ var (
 				v1 := i.stack[i.sp-1]
 				v2 := i.globals[v0]
 				i.globals[v0] = v1
-				i.releaseBox(v2)
+				i.heap.Release(v2)
 				i.sp--
 				i.fr.ip += 3
 			}
@@ -120768,8 +120768,8 @@ var (
 				v1 := i.stack[i.sp-1]
 				v2 := i.globals[v0]
 				if v2 != v1 {
-					i.retainBox(v1)
-					i.releaseBox(v2)
+					i.heap.Retain(v1)
+					i.heap.Release(v2)
 				}
 				i.globals[v0] = v1
 				i.fr.ip += 3
@@ -120808,7 +120808,7 @@ var (
 					panic(ErrSegmentationFault)
 				}
 				v2 := i.stack[v1]
-				i.retainBox(v2)
+				i.heap.Retain(v2)
 				i.stack[i.sp] = v2
 				i.sp++
 				i.fr.ip += 2
@@ -120845,7 +120845,7 @@ var (
 				v2 := i.stack[i.sp-1]
 				v3 := i.stack[v1]
 				i.stack[v1] = v2
-				i.releaseBox(v3)
+				i.heap.Release(v3)
 				i.sp--
 				i.fr.ip += 2
 			}
@@ -120880,8 +120880,8 @@ var (
 				v2 := i.stack[i.sp-1]
 				v3 := i.stack[v1]
 				if v3 != v2 {
-					i.retainBox(v2)
-					i.releaseBox(v3)
+					i.heap.Retain(v2)
+					i.heap.Release(v3)
 				}
 				i.stack[v1] = v2
 				i.fr.ip += 2
@@ -120946,7 +120946,7 @@ var (
 					panic(ErrSegmentationFault)
 				}
 				v1 := i.fr.upvals[v0]
-				i.retainBox(v1)
+				i.heap.Retain(v1)
 				i.stack[i.sp] = v1
 				i.sp++
 				i.fr.ip += 2
@@ -120981,7 +120981,7 @@ var (
 				v1 := i.stack[i.sp-1]
 				v2 := i.fr.upvals[v0]
 				i.fr.upvals[v0] = v1
-				i.releaseBox(v2)
+				i.heap.Release(v2)
 				i.sp--
 				i.fr.ip += 2
 			}
@@ -121086,7 +121086,7 @@ var (
 				default:
 					v2 = types.BoxI1(v1.Kind() == v3)
 				}
-				i.releaseBox(v0)
+				i.heap.Release(v0)
 				i.stack[i.sp-1] = v2
 				i.fr.ip += 3
 			}
@@ -121127,7 +121127,7 @@ var (
 				}
 				v0 := i.stack[i.sp-1]
 				i.stack[i.sp-1] = types.BoxI1(v0.Ref() == 0)
-				i.releaseBox(v0)
+				i.heap.Release(v0)
 				i.fr.ip += 1
 			}
 		},
@@ -121141,8 +121141,8 @@ var (
 				v1 := i.stack[i.sp-2]
 				i.sp--
 				i.stack[i.sp-1] = types.BoxI1(v1 == v0)
-				i.releaseBox(v0)
-				i.releaseBox(v1)
+				i.heap.Release(v0)
+				i.heap.Release(v1)
 				i.fr.ip++
 			}
 		},
@@ -121156,8 +121156,8 @@ var (
 				v1 := i.stack[i.sp-2]
 				i.sp--
 				i.stack[i.sp-1] = types.BoxI1(v1 != v0)
-				i.releaseBox(v0)
-				i.releaseBox(v1)
+				i.heap.Release(v0)
+				i.heap.Release(v1)
 				i.fr.ip++
 			}
 		},
@@ -123554,10 +123554,10 @@ var (
 					for v4 := v2; v4 < v2+v0; v4++ {
 						v0 := v3.Elems[v4]
 						v3.Elems[v4] = v1
-						i.releaseBox(v0)
+						i.heap.Release(v0)
 					}
 					if v0 <= 0 {
-						i.releaseBox(v1)
+						i.heap.Release(v1)
 					}
 				case *HostArray:
 					if v4 := v3.Fill(i, v2, v0, v1); v4 != nil {
@@ -123745,10 +123745,10 @@ var (
 						}
 					}
 					for _, v2 := range v4.Elems[v1 : v1+v0] {
-						i.retainBox(v2)
+						i.heap.Retain(v2)
 					}
 					for _, v1 := range v2.Elems[v3 : v3+v0] {
-						i.releaseBox(v1)
+						i.heap.Release(v1)
 					}
 					copy(v2.Elems[v3:v3+v0], v4.Elems[v1:v1+v0])
 				case *HostArray:
@@ -124081,7 +124081,7 @@ var (
 						v2.Data[v1] = math.Float64bits(v0.F64())
 					case types.KindRef:
 						v3 := types.Boxed(v2.Data[v1])
-						i.releaseBox(v3)
+						i.heap.Release(v3)
 						v2.Data[v1] = uint64(v0)
 					default:
 						panic(ErrTypeMismatch)
@@ -124132,37 +124132,37 @@ var (
 					case *types.TypedMap[int8]:
 						v2, v3 := v1.Set(v0.I8(), v4)
 						if v3 {
-							i.releaseBox(v2)
+							i.heap.Release(v2)
 						}
 					case *types.TypedMap[bool]:
 						v2, v3 := v1.Set(v0.Bool(), v4)
 						if v3 {
-							i.releaseBox(v2)
+							i.heap.Release(v2)
 						}
 					case *types.TypedMap[int32]:
 						v2, v3 := v1.Set(v0.I32(), v4)
 						if v3 {
-							i.releaseBox(v2)
+							i.heap.Release(v2)
 						}
 					case *types.TypedMap[int64]:
 						v2, v3 := v1.Set(i.unboxI64(v0), v4)
 						if v3 {
-							i.releaseBox(v2)
+							i.heap.Release(v2)
 						}
 					case *types.TypedMap[float32]:
 						v2, v3 := v1.Set(v0.F32(), v4)
 						if v3 {
-							i.releaseBox(v2)
+							i.heap.Release(v2)
 						}
 					case *types.TypedMap[float64]:
 						v2, v3 := v1.Set(v0.F64(), v4)
 						if v3 {
-							i.releaseBox(v2)
+							i.heap.Release(v2)
 						}
 					case *types.StringMap:
 						v2, v3 := v1.Set(string(unboxRef[types.String](i, v0)), v4)
 						if v3 {
-							i.releaseBox(v2)
+							i.heap.Release(v2)
 						}
 					case *types.Map:
 						v2, v3 := i.mapKey(v0)
@@ -124172,8 +124172,8 @@ var (
 						}
 						v6, v7 := v1.Set(v2, v5)
 						if v7 {
-							i.releaseBox(v6.Key)
-							i.releaseBox(v6.Value)
+							i.heap.Release(v6.Key)
+							i.heap.Release(v6.Value)
 						}
 					default:
 						panic(ErrTypeMismatch)
@@ -124301,7 +124301,7 @@ var (
 				case *types.Map:
 					v2, v4 := i.mapKey(v0)
 					v5, v6 := v1.Get(v2)
-					i.releaseBox(v4)
+					i.heap.Release(v4)
 					if v6 {
 						v3 = v5.Value
 					} else {
@@ -124318,7 +124318,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				if !v5 {
-					i.retainBox(v3)
+					i.heap.Retain(v3)
 				}
 				i.heap.Dec(v2)
 				i.sp--
@@ -124359,7 +124359,7 @@ var (
 				case *types.Map:
 					v2, v4 := i.mapKey(v0)
 					v6, v7 := v1.Get(v2)
-					i.releaseBox(v4)
+					i.heap.Release(v4)
 					v5 = v7
 					if v7 {
 						v3 = v6.Value
@@ -124377,7 +124377,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				if !v4 {
-					i.retainBox(v3)
+					i.heap.Retain(v3)
 				}
 				i.heap.Dec(v2)
 				i.stack[i.sp-2] = v3
@@ -124402,37 +124402,37 @@ var (
 				case *types.TypedMap[int8]:
 					v3, v4 := v2.Set(v1.I8(), v0)
 					if v4 {
-						i.releaseBox(v3)
+						i.heap.Release(v3)
 					}
 				case *types.TypedMap[bool]:
 					v3, v4 := v2.Set(v1.Bool(), v0)
 					if v4 {
-						i.releaseBox(v3)
+						i.heap.Release(v3)
 					}
 				case *types.TypedMap[int32]:
 					v3, v4 := v2.Set(v1.I32(), v0)
 					if v4 {
-						i.releaseBox(v3)
+						i.heap.Release(v3)
 					}
 				case *types.TypedMap[int64]:
 					v3, v4 := v2.Set(i.unboxI64(v1), v0)
 					if v4 {
-						i.releaseBox(v3)
+						i.heap.Release(v3)
 					}
 				case *types.TypedMap[float32]:
 					v3, v4 := v2.Set(v1.F32(), v0)
 					if v4 {
-						i.releaseBox(v3)
+						i.heap.Release(v3)
 					}
 				case *types.TypedMap[float64]:
 					v3, v4 := v2.Set(v1.F64(), v0)
 					if v4 {
-						i.releaseBox(v3)
+						i.heap.Release(v3)
 					}
 				case *types.StringMap:
 					v3, v4 := v2.Set(string(unboxRef[types.String](i, v1)), v0)
 					if v4 {
-						i.releaseBox(v3)
+						i.heap.Release(v3)
 					}
 				case *types.Map:
 					v3, v4 := i.mapKey(v1)
@@ -124442,8 +124442,8 @@ var (
 					}
 					v6, v7 := v2.Set(v3, v5)
 					if v7 {
-						i.releaseBox(v6.Key)
-						i.releaseBox(v6.Value)
+						i.heap.Release(v6.Key)
+						i.heap.Release(v6.Value)
 					}
 				case *HostMap:
 					if v3 := v2.Set(i, v1, v0); v3 != nil {
@@ -124473,46 +124473,46 @@ var (
 				case *types.TypedMap[int8]:
 					v2, v3 := v1.Delete(v0.I8())
 					if v3 {
-						i.releaseBox(v2)
+						i.heap.Release(v2)
 					}
 				case *types.TypedMap[bool]:
 					v2, v3 := v1.Delete(v0.Bool())
 					if v3 {
-						i.releaseBox(v2)
+						i.heap.Release(v2)
 					}
 				case *types.TypedMap[int32]:
 					v2, v3 := v1.Delete(v0.I32())
 					if v3 {
-						i.releaseBox(v2)
+						i.heap.Release(v2)
 					}
 				case *types.TypedMap[int64]:
 					v2, v3 := v1.Delete(i.unboxI64(v0))
 					if v3 {
-						i.releaseBox(v2)
+						i.heap.Release(v2)
 					}
 				case *types.TypedMap[float32]:
 					v2, v3 := v1.Delete(v0.F32())
 					if v3 {
-						i.releaseBox(v2)
+						i.heap.Release(v2)
 					}
 				case *types.TypedMap[float64]:
 					v2, v3 := v1.Delete(v0.F64())
 					if v3 {
-						i.releaseBox(v2)
+						i.heap.Release(v2)
 					}
 				case *types.StringMap:
 					v2, v3 := v1.Delete(string(unboxRef[types.String](i, v0)))
 					if v3 {
-						i.releaseBox(v2)
+						i.heap.Release(v2)
 					}
 				case *types.Map:
 					v2, v3 := i.mapKey(v0)
 					v4, v5 := v1.Delete(v2)
 					if v5 {
-						i.releaseBox(v4.Key)
-						i.releaseBox(v4.Value)
+						i.heap.Release(v4.Key)
+						i.heap.Release(v4.Value)
 					}
-					i.releaseBox(v3)
+					i.heap.Release(v3)
 				case *HostMap:
 					if v2 := v1.Delete(i, v0); v2 != nil {
 						panic(v2)
@@ -124539,36 +124539,36 @@ var (
 				switch v0 := i.heap.At(v1).(type) {
 				case *types.TypedMap[int8]:
 					v0.Clear(func(value types.Boxed) {
-						i.releaseBox(value)
+						i.heap.Release(value)
 					})
 				case *types.TypedMap[bool]:
 					v0.Clear(func(value types.Boxed) {
-						i.releaseBox(value)
+						i.heap.Release(value)
 					})
 				case *types.TypedMap[int32]:
 					v0.Clear(func(value types.Boxed) {
-						i.releaseBox(value)
+						i.heap.Release(value)
 					})
 				case *types.TypedMap[int64]:
 					v0.Clear(func(value types.Boxed) {
-						i.releaseBox(value)
+						i.heap.Release(value)
 					})
 				case *types.TypedMap[float32]:
 					v0.Clear(func(value types.Boxed) {
-						i.releaseBox(value)
+						i.heap.Release(value)
 					})
 				case *types.TypedMap[float64]:
 					v0.Clear(func(value types.Boxed) {
-						i.releaseBox(value)
+						i.heap.Release(value)
 					})
 				case *types.StringMap:
 					v0.Clear(func(value types.Boxed) {
-						i.releaseBox(value)
+						i.heap.Release(value)
 					})
 				case *types.Map:
 					v0.Clear(func(entry types.MapEntry) {
-						i.releaseBox(entry.Key)
-						i.releaseBox(entry.Value)
+						i.heap.Release(entry.Key)
+						i.heap.Release(entry.Value)
 					})
 				case *HostMap:
 					v0.Clear()
@@ -124654,7 +124654,7 @@ var (
 					v2 = types.MakeArray(&i.heap, types.NewArrayType(v0.Typ.Key), v0.Len())
 					v1 := 0
 					v0.Range(func(_ types.MapKey, entry types.MapEntry) {
-						i.retainBox(entry.Key)
+						i.heap.Retain(entry.Key)
 						v2.Elems[v1] = entry.Key
 						v1++
 					})
@@ -124722,7 +124722,7 @@ var (
 					v0 := v4.Current()
 					switch v1 := v0.(type) {
 					case types.Boxed:
-						i.retainBox(v1)
+						i.heap.Retain(v1)
 					case types.Ref:
 						i.heap.Inc(int(v1), 1)
 					}
@@ -124778,8 +124778,8 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				v3 := v1.Value()
-				i.retainBox(v3)
-				i.releaseBox(v0)
+				i.heap.Retain(v3)
+				i.heap.Release(v0)
 				i.stack[i.sp-1] = v3
 				i.fr.ip++
 			}
@@ -124799,7 +124799,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				v3 := v1.Code()
-				i.releaseBox(v0)
+				i.heap.Release(v0)
 				i.stack[i.sp-1] = types.BoxI32(int32(v3))
 				i.fr.ip++
 			}

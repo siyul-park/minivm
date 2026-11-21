@@ -93,7 +93,7 @@ func mapGet() jen.Code {
 			genericMapCase(
 				jen.List(jen.Id("k"), jen.Id("entryKey")).Op(":=").Id("i").Dot("mapKey").Call(jen.Id("key")),
 				jen.List(jen.Id("entry"), jen.Id("ok")).Op(":=").Id("m").Dot("Get").Call(jen.Id("k")),
-				jen.Id("i").Dot("releaseBox").Call(jen.Id("entryKey")),
+				jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("entryKey")),
 				jen.If(jen.Id("ok")).Block(jen.Id("result").Op("=").Id("entry").Dot("Value")).Else().Block(jen.Id("result").Op("=").Id("m").Dot("Zero")),
 			),
 			hostMapCase(
@@ -103,7 +103,7 @@ func mapGet() jen.Code {
 				jen.Id("_").Op("=").Id("present"),
 			),
 		),
-		jen.If(jen.Op("!").Id("owned")).Block(jen.Id("i").Dot("retainBox").Call(jen.Id("result"))),
+		jen.If(jen.Op("!").Id("owned")).Block(jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("result"))),
 		jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("addr")),
 		jen.Id("i").Dot("sp").Op("--"),
 		top(1).Op("=").Id("result"),
@@ -122,7 +122,7 @@ func mapLookup() jen.Code {
 			genericMapCase(
 				jen.List(jen.Id("k"), jen.Id("entryKey")).Op(":=").Id("i").Dot("mapKey").Call(jen.Id("key")),
 				jen.List(jen.Id("entry"), jen.Id("ok")).Op(":=").Id("m").Dot("Get").Call(jen.Id("k")),
-				jen.Id("i").Dot("releaseBox").Call(jen.Id("entryKey")),
+				jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("entryKey")),
 				jen.Id("found").Op("=").Id("ok"),
 				jen.If(jen.Id("ok")).Block(jen.Id("result").Op("=").Id("entry").Dot("Value")).Else().Block(jen.Id("result").Op("=").Id("m").Dot("Zero")),
 			),
@@ -133,7 +133,7 @@ func mapLookup() jen.Code {
 				jen.Id("found").Op("=").Id("present"),
 			),
 		),
-		jen.If(jen.Op("!").Id("owned")).Block(jen.Id("i").Dot("retainBox").Call(jen.Id("result"))),
+		jen.If(jen.Op("!").Id("owned")).Block(jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("result"))),
 		jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("addr")),
 		top(2).Op("=").Id("result"),
 		top(1).Op("=").Qual(typesPkg, "BoxI1").Call(jen.Id("found")),
@@ -171,7 +171,7 @@ func mapDelete() jen.Code {
 				jen.List(jen.Id("k"), jen.Id("entryKey")).Op(":=").Id("i").Dot("mapKey").Call(jen.Id("key")),
 				jen.List(jen.Id("old"), jen.Id("ok")).Op(":=").Id("m").Dot("Delete").Call(jen.Id("k")),
 				releaseEntry(),
-				jen.Id("i").Dot("releaseBox").Call(jen.Id("entryKey")),
+				jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("entryKey")),
 			),
 			hostMapCase(check(jen.Id("m").Dot("Delete").Call(jen.Id("i"), jen.Id("key")))),
 		),
@@ -189,12 +189,12 @@ func mapClear() jen.Code {
 		container(1),
 		mapHeap(
 			func(typedKey) []jen.Code {
-				return []jen.Code{clearing(jen.Id("value").Qual(typesPkg, "Boxed"), jen.Id("i").Dot("releaseBox").Call(jen.Id("value")))}
+				return []jen.Code{clearing(jen.Id("value").Qual(typesPkg, "Boxed"), jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("value")))}
 			},
 			genericMapCase(clearing(
 				jen.Id("entry").Qual(typesPkg, "MapEntry"),
-				jen.Id("i").Dot("releaseBox").Call(jen.Id("entry").Dot("Key")),
-				jen.Id("i").Dot("releaseBox").Call(jen.Id("entry").Dot("Value")),
+				jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("entry").Dot("Key")),
+				jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("entry").Dot("Value")),
 			)),
 			hostMapCase(jen.Id("m").Dot("Clear").Call()),
 		),
@@ -232,7 +232,7 @@ func mapKeys() jen.Code {
 			genericMapCase(collect(
 				[]jen.Code{jen.Id("_").Qual(typesPkg, "MapKey"), jen.Id("entry").Qual(typesPkg, "MapEntry")},
 				jen.Id("entry").Dot("Key"),
-				jen.Id("i").Dot("retainBox").Call(jen.Id("entry").Dot("Key")),
+				jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("entry").Dot("Key")),
 			)...),
 		),
 		jen.Id("out").Op(":=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("heap").Dot("Add").Call(jen.Id("arr"))),
@@ -262,7 +262,7 @@ func mapIter() jen.Code {
 		jen.If(jen.Op("!").Id("iter").Dot("Done").Call()).Block(
 			jen.Id("current").Op(":=").Id("iter").Dot("Current").Call(),
 			jen.Switch(jen.Id("current").Op(":=").Id("current").Assert(jen.Type())).Block(
-				jen.Case(jen.Qual(typesPkg, "Boxed")).Block(jen.Id("i").Dot("retainBox").Call(jen.Id("current"))),
+				jen.Case(jen.Qual(typesPkg, "Boxed")).Block(jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("current"))),
 				jen.Case(jen.Qual(typesPkg, "Ref")).Block(jen.Id("i").Dot("heap").Dot("Inc").Call(jen.Id("int").Call(jen.Id("current")), jen.Lit(1))),
 			),
 		),
@@ -329,14 +329,14 @@ func genericMapCase(body ...jen.Code) jen.Code {
 
 // releaseOld releases the value a typed Delete or Set displaced.
 func releaseOld() jen.Code {
-	return jen.If(jen.Id("ok")).Block(jen.Id("i").Dot("releaseBox").Call(jen.Id("old")))
+	return jen.If(jen.Id("ok")).Block(jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("old")))
 }
 
 // releaseEntry releases the key and value of the entry a generic Delete or Set
 // displaced.
 func releaseEntry() jen.Code {
 	return jen.If(jen.Id("ok")).Block(
-		jen.Id("i").Dot("releaseBox").Call(jen.Id("old").Dot("Key")),
-		jen.Id("i").Dot("releaseBox").Call(jen.Id("old").Dot("Value")),
+		jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("old").Dot("Key")),
+		jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("old").Dot("Value")),
 	)
 }

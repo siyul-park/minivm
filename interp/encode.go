@@ -645,8 +645,8 @@ func mapWriter(mt *types.MapType, key *conversion) func(*Encoder, types.Value, u
 			}
 			k, entryKey := e.interp.mapKey(boxed)
 			if old, replaced := m.(*types.Map).Set(k, types.MapEntry{Key: entryKey, Value: value}); replaced {
-				e.interp.releaseBox(old.Key)
-				e.interp.releaseBox(old.Value)
+				e.interp.heap.Release(old.Key)
+				e.interp.heap.Release(old.Value)
 			}
 			return nil
 		}

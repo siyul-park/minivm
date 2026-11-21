@@ -1397,7 +1397,7 @@ func (m *Machine) mapGet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 	return true
 }
 
-// retain counts one more reference to ref, as the interpreter's retainBox:
+// retain counts one more reference to ref, as Heap.Retain:
 // any reference, the null one included.
 func (m *Machine) retain(a *asm.Assembler, ref asm.VReg) {
 	skip := a.Label()
@@ -1663,7 +1663,7 @@ func (m *Machine) replace(a *asm.Assembler, s compile.Site, p address, word asm.
 	m.release(a, old, s)
 }
 
-// release counts one reference to ref less, as the interpreter's releaseBox:
+// release counts one reference to ref less, as Heap.Release:
 // never the null one. The last reference exits for the interpreter to
 // release the object and what it holds.
 func (m *Machine) release(a *asm.Assembler, ref asm.VReg, s compile.Site) {

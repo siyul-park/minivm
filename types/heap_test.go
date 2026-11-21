@@ -260,6 +260,65 @@ func TestHeap_Dec(t *testing.T) {
 	})
 }
 
+func TestHeap_Retain(t *testing.T) {
+	t.Run("counts a reference", func(t *testing.T) {
+		h := types.NewHeap(2, 0, types.Hooks{})
+		addr := h.Add(types.I32(1))
+		h.Retain(types.BoxRef(addr))
+		require.Equal(t, 2, h.Count(addr))
+	})
+
+	t.Run("counts null", func(t *testing.T) {
+		h := types.NewHeap(2, 0, types.Hooks{})
+		null := h.Add(types.I32(0))
+		h.Retain(types.BoxRef(null))
+		require.Equal(t, 2, h.Count(null))
+	})
+
+	t.Run("ignores a value that is not a reference", func(t *testing.T) {
+		h := types.NewHeap(2, 0, types.Hooks{})
+		addr := h.Add(types.I32(1))
+		h.Retain(types.BoxI32(7))
+		require.Equal(t, 1, h.Count(addr))
+	})
+}
+
+func TestHeap_Release(t *testing.T) {
+	t.Run("removes a reference", func(t *testing.T) {
+		h := types.NewHeap(3, 0, types.Hooks{})
+		h.Add(types.I32(0))
+		addr := h.Add(types.I32(1))
+		h.Inc(addr, 1)
+		h.Release(types.BoxRef(addr))
+		require.Equal(t, 1, h.Count(addr))
+	})
+
+	t.Run("reclaims on the last reference", func(t *testing.T) {
+		h := types.NewHeap(4, 0, types.Hooks{})
+		h.Add(types.I32(0))
+		child := h.Add(types.I32(1))
+		parent := h.Add(types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(child)))
+		h.Release(types.BoxRef(parent))
+		require.False(t, h.Alive(parent))
+		require.False(t, h.Alive(child))
+	})
+
+	t.Run("skips null", func(t *testing.T) {
+		h := types.NewHeap(2, 0, types.Hooks{})
+		null := h.Add(types.I32(0))
+		h.Release(types.BoxRef(null))
+		require.Equal(t, 1, h.Count(null))
+	})
+
+	t.Run("ignores a value that is not a reference", func(t *testing.T) {
+		h := types.NewHeap(3, 0, types.Hooks{})
+		h.Add(types.I32(0))
+		addr := h.Add(types.I32(1))
+		h.Release(types.BoxI32(7))
+		require.Equal(t, 1, h.Count(addr))
+	})
+}
+
 func TestHeap_Count(t *testing.T) {
 	h := types.NewHeap(2, 0, types.Hooks{})
 	addr := h.Add(types.I32(1))

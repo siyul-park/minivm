@@ -98,7 +98,7 @@ func (h *HostStruct) SetField(i *Interpreter, at int, val types.Boxed) error {
 	if err := assign(i, h.registry, f.conversion.set, val, unsafe.Add(h.ptr, f.offset)); err != nil {
 		return err
 	}
-	i.releaseBox(val)
+	i.heap.Release(val)
 	return nil
 }
 
@@ -148,7 +148,7 @@ func (h *HostArray) SetElement(i *Interpreter, at int, val types.Boxed) error {
 	if err := assign(i, h.registry, h.elem.set, val, unsafe.Add(base, uintptr(at)*h.stride)); err != nil {
 		return err
 	}
-	i.releaseBox(val)
+	i.heap.Release(val)
 	return nil
 }
 
@@ -167,7 +167,7 @@ func (h *HostArray) Fill(i *Interpreter, at, n int, val types.Boxed) error {
 	for k := range n {
 		reflect.NewAt(elem, unsafe.Add(base, uintptr(at+k)*h.stride)).Elem().Set(entry)
 	}
-	i.releaseBox(val)
+	i.heap.Release(val)
 	return nil
 }
 
@@ -190,7 +190,7 @@ func (h *HostArray) Append(i *Interpreter, vals []types.Boxed) error {
 	}
 	dst.Set(out)
 	for _, val := range vals {
-		i.releaseBox(val)
+		i.heap.Release(val)
 	}
 	return nil
 }
@@ -217,7 +217,7 @@ func (h *HostMap) Get(i *Interpreter, key types.Boxed) (types.Boxed, bool, error
 	}
 	entry := h.value().MapIndex(k)
 	if !entry.IsValid() {
-		i.releaseBox(key)
+		i.heap.Release(key)
 		return types.Zero(h.typ.ElemKind), false, nil
 	}
 	holder := reflect.New(h.rtyp.Elem())
@@ -226,7 +226,7 @@ func (h *HostMap) Get(i *Interpreter, key types.Boxed) (types.Boxed, bool, error
 	if err != nil {
 		return 0, false, err
 	}
-	i.releaseBox(key)
+	i.heap.Release(key)
 	return result, true, nil
 }
 
@@ -246,8 +246,8 @@ func (h *HostMap) Set(i *Interpreter, key, val types.Boxed) error {
 		return ErrTypeMismatch
 	}
 	m.SetMapIndex(k, entry)
-	i.releaseBox(key)
-	i.releaseBox(val)
+	i.heap.Release(key)
+	i.heap.Release(val)
 	return nil
 }
 
@@ -258,7 +258,7 @@ func (h *HostMap) Delete(i *Interpreter, key types.Boxed) error {
 		return err
 	}
 	h.value().SetMapIndex(k, reflect.Value{})
-	i.releaseBox(key)
+	i.heap.Release(key)
 	return nil
 }
 

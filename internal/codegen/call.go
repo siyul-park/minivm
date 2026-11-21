@@ -274,7 +274,7 @@ func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance in
 				jen.Id("f").Dot("bp").Op(":").Id("i").Dot("sp").Op("-").Id("params").Op("-").Lit(1),
 			)).Block(
 				jen.If(jen.Id("value").Dot("Kind").Call().Op("!=").Qual(typesPkg, "KindRef")).Block(jen.Continue()),
-				jen.Id("i").Dot("releaseBox").Call(jen.Id("value")),
+				jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("value")),
 			),
 			jen.Copy(jen.Id("i").Dot("stack").Index(jen.Id("base").Op(":").Id("base").Op("+").Id("params")), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("params").Op("-").Lit(1).Op(":").Id("i").Dot("sp").Op("-").Lit(1))),
 			jen.If(jen.Id("f").Dot("release")).Block(jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("f").Dot("ref"))),
@@ -324,7 +324,7 @@ func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance in
 			jen.Id("f").Dot("bp").Op(":").Id("i").Dot("sp").Op("-").Id("params"),
 		)).Block(
 			jen.If(jen.Id("value").Dot("Kind").Call().Op("!=").Qual(typesPkg, "KindRef")).Block(jen.Continue()),
-			jen.Id("i").Dot("releaseBox").Call(jen.Id("value")),
+			jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("value")),
 		),
 		jen.Copy(jen.Id("i").Dot("stack").Index(jen.Id("base").Op(":").Id("base").Op("+").Id("params")), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("params").Op(":").Id("i").Dot("sp"))),
 		jen.If(jen.Id("f").Dot("release")).Block(jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("f").Dot("ref"))),
@@ -464,7 +464,7 @@ func releaseArgs(args, returns jen.Code) jen.Code {
 func retire(guard jen.Code) []jen.Code {
 	sweep := jen.For(jen.List(jen.Id("_"), jen.Id("value")).Op(":=").Range().Id("i").Dot("stack").Index(
 		jen.Id("f").Dot("bp").Op(":").Id("i").Dot("sp").Op("-").Id("f").Dot("returns"),
-	)).Block(jen.Id("i").Dot("releaseBox").Call(jen.Id("value")))
+	)).Block(jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("value")))
 	var discard jen.Code = sweep
 	if guard != nil {
 		discard = jen.If(guard).Block(sweep)
@@ -479,12 +479,12 @@ func retire(guard jen.Code) []jen.Code {
 			jen.If(jen.Id("f").Dot("returns").Op(">").Lit(0)).Block(
 				jen.For(jen.List(jen.Id("_"), jen.Id("value")).Op(":=").Range().Id("i").Dot("stack").Index(
 					jen.Id("f").Dot("bp").Op(":").Id("i").Dot("sp").Op("-").Lit(1),
-				)).Block(jen.Id("i").Dot("releaseBox").Call(jen.Id("value"))),
+				)).Block(jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("value"))),
 				jen.Id("co").Dot("value").Op("=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)),
 			).Else().Block(
 				jen.For(jen.List(jen.Id("_"), jen.Id("value")).Op(":=").Range().Id("i").Dot("stack").Index(
 					jen.Id("f").Dot("bp").Op(":").Id("i").Dot("sp"),
-				)).Block(jen.Id("i").Dot("releaseBox").Call(jen.Id("value"))),
+				)).Block(jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("value"))),
 				jen.Id("i").Dot("heap").Dot("Inc").Call(jen.Lit(0), jen.Lit(1)),
 				jen.Id("co").Dot("value").Op("=").Qual(typesPkg, "BoxedNull"),
 			),

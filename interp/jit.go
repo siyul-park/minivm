@@ -318,7 +318,7 @@ func (e *engine) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	// Native execution finished; any fault during return cleanup belongs to CALL.
 	i.fr.ip -= advance
 	for _, v := range owned {
-		i.releaseBox(v)
+		i.heap.Release(v)
 	}
 	boxRegisters(i, code, bp)
 	if release {
@@ -418,7 +418,7 @@ func (e *engine) materialize(i *Interpreter, exit *jit.Exit, start, ref int, rel
 	for j := 1; j < len(maps); j++ {
 		bp := i.frames[start+j].bp
 		for _, p := range lent[j] {
-			i.retainBox(i.stack[bp+p])
+			i.heap.Retain(i.stack[bp+p])
 		}
 	}
 	i.fp = start + len(maps)
@@ -479,7 +479,7 @@ func (e *engine) frame(i *Interpreter, at, k int, m jit.Frame, ref int, release 
 		boxed := fromWord(i, o.Value.Kind, ctx.Read(k, o.Value))
 
 		if !o.Owned && o.Value.Kind == types.KindRef {
-			i.retainBox(boxed)
+			i.heap.Retain(boxed)
 		}
 		i.stack[sp+j] = boxed
 	}
@@ -488,7 +488,7 @@ func (e *engine) frame(i *Interpreter, at, k int, m jit.Frame, ref int, release 
 	for _, l := range m.Locals {
 		boxed := fromWord(i, l.Value.Kind, ctx.Read(k, l.Value))
 		addr := f.bp + l.Index
-		i.releaseBox(i.stack[addr])
+		i.heap.Release(i.stack[addr])
 		i.stack[addr] = boxed
 	}
 
@@ -760,7 +760,7 @@ func (e *engine) bridge(i *Interpreter, exit *jit.Exit) jit.Class {
 	}
 	for j, o := range tail {
 		if o.Value.Kind == types.KindRef {
-			i.retainBox(i.stack[sp+j])
+			i.heap.Retain(i.stack[sp+j])
 		}
 	}
 
@@ -778,7 +778,7 @@ func (e *engine) bridge(i *Interpreter, exit *jit.Exit) jit.Class {
 
 		for _, o := range tail[len(tail)-exit.Adopts:] {
 			if o.Value.Kind == types.KindRef {
-				i.releaseBox(types.Boxed(ctx.Read(k, o.Value)))
+				i.heap.Release(types.Boxed(ctx.Read(k, o.Value)))
 			}
 		}
 	} else {
@@ -863,7 +863,7 @@ func (e *engine) reenter(i *Interpreter, exit *jit.Exit, ref, start int, deopt f
 	i.sp = args
 	e.replay(i, exit, ref)
 	for _, p := range exit.Kept {
-		i.retainBox(i.stack[args+p])
+		i.heap.Retain(i.stack[args+p])
 	}
 	e.depth, i.floor = uint64(k+1), at+1
 	e.spans = append(e.spans, span{start: start, at: at, depth: int(depth)})
@@ -882,7 +882,7 @@ func (e *engine) reenter(i *Interpreter, exit *jit.Exit, ref, start int, deopt f
 	}
 
 	for _, p := range exit.Kept {
-		i.releaseBox(i.stack[args+p])
+		i.heap.Release(i.stack[args+p])
 	}
 
 	ip, live := i.frames[at].ip, [...]int{i.fp, i.sp}
@@ -922,12 +922,12 @@ func (e *engine) frameBase(i *Interpreter, k int) int {
 // since the CALL adopts both. The policy counts the callee (reached).
 func (e *engine) replay(i *Interpreter, exit *jit.Exit, ref int) {
 	for _, p := range exit.Lent {
-		i.retainBox(i.stack[i.sp+p])
+		i.heap.Retain(i.stack[i.sp+p])
 	}
 	i.sp += exit.Args
 	boxed := types.BoxRef(ref)
 	if !exit.Owned {
-		i.retainBox(boxed)
+		i.heap.Retain(boxed)
 	}
 	i.stack[i.sp] = boxed
 	i.sp++

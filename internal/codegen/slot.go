@@ -372,7 +372,7 @@ func (l loader) finish(result value, current step, ok bool) (value, error) {
 	result.push = append(result.push, result.check...)
 	result.push = append(result.push, result.body...)
 	if current.op == instr.CONST_GET {
-		result.push = append(result.push, jen.Id("i").Dot("retainBox").Call(result.boxed))
+		result.push = append(result.push, jen.Id("i").Dot("heap").Dot("Retain").Call(result.boxed))
 	}
 	result.push = append(result.push,
 		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Add(result.boxed),
@@ -480,7 +480,7 @@ func materialize(input value, retain bool, advance int) []jen.Code {
 	body = append(body, input.check...)
 	body = append(body, input.body...)
 	if retain {
-		body = append(body, jen.Id("i").Dot("retainBox").Call(input.boxed))
+		body = append(body, jen.Id("i").Dot("heap").Dot("Retain").Call(input.boxed))
 	}
 	return append(body,
 		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Add(input.boxed),
@@ -544,15 +544,15 @@ func slotStore(dst slot, tee bool) jen.Code {
 	if tee {
 		owned = append(owned,
 			jen.If(jen.Id("old").Op("!=").Id("val")).Block(
-				jen.Id("i").Dot("retainBox").Call(jen.Id("val")),
-				jen.Id("i").Dot("releaseBox").Call(jen.Id("old")),
+				jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("val")),
+				jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("old")),
 			),
 			dst.target().Op("=").Id("val"),
 		)
 	} else {
 		owned = append(owned,
 			dst.target().Op("=").Id("val"),
-			jen.Id("i").Dot("releaseBox").Call(jen.Id("old")),
+			jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("old")),
 		)
 	}
 	owned = append(owned, pop()...)

@@ -587,7 +587,7 @@ func (r *Registry) unmarshalFunc(t reflect.Type, fn *types.FunctionType) Unmarsh
 			}
 			defer func() {
 				for _, value := range returns {
-					d.interp.releaseBox(value)
+					d.interp.heap.Release(value)
 				}
 			}()
 			for idx := range returns {

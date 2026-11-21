@@ -157,6 +157,23 @@ func (h *Heap) Dec(addr int) {
 	}
 }
 
+// Retain adds one reference to the value v refers to, null included, and
+// ignores a v that is not a reference, for the runtime that owns the heap.
+func (h *Heap) Retain(v Boxed) {
+	if v.Kind() == KindRef {
+		h.Inc(v.Ref(), 1)
+	}
+}
+
+// Release removes one reference from the value v refers to, as Dec, and
+// ignores null and a v that is not a reference, for the runtime that owns the
+// heap.
+func (h *Heap) Release(v Boxed) {
+	if v.Kind() == KindRef && v.Ref() != 0 {
+		h.Dec(v.Ref())
+	}
+}
+
 // Count returns the reference count of addr, for the runtime that owns the
 // heap.
 func (h *Heap) Count(addr int) int {

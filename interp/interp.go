@@ -831,7 +831,7 @@ func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []type
 	}
 	if err != nil {
 		for _, param := range params {
-			i.releaseBox(param)
+			i.heap.Release(param)
 		}
 		return nil, err
 	}
@@ -856,7 +856,7 @@ func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []type
 				i.fp--
 			}
 			for _, value := range i.stack[base:i.sp] {
-				i.releaseBox(value)
+				i.heap.Release(value)
 			}
 		}
 		i.sp = base
@@ -896,7 +896,7 @@ func (i *Interpreter) nest(ctx context.Context, base int, call []func(*Interpret
 			i.fp--
 		}
 		for _, value := range i.stack[base:i.sp] {
-			i.releaseBox(value)
+			i.heap.Release(value)
 		}
 	} else {
 		returns = append([]types.Boxed(nil), i.stack[base:i.sp]...)
@@ -1092,12 +1092,12 @@ func (i *Interpreter) retire(sweep bool) {
 		}
 		if f.returns > 0 {
 			for _, value := range i.stack[f.bp : i.sp-1] {
-				i.releaseBox(value)
+				i.heap.Release(value)
 			}
 			co.value = i.stack[i.sp-1]
 		} else {
 			for _, value := range i.stack[f.bp:i.sp] {
-				i.releaseBox(value)
+				i.heap.Release(value)
 			}
 			i.heap.Inc(0, 1)
 			co.value = types.BoxedNull
@@ -1115,7 +1115,7 @@ func (i *Interpreter) retire(sweep bool) {
 	}
 	if sweep {
 		for _, value := range i.stack[f.bp : i.sp-f.returns] {
-			i.releaseBox(value)
+			i.heap.Release(value)
 		}
 	}
 	switch f.returns {
@@ -1267,8 +1267,8 @@ func (i *Interpreter) load(constants []types.Value) {
 	// Holding each replaced ref across its release frees only what the map no
 	// longer reaches.
 	for _, old := range replaced {
-		i.retainBox(old)
-		i.releaseBox(old)
+		i.heap.Retain(old)
+		i.heap.Release(old)
 	}
 }
 
@@ -1430,7 +1430,7 @@ func (i *Interpreter) slice(array types.Boxed, start, end int) types.Value {
 func (i *Interpreter) share(value types.Value) {
 	if array, ok := value.(*types.Array); ok {
 		for _, v := range array.Elems {
-			i.retainBox(v)
+			i.heap.Retain(v)
 		}
 	}
 }
@@ -1519,7 +1519,7 @@ func (i *Interpreter) arrayGet(addr, at int) types.Boxed {
 			panic(ErrIndexOutOfRange)
 		}
 		result := array.Elems[at]
-		i.retainBox(result)
+		i.heap.Retain(result)
 		return result
 	case *HostArray:
 
@@ -1573,7 +1573,7 @@ func (i *Interpreter) arraySet(addr, at int, val types.Boxed) {
 		}
 		elem := array.Elems[at]
 		array.Elems[at] = val
-		i.releaseBox(elem)
+		i.heap.Release(elem)
 	case *HostArray:
 		if err := array.SetElement(i, at, val); err != nil {
 			panic(err)
@@ -1599,7 +1599,7 @@ func (i *Interpreter) structGet(addr, at int) types.Boxed {
 			return i.boxI64(int64(data))
 		case types.KindRef:
 			result := types.Boxed(data)
-			i.retainBox(result)
+			i.heap.Retain(result)
 			return result
 		default:
 			panic(ErrTypeMismatch)
@@ -1745,7 +1745,7 @@ func (i *Interpreter) land(fp int, h instr.Handler, exc types.Boxed) {
 	f := &i.frames[fp-1]
 	base := f.bp + h.Depth
 	for s := i.sp - 1; s >= base; s-- {
-		i.releaseBox(i.stack[s])
+		i.heap.Release(i.stack[s])
 	}
 	i.stack[base] = exc
 	i.sp = base + 1
@@ -1892,18 +1892,6 @@ func (i *Interpreter) borrowI64(val types.Boxed) int64 {
 		panic(ErrTypeMismatch)
 	}
 	return int64(v)
-}
-
-func (i *Interpreter) retainBox(v types.Boxed) {
-	if v.Kind() == types.KindRef {
-		i.heap.Inc(v.Ref(), 1)
-	}
-}
-
-func (i *Interpreter) releaseBox(v types.Boxed) {
-	if v.Kind() == types.KindRef && v.Ref() != 0 {
-		i.heap.Dec(v.Ref())
-	}
 }
 
 // owner returns the slot that already holds val, or -1 when val is unowned.

@@ -303,9 +303,9 @@ func arrayFill() jen.Code {
 				jen.For(jen.Id("k").Op(":=").Id("idx"), jen.Id("k").Op("<").Id("idx").Op("+").Id("size"), jen.Id("k").Op("++")).Block(
 					jen.Id("old").Op(":=").Add(elems("arr")).Index(jen.Id("k")),
 					elems("arr").Index(jen.Id("k")).Op("=").Id("val"),
-					jen.Id("i").Dot("releaseBox").Call(jen.Id("old")),
+					jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("old")),
 				),
-				jen.If(jen.Id("size").Op("<=").Lit(0)).Block(jen.Id("i").Dot("releaseBox").Call(jen.Id("val"))),
+				jen.If(jen.Id("size").Op("<=").Lit(0)).Block(jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("val"))),
 			),
 			hostArrayCase(check(jen.Id("arr").Dot("Fill").Call(jen.Id("i"), jen.Id("idx"), jen.Id("size"), jen.Id("val")))),
 		),
@@ -334,8 +334,8 @@ func arrayCopy() jen.Code {
 					jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
 					bounds(jen.Id("srcOffset"), jen.Id("size"), elems("src")),
 					bounds(jen.Id("dstOffset"), jen.Id("size"), elems("dst")),
-					jen.For(jen.List(jen.Id("_"), jen.Id("v")).Op(":=").Range().Add(window(elems("src"), "srcOffset", "size"))).Block(jen.Id("i").Dot("retainBox").Call(jen.Id("v"))),
-					jen.For(jen.List(jen.Id("_"), jen.Id("v")).Op(":=").Range().Add(window(elems("dst"), "dstOffset", "size"))).Block(jen.Id("i").Dot("releaseBox").Call(jen.Id("v"))),
+					jen.For(jen.List(jen.Id("_"), jen.Id("v")).Op(":=").Range().Add(window(elems("src"), "srcOffset", "size"))).Block(jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("v"))),
+					jen.For(jen.List(jen.Id("_"), jen.Id("v")).Op(":=").Range().Add(window(elems("dst"), "dstOffset", "size"))).Block(jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("v"))),
 					jen.Id("copy").Call(window(elems("dst"), "dstOffset", "size"), window(elems("src"), "srcOffset", "size")),
 				),
 				hostArrayCase(jen.For(jen.Id("k").Op(":=").Lit(0), jen.Id("k").Op("<").Id("size"), jen.Id("k").Op("++")).Block(
