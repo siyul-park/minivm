@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"reflect"
 	"runtime"
 	"sort"
 	"testing"
@@ -308,6 +309,23 @@ func TestTypedMap_Set(t *testing.T) {
 		old, ok = m.Set(1, types.BoxI32(3))
 		require.True(t, ok)
 		require.Equal(t, types.BoxI32(2), old)
+	})
+
+	t.Run("a key deleted and set again takes a dead slot, not a new one", func(t *testing.T) {
+		m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32(), types.TypeI32()), 64)
+		for k := range int32(8) {
+			m.Set(k, types.BoxI32(1))
+		}
+		ctrl := reflect.ValueOf(m).Elem().FieldByName("table").FieldByName("ctrl")
+		for range 32 {
+			m.Delete(-5)
+			m.Set(-5, types.BoxI32(1))
+			taken := 0
+			for i := range ctrl.Len() {
+				taken += min(int(ctrl.Index(i).Uint()), 1)
+			}
+			require.LessOrEqual(t, taken, 9)
+		}
 	})
 
 	t.Run("f32 -0.0 collapses to +0.0", func(t *testing.T) {
