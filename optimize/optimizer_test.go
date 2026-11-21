@@ -7,14 +7,17 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/ssa"
+	"github.com/siyul-park/minivm/internal/testenv"
 	"github.com/siyul-park/minivm/internal/transform"
 	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/optimize"
 	"github.com/siyul-park/minivm/pass"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -182,17 +185,18 @@ func TestOptimizer_Optimize(t *testing.T) {
 	})
 
 	t.Run("resolves runtime error frames to sources", func(t *testing.T) {
-		build := func() *program.Program {
-			div := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Append(
-				instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_DIV_S), instr.MustNew(instr.RETURN)).MustBuild()
-			b := program.NewBuilder().Locals(types.TypeI32()).Globals(types.TypeI32())
-			head := b.Label()
-			b.Emit(instr.I32_CONST, 3).Emit(instr.LOCAL_SET, 0)
-			b.Bind(head).Emit(instr.I32_CONST, 7).Emit(instr.LOCAL_GET, 0).ConstGet(div).Emit(instr.CALL).Emit(instr.DROP)
-			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_SUB).Emit(instr.LOCAL_TEE, 0)
-			b.Emit(instr.I32_CONST, 0).Emit(instr.I32_GE_S).BrIf(head).Emit(instr.I32_CONST, 0).Emit(instr.GLOBAL_SET, 0)
-			return b.MustBuild()
-		}
+		// The module calls div(7, 1) a thousand times, so the JIT can compile
+		// it, then div(7, 0), which traps.
+		div := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{types.TypeI32(), types.TypeI32()}, Returns: []types.Type{types.TypeI32()}}).Append(
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_DIV_S), instr.MustNew(instr.RETURN)).MustBuild()
+		b := program.NewBuilder().Locals(types.TypeI32())
+		loop, done := b.Label(), b.Label()
+		b.Bind(loop).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1000).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.I32_CONST, 7).Emit(instr.I32_CONST, 1).ConstGet(div).Emit(instr.CALL).Emit(instr.DROP)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+		b.Bind(done).Emit(instr.I32_CONST, 7).Emit(instr.I32_CONST, 0).ConstGet(div).Emit(instr.CALL)
+		input := b.MustBuild()
+
 		// Every instruction's source is owner<<16 + ip + 1; div is owner 1.
 		annotate := func(code []byte, owner int) []instr.Position {
 			var positions []instr.Position
@@ -201,42 +205,66 @@ func TestOptimizer_Optimize(t *testing.T) {
 			}
 			return positions
 		}
-		at := func(code []byte, op instr.Opcode) int {
+		// last is the ip of the last op in code.
+		last := func(code []byte, op instr.Opcode) int {
+			at := -1
 			for ip := 0; ip < len(code); ip += instr.Instruction(code[ip:]).Width() {
 				if instr.Opcode(code[ip]) == op {
-					return ip
+					at = ip
 				}
 			}
-			return -1
+			return at
 		}
-
-		input := build()
-		div := input.Constants[0].(*types.Function)
 		input.Positions, div.Positions = annotate(input.Code, 0), annotate(div.Code, 1)
-		want := []uint32{uint32(1<<16 + at(div.Code, instr.I32_DIV_S) + 1), uint32(at(input.Code, instr.CALL) + 1)}
+		want := []uint32{uint32(1<<16 + last(div.Code, instr.I32_DIV_S) + 1), uint32(last(input.Code, instr.CALL) + 1)}
 
 		got, err := optimize.New(optimize.O3).Optimize(input)
 		require.NoError(t, err)
 
-		for _, threshold := range []int{-1, 1} {
-			vm := interp.MustNew(got, interp.WithThreshold(threshold))
-			err := vm.Run(context.Background())
+		// resolve maps the frames of a divide-by-zero to sources: the innermost
+		// frame names the faulting instruction, and an outer frame's IP is its
+		// return address, so its call is the instruction before it.
+		resolve := func(vm *interp.Interpreter, err error) []uint32 {
 			var runtimeErr *interp.RuntimeError
 			require.ErrorAs(t, err, &runtimeErr)
 			require.ErrorIs(t, err, interp.ErrDivideByZero)
 			require.Len(t, runtimeErr.Frames, 2)
-
-			// The innermost frame names the faulting instruction; an outer frame's
-			// IP is its return address, so its call is the instruction before it.
 			callee, err := vm.Load(runtimeErr.Frames[0].Func)
 			require.NoError(t, err)
-			sources := []uint32{
+			return []uint32{
 				instr.Find(callee.(*types.Function).Positions, runtimeErr.Frames[0].IP),
 				instr.Find(got.Positions, runtimeErr.Frames[1].IP-1),
 			}
-			require.Equal(t, want, sources, "threshold %d", threshold)
-			vm.Close()
 		}
+
+		t.Run("threaded", func(t *testing.T) {
+			vm := interp.MustNew(got, interp.WithThreshold(-1))
+			defer vm.Close()
+			require.Equal(t, want, resolve(vm, vm.Run(context.Background())))
+		})
+
+		t.Run("native", func(t *testing.T) {
+			testenv.MustHaveJIT(t)
+			profiler := prof.New()
+			vm := interp.MustNew(got, interp.WithThreshold(1), interp.WithProfiler(profiler))
+			defer vm.Close()
+			entries := func() float64 {
+				baseline, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "baseline"})
+				optimized, _ := profiler.Metric("vm_jit_entries_total", prof.Label{Key: "tier", Value: "optimized"})
+				return baseline + optimized
+			}
+			deadline := time.Now().Add(10 * time.Second)
+			for {
+				err := vm.Run(context.Background())
+				vm.Flush()
+				if entries() > 0 {
+					require.Equal(t, want, resolve(vm, err))
+					return
+				}
+				require.True(t, time.Now().Before(deadline), "native code never ran")
+				vm.Reset()
+			}
+		})
 	})
 
 	t.Run("O0 passthrough", func(t *testing.T) {

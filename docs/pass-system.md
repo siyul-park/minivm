@@ -53,7 +53,18 @@ SSA transforms are target-independent and `MUST` accept any valid `ssa.Function`
 
 A size-changing transform `MUST` repair position-sensitive metadata or leave the function unchanged. `transform.SSAPass` `MUST` decline invalid encodings.
 
-Source positions (`debugging.md`) are such metadata. `transform.SSAPass` replaces a function's `Positions` together with its `Code` and `Locals`, and restores all three on rollback; `CompactPass` keeps code size and so the table. Each SSA operation and terminator carries the source of the instruction it came from (`ssa.Operation.Source`): translation stamps it through the builder's current source (`ssa.Builder.At`), as an IR builder's current debug location does, and an operation or terminator a pass adds without one takes the source of the one being rebuilt. A moved operation keeps its source; a merge keeps the first (dominating) operation's; an inlined body keeps its callee's, and the jumps the splice adds take the call's. Emission gives each instruction it writes the source of the operation or terminator it serves, including a rematerialized constant or load, a `dup`, a spill, an edge move, and a branch; a block's entry stores take the block's first source, and a `local.tee` that replaces a `local.set` keeps the set's. When every input instruction has a source, every output instruction has one from its own body or from a callee inlined into it. Source `0` is not preserved: an instruction without one may take a neighbouring instruction's.
+Source positions (`debugging.md`) are such metadata. `transform.SSAPass` replaces a function's `Positions` together with its `Code` and `Locals`, and restores all three on rollback; `CompactPass` keeps code size and so the table. Each SSA operation and terminator carries the source of the instruction it came from (`ssa.Operation.Source`). Translation stamps it through the builder's current source (`ssa.Builder.At`), as an IR builder's current debug location does; an operation or terminator a pass adds without one takes the source of the one being rebuilt.
+
+| Rewrite | Source kept |
+|---|---|
+| move | the moved operation's |
+| merge | the first (dominating) operation's |
+| inline | the callee's; the call's when the callee has none, and for the jumps the splice adds |
+| emitted support instruction (rematerialized constant or load, `dup`, spill, edge move, branch) | the operation's or terminator's it serves |
+| block entry store | the block's first source |
+| `local.tee` replacing a `local.set` | the set's |
+
+When every input instruction has a source, every output instruction has one from its own body or from a callee inlined into it. Source `0` is not preserved: an instruction without one may take a neighbouring instruction's.
 
 Passes `SHOULD` stay local, reuse existing analyses, and keep target policy out of target-independent code.
 
