@@ -42,6 +42,7 @@ type known struct {
 // table is the state of a TypedMap's table, read through reflection (snapshot).
 type table struct {
 	ctrl, slots, order     []uint64
+	pos                    []uint64
 	mask, shift, seed, gen uint64
 	count, used            int
 	capacity               int
@@ -142,7 +143,7 @@ func snapshot(m any) table {
 		mask: v.FieldByName("mask").Uint(), shift: v.FieldByName("shift").Uint(), seed: v.FieldByName("seed").Uint(), gen: v.FieldByName("gen").Uint(),
 		count: int(v.FieldByName("count").Int()), used: int(v.FieldByName("used").Int()),
 	}
-	ctrl, slots, order := v.FieldByName("ctrl"), v.FieldByName("slots"), v.FieldByName("order")
+	ctrl, slots, order, pos := v.FieldByName("ctrl"), v.FieldByName("slots"), v.FieldByName("order"), v.FieldByName("pos")
 	for i := range ctrl.Len() {
 		t.ctrl = append(t.ctrl, ctrl.Index(i).Uint())
 	}
@@ -151,6 +152,9 @@ func snapshot(m any) table {
 	}
 	for i := range order.Len() {
 		t.order = append(t.order, order.Index(i).Uint())
+	}
+	for i := range pos.Len() {
+		t.pos = append(t.pos, pos.Index(i).Uint())
 	}
 	t.capacity = ctrl.Len()
 	return t
@@ -3101,9 +3105,9 @@ func TestMachine_Lower(t *testing.T) {
 
 	// Map operations over a guarded integer-keyed map, written from the table's
 	// contract: a key's home slot is ((key ^ seed) * hash >> shift) & mask, a
-	// lookup walks ctrl[i] from it (0 empty, 1 full, 2 dead) comparing the key word
-	// at slots[2i], and a set that must rehash leaves the table untouched and
-	// bridges. The helpers number the virtual registers in the order a lowering
+	// lookup walks ctrl[i] from it (0 empty, 1 dead, 0x80 with the tag full)
+	// comparing the key word at slots[2i], and a set that must rehash leaves the
+	// table untouched and bridges. The helpers number the virtual registers in the order a lowering
 	// takes them: the heap slot address, the table, the key word when it is not
 	// the operand itself, then ctrl, slots, mask, the home slot index, the first
 	// dead slot a set remembers, and the probe's state byte, slot address, and
@@ -3112,9 +3116,16 @@ func TestMachine_Lower(t *testing.T) {
 	// address it reads, so the operation's own registers count from vr(2).
 	guarded := vr
 	vr := func(n int) asm.VReg { return guarded(n + 1) }
-	type walk struct{ data, ctrl, slots, mask, index, tag, state, slot, word int }
-	layout := func(data, ctrl int) walk {
-		return walk{data: data, ctrl: ctrl, slots: ctrl + 1, mask: ctrl + 2, index: ctrl + 3, tag: ctrl + 4, state: ctrl + 5, slot: ctrl + 6, word: ctrl + 7}
+	type walk struct{ data, ctrl, slots, mask, index, tag, free, state, slot, word int }
+	// layout numbers a walk's registers; a set takes one more, free, before the
+	// probe's.
+	layout := func(data, ctrl int, set bool) walk {
+		w := walk{data: data, ctrl: ctrl, slots: ctrl + 1, mask: ctrl + 2, index: ctrl + 3, tag: ctrl + 4, state: ctrl + 5}
+		if set {
+			w.free, w.state = w.state, w.state+1
+		}
+		w.slot, w.word = w.state+1, w.state+2
+		return w
 	}
 	intMap := func(key, elem types.Kind) *ssa.Operation {
 		return &ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormMap, Key: key, Elem: elem}, Args: []ssa.Value{1}, Results: []ssa.Value{2}}
@@ -3153,17 +3164,24 @@ func TestMachine_Lower(t *testing.T) {
 	}
 	// probe walks from the home slot. An empty slot goes to miss, a slot whose
 	// control byte is the tag and whose key matches to hit; any other slot, a
-	// dead one included, is passed over.
+	// dead one included, is passed over. A set's probe also keeps the first dead
+	// slot it passes in free.
 	probe := func(w walk, key asm.Reg, loop, next, hit, miss asm.Label) []asm.Instruction {
 		rows := []asm.Instruction{
 			target.LDRBR(vr(w.state), vr(w.ctrl), vr(w.index)), target.CBZLabel(vr(w.state), miss),
 			target.CMP(vr(w.state), vr(w.tag)), target.BCondLabel(target.OpBNE, next),
-		}
-		return append(rows,
 			target.LSLI(vr(w.slot), vr(w.index), 4), target.ADD(vr(w.slot), vr(w.slots), vr(w.slot)),
 			target.LDR(vr(w.word), vr(w.slot), 0), target.CMP(vr(w.word), key), target.BCondLabel(target.OpBEQ, hit),
-			target.ADDI(vr(w.index), vr(w.index), 1), target.AND(vr(w.index), vr(w.index), vr(w.mask)), target.BLabel(loop),
-		)
+		}
+		if w.free != 0 {
+			step := next + 1
+			rows = append(rows,
+				target.CMPI(vr(w.state), jit.SlotDead), target.BCondLabel(target.OpBNE, step),
+				target.CMPI(vr(w.free), 0), target.BCondLabel(target.OpBGE, step),
+				target.MOV(vr(w.free), vr(w.index)),
+			)
+		}
+		return append(rows, target.ADDI(vr(w.index), vr(w.index), 1), target.AND(vr(w.index), vr(w.index), vr(w.mask)), target.BLabel(loop))
 	}
 	retained := func(ref asm.VReg, skip asm.Label) []asm.Instruction {
 		return slices.Concat(
@@ -3200,7 +3218,7 @@ func TestMachine_Lower(t *testing.T) {
 	// get is map.get or map.lookup; hit, miss, and done are labels 2, 3, and 4, and
 	// the probe's loop and next 5 and 6. The heap slot is vr(1), the table vr(2).
 	get := func(ref, dst asm.VReg, key asm.Reg, keyRows []asm.Instruction, flag asm.VReg, extra []asm.Instruction) []asm.Instruction {
-		w := layout(2, 3+min(len(keyRows), 1))
+		w := layout(2, 3+min(len(keyRows), 1), false)
 		rows := slices.Concat(tableOf(ref, 1), keyRows, words(w), home(w, key), probe(w, key, 5, 6, 2, 3))
 		rows = append(rows, target.LDR(dst, vr(w.slot), 8))
 		if flag != (asm.VReg{}) {
@@ -3214,22 +3232,26 @@ func TestMachine_Lower(t *testing.T) {
 	}
 	// set is map.set. A value that boxes into a register (valueRows) is vr(1), so
 	// the heap slot follows it; labels hit and empty are 2 and 3, and the probe's
-	// loop and next 4 and 5. The table is only changed once the load factor admits
-	// the insert, else the set bridges untouched; an insert fills the empty slot
-	// with the tag, the key, and the value, and appends the slot to the order.
+	// loop, next, and the dead-slot check's step 4, 5, and 6. The table is only
+	// changed once the order has room for the insert, else the set bridges
+	// untouched; an insert fills the first dead slot the probe passed, else the
+	// empty slot that ended it, with the tag, the key, and the value, appends the
+	// slot to the order, and points the slot back at its position.
 	set := func(ref asm.VReg, key asm.Reg, keyRows, valueRows []asm.Instruction, value asm.Reg, release bool) []asm.Instruction {
 		first := 1 + min(len(valueRows), 1)
-		w := layout(first+1, first+2+min(len(keyRows), 1))
-		used, want, limit, order, count := w.word+1, w.word+2, w.word+3, w.word+4, w.word+5
-		rows := slices.Concat(valueRows, tableOf(ref, first), keyRows, words(w), home(w, key), probe(w, key, 4, 5, 2, 3))
+		w := layout(first+1, first+2+min(len(keyRows), 1), true)
+		used, want, limit, order, pos, count := w.word+1, w.word+2, w.word+3, w.word+4, w.word+5, w.word+6
+		rows := slices.Concat(valueRows, tableOf(ref, first), keyRows, words(w), home(w, key), []asm.Instruction{target.MOVN(vr(w.free), 0, 0)}, probe(w, key, 4, 5, 2, 3))
 		rows = append(rows,
 			target.LDR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)), target.ADDI(vr(want), vr(used), 1), target.LSLI(vr(want), vr(want), 2),
 			target.ADDI(vr(limit), vr(w.mask), 1), target.LSLI(target.X16, vr(limit), 1), target.ADD(vr(limit), vr(limit), target.X16),
 			target.CMP(vr(want), vr(limit)), target.BCondLabel(target.OpBGT, exit),
+			target.CMPI(vr(w.free), 0), target.CSEL(vr(w.index), vr(w.free), vr(w.index), target.CondGE),
 			target.STRBR(vr(w.tag), vr(w.ctrl), vr(w.index)),
 			target.LSLI(vr(w.slot), vr(w.index), 4), target.ADD(vr(w.slot), vr(w.slots), vr(w.slot)),
 			target.STR(key, vr(w.slot), 0), target.STR(value, vr(w.slot), 8),
 			target.LDR(vr(order), vr(w.data), offset(jit.OffsetMapOrder)), target.STRWR(vr(w.index), vr(order), vr(used)),
+			target.LDR(vr(pos), vr(w.data), offset(jit.OffsetMapPos)), target.STRWR(vr(used), vr(pos), vr(w.index)),
 			target.ADDI(vr(used), vr(used), 1), target.STR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)),
 			target.LDR(vr(count), vr(w.data), offset(jit.OffsetMapCount)), target.ADDI(vr(count), vr(count), 1), target.STR(vr(count), vr(w.data), offset(jit.OffsetMapCount)),
 			target.BLabel(resume),
@@ -3243,7 +3265,7 @@ func TestMachine_Lower(t *testing.T) {
 	}
 	// del is map.delete; hit and done are labels 2 and 3, the probe's loop and next 4 and 5.
 	del := func(ref asm.VReg, key asm.Reg, keyRows []asm.Instruction, release bool) []asm.Instruction {
-		w := layout(2, 3+min(len(keyRows), 1))
+		w := layout(2, 3+min(len(keyRows), 1), false)
 		rows := slices.Concat(tableOf(ref, 1), keyRows, words(w), home(w, key), probe(w, key, 4, 5, 2, 3))
 		state, count := w.word+1, w.word+2
 		rows = append(rows, target.LDI(vr(state), jit.SlotDead)...)
@@ -3312,7 +3334,7 @@ func TestMachine_Lower(t *testing.T) {
 			rows: get(reg(ref, 2), reg(i32, 4), vr(3), zext(reg(i32, 3), 3), reg(ssa.TypeI1, 5), nil), lower: true,
 		},
 		{
-			name: "map.set stores the boxed value in the empty slot that ended the probe and appends it to the order, bridging when the table must rehash",
+			name: "map.set stores the boxed value in the first dead slot of the probe or the empty slot that ended it and appends it to the order, bridging when the table must rehash",
 			regs: regs{1: ref, 2: ref, 3: i32, 4: i32}, guard: intMap(types.KindI32, types.KindI32),
 			op:   ssa.Operation{Op: ssa.OpMapSet, Args: []ssa.Value{2, 3, 4}},
 			rows: set(reg(ref, 2), vr(4), zext(reg(i32, 3), 4), box32(reg(i32, 4)), vr(1), false), lower: true,
@@ -3418,9 +3440,11 @@ func TestMachine_Lower(t *testing.T) {
 
 // mirror runs the same random operations on a Go table and on its clone, the
 // clone through native code that serves a bridge with the Go method, and
-// requires the two tables to agree word for word after each: ctrl, slots, count,
-// used, and the arrays' identity, so a native rehash would show. It also
-// requires native code to bridge exactly the sets the Go table rehashes on.
+// requires the two tables to agree word for word after each: ctrl, slots, order,
+// pos, count, used, and the arrays' identity, so a native rehash would show. It
+// also requires native code to bridge exactly the sets the Go table rehashes on,
+// and an insert to reuse a dead slot, so no more slots are taken than there are
+// distinct keys.
 func mirror[K types.Scalar](t *testing.T, key types.Type, box func(K) types.Boxed, keyOf func(int) K) {
 	typ := types.NewMapType(key, types.TypeI32())
 	mapType := typ
@@ -3470,6 +3494,10 @@ func mirror[K types.Scalar](t *testing.T, key types.Type, box func(K) types.Boxe
 				}
 				never := func(jit.Exit) { require.Fail(t, "bridged an operation native code serves") }
 				bridged := 0
+				distinct := map[K]bool{}
+				for n := range space {
+					distinct[keyOf(n)] = true
+				}
 
 				for step := range 1500 {
 					k, v := keyOf(rng.IntN(space)), int32(rng.IntN(1000))
@@ -3504,11 +3532,13 @@ func mirror[K types.Scalar](t *testing.T, key types.Type, box func(K) types.Boxe
 						require.Zero(t, bridges)
 						require.Equal(t, types.BoxI32(int32(want.Len())), out[0], "step %d", step)
 					}
-					require.Equal(t, snapshot(want), snapshot(got), "step %d", step)
-				}
-				distinct := map[K]bool{}
-				for n := range space {
-					distinct[keyOf(n)] = true
+					snap := snapshot(got)
+					require.Equal(t, snapshot(want), snap, "step %d", step)
+					taken := 0
+					for _, state := range snap.ctrl {
+						taken += btoi(state != 0)
+					}
+					require.LessOrEqual(t, taken, len(distinct), "step %d: an insert passed over a dead slot", step)
 				}
 				if len(distinct) > 6 && initial < 40 {
 					require.Positive(t, bridged, "the sequence never reached the load factor")

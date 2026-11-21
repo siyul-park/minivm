@@ -65,11 +65,12 @@ func TestHeap_Layout(t *testing.T) {
 			require.Equal(t, uintptr(16), jit.OffsetMapCtrl)
 			require.Equal(t, uintptr(40), jit.OffsetMapSlots)
 			require.Equal(t, uintptr(64), jit.OffsetMapOrder)
-			require.Equal(t, uintptr(88), jit.OffsetMapMask)
-			require.Equal(t, uintptr(96), jit.OffsetMapShift)
-			require.Equal(t, uintptr(104), jit.OffsetMapSeed)
-			require.Equal(t, uintptr(112), jit.OffsetMapCount)
-			require.Equal(t, uintptr(120), jit.OffsetMapUsed)
+			require.Equal(t, uintptr(88), jit.OffsetMapPos)
+			require.Equal(t, uintptr(112), jit.OffsetMapMask)
+			require.Equal(t, uintptr(120), jit.OffsetMapShift)
+			require.Equal(t, uintptr(128), jit.OffsetMapSeed)
+			require.Equal(t, uintptr(136), jit.OffsetMapCount)
+			require.Equal(t, uintptr(144), jit.OffsetMapUsed)
 		})
 
 		t.Run("reads the fields of every key kind's table", func(t *testing.T) {
@@ -91,6 +92,7 @@ func TestHeap_Layout(t *testing.T) {
 				require.Equal(t, uint64(table.FieldByName("ctrl").Pointer()), word(jit.OffsetMapCtrl))
 				require.Equal(t, uint64(table.FieldByName("slots").Pointer()), word(jit.OffsetMapSlots))
 				require.Equal(t, uint64(table.FieldByName("order").Pointer()), word(jit.OffsetMapOrder))
+				require.Equal(t, uint64(table.FieldByName("pos").Pointer()), word(jit.OffsetMapPos))
 			}
 		})
 

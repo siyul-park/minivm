@@ -1377,7 +1377,7 @@ func (m *Machine) mapGet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 	key := m.key(a, s, shape, op.Args[1])
 	t := m.table(a, data)
 	index, tag := m.home(a, t, key)
-	slot := m.probe(a, t, key, index, tag, hit, miss)
+	slot := m.probe(a, t, key, index, tag, asm.VReg{}, hit, miss)
 
 	a.Bind(hit)
 	a.Emit(target.LDR(dst, slot, 8))
@@ -1407,11 +1407,11 @@ func (m *Machine) retain(a *asm.Assembler, ref asm.VReg) {
 }
 
 // mapSet stores a value under a key of a guarded map, as types.set does: it
-// replaces the value of a full slot holding the key, else fills the empty slot
-// that ended the probe and appends that slot to the insertion order. An insert
-// that would rehash changes nothing and bridges, so the Go set owns growth. A
-// map of references (or wide i64s) adopts the value and releases the one it
-// replaced.
+// replaces the value of a full slot holding the key, else fills the first
+// tombstone on the probe, or the empty slot that ended it, and appends that
+// slot to the insertion order. An insert that would rehash changes nothing and
+// bridges, so the Go set owns growth. A map of references (or wide i64s) adopts
+// the value and releases the one it replaced.
 func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	if !has(op, 3, 0) {
 		return false
@@ -1432,19 +1432,23 @@ func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 	key := m.key(a, s, shape, op.Args[1])
 	t := m.table(a, data)
 	index, tag := m.home(a, t, key)
-	slot := m.probe(a, t, key, index, tag, hit, empty)
+	free := m.vreg()
+	a.Emit(target.MOVN(free, 0, 0))
+	slot := m.probe(a, t, key, index, tag, free, hit, empty)
 
 	a.Bind(empty)
-	used, want, limit, order, count := m.vreg(), m.vreg(), m.vreg(), m.vreg(), m.vreg()
+	used, want, limit, order, pos, count := m.vreg(), m.vreg(), m.vreg(), m.vreg(), m.vreg(), m.vreg()
 	a.Emit(
-		// (used+1)*4 > (mask+1)*3 is the load factor at which table.set rehashes.
+		// (used+1)*4 > (mask+1)*3 is the order's capacity, at which table.set rehashes.
 		target.LDR(used, data, int16(jit.OffsetMapUsed)), target.ADDI(want, used, 1), target.LSLI(want, want, 2),
 		target.ADDI(limit, t.mask, 1), target.LSLI(target.X16, limit, 1), target.ADD(limit, limit, target.X16),
 		target.CMP(want, limit), target.BCondLabel(target.OpBGT, exit),
+		target.CMPI(free, 0), target.CSEL(index, free, index, target.CondGE),
 		target.STRBR(tag, t.ctrl, index),
 		target.LSLI(slot, index, 4), target.ADD(slot, t.slots, slot),
 		target.STR(key, slot, 0), target.STR(word, slot, 8),
 		target.LDR(order, data, int16(jit.OffsetMapOrder)), target.STRWR(index, order, used),
+		target.LDR(pos, data, int16(jit.OffsetMapPos)), target.STRWR(used, pos, index),
 		target.ADDI(used, used, 1), target.STR(used, data, int16(jit.OffsetMapUsed)),
 		target.LDR(count, data, int16(jit.OffsetMapCount)), target.ADDI(count, count, 1), target.STR(count, data, int16(jit.OffsetMapCount)),
 		target.BLabel(resume),
@@ -1475,7 +1479,7 @@ func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 	key := m.key(a, s, shape, op.Args[1])
 	t := m.table(a, data)
 	index, tag := m.home(a, t, key)
-	slot := m.probe(a, t, key, index, tag, hit, done)
+	slot := m.probe(a, t, key, index, tag, asm.VReg{}, hit, done)
 
 	a.Bind(hit)
 	state, count := m.vreg(), m.vreg()
@@ -1553,8 +1557,9 @@ func (m *Machine) home(a *asm.Assembler, t table, key asm.VReg) (index, tag asm.
 // probe walks the table linearly from index, as types.probe does. It branches
 // to miss at an empty slot and to hit at a full slot holding key, leaving the
 // slot's index in index and its address in the returned register. A slot whose
-// control byte is not tag, a dead one included, is passed over.
-func (m *Machine) probe(a *asm.Assembler, t table, key, index, tag asm.VReg, hit, miss asm.Label) asm.VReg {
+// control byte is not tag, a dead one included, is passed over. A set passes
+// free, holding -1, and probe leaves in it the first dead slot it passed.
+func (m *Machine) probe(a *asm.Assembler, t table, key, index, tag, free asm.VReg, hit, miss asm.Label) asm.VReg {
 	loop, next := a.Label(), a.Label()
 	state, slot, word := m.vreg(), m.vreg(), m.vreg()
 	a.Bind(loop)
@@ -1565,6 +1570,15 @@ func (m *Machine) probe(a *asm.Assembler, t table, key, index, tag asm.VReg, hit
 		target.LDR(word, slot, 0), target.CMP(word, key), target.BCondLabel(target.OpBEQ, hit),
 	)
 	a.Bind(next)
+	if free != (asm.VReg{}) {
+		step := a.Label()
+		a.Emit(
+			target.CMPI(state, jit.SlotDead), target.BCondLabel(target.OpBNE, step),
+			target.CMPI(free, 0), target.BCondLabel(target.OpBGE, step),
+			target.MOV(free, index),
+		)
+		a.Bind(step)
+	}
 	a.Emit(target.ADDI(index, index, 1), target.AND(index, index, t.mask), target.BLabel(loop))
 	return slot
 }

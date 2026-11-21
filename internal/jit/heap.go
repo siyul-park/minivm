@@ -63,21 +63,24 @@ const (
 // taken from reflection, since the table is unexported, and TestHeap_Layout pins
 // every value. Every key kind shares one layout: only the methods differ.
 var (
-	// OffsetMapCtrl, OffsetMapSlots, and OffsetMapOrder are the data words of
-	// the control bytes, of the key and value words, and of the insertion
-	// order: slot i has its state at ctrl[i], its key word at slots[2i], and
-	// its value word at slots[2i+1]; order[p] is the slot of the p-th insert.
+	// OffsetMapCtrl, OffsetMapSlots, OffsetMapOrder, and OffsetMapPos are the
+	// data words of the control bytes, of the key and value words, of the
+	// insertion order, and of its back-pointers: slot i has its state at
+	// ctrl[i], its key word at slots[2i], and its value word at slots[2i+1];
+	// order[p] is the slot of the p-th insert, and pos[i] the position of slot
+	// i's latest insert.
 	OffsetMapCtrl  = mapField("ctrl")
 	OffsetMapSlots = mapField("slots")
 	OffsetMapOrder = mapField("order")
+	OffsetMapPos   = mapField("pos")
 	// OffsetMapMask, OffsetMapShift, and OffsetMapSeed are the hash words: the
 	// hash is (key ^ seed) * MapHash, the home slot is hash >> shift & mask,
 	// and the tag is hash >> (shift-7) & 0x7F.
 	OffsetMapMask  = mapField("mask")
 	OffsetMapShift = mapField("shift")
 	OffsetMapSeed  = mapField("seed")
-	// OffsetMapCount is the live entry count, OffsetMapUsed the slots that
-	// are not empty, tombstones included, which is also the length of order.
+	// OffsetMapCount is the live entry count, OffsetMapUsed the order
+	// positions in use, which bounds the slots that are not empty.
 	OffsetMapCount = mapField("count")
 	OffsetMapUsed  = mapField("used")
 )

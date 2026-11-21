@@ -668,6 +668,7 @@ func TestMapIterator_Next(t *testing.T) {
 		require.True(t, it.Next())
 		m.Clear(func(types.Boxed) {})
 		m.Set(100, 1)
+		m.Set(101, 1)
 		require.False(t, it.Next())
 		require.True(t, it.Done())
 		require.Equal(t, []types.Ref{7}, it.Refs(nil))
@@ -738,6 +739,34 @@ func TestMapIterator_Next(t *testing.T) {
 			}
 		}
 		require.Equal(t, []int32{0, 1, 2, 3, 100, 101, 102, 103}, produced)
+	})
+
+	t.Run("two walks follow the same rehashes", func(t *testing.T) {
+		m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32(), types.TypeI32()), 0)
+		for k := range int32(6) {
+			m.Set(k, 1)
+		}
+		first, second := types.NewMapIterator(1, m), types.NewMapIterator(2, m)
+		require.True(t, first.Next())
+		require.True(t, second.Next())
+		require.True(t, second.Next())
+		m.Delete(0)
+		m.Delete(1)
+		var want []int32
+		for k := range int32(4) {
+			want = append(want, k+2)
+		}
+		for k := range int32(100) {
+			m.Set(k+100, 1)
+			want = append(want, k+100)
+		}
+		for _, it := range []*types.MapIterator{first, second} {
+			var produced []int32
+			for it.Next() {
+				produced = append(produced, int32(it.Current().(types.I32)))
+			}
+			require.Equal(t, want, produced)
+		}
 	})
 
 	t.Run("clear ends a string map walk", func(t *testing.T) {
@@ -936,6 +965,27 @@ func TestTypedMap_Clone(t *testing.T) {
 		require.Equal(t, types.BoxRef(1), v)
 		require.Equal(t, 1, src.Len())
 	})
+
+	t.Run("a rehash of the clone leaves a walk of the original in place", func(t *testing.T) {
+		src := types.NewTypedMap[int32](types.NewMapType(types.TypeI32(), types.TypeI32()), 0)
+		for k := range int32(6) {
+			src.Set(k, 1)
+		}
+		it := types.NewMapIterator(1, src)
+		require.True(t, it.Next())
+		require.True(t, it.Next())
+		c := src.Clone()
+		c.Delete(0)
+		c.Delete(1)
+		for k := range int32(100) {
+			c.Set(k+100, 1)
+		}
+		var produced []int32
+		for it.Next() {
+			produced = append(produced, int32(it.Current().(types.I32)))
+		}
+		require.Equal(t, []int32{2, 3, 4, 5}, produced)
+	})
 }
 
 func TestTypedMap_String(t *testing.T) {
@@ -949,6 +999,13 @@ func TestTypedMap_String(t *testing.T) {
 		m := types.NewTypedMap[int64](types.NewMapType(types.TypeI64(), types.TypeI32()), 0)
 		m.Set(1, types.BoxI32(2))
 		require.Equal(t, "map[i64]i32{1: 2}", m.String())
+	})
+
+	t.Run("entries in insertion order", func(t *testing.T) {
+		m := types.NewTypedMap[int32](types.NewMapType(types.TypeI32(), types.TypeI32()), 0)
+		m.Set(2, types.BoxI32(4))
+		m.Set(1, types.BoxI32(2))
+		require.Equal(t, "map[i32]i32{2: 4, 1: 2}", m.String())
 	})
 
 	t.Run("f32", func(t *testing.T) {
