@@ -43,9 +43,16 @@ func FieldWithName(name string) func(*StructField) {
 	}
 }
 
-// NewStruct returns a struct of type typ with fields assigned in order.
-func NewStruct(typ *StructType, fields ...Boxed) *Struct {
-	s := &Struct{}
+// NewStruct returns a struct of type typ with fields assigned in order. A
+// non-nil heap supplies a struct of up to four fields it kept for reuse.
+func NewStruct(heap *Heap, typ *StructType, fields ...Boxed) *Struct {
+	s, ok := (*Struct)(nil), false
+	if heap != nil && len(typ.Fields) <= 4 {
+		s, ok = heap.structs.get()
+	}
+	if !ok {
+		s = &Struct{}
+	}
 	s.Reset(typ)
 	for i, field := range fields {
 		s.SetField(i, field)
@@ -184,7 +191,7 @@ func (s *Struct) Refs(dst []Ref) []Ref {
 // Clone returns a copy of s with its own field storage. The fields are boxed
 // words, so the references they hold are shared, not copied.
 func (s *Struct) Clone() *Struct {
-	c := NewStruct(s.Typ)
+	c := NewStruct(nil, s.Typ)
 	copy(c.Data, s.Data)
 	return c
 }

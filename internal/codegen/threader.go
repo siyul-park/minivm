@@ -11,7 +11,7 @@ func threaderType(file *jen.File) {
 	file.Type().Id("threader").Struct(
 		jen.Id("types").Index().Qual(typesPkg, "Type"),
 		jen.Id("constants").Index().Qual(typesPkg, "Boxed"),
-		jen.Id("heap").Index().Qual(typesPkg, "Value"),
+		jen.Id("heap").Op("*").Qual(typesPkg, "Heap"),
 		jen.Id("coros").Index().Bool(),
 		jen.Id("locals").Index().Qual(typesPkg, "Kind"),
 		jen.Id("localTypes").Index().Qual(typesPkg, "Type"),
@@ -197,10 +197,10 @@ func constantMethod(file *jen.File) {
 				jen.Case(jen.Qual(typesPkg, "KindI64")),
 				jen.Case(jen.Qual(typesPkg, "KindRef")).Block(
 					jen.Id("ref").Op(":=").Id("boxed").Dot("Ref").Call(),
-					jen.If(jen.Id("ref").Op("<").Lit(0).Op("||").Id("ref").Op(">=").Len(jen.Id("c").Dot("heap"))).Block(
+					jen.If(jen.Id("ref").Op("<").Lit(0).Op("||").Id("ref").Op(">=").Id("c").Dot("heap").Dot("Len").Call()).Block(
 						jen.Return(jen.Qual(typesPkg, "Boxed").Call(jen.Lit(0)), jen.False()),
 					),
-					jen.If(jen.List(jen.Id("_"), jen.Id("ok")).Op(":=").Id("c").Dot("heap").Index(jen.Id("ref")).Assert(jen.Qual(typesPkg, "I64")), jen.Op("!").Id("ok")).Block(
+					jen.If(jen.List(jen.Id("_"), jen.Id("ok")).Op(":=").Id("c").Dot("heap").Dot("At").Call(jen.Id("ref")).Assert(jen.Qual(typesPkg, "I64")), jen.Op("!").Id("ok")).Block(
 						jen.Return(jen.Qual(typesPkg, "Boxed").Call(jen.Lit(0)), jen.False()),
 					),
 				),

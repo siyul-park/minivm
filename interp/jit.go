@@ -154,13 +154,13 @@ var callouts = [256]callout{
 		return i.newArrayDefault(i.types[index(code)].(*types.ArrayType), args[0])
 	},
 	instr.STRUCT_NEW_DEFAULT: func(i *Interpreter, code []byte, _ [3]types.Boxed) types.Value {
-		return i.newStruct(i.types[index(code)].(*types.StructType))
+		return types.NewStruct(&i.heap, i.types[index(code)].(*types.StructType))
 	},
 	instr.MAP_NEW_DEFAULT: func(i *Interpreter, code []byte, args [3]types.Boxed) types.Value {
 		return i.newMapDefault(i.types[index(code)].(*types.MapType), args[0])
 	},
 	instr.ARRAY_SLICE: func(i *Interpreter, _ []byte, args [3]types.Boxed) types.Value {
-		if hosted(i.heap[args[0].Ref()]) {
+		if hosted(i.heap.At(args[0].Ref())) {
 			panic(ErrTypeMismatch)
 		}
 		return i.slice(args[0], int(args[1].I32()), int(args[2].I32()))
@@ -322,7 +322,7 @@ func (e *engine) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	}
 	boxRegisters(i, code, bp)
 	if release {
-		i.release(addr)
+		i.heap.Dec(addr)
 	}
 	i.sp = bp + returns
 	i.fr.ip += advance
@@ -409,9 +409,9 @@ func (e *engine) materialize(i *Interpreter, exit *jit.Exit, start, ref int, rel
 	// Materialization must not fail: threaded code would already have paid for
 	// these values, so their boxes may pass the heap limit. The next allocation
 	// that needs a new entry trips it.
-	limit := i.limit
-	i.limit = 0
-	defer func() { i.limit = limit }()
+	limit := i.heap.Limit()
+	i.heap.SetLimit(0)
+	defer func() { i.heap.SetLimit(limit) }()
 	for j := range maps {
 		e.frame(i, start+j, floor+j, maps[j], refs[j], owns[j])
 	}
@@ -459,7 +459,7 @@ func (e *engine) frame(i *Interpreter, at, k int, m jit.Frame, ref int, release 
 		// translation: threaded released ref there and the frame runs addr through
 		// no reference of its own.
 		if release {
-			i.release(ref)
+			i.heap.Dec(ref)
 		}
 		ref, release = m.Address, false
 	}
@@ -503,8 +503,8 @@ func (e *engine) frame(i *Interpreter, at, k int, m jit.Frame, ref int, release 
 // entered is the function a call through ref runs: ref itself, or the
 // function of the closure it names.
 func entered(i *Interpreter, ref int) int {
-	if ref > 0 && ref < len(i.heap) {
-		if cl, ok := i.heap[ref].(*types.Closure); ok {
+	if ref > 0 && ref < i.heap.Len() {
+		if cl, ok := i.heap.At(ref).(*types.Closure); ok {
 			return int(cl.Fn)
 		}
 	}
@@ -574,7 +574,7 @@ func (e *engine) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 
 			ledger.Charge(jit.ClassRelease)
 			if ref := types.Boxed(ctx.Read(ctx.Level()-1, exit.Word)).Ref(); ref != 0 {
-				i.release(ref)
+				i.heap.Dec(ref)
 			}
 			e.sync(i)
 			trap = jit.Resume(ctx)
@@ -687,8 +687,7 @@ func (e *engine) load(i *Interpreter, bp, spare int) {
 // sync points the native context at i's heap and counts, which a bridge or a
 // call may have moved.
 func (e *engine) sync(i *Interpreter) {
-	e.ctx.Heap = base(i.heap)
-	e.ctx.RC = base(i.rc)
+	e.ctx.Heap, e.ctx.RC = i.heap.Bases()
 }
 
 // box heap-boxes exit.Word, a wide i64, into Context.Results[0] as
@@ -751,11 +750,11 @@ func (e *engine) bridge(i *Interpreter, exit *jit.Exit) jit.Class {
 
 		count := 0
 		if o.Value.Kind == types.KindRef {
-			if hosted(i.heap[v.Ref()]) {
+			if hosted(i.heap.At(v.Ref())) {
 				rollback(i, holds)
 				return jit.ClassGuard
 			}
-			count = i.rc[v.Ref()]
+			count = i.heap.Count(v.Ref())
 		}
 		holds = append(holds, hold{ref: v.Ref(), count: count})
 	}
@@ -813,7 +812,7 @@ func (e *engine) callout(i *Interpreter, exit *jit.Exit, serve callout) (ok bool
 	}
 	code := i.function(m.Address).Code[m.IP:]
 	v := serve(i, code, args)
-	ctx.Results[0] = toWord(i, exit.Results[0], types.BoxRef(i.alloc(v)))
+	ctx.Results[0] = toWord(i, exit.Results[0], types.BoxRef(i.heap.Add(v)))
 	switch exit.Code {
 	case instr.STRUCT_NEW_DEFAULT:
 		e.tcache.fill(i, index(code), 0)
@@ -1048,8 +1047,8 @@ func (r *shared) sweep(visit func(addr int) (live bool)) {
 // rollback releases each held operand back down to its saved count.
 func rollback(i *Interpreter, holds []hold) {
 	for _, h := range holds {
-		for i.rc[h.ref] > h.count {
-			i.release(h.ref)
+		for i.heap.Count(h.ref) > h.count {
+			i.heap.Dec(h.ref)
 		}
 	}
 }
@@ -1154,11 +1153,11 @@ func target(i *Interpreter, exit *jit.Exit, ref int) (addr int, ok bool) {
 	if exit.Callee != 0 {
 		return exit.Callee, true
 	}
-	if ref <= 0 || ref >= len(i.heap) {
+	if ref <= 0 || ref >= i.heap.Len() {
 		return 0, false
 	}
 	var typ *types.FunctionType
-	switch callee := i.heap[ref].(type) {
+	switch callee := i.heap.At(ref).(type) {
 	case *types.Function:
 		addr, typ = ref, callee.Typ
 	case *types.Closure:
@@ -1208,7 +1207,7 @@ func newModule(i *Interpreter) transform.Module {
 			continue
 		}
 		addr := c.Ref()
-		switch v := i.heap[addr].(type) {
+		switch v := i.heap.At(addr).(type) {
 		case *types.Function:
 			objects[addr] = transform.Object{Function: v}
 		case *types.Struct:

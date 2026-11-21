@@ -71,7 +71,7 @@ A finalizer (`io.Closer.Close`) runs as host code with the VM mid-instruction: i
 
 ## Reference Counting
 
-`retain(addr)` adds one owner. `release(addr)` removes one; zero clears the slot, recycles the index, and iteratively releases child refs.
+`types.Heap` owns the slots, counts, free lists, and collection (`Interpreter.Heap`). `Inc(addr, n)` adds owners. `Dec(addr)` removes one; zero clears the slot, recycles the index, and iteratively releases child refs. The `Interpreter` host API validates an address, then calls these unchecked methods; the interpreter supplies `types.Hooks` for what the heap cannot own: finalizing a function or closer, flushing the native tcache when the limit is reached, faulting on corruption, and the collection metrics.
 
 Counts cover heap edges plus frame, global, stack, temporary, coroutine, and host owners.
 
@@ -87,7 +87,7 @@ Implementations `MUST` append child refs without mutating existing entries and `
 
 Trial deletion subtracts heap-to-heap edges from exact counts, marks from externally owned objects, reclaims unmarked allocated objects, then repairs surviving counts.
 
-Heap indexes never move. Collection runs adaptively and before the hard heap limit.
+Heap indexes never move. Collection runs adaptively and before the hard heap limit. After construction and after `Reset`, the heap collects when it holds the baseline plus `max(live - baseline, 64)` slots, capped at the limit; every collection sets the pace again the same way.
 
 ## Strings
 

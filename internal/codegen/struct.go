@@ -57,7 +57,7 @@ func structGet(state *state, current step) (value, error) {
 		structBody = append(structBody, tail(jen.Id("result"))...)
 
 		body = append(body, jen.If(
-			jen.List(jen.Id("value"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(container.raw).Assert(jen.Op("*").Qual(typesPkg, "Struct")),
+			jen.List(jen.Id("value"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Dot("At").Call(container.raw).Assert(jen.Op("*").Qual(typesPkg, "Struct")),
 			jen.Id("ok"),
 		).Block(structBody...))
 		body = append(body, tail(jen.Id("i").Dot("structGet").Call(container.raw, jen.Id("at")))...)
@@ -103,21 +103,21 @@ func structNew() jen.Code {
 	return assertType("StructType",
 		jen.Id("size").Op(":=").Id("len").Call(jen.Id("typ").Dot("Fields")),
 		jen.Return(closure(jen.If(jen.Id("i").Dot("sp").Op("<").Id("size")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
-			jen.Id("s").Op(":=").Id("i").Dot("newStruct").Call(jen.Id("typ")),
+			jen.Id("s").Op(":=").Qual(typesPkg, "NewStruct").Call(jen.Op("&").Id("i").Dot("heap"), jen.Id("typ")),
 			jen.For(jen.List(jen.Id("j"), jen.Id("f")).Op(":=").Range().Id("typ").Dot("Fields")).Block(jen.Id("val").Op(":=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("size").Op("+").Id("j")),
 				jen.Switch(jen.Id("f").Dot("Kind")).Block(jen.Case(jen.Qual(typesPkg, "KindI32"), jen.Qual(typesPkg, "KindI8"), jen.Qual(typesPkg, "KindI1"), jen.Qual(typesPkg, "KindF32"), jen.Qual(typesPkg, "KindF64"), jen.Qual(typesPkg, "KindRef")).Block(jen.Id("s").Dot("SetField").Call(jen.Id("j"), jen.Id("val"))),
 					jen.Case(jen.Qual(typesPkg, "KindI64")).Block(jen.Id("s").Dot("SetRaw").Call(jen.Id("j"), jen.Id("uint64").Call(jen.Id("i").Dot("unboxI64").Call(jen.Id("val"))))),
 					jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))))),
 			jen.Id("i").Dot("sp").Op("-=").Id("size").Op("-").Lit(1),
-			top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("s"))),
+			top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("heap").Dot("Add").Call(jen.Id("s"))),
 			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(3))))
 }
 
 func structNewDefault() jen.Code {
 	return assertType("StructType",
 		jen.Return(closure(jen.If(jen.Id("i").Dot("sp").Op("==").Id("len").Call(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
-			jen.Id("s").Op(":=").Id("i").Dot("newStruct").Call(jen.Id("typ")),
-			jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("s"))),
+			jen.Id("s").Op(":=").Qual(typesPkg, "NewStruct").Call(jen.Op("&").Id("i").Dot("heap"), jen.Id("typ")),
+			jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("heap").Dot("Add").Call(jen.Id("s"))),
 			jen.Id("i").Dot("sp").Op("++"),
 			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(3))))
 }
@@ -127,7 +127,7 @@ func structSet() jen.Code {
 		jen.Id("val").Op(":=").Add(top(1)),
 		jen.Id("idx").Op(":=").Id("int").Call(top(2).Dot("I32").Call()),
 		container(3),
-		jen.Switch(jen.Id("s").Op(":=").Id("i").Dot("heap").Index(jen.Id("addr")).Assert(jen.Type())).Block(jen.Case(jen.Op("*").Qual(typesPkg, "Struct")).Block(jen.Id("typ").Op(":=").Id("s").Dot("Typ"),
+		jen.Switch(jen.Id("s").Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Id("addr")).Assert(jen.Type())).Block(jen.Case(jen.Op("*").Qual(typesPkg, "Struct")).Block(jen.Id("typ").Op(":=").Id("s").Dot("Typ"),
 			jen.If(jen.Id("idx").Op("<").Lit(0).Op("||").Id("idx").Op(">=").Id("len").Call(jen.Id("typ").Dot("Fields"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
 			jen.Id("field").Op(":=").Id("typ").Dot("Fields").Index(jen.Id("idx")),
 			jen.Switch(jen.Id("field").Dot("Kind")).Block(jen.Case(jen.Qual(typesPkg, "KindI32")).Block(jen.Id("s").Dot("Data").Index(jen.Id("idx")).Op("=").Id("uint64").Call(jen.Id("uint32").Call(jen.Id("val").Dot("I32").Call()))),
@@ -142,7 +142,7 @@ func structSet() jen.Code {
 				jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))))),
 			jen.Case(jen.Op("*").Id("HostStruct")).Block(check(jen.Id("s").Dot("SetField").Call(jen.Id("i"), jen.Id("idx"), jen.Id("val")))),
 			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch")))),
-		jen.Id("i").Dot("release").Call(jen.Id("addr")),
+		jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("addr")),
 		jen.Id("i").Dot("sp").Op("-=").Lit(3),
 		next())
 }

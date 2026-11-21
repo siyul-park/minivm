@@ -27,7 +27,7 @@ var typedKeys = []typedKey{
 			return jen.String().Call(jen.Id("unboxRef").Index(jen.Qual(typesPkg, "String")).Call(jen.Id("i"), jen.Id("key")))
 		},
 		func(key jen.Code) jen.Code {
-			return jen.Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Qual(typesPkg, "String").Call(key)))
+			return jen.Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("heap").Dot("Add").Call(jen.Qual(typesPkg, "String").Call(key)))
 		},
 	},
 }
@@ -45,7 +45,7 @@ func mapNew() jen.Code {
 				jen.Id("value").Op(":=").Id("i").Dot("stack").Index(jen.Id("base").Op("+").Id("j").Op("*").Lit(2).Op("+").Lit(1)),
 				mapSwitch(jen.Id("m").Op(":=").Id("m").Assert(jen.Type()), setTyped, mapEntrySet()),
 			),
-			jen.Id("addr").Op(":=").Id("i").Dot("alloc").Call(jen.Id("m")),
+			jen.Id("addr").Op(":=").Id("i").Dot("heap").Dot("Add").Call(jen.Id("m")),
 			jen.Id("i").Dot("sp").Op("=").Id("base").Op("+").Lit(1),
 			jen.Id("i").Dot("stack").Index(jen.Id("base")).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("addr")),
 			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(3),
@@ -57,7 +57,7 @@ func mapNewDefault() jen.Code {
 	return assertType("MapType",
 		jen.Return(closure(underflow(1),
 			jen.Id("val").Op(":=").Id("i").Dot("newMapDefault").Call(jen.Id("typ"), top(1)),
-			top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("val"))),
+			top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("heap").Dot("Add").Call(jen.Id("val"))),
 			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(3),
 		)),
 	)
@@ -72,7 +72,7 @@ func mapLen() jen.Code {
 			genericMapCase(length...),
 			hostMapCase(length...),
 		),
-		jen.Id("i").Dot("release").Call(jen.Id("addr")),
+		jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("addr")),
 		top(1).Op("=").Qual(typesPkg, "BoxI32").Call(jen.Id("int32").Call(jen.Id("n"))),
 		next(),
 	)
@@ -104,7 +104,7 @@ func mapGet() jen.Code {
 			),
 		),
 		jen.If(jen.Op("!").Id("owned")).Block(jen.Id("i").Dot("retainBox").Call(jen.Id("result"))),
-		jen.Id("i").Dot("release").Call(jen.Id("addr")),
+		jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("addr")),
 		jen.Id("i").Dot("sp").Op("--"),
 		top(1).Op("=").Id("result"),
 		next(),
@@ -134,7 +134,7 @@ func mapLookup() jen.Code {
 			),
 		),
 		jen.If(jen.Op("!").Id("owned")).Block(jen.Id("i").Dot("retainBox").Call(jen.Id("result"))),
-		jen.Id("i").Dot("release").Call(jen.Id("addr")),
+		jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("addr")),
 		top(2).Op("=").Id("result"),
 		top(1).Op("=").Qual(typesPkg, "BoxI1").Call(jen.Id("found")),
 		next(),
@@ -150,7 +150,7 @@ func mapSet() jen.Code {
 			mapEntrySet(),
 			hostMapCase(check(jen.Id("m").Dot("Set").Call(jen.Id("i"), jen.Id("key"), jen.Id("value")))),
 		),
-		jen.Id("i").Dot("release").Call(jen.Id("addr")),
+		jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("addr")),
 		jen.Id("i").Dot("sp").Op("-=").Lit(3),
 		next(),
 	)
@@ -175,7 +175,7 @@ func mapDelete() jen.Code {
 			),
 			hostMapCase(check(jen.Id("m").Dot("Delete").Call(jen.Id("i"), jen.Id("key")))),
 		),
-		jen.Id("i").Dot("release").Call(jen.Id("addr")),
+		jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("addr")),
 		jen.Id("i").Dot("sp").Op("-=").Lit(2),
 		next(),
 	)
@@ -198,7 +198,7 @@ func mapClear() jen.Code {
 			)),
 			hostMapCase(jen.Id("m").Dot("Clear").Call()),
 		),
-		jen.Id("i").Dot("release").Call(jen.Id("addr")),
+		jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("addr")),
 		jen.Id("i").Dot("sp").Op("--"),
 		next(),
 	)
@@ -220,7 +220,7 @@ func mapKeys() jen.Code {
 	return handler(underflow(1),
 		container(1),
 		jen.Var().Id("arr").Op("*").Qual(typesPkg, "Array"),
-		jen.Id("source").Op(":=").Id("i").Dot("heap").Index(jen.Id("addr")),
+		jen.Id("source").Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Id("addr")),
 		view("HostMap", "Map"),
 		mapSwitch(jen.Id("m").Op(":=").Id("source").Assert(jen.Type()),
 			func(k typedKey) []jen.Code {
@@ -235,8 +235,8 @@ func mapKeys() jen.Code {
 				jen.Id("i").Dot("retainBox").Call(jen.Id("entry").Dot("Key")),
 			)...),
 		),
-		jen.Id("out").Op(":=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("arr"))),
-		jen.Id("i").Dot("release").Call(jen.Id("addr")),
+		jen.Id("out").Op(":=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("heap").Dot("Add").Call(jen.Id("arr"))),
+		jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("addr")),
 		top(1).Op("=").Id("out"),
 		next(),
 	)
@@ -250,7 +250,7 @@ func mapIter() jen.Code {
 	instances = append(instances, jen.Op("*").Qual(typesPkg, "Map"))
 	return handler(underflow(1),
 		container(1),
-		jen.Id("source").Op(":=").Id("i").Dot("heap").Index(jen.Id("addr")),
+		jen.Id("source").Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Id("addr")),
 		view("HostMap", "Map"),
 		jen.Switch(jen.Id("source").Assert(jen.Type())).Block(
 			jen.Case(instances...).Block(),
@@ -258,12 +258,12 @@ func mapIter() jen.Code {
 		),
 		jen.Id("iter").Op(":=").Qual(typesPkg, "NewMapIterator").Call(jen.Qual(typesPkg, "Ref").Call(jen.Id("addr")), jen.Id("source")),
 		jen.Id("iter").Dot("Next").Call(),
-		jen.Id("out").Op(":=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("iter"))),
+		jen.Id("out").Op(":=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("heap").Dot("Add").Call(jen.Id("iter"))),
 		jen.If(jen.Op("!").Id("iter").Dot("Done").Call()).Block(
 			jen.Id("current").Op(":=").Id("iter").Dot("Current").Call(),
 			jen.Switch(jen.Id("current").Op(":=").Id("current").Assert(jen.Type())).Block(
 				jen.Case(jen.Qual(typesPkg, "Boxed")).Block(jen.Id("i").Dot("retainBox").Call(jen.Id("current"))),
-				jen.Case(jen.Qual(typesPkg, "Ref")).Block(jen.Id("i").Dot("retain").Call(jen.Id("int").Call(jen.Id("current")))),
+				jen.Case(jen.Qual(typesPkg, "Ref")).Block(jen.Id("i").Dot("heap").Dot("Inc").Call(jen.Id("int").Call(jen.Id("current")), jen.Lit(1))),
 			),
 		),
 		top(1).Op("=").Id("out"),
@@ -273,7 +273,7 @@ func mapIter() jen.Code {
 
 // mapHeap dispatches on the map at heap address addr.
 func mapHeap(body func(typedKey) []jen.Code, rest ...jen.Code) jen.Code {
-	return mapSwitch(jen.Id("m").Op(":=").Id("i").Dot("heap").Index(jen.Id("addr")).Assert(jen.Type()), body, rest...)
+	return mapSwitch(jen.Id("m").Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Id("addr")).Assert(jen.Type()), body, rest...)
 }
 
 // mapSwitch dispatches on the map behind subject: each typed instantiation

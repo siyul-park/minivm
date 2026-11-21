@@ -14,7 +14,7 @@ import (
 type threader struct {
 	types        []types.Type
 	constants    []types.Boxed
-	heap         []types.Value
+	heap         *types.Heap
 	coros        []bool
 	locals       []types.Kind
 	localTypes   []types.Type
@@ -198,7 +198,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.stack[i.sp-1].Ref()
-				switch v1 := i.heap[v0].(type) {
+				switch v1 := i.heap.At(v0).(type) {
 				case *types.Function:
 					if i.fp == len(i.frames) {
 						panic(ErrFrameOverflow)
@@ -229,7 +229,7 @@ var (
 					v5.release = true
 					v5.coro = 0
 					if v0 < len(i.coros) && i.coros[v0] {
-						v5.coro = i.alloc(&coroutine{typ: v1.Typ})
+						v5.coro = i.heap.Add(&coroutine{typ: v1.Typ})
 					}
 					i.sp = v5.bp + v2 + v4
 					i.fr.ip += 1
@@ -245,7 +245,7 @@ var (
 					if i.fp == len(i.frames) {
 						panic(ErrFrameOverflow)
 					}
-					v2, v3 := i.heap[v1.Fn].(*types.Function)
+					v2, v3 := i.heap.At(int(v1.Fn)).(*types.Function)
 					if !v3 {
 						panic(ErrTypeMismatch)
 					}
@@ -272,7 +272,7 @@ var (
 					v7.release = true
 					v7.coro = 0
 					if int(v1.Fn) < len(i.coros) && i.coros[int(v1.Fn)] {
-						v7.coro = i.alloc(&coroutine{typ: v1.Typ})
+						v7.coro = i.heap.Add(&coroutine{typ: v1.Typ})
 					}
 					i.sp = v7.bp + v4 + v6
 					i.fr.ip += 1
@@ -314,7 +314,7 @@ var (
 								}
 							}
 							if !v1 {
-								i.release(v0.Ref())
+								i.heap.Dec(v0.Ref())
 							}
 						}
 						for _, v0 := range i.stack[i.sp-1 : i.sp] {
@@ -329,7 +329,7 @@ var (
 								}
 							}
 							if !v1 {
-								i.release(v0.Ref())
+								i.heap.Dec(v0.Ref())
 							}
 						}
 						i.sp += v3 - v2 - 1
@@ -371,7 +371,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.stack[i.sp-1].Ref()
-				switch v1 := i.heap[v0].(type) {
+				switch v1 := i.heap.At(v0).(type) {
 				case *types.Function:
 					{
 						v2 := v0
@@ -430,7 +430,7 @@ var (
 						}
 						copy(i.stack[v9:v9+v5], i.stack[i.sp-v5-1:i.sp-1])
 						if v8.release {
-							i.release(v8.ref)
+							i.heap.Dec(v8.ref)
 						}
 						if v7 > 0 {
 							copy(i.stack[v9+v5:v9+v5+v7], i.zeros[v2])
@@ -452,7 +452,7 @@ var (
 						}
 					}
 				case *types.Closure:
-					v2, v3 := i.heap[v1.Fn].(*types.Function)
+					v2, v3 := i.heap.At(int(v1.Fn)).(*types.Function)
 					if !v3 {
 						panic(ErrTypeMismatch)
 					}
@@ -513,7 +513,7 @@ var (
 						}
 						copy(i.stack[v10:v10+v6], i.stack[i.sp-v6-1:i.sp-1])
 						if v9.release {
-							i.release(v9.ref)
+							i.heap.Dec(v9.ref)
 						}
 						if v8 > 0 {
 							copy(i.stack[v10+v6:v10+v6+v8], i.zeros[v3])
@@ -564,7 +564,7 @@ var (
 								}
 							}
 							if !v1 {
-								i.release(v0.Ref())
+								i.heap.Dec(v0.Ref())
 							}
 						}
 						for _, v0 := range i.stack[i.sp-1 : i.sp] {
@@ -579,7 +579,7 @@ var (
 								}
 							}
 							if !v1 {
-								i.release(v0.Ref())
+								i.heap.Dec(v0.Ref())
 							}
 						}
 						i.sp += v3 - v2 - 1
@@ -593,7 +593,7 @@ var (
 						}
 						if v0.coro != 0 {
 							v1 := v0.coro
-							v2, v3 := i.heap[v1].(*coroutine)
+							v2, v3 := i.heap.At(v1).(*coroutine)
 							if !v3 {
 								panic(ErrTypeMismatch)
 							}
@@ -606,14 +606,14 @@ var (
 								for _, v1 := range i.stack[v0.bp:i.sp] {
 									i.releaseBox(v1)
 								}
-								i.retain(0)
+								i.heap.Inc(0, 1)
 								v2.value = types.BoxedNull
 							}
 							v2.done = true
 							v2.image = v2.image[:0]
 							v2.upvals = nil
 							if v0.release {
-								i.release(v0.ref)
+								i.heap.Dec(v0.ref)
 							}
 							v2.ref = 0
 							v2.release = false
@@ -643,7 +643,7 @@ var (
 						}
 						i.sp = v0.bp + v0.returns
 						if v0.release {
-							i.release(v0.ref)
+							i.heap.Dec(v0.ref)
 						}
 						v0.code = nil
 						i.fp--
@@ -667,7 +667,7 @@ var (
 				{
 					v0 := i.fr
 					v1 := v0.coro
-					v2, v3 := i.heap[v1].(*coroutine)
+					v2, v3 := i.heap.At(v1).(*coroutine)
 					if !v3 {
 						panic(ErrTypeMismatch)
 					}
@@ -708,7 +708,7 @@ var (
 						panic(ErrTypeMismatch)
 					}
 					v2 := v1.Ref()
-					switch v1 := i.heap[v2].(type) {
+					switch v1 := i.heap.At(v2).(type) {
 					case *coroutine:
 						{
 							v3 := v2
@@ -766,7 +766,7 @@ var (
 										case types.Boxed:
 											i.releaseBox(v0)
 										case types.Ref:
-											i.release(int(v0))
+											i.heap.Dec(int(v0))
 										}
 									}
 								}
@@ -785,7 +785,7 @@ var (
 										case types.Boxed:
 											i.retainBox(v0)
 										case types.Ref:
-											i.retain(int(v0))
+											i.heap.Inc(int(v0), 1)
 										}
 									}
 								}
@@ -811,7 +811,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				v1 := int32(0)
-				switch v2 := i.heap[v0.Ref()].(type) {
+				switch v2 := i.heap.At(v0.Ref()).(type) {
 				case *coroutine:
 					if v2.done {
 						v1 = 1
@@ -839,14 +839,14 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				var v1 types.Boxed
-				switch v2 := i.heap[v0.Ref()].(type) {
+				switch v2 := i.heap.At(v0.Ref()).(type) {
 				case *coroutine:
 					v1 = v2.value
 					i.retainBox(v1)
 				case types.Iterator:
 					v0 := v2.Current()
 					if v0 == nil {
-						i.retain(0)
+						i.heap.Inc(0, 1)
 						v1 = types.BoxedNull
 					} else {
 						v1 = i.box(v0)
@@ -854,7 +854,7 @@ var (
 						case types.Boxed:
 							i.retainBox(v1)
 						case types.Ref:
-							i.retain(int(v1))
+							i.heap.Inc(int(v1), 1)
 						}
 					}
 				default:
@@ -1096,7 +1096,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i.retain(v0)
+					i.heap.Inc(v0, 1)
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 3
@@ -1185,7 +1185,7 @@ var (
 				if i.sp == len(i.stack) {
 					panic(ErrStackOverflow)
 				}
-				i.retain(0)
+				i.heap.Inc(0, 1)
 				i.stack[i.sp] = types.BoxedNull
 				i.sp++
 				i.fr.ip++
@@ -1201,7 +1201,7 @@ var (
 				if v0.Kind() == types.KindRef {
 					panic(ErrTypeMismatch)
 				}
-				i.stack[i.sp-1] = types.BoxRef(i.alloc(types.Unbox(v0)))
+				i.stack[i.sp-1] = types.BoxRef(i.heap.Add(types.Unbox(v0)))
 				i.fr.ip++
 			}
 		},
@@ -1218,13 +1218,13 @@ var (
 						panic(ErrTypeMismatch)
 					}
 					v2 := v1.Ref()
-					switch i.heap[v2].(type) {
+					switch i.heap.At(v2).(type) {
 					case types.I1, types.I8, types.I32, types.I64, types.F32, types.F64:
 					default:
 						panic(ErrTypeMismatch)
 					}
-					v3 := i.box(i.heap[v2])
-					i.release(v2)
+					v3 := i.box(i.heap.At(v2))
+					i.heap.Dec(v2)
 					i.sp--
 					v0 = v3
 				}
@@ -1248,12 +1248,12 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				v2 := v1.Ref()
-				if !scalar(i.heap[v2]) {
+				if !scalar(i.heap.At(v2)) {
 					panic(ErrTypeMismatch)
 				}
-				i.heap[v2] = types.Unbox(v0)
+				i.heap.Set(v2, types.Unbox(v0))
 				i.sp -= 2
-				i.release(v2)
+				i.heap.Dec(v2)
 				i.fr.ip++
 			}
 		},
@@ -1274,7 +1274,7 @@ var (
 				var v2 types.Boxed
 				switch v3 := v0.Kind(); v3 {
 				case types.KindRef:
-					v3 := i.heap[v0.Ref()]
+					v3 := i.heap.At(v0.Ref())
 					v2 = types.BoxI1(v1.Equals(v3.Type()))
 				default:
 					v2 = types.BoxI1(v1.Kind() == v3)
@@ -1300,7 +1300,7 @@ var (
 				v0 := i.stack[i.sp-1]
 				switch v2 := v0.Kind(); v2 {
 				case types.KindRef:
-					v2 := i.heap[v0.Ref()]
+					v2 := i.heap.At(v0.Ref())
 					if !v1.Cast(v2.Type()) {
 						panic(ErrTypeMismatch)
 					}
@@ -3288,8 +3288,8 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.text(i.stack[i.sp-1])
-				i.release(i.stack[i.sp-1].Ref())
-				i.stack[i.sp-1] = types.BoxRef(i.alloc(v0))
+				i.heap.Dec(i.stack[i.sp-1].Ref())
+				i.stack[i.sp-1] = types.BoxRef(i.heap.Add(v0))
 				i.fr.ip++
 			}
 		},
@@ -3312,10 +3312,10 @@ var (
 				}
 				v0, v1 := i.stack[i.sp-1], i.stack[i.sp-2]
 				v2 := i.concat(v1, v0)
-				i.release(v0.Ref())
-				i.release(v1.Ref())
+				i.heap.Dec(v0.Ref())
+				i.heap.Dec(v1.Ref())
 				i.sp--
-				i.stack[i.sp-1] = types.BoxRef(i.alloc(v2))
+				i.stack[i.sp-1] = types.BoxRef(i.heap.Add(v2))
 				i.fr.ip++
 			}
 		},
@@ -3404,8 +3404,8 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.runes(i.stack[i.sp-1])
-				i.release(i.stack[i.sp-1].Ref())
-				i.stack[i.sp-1] = types.BoxRef(i.alloc(v0))
+				i.heap.Dec(i.stack[i.sp-1].Ref())
+				i.stack[i.sp-1] = types.BoxRef(i.heap.Add(v0))
 				i.fr.ip++
 			}
 		},
@@ -3438,7 +3438,7 @@ var (
 						v1[v2] = i.stack[i.sp-v0-1+v2].Bool()
 					}
 					i.sp -= v0
-					i.stack[i.sp-1] = types.BoxRef(i.alloc(v1))
+					i.stack[i.sp-1] = types.BoxRef(i.heap.Add(v1))
 					i.fr.ip += 3
 				}
 			case types.KindI8:
@@ -3455,7 +3455,7 @@ var (
 						v1[v2] = int8(i.stack[i.sp-v0-1+v2].I32())
 					}
 					i.sp -= v0
-					i.stack[i.sp-1] = types.BoxRef(i.alloc(v1))
+					i.stack[i.sp-1] = types.BoxRef(i.heap.Add(v1))
 					i.fr.ip += 3
 				}
 			case types.KindI32:
@@ -3472,7 +3472,7 @@ var (
 						v1[v2] = i.stack[i.sp-v0-1+v2].I32()
 					}
 					i.sp -= v0
-					i.stack[i.sp-1] = types.BoxRef(i.alloc(v1))
+					i.stack[i.sp-1] = types.BoxRef(i.heap.Add(v1))
 					i.fr.ip += 3
 				}
 			case types.KindI64:
@@ -3489,7 +3489,7 @@ var (
 						v1[v2] = i.unboxI64(i.stack[i.sp-v0-1+v2])
 					}
 					i.sp -= v0
-					i.stack[i.sp-1] = types.BoxRef(i.alloc(v1))
+					i.stack[i.sp-1] = types.BoxRef(i.heap.Add(v1))
 					i.fr.ip += 3
 				}
 			case types.KindF32:
@@ -3506,7 +3506,7 @@ var (
 						v1[v2] = i.stack[i.sp-v0-1+v2].F32()
 					}
 					i.sp -= v0
-					i.stack[i.sp-1] = types.BoxRef(i.alloc(v1))
+					i.stack[i.sp-1] = types.BoxRef(i.heap.Add(v1))
 					i.fr.ip += 3
 				}
 			case types.KindF64:
@@ -3523,7 +3523,7 @@ var (
 						v1[v2] = i.stack[i.sp-v0-1+v2].F64()
 					}
 					i.sp -= v0
-					i.stack[i.sp-1] = types.BoxRef(i.alloc(v1))
+					i.stack[i.sp-1] = types.BoxRef(i.heap.Add(v1))
 					i.fr.ip += 3
 				}
 			default:
@@ -3538,7 +3538,7 @@ var (
 					v2 := i.newArray(v1, v0)
 					copy(v2.Elems, i.stack[i.sp-v0-1:i.sp-1])
 					i.sp -= v0
-					i.stack[i.sp-1] = types.BoxRef(i.alloc(v2))
+					i.stack[i.sp-1] = types.BoxRef(i.heap.Add(v2))
 					i.fr.ip += 3
 				}
 			}
@@ -3562,7 +3562,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.newArrayDefault(v1, i.stack[i.sp-1])
-				i.stack[i.sp-1] = types.BoxRef(i.alloc(v0))
+				i.stack[i.sp-1] = types.BoxRef(i.heap.Add(v0))
 				i.fr.ip += 3
 			}
 		},
@@ -3614,7 +3614,7 @@ var (
 				}
 				v2 := v1.Ref()
 				v3 := i.arrayGet(v2, v0)
-				i.release(v2)
+				i.heap.Dec(v2)
 				i.sp--
 				i.stack[i.sp] = v3
 				i.sp++
@@ -3634,7 +3634,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				i.arraySet(v2.Ref(), v1, v0)
-				i.release(v2.Ref())
+				i.heap.Dec(v2.Ref())
 				i.sp -= 3
 				i.fr.ip++
 			}
@@ -3653,7 +3653,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				v4 := v3.Ref()
-				switch v3 := i.heap[v4].(type) {
+				switch v3 := i.heap.At(v4).(type) {
 				case types.TypedArray[bool]:
 					{
 						v1 := v2
@@ -3742,7 +3742,7 @@ var (
 						}
 					}
 					if v1.Kind() == types.KindRef && v0 > 1 {
-						i.retains(v1.Ref(), v0-1)
+						i.heap.Inc(v1.Ref(), v0-1)
 					}
 					for v4 := v2; v4 < v2+v0; v4++ {
 						v0 := v3.Elems[v4]
@@ -3759,7 +3759,7 @@ var (
 				default:
 					panic(ErrTypeMismatch)
 				}
-				i.release(v4)
+				i.heap.Dec(v4)
 				i.sp -= 4
 				i.fr.ip++
 			}
@@ -3783,9 +3783,9 @@ var (
 				}
 				v5 := v2.Ref()
 				v6 := v4.Ref()
-				switch v2 := i.heap[v6].(type) {
+				switch v2 := i.heap.At(v6).(type) {
 				case types.TypedArray[bool]:
-					v4, v6 := i.heap[v5].(types.TypedArray[bool])
+					v4, v6 := i.heap.At(v5).(types.TypedArray[bool])
 					if !v6 {
 						panic(ErrTypeMismatch)
 					}
@@ -3807,7 +3807,7 @@ var (
 					}
 					copy(v2[v3:v3+v0], v4[v1:v1+v0])
 				case types.TypedArray[int8]:
-					v4, v6 := i.heap[v5].(types.TypedArray[int8])
+					v4, v6 := i.heap.At(v5).(types.TypedArray[int8])
 					if !v6 {
 						panic(ErrTypeMismatch)
 					}
@@ -3829,7 +3829,7 @@ var (
 					}
 					copy(v2[v3:v3+v0], v4[v1:v1+v0])
 				case types.TypedArray[int32]:
-					v4, v6 := i.heap[v5].(types.TypedArray[int32])
+					v4, v6 := i.heap.At(v5).(types.TypedArray[int32])
 					if !v6 {
 						panic(ErrTypeMismatch)
 					}
@@ -3851,7 +3851,7 @@ var (
 					}
 					copy(v2[v3:v3+v0], v4[v1:v1+v0])
 				case types.TypedArray[int64]:
-					v4, v6 := i.heap[v5].(types.TypedArray[int64])
+					v4, v6 := i.heap.At(v5).(types.TypedArray[int64])
 					if !v6 {
 						panic(ErrTypeMismatch)
 					}
@@ -3873,7 +3873,7 @@ var (
 					}
 					copy(v2[v3:v3+v0], v4[v1:v1+v0])
 				case types.TypedArray[float32]:
-					v4, v6 := i.heap[v5].(types.TypedArray[float32])
+					v4, v6 := i.heap.At(v5).(types.TypedArray[float32])
 					if !v6 {
 						panic(ErrTypeMismatch)
 					}
@@ -3895,7 +3895,7 @@ var (
 					}
 					copy(v2[v3:v3+v0], v4[v1:v1+v0])
 				case types.TypedArray[float64]:
-					v4, v6 := i.heap[v5].(types.TypedArray[float64])
+					v4, v6 := i.heap.At(v5).(types.TypedArray[float64])
 					if !v6 {
 						panic(ErrTypeMismatch)
 					}
@@ -3917,7 +3917,7 @@ var (
 					}
 					copy(v2[v3:v3+v0], v4[v1:v1+v0])
 				case *types.Array:
-					v4, v6 := i.heap[v5].(*types.Array)
+					v4, v6 := i.heap.At(v5).(*types.Array)
 					if !v6 {
 						panic(ErrTypeMismatch)
 					}
@@ -3953,8 +3953,8 @@ var (
 				default:
 					panic(ErrTypeMismatch)
 				}
-				i.release(v5)
-				i.release(v6)
+				i.heap.Dec(v5)
+				i.heap.Dec(v6)
 				i.sp -= 5
 				i.fr.ip++
 			}
@@ -3975,37 +3975,37 @@ var (
 				}
 				v2 := v1.Ref()
 				v3 := i.sp - v0 - 1
-				switch v1 := i.heap[v2].(type) {
+				switch v1 := i.heap.At(v2).(type) {
 				case types.TypedArray[bool]:
 					for v2 := 0; v2 < v0; v2++ {
 						v1 = append(v1, i.stack[v3+v2].Bool())
 					}
-					i.heap[v2] = v1
+					i.heap.Set(v2, v1)
 				case types.TypedArray[int8]:
 					for v2 := 0; v2 < v0; v2++ {
 						v1 = append(v1, int8(i.stack[v3+v2].I32()))
 					}
-					i.heap[v2] = v1
+					i.heap.Set(v2, v1)
 				case types.TypedArray[int32]:
 					for v2 := 0; v2 < v0; v2++ {
 						v1 = append(v1, i.stack[v3+v2].I32())
 					}
-					i.heap[v2] = v1
+					i.heap.Set(v2, v1)
 				case types.TypedArray[int64]:
 					for v2 := 0; v2 < v0; v2++ {
 						v1 = append(v1, i.unboxI64(i.stack[v3+v2]))
 					}
-					i.heap[v2] = v1
+					i.heap.Set(v2, v1)
 				case types.TypedArray[float32]:
 					for v2 := 0; v2 < v0; v2++ {
 						v1 = append(v1, i.stack[v3+v2].F32())
 					}
-					i.heap[v2] = v1
+					i.heap.Set(v2, v1)
 				case types.TypedArray[float64]:
 					for v2 := 0; v2 < v0; v2++ {
 						v1 = append(v1, i.stack[v3+v2].F64())
 					}
-					i.heap[v2] = v1
+					i.heap.Set(v2, v1)
 				case *types.Array:
 					for v2 := 0; v2 < v0; v2++ {
 						v1.Elems = append(v1.Elems, i.stack[v3+v2])
@@ -4034,7 +4034,7 @@ var (
 				}
 				v2 := v1.Ref()
 				var v3 types.Boxed
-				switch v1 := i.heap[v2].(type) {
+				switch v1 := i.heap.At(v2).(type) {
 				case types.TypedArray[bool]:
 					{
 						v2 := v0
@@ -4046,7 +4046,7 @@ var (
 					}
 					v3 = types.BoxI1(v1[v0])
 					copy(v1[v0:], v1[v0+1:])
-					i.heap[v2] = v1[:len(v1)-1]
+					i.heap.Set(v2, v1[:len(v1)-1])
 				case types.TypedArray[int8]:
 					{
 						v2 := v0
@@ -4058,7 +4058,7 @@ var (
 					}
 					v3 = types.BoxI8(v1[v0])
 					copy(v1[v0:], v1[v0+1:])
-					i.heap[v2] = v1[:len(v1)-1]
+					i.heap.Set(v2, v1[:len(v1)-1])
 				case types.TypedArray[int32]:
 					{
 						v2 := v0
@@ -4070,7 +4070,7 @@ var (
 					}
 					v3 = types.BoxI32(v1[v0])
 					copy(v1[v0:], v1[v0+1:])
-					i.heap[v2] = v1[:len(v1)-1]
+					i.heap.Set(v2, v1[:len(v1)-1])
 				case types.TypedArray[int64]:
 					{
 						v2 := v0
@@ -4082,7 +4082,7 @@ var (
 					}
 					v3 = i.boxI64(v1[v0])
 					copy(v1[v0:], v1[v0+1:])
-					i.heap[v2] = v1[:len(v1)-1]
+					i.heap.Set(v2, v1[:len(v1)-1])
 				case types.TypedArray[float32]:
 					{
 						v2 := v0
@@ -4094,7 +4094,7 @@ var (
 					}
 					v3 = types.BoxF32(v1[v0])
 					copy(v1[v0:], v1[v0+1:])
-					i.heap[v2] = v1[:len(v1)-1]
+					i.heap.Set(v2, v1[:len(v1)-1])
 				case types.TypedArray[float64]:
 					{
 						v2 := v0
@@ -4106,7 +4106,7 @@ var (
 					}
 					v3 = types.BoxF64(v1[v0])
 					copy(v1[v0:], v1[v0+1:])
-					i.heap[v2] = v1[:len(v1)-1]
+					i.heap.Set(v2, v1[:len(v1)-1])
 				case *types.Array:
 					{
 						v2 := v0
@@ -4129,7 +4129,7 @@ var (
 				default:
 					panic(ErrTypeMismatch)
 				}
-				i.release(v2)
+				i.heap.Dec(v2)
 				i.sp--
 				i.stack[i.sp-1] = v3
 				i.fr.ip++
@@ -4142,10 +4142,10 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.slice(i.stack[i.sp-3], int(i.stack[i.sp-2].I32()), int(i.stack[i.sp-1].I32()))
-				v1 := i.alloc(v0)
+				v1 := i.heap.Add(v0)
 				i.share(v0)
 				v2 := i.stack[i.sp-3].Ref()
-				i.release(v2)
+				i.heap.Dec(v2)
 				i.sp -= 2
 				i.stack[i.sp-1] = types.BoxRef(v1)
 				i.fr.ip++
@@ -4170,7 +4170,7 @@ var (
 				if i.sp < v3 {
 					panic(ErrStackUnderflow)
 				}
-				v0 := i.newStruct(v1)
+				v0 := types.NewStruct(&i.heap, v1)
 				for v2, v4 := range v1.Fields {
 					v1 := i.stack[i.sp-v3+v2]
 					switch v4.Kind {
@@ -4183,7 +4183,7 @@ var (
 					}
 				}
 				i.sp -= v3 - 1
-				i.stack[i.sp-1] = types.BoxRef(i.alloc(v0))
+				i.stack[i.sp-1] = types.BoxRef(i.heap.Add(v0))
 				i.fr.ip += 3
 			}
 		},
@@ -4205,8 +4205,8 @@ var (
 				if i.sp == len(i.stack) {
 					panic(ErrStackOverflow)
 				}
-				v0 := i.newStruct(v1)
-				i.stack[i.sp] = types.BoxRef(i.alloc(v0))
+				v0 := types.NewStruct(&i.heap, v1)
+				i.stack[i.sp] = types.BoxRef(i.heap.Add(v0))
 				i.sp++
 				i.fr.ip += 3
 			}
@@ -4228,7 +4228,7 @@ var (
 				}
 				v2 := v1.Ref()
 				v3 := i.structGet(v2, v0)
-				i.release(v2)
+				i.heap.Dec(v2)
 				i.sp--
 				i.stack[i.sp] = v3
 				i.sp++
@@ -4248,7 +4248,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				v3 := v2.Ref()
-				switch v2 := i.heap[v3].(type) {
+				switch v2 := i.heap.At(v3).(type) {
 				case *types.Struct:
 					v3 := v2.Typ
 					if v1 < 0 || v1 >= len(v3.Fields) {
@@ -4286,7 +4286,7 @@ var (
 				default:
 					panic(ErrTypeMismatch)
 				}
-				i.release(v3)
+				i.heap.Dec(v3)
 				i.sp -= 3
 				i.fr.ip++
 			}
@@ -4372,7 +4372,7 @@ var (
 						panic(ErrTypeMismatch)
 					}
 				}
-				v8 := i.alloc(v2)
+				v8 := i.heap.Add(v2)
 				i.sp = v3 + 1
 				i.stack[v3] = types.BoxRef(v8)
 				i.fr.ip += 3
@@ -4397,7 +4397,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.newMapDefault(v1, i.stack[i.sp-1])
-				i.stack[i.sp-1] = types.BoxRef(i.alloc(v0))
+				i.stack[i.sp-1] = types.BoxRef(i.heap.Add(v0))
 				i.fr.ip += 3
 			}
 		},
@@ -4413,7 +4413,7 @@ var (
 				}
 				v1 := v0.Ref()
 				v2 := 0
-				switch v0 := i.heap[v1].(type) {
+				switch v0 := i.heap.At(v1).(type) {
 				case *types.TypedMap[int8]:
 					v2 = v0.Len()
 				case *types.TypedMap[bool]:
@@ -4435,7 +4435,7 @@ var (
 				default:
 					panic(ErrTypeMismatch)
 				}
-				i.release(v1)
+				i.heap.Dec(v1)
 				i.stack[i.sp-1] = types.BoxI32(int32(v2))
 				i.fr.ip++
 			}
@@ -4455,7 +4455,7 @@ var (
 				var v3 types.Boxed
 				var v4 bool
 				var v5 bool
-				switch v1 := i.heap[v2].(type) {
+				switch v1 := i.heap.At(v2).(type) {
 				case *types.TypedMap[int8]:
 					v3, v4 = v1.Get(v0.I8())
 					if !v4 {
@@ -4513,7 +4513,7 @@ var (
 				if !v5 {
 					i.retainBox(v3)
 				}
-				i.release(v2)
+				i.heap.Dec(v2)
 				i.sp--
 				i.stack[i.sp-1] = v3
 				i.fr.ip++
@@ -4534,7 +4534,7 @@ var (
 				var v3 types.Boxed
 				var v4 bool
 				var v5 bool
-				switch v1 := i.heap[v2].(type) {
+				switch v1 := i.heap.At(v2).(type) {
 				case *types.TypedMap[int8]:
 					v3, v5 = v1.Get(v0.I8())
 				case *types.TypedMap[bool]:
@@ -4572,7 +4572,7 @@ var (
 				if !v4 {
 					i.retainBox(v3)
 				}
-				i.release(v2)
+				i.heap.Dec(v2)
 				i.stack[i.sp-2] = v3
 				i.stack[i.sp-1] = types.BoxI1(v5)
 				i.fr.ip++
@@ -4591,7 +4591,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				v3 := v2.Ref()
-				switch v2 := i.heap[v3].(type) {
+				switch v2 := i.heap.At(v3).(type) {
 				case *types.TypedMap[int8]:
 					v3, v4 := v2.Set(v1.I8(), v0)
 					if v4 {
@@ -4645,7 +4645,7 @@ var (
 				default:
 					panic(ErrTypeMismatch)
 				}
-				i.release(v3)
+				i.heap.Dec(v3)
 				i.sp -= 3
 				i.fr.ip++
 			}
@@ -4662,7 +4662,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				v2 := v1.Ref()
-				switch v1 := i.heap[v2].(type) {
+				switch v1 := i.heap.At(v2).(type) {
 				case *types.TypedMap[int8]:
 					v2, v3 := v1.Delete(v0.I8())
 					if v3 {
@@ -4713,7 +4713,7 @@ var (
 				default:
 					panic(ErrTypeMismatch)
 				}
-				i.release(v2)
+				i.heap.Dec(v2)
 				i.sp -= 2
 				i.fr.ip++
 			}
@@ -4729,7 +4729,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				v1 := v0.Ref()
-				switch v0 := i.heap[v1].(type) {
+				switch v0 := i.heap.At(v1).(type) {
 				case *types.TypedMap[int8]:
 					v0.Clear(func(value types.Boxed) {
 						i.releaseBox(value)
@@ -4768,7 +4768,7 @@ var (
 				default:
 					panic(ErrTypeMismatch)
 				}
-				i.release(v1)
+				i.heap.Dec(v1)
 				i.sp--
 				i.fr.ip++
 			}
@@ -4785,7 +4785,7 @@ var (
 				}
 				v1 := v0.Ref()
 				var v2 *types.Array
-				v3 := i.heap[v1]
+				v3 := i.heap.At(v1)
 				if v0, v1 := v3.(*HostMap); v1 {
 					v1, v2 := v0.Map(i)
 					if v2 != nil {
@@ -4840,7 +4840,7 @@ var (
 					v2 = i.newArray(types.NewArrayType(v0.Typ.Key), v0.Len())
 					v1 := 0
 					v0.Range(func(k string, _ types.Boxed) {
-						v2.Elems[v1] = types.BoxRef(i.alloc(types.String(k)))
+						v2.Elems[v1] = types.BoxRef(i.heap.Add(types.String(k)))
 						v1++
 					})
 				case *types.Map:
@@ -4854,8 +4854,8 @@ var (
 				default:
 					panic(ErrTypeMismatch)
 				}
-				v4 := types.BoxRef(i.alloc(v2))
-				i.release(v1)
+				v4 := types.BoxRef(i.heap.Add(v2))
+				i.heap.Dec(v1)
 				i.stack[i.sp-1] = v4
 				i.fr.ip++
 			}
@@ -4867,7 +4867,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.stack[i.sp-1].Ref()
-				v1, v2 := i.heap[v0].(*types.Function)
+				v1, v2 := i.heap.At(v0).(*types.Function)
 				if !v2 {
 					panic(ErrTypeMismatch)
 				}
@@ -4879,7 +4879,7 @@ var (
 				v5 := append([]types.Boxed{}, i.stack[v4:v4+v3]...)
 				v6 := types.NewClosure(v1.Typ, types.Ref(v0), v5)
 				i.sp = v4
-				i.stack[i.sp] = types.BoxRef(i.alloc(v6))
+				i.stack[i.sp] = types.BoxRef(i.heap.Add(v6))
 				i.sp++
 				i.fr.ip += 1
 			}
@@ -4895,7 +4895,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				v1 := v0.Ref()
-				v2 := i.heap[v1]
+				v2 := i.heap.At(v1)
 				if v0, v1 := v2.(*HostMap); v1 {
 					v1, v3 := v0.Map(i)
 					if v3 != nil {
@@ -4910,14 +4910,14 @@ var (
 				}
 				v4 := types.NewMapIterator(types.Ref(v1), v2)
 				v4.Next()
-				v5 := types.BoxRef(i.alloc(v4))
+				v5 := types.BoxRef(i.heap.Add(v4))
 				if !v4.Done() {
 					v0 := v4.Current()
 					switch v1 := v0.(type) {
 					case types.Boxed:
 						i.retainBox(v1)
 					case types.Ref:
-						i.retain(int(v1))
+						i.heap.Inc(int(v1), 1)
 					}
 				}
 				i.stack[i.sp-1] = v5
@@ -4950,7 +4950,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				v1 := i.stack[i.sp-2]
-				v2 := i.alloc(types.NewError(types.ErrorCode(v0.I32()), i.errorMessage(v1), v1))
+				v2 := i.heap.Add(types.NewError(types.ErrorCode(v0.I32()), i.errorMessage(v1), v1))
 				i.sp--
 				i.stack[i.sp-1] = types.BoxRef(v2)
 				i.fr.ip++
@@ -4966,7 +4966,7 @@ var (
 				if v0.Kind() != types.KindRef {
 					panic(ErrTypeMismatch)
 				}
-				v1, v2 := i.heap[v0.Ref()].(*types.Error)
+				v1, v2 := i.heap.At(v0.Ref()).(*types.Error)
 				if !v2 {
 					panic(ErrTypeMismatch)
 				}
@@ -4987,7 +4987,7 @@ var (
 				if v0.Kind() != types.KindRef {
 					panic(ErrTypeMismatch)
 				}
-				v1, v2 := i.heap[v0.Ref()].(*types.Error)
+				v1, v2 := i.heap.At(v0.Ref()).(*types.Error)
 				if !v2 {
 					panic(ErrTypeMismatch)
 				}
@@ -5008,13 +5008,13 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				v1 := v0.Ref()
-				v2, v3 := i.heap[v1].(types.String)
+				v2, v3 := i.heap.At(v1).(types.String)
 				if !v3 {
 					panic(ErrTypeMismatch)
 				}
 				v4 := types.NewStringIterator(types.Ref(v1), v2)
 				v4.Next()
-				i.stack[i.sp-1] = types.BoxRef(i.alloc(v4))
+				i.stack[i.sp-1] = types.BoxRef(i.heap.Add(v4))
 				i.fr.ip++
 			}
 		}}
@@ -13259,7 +13259,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -13322,7 +13322,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -13380,7 +13380,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -13442,7 +13442,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -13496,7 +13496,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -13559,7 +13559,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -13623,7 +13623,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -13682,7 +13682,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -13745,7 +13745,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -13800,7 +13800,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -13858,7 +13858,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -13917,7 +13917,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -13971,7 +13971,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -14029,7 +14029,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -14079,7 +14079,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -14141,7 +14141,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -14204,7 +14204,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -14262,7 +14262,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -14324,7 +14324,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -14378,7 +14378,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -14432,7 +14432,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -14487,7 +14487,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -14537,7 +14537,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -14591,7 +14591,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -14637,7 +14637,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -14691,7 +14691,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -14753,7 +14753,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -14816,7 +14816,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -14874,7 +14874,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -14936,7 +14936,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -14991,7 +14991,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -15054,7 +15054,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -15118,7 +15118,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -15177,7 +15177,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -15240,7 +15240,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -15290,7 +15290,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -15348,7 +15348,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -15407,7 +15407,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -15461,7 +15461,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -15519,7 +15519,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -15573,7 +15573,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -15635,7 +15635,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -15698,7 +15698,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -15756,7 +15756,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -15818,7 +15818,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -15864,7 +15864,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -15918,7 +15918,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -15973,7 +15973,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -16023,7 +16023,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -16077,7 +16077,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -16131,7 +16131,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -16193,7 +16193,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -16256,7 +16256,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -16314,7 +16314,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -16376,7 +16376,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -16431,7 +16431,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -16494,7 +16494,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -16558,7 +16558,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -16617,7 +16617,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -16680,7 +16680,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -16730,7 +16730,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -16788,7 +16788,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -16847,7 +16847,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -16901,7 +16901,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -16959,7 +16959,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -17013,7 +17013,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -17075,7 +17075,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -17138,7 +17138,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -17196,7 +17196,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -17258,7 +17258,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -17304,7 +17304,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -17358,7 +17358,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -17413,7 +17413,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -17463,7 +17463,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -17517,7 +17517,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -17579,7 +17579,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -17642,7 +17642,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -17700,7 +17700,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -17762,7 +17762,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -17816,7 +17816,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -17879,7 +17879,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -17943,7 +17943,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -18002,7 +18002,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -18065,7 +18065,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -18120,7 +18120,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -18178,7 +18178,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -18237,7 +18237,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -18291,7 +18291,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -18349,7 +18349,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -18399,7 +18399,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -18461,7 +18461,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -18524,7 +18524,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -18582,7 +18582,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -18644,7 +18644,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -18698,7 +18698,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -18752,7 +18752,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -18807,7 +18807,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -18857,7 +18857,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -18911,7 +18911,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -18957,7 +18957,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -19019,7 +19019,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -19082,7 +19082,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -19140,7 +19140,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -19202,7 +19202,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -19256,7 +19256,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -19319,7 +19319,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -19383,7 +19383,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -19442,7 +19442,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -19505,7 +19505,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -19560,7 +19560,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -19618,7 +19618,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -19677,7 +19677,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -19731,7 +19731,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -19789,7 +19789,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -19839,7 +19839,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -19901,7 +19901,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -19964,7 +19964,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -20022,7 +20022,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -20084,7 +20084,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -20138,7 +20138,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -20192,7 +20192,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -20247,7 +20247,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -20297,7 +20297,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -20351,7 +20351,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -20397,7 +20397,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -20459,7 +20459,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -20522,7 +20522,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -20580,7 +20580,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -20642,7 +20642,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -20696,7 +20696,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -20759,7 +20759,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -20823,7 +20823,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -20882,7 +20882,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -20945,7 +20945,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -21000,7 +21000,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -21058,7 +21058,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -21117,7 +21117,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -21171,7 +21171,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -21229,7 +21229,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -21279,7 +21279,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -21341,7 +21341,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -21404,7 +21404,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -21462,7 +21462,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -21524,7 +21524,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -21578,7 +21578,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -21632,7 +21632,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -21687,7 +21687,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -21737,7 +21737,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -21791,7 +21791,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -21837,7 +21837,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -36368,7 +36368,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -36400,7 +36400,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -36432,7 +36432,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -36464,7 +36464,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -36496,7 +36496,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -36528,7 +36528,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -36560,7 +36560,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -36620,7 +36620,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -36652,7 +36652,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -36684,7 +36684,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -36716,7 +36716,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -36748,7 +36748,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -36780,7 +36780,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -36812,7 +36812,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -36875,7 +36875,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -36931,7 +36931,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -36982,7 +36982,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37037,7 +37037,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37084,7 +37084,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37139,7 +37139,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37195,7 +37195,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37246,7 +37246,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37301,7 +37301,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37348,7 +37348,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37403,7 +37403,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37459,7 +37459,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37510,7 +37510,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37565,7 +37565,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37612,7 +37612,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37667,7 +37667,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37723,7 +37723,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37774,7 +37774,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37829,7 +37829,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37876,7 +37876,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37931,7 +37931,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -37987,7 +37987,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -38038,7 +38038,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -38093,7 +38093,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -38140,7 +38140,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -38195,7 +38195,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -38251,7 +38251,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -38302,7 +38302,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -38357,7 +38357,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -38404,7 +38404,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -47761,7 +47761,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -47825,7 +47825,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -47884,7 +47884,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -47947,7 +47947,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -48002,7 +48002,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -48066,7 +48066,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -48131,7 +48131,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v12 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v12 < 0 || v12+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -48191,7 +48191,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -48255,7 +48255,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -48311,7 +48311,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -48370,7 +48370,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -48430,7 +48430,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -48485,7 +48485,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -48544,7 +48544,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -48595,7 +48595,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -48658,7 +48658,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -48722,7 +48722,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -48781,7 +48781,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -48844,7 +48844,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -48899,7 +48899,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -48954,7 +48954,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -49010,7 +49010,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -49061,7 +49061,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -49116,7 +49116,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -49163,7 +49163,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -49218,7 +49218,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -49281,7 +49281,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -49345,7 +49345,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -49404,7 +49404,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -49467,7 +49467,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -49523,7 +49523,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -49587,7 +49587,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -49652,7 +49652,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v12 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v12 < 0 || v12+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -49712,7 +49712,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -49776,7 +49776,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -49827,7 +49827,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -49886,7 +49886,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -49946,7 +49946,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -50001,7 +50001,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -50060,7 +50060,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -50115,7 +50115,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -50178,7 +50178,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -50242,7 +50242,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -50301,7 +50301,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -50364,7 +50364,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -50411,7 +50411,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -50466,7 +50466,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -50522,7 +50522,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -50573,7 +50573,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -50628,7 +50628,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -50683,7 +50683,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -50746,7 +50746,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -50810,7 +50810,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -50869,7 +50869,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -50932,7 +50932,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -50988,7 +50988,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -51052,7 +51052,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -51117,7 +51117,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v12 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v12 < 0 || v12+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -51177,7 +51177,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -51241,7 +51241,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -51292,7 +51292,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -51351,7 +51351,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -51411,7 +51411,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -51466,7 +51466,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -51525,7 +51525,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -51580,7 +51580,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -51643,7 +51643,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -51707,7 +51707,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -51766,7 +51766,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -51829,7 +51829,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -51876,7 +51876,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -51931,7 +51931,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -51987,7 +51987,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -52038,7 +52038,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -52093,7 +52093,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -52156,7 +52156,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -52220,7 +52220,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -52279,7 +52279,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -52342,7 +52342,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -52397,7 +52397,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -52461,7 +52461,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -52526,7 +52526,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v12 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v12 < 0 || v12+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -52586,7 +52586,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -52650,7 +52650,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -52706,7 +52706,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -52765,7 +52765,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -52825,7 +52825,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -52880,7 +52880,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -52939,7 +52939,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -52990,7 +52990,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -53053,7 +53053,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -53117,7 +53117,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -53176,7 +53176,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -53239,7 +53239,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -53294,7 +53294,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -53349,7 +53349,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -53405,7 +53405,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -53456,7 +53456,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -53511,7 +53511,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -53558,7 +53558,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -53621,7 +53621,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -53685,7 +53685,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -53744,7 +53744,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -53807,7 +53807,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -53862,7 +53862,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -53926,7 +53926,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -53991,7 +53991,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v12 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v12 < 0 || v12+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -54051,7 +54051,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -54115,7 +54115,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -54171,7 +54171,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -54230,7 +54230,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -54290,7 +54290,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -54345,7 +54345,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -54404,7 +54404,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -54455,7 +54455,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -54518,7 +54518,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -54582,7 +54582,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -54641,7 +54641,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -54704,7 +54704,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -54759,7 +54759,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -54814,7 +54814,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -54870,7 +54870,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -54921,7 +54921,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -54976,7 +54976,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -55023,7 +55023,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -55086,7 +55086,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -55150,7 +55150,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -55209,7 +55209,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -55272,7 +55272,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -55327,7 +55327,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -55391,7 +55391,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -55456,7 +55456,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v12 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v12 < 0 || v12+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -55516,7 +55516,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -55580,7 +55580,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -55636,7 +55636,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v8)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -55695,7 +55695,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -55755,7 +55755,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -55810,7 +55810,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -55869,7 +55869,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -55920,7 +55920,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -55983,7 +55983,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -56047,7 +56047,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -56106,7 +56106,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -56169,7 +56169,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -56224,7 +56224,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -56279,7 +56279,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -56335,7 +56335,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -56386,7 +56386,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -56441,7 +56441,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -56488,7 +56488,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -64718,7 +64718,7 @@ var (
 							if v2.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v3].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v3).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -64751,7 +64751,7 @@ var (
 							if v2.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v3].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v3).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -64784,7 +64784,7 @@ var (
 							if v2.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v3].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v3).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -64817,7 +64817,7 @@ var (
 							if v2.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v3].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v3).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -64850,7 +64850,7 @@ var (
 							if v2.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v3].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v3).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -64883,7 +64883,7 @@ var (
 							if v2.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v3].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v3).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -64916,7 +64916,7 @@ var (
 							if v2.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v3].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v3).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -64977,7 +64977,7 @@ var (
 							if v2.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v3].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v3).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -65010,7 +65010,7 @@ var (
 							if v2.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v3].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v3).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -65043,7 +65043,7 @@ var (
 							if v2.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v3].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v3).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -65076,7 +65076,7 @@ var (
 							if v2.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v3].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v3).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -65109,7 +65109,7 @@ var (
 							if v2.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v3].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v3).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -65142,7 +65142,7 @@ var (
 							if v2.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v3].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v3).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -65175,7 +65175,7 @@ var (
 							if v2.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v3].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v3).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -65239,7 +65239,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -65296,7 +65296,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v7)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -65348,7 +65348,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -65404,7 +65404,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -65452,7 +65452,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[bool]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -65508,7 +65508,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -65565,7 +65565,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v7)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -65617,7 +65617,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -65673,7 +65673,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -65721,7 +65721,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float32]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -65777,7 +65777,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -65834,7 +65834,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v7)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -65886,7 +65886,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -65942,7 +65942,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -65990,7 +65990,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[float64]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -66046,7 +66046,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -66103,7 +66103,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v7)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -66155,7 +66155,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -66211,7 +66211,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -66259,7 +66259,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int32]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -66315,7 +66315,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -66372,7 +66372,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v7)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -66424,7 +66424,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -66480,7 +66480,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -66528,7 +66528,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int64]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -66584,7 +66584,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -66641,7 +66641,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v7)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -66693,7 +66693,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -66749,7 +66749,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -66797,7 +66797,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v3].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v3).(types.TypedArray[int8]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -69366,10 +69366,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -69396,7 +69396,7 @@ var (
 						}
 						v2 := i.globals[v7]
 						v4 := v2.I32()
-						v6, v8 := i.heap[v3].(types.TypedArray[bool])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -69423,10 +69423,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -69454,7 +69454,7 @@ var (
 						v2 := i.fr.bp + v7
 						v4 := i.stack[v2]
 						v6 := v4.I32()
-						v8, v9 := i.heap[v3].(types.TypedArray[bool])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -69481,10 +69481,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -69507,7 +69507,7 @@ var (
 						v0 := i.globals[v5]
 						v1 := v0.I32()
 						v2 := v7.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[bool])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -69534,10 +69534,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -69564,7 +69564,7 @@ var (
 						}
 						v2 := i.fr.upvals[v7]
 						v4 := v2.I32()
-						v6, v8 := i.heap[v3].(types.TypedArray[bool])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -69591,10 +69591,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -69613,7 +69613,7 @@ var (
 						}
 						v0 := i.globals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[bool])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -69640,10 +69640,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -69671,7 +69671,7 @@ var (
 						}
 						v4 := i.globals[v7]
 						v6 := v4.I32()
-						v8, v9 := i.heap[v3].(types.TypedArray[bool])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -69698,10 +69698,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -69730,7 +69730,7 @@ var (
 						v4 := i.fr.bp + v7
 						v6 := i.stack[v4]
 						v8 := v6.I32()
-						v9, v10 := i.heap[v3].(types.TypedArray[bool])
+						v9, v10 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v10 {
 							panic(ErrTypeMismatch)
 						}
@@ -69757,10 +69757,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -69784,7 +69784,7 @@ var (
 						v1 := i.stack[v0]
 						v2 := v1.I32()
 						v4 := v7.I32()
-						v6, v8 := i.heap[v3].(types.TypedArray[bool])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -69811,10 +69811,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -69842,7 +69842,7 @@ var (
 						}
 						v4 := i.fr.upvals[v7]
 						v6 := v4.I32()
-						v8, v9 := i.heap[v3].(types.TypedArray[bool])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -69869,10 +69869,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -69892,7 +69892,7 @@ var (
 						v0 := i.fr.bp + v5
 						v1 := i.stack[v0]
 						v2 := v1.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[bool])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -69919,10 +69919,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -69945,7 +69945,7 @@ var (
 						}
 						v1 := i.globals[v7]
 						v2 := v1.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[bool])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -69972,10 +69972,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -69999,7 +69999,7 @@ var (
 						v1 := i.fr.bp + v7
 						v2 := i.stack[v1]
 						v4 := v2.I32()
-						v6, v8 := i.heap[v3].(types.TypedArray[bool])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -70026,10 +70026,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -70048,7 +70048,7 @@ var (
 						}
 						v0 := v5.I32()
 						v1 := v7.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[bool])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -70075,10 +70075,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -70101,7 +70101,7 @@ var (
 						}
 						v1 := i.fr.upvals[v7]
 						v2 := v1.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[bool])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -70128,10 +70128,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -70146,7 +70146,7 @@ var (
 							panic(trapped{ErrStackOverflow, 0})
 						}
 						v0 := v5.I32()
-						v1, v2 := i.heap[v3].(types.TypedArray[bool])
+						v1, v2 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v2 {
 							panic(ErrTypeMismatch)
 						}
@@ -70173,10 +70173,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -70203,7 +70203,7 @@ var (
 						}
 						v2 := i.globals[v7]
 						v4 := v2.I32()
-						v6, v8 := i.heap[v3].(types.TypedArray[bool])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -70230,10 +70230,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -70261,7 +70261,7 @@ var (
 						v2 := i.fr.bp + v7
 						v4 := i.stack[v2]
 						v6 := v4.I32()
-						v8, v9 := i.heap[v3].(types.TypedArray[bool])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -70288,10 +70288,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -70314,7 +70314,7 @@ var (
 						v0 := i.fr.upvals[v5]
 						v1 := v0.I32()
 						v2 := v7.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[bool])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -70341,10 +70341,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -70371,7 +70371,7 @@ var (
 						}
 						v2 := i.fr.upvals[v7]
 						v4 := v2.I32()
-						v6, v8 := i.heap[v3].(types.TypedArray[bool])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -70398,10 +70398,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -70420,7 +70420,7 @@ var (
 						}
 						v0 := i.fr.upvals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[bool])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -70447,10 +70447,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -70469,7 +70469,7 @@ var (
 						}
 						v0 := i.globals[v6]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[bool])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -70496,10 +70496,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -70519,7 +70519,7 @@ var (
 						v0 := i.fr.bp + v6
 						v1 := i.stack[v0]
 						v2 := v1.I32()
-						v4, v7 := i.heap[v3].(types.TypedArray[bool])
+						v4, v7 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v7 {
 							panic(ErrTypeMismatch)
 						}
@@ -70546,10 +70546,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -70564,7 +70564,7 @@ var (
 							panic(trapped{ErrStackOverflow, 0})
 						}
 						v0 := v6.I32()
-						v1, v2 := i.heap[v3].(types.TypedArray[bool])
+						v1, v2 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v2 {
 							panic(ErrTypeMismatch)
 						}
@@ -70591,10 +70591,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -70613,7 +70613,7 @@ var (
 						}
 						v0 := i.fr.upvals[v6]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[bool])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -70640,10 +70640,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -70654,7 +70654,7 @@ var (
 						if i.sp == len(i.stack) {
 							panic(trapped{ErrStackOverflow, 0})
 						}
-						v0, v1 := i.heap[v3].(types.TypedArray[bool])
+						v0, v1 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v1 {
 							panic(ErrTypeMismatch)
 						}
@@ -70681,10 +70681,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -70703,7 +70703,7 @@ var (
 						}
 						v0 := i.globals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[float32])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -70730,10 +70730,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -70760,7 +70760,7 @@ var (
 						}
 						v2 := i.globals[v7]
 						v4 := v2.F32()
-						v6, v8 := i.heap[v3].(types.TypedArray[float32])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -70787,10 +70787,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -70818,7 +70818,7 @@ var (
 						v2 := i.fr.bp + v7
 						v4 := i.stack[v2]
 						v6 := v4.F32()
-						v8, v9 := i.heap[v3].(types.TypedArray[float32])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -70845,10 +70845,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -70871,7 +70871,7 @@ var (
 						v0 := i.globals[v5]
 						v1 := v0.I32()
 						v2 := v7.F32()
-						v4, v6 := i.heap[v3].(types.TypedArray[float32])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -70898,10 +70898,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -70928,7 +70928,7 @@ var (
 						}
 						v2 := i.fr.upvals[v7]
 						v4 := v2.F32()
-						v6, v8 := i.heap[v3].(types.TypedArray[float32])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -70955,10 +70955,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -70978,7 +70978,7 @@ var (
 						v0 := i.fr.bp + v5
 						v1 := i.stack[v0]
 						v2 := v1.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[float32])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -71005,10 +71005,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71036,7 +71036,7 @@ var (
 						}
 						v4 := i.globals[v7]
 						v6 := v4.F32()
-						v8, v9 := i.heap[v3].(types.TypedArray[float32])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -71063,10 +71063,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71095,7 +71095,7 @@ var (
 						v4 := i.fr.bp + v7
 						v6 := i.stack[v4]
 						v8 := v6.F32()
-						v9, v10 := i.heap[v3].(types.TypedArray[float32])
+						v9, v10 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v10 {
 							panic(ErrTypeMismatch)
 						}
@@ -71122,10 +71122,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71149,7 +71149,7 @@ var (
 						v1 := i.stack[v0]
 						v2 := v1.I32()
 						v4 := v7.F32()
-						v6, v8 := i.heap[v3].(types.TypedArray[float32])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -71176,10 +71176,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71207,7 +71207,7 @@ var (
 						}
 						v4 := i.fr.upvals[v7]
 						v6 := v4.F32()
-						v8, v9 := i.heap[v3].(types.TypedArray[float32])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -71234,10 +71234,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71252,7 +71252,7 @@ var (
 							panic(trapped{ErrStackOverflow, 0})
 						}
 						v0 := v5.I32()
-						v1, v2 := i.heap[v3].(types.TypedArray[float32])
+						v1, v2 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v2 {
 							panic(ErrTypeMismatch)
 						}
@@ -71279,10 +71279,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71305,7 +71305,7 @@ var (
 						}
 						v1 := i.globals[v7]
 						v2 := v1.F32()
-						v4, v6 := i.heap[v3].(types.TypedArray[float32])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -71332,10 +71332,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71359,7 +71359,7 @@ var (
 						v1 := i.fr.bp + v7
 						v2 := i.stack[v1]
 						v4 := v2.F32()
-						v6, v8 := i.heap[v3].(types.TypedArray[float32])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -71386,10 +71386,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71408,7 +71408,7 @@ var (
 						}
 						v0 := v5.I32()
 						v1 := v7.F32()
-						v2, v4 := i.heap[v3].(types.TypedArray[float32])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -71435,10 +71435,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71461,7 +71461,7 @@ var (
 						}
 						v1 := i.fr.upvals[v7]
 						v2 := v1.F32()
-						v4, v6 := i.heap[v3].(types.TypedArray[float32])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -71488,10 +71488,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71510,7 +71510,7 @@ var (
 						}
 						v0 := i.fr.upvals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[float32])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -71537,10 +71537,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71567,7 +71567,7 @@ var (
 						}
 						v2 := i.globals[v7]
 						v4 := v2.F32()
-						v6, v8 := i.heap[v3].(types.TypedArray[float32])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -71594,10 +71594,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71625,7 +71625,7 @@ var (
 						v2 := i.fr.bp + v7
 						v4 := i.stack[v2]
 						v6 := v4.F32()
-						v8, v9 := i.heap[v3].(types.TypedArray[float32])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -71652,10 +71652,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71678,7 +71678,7 @@ var (
 						v0 := i.fr.upvals[v5]
 						v1 := v0.I32()
 						v2 := v7.F32()
-						v4, v6 := i.heap[v3].(types.TypedArray[float32])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -71705,10 +71705,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71735,7 +71735,7 @@ var (
 						}
 						v2 := i.fr.upvals[v7]
 						v4 := v2.F32()
-						v6, v8 := i.heap[v3].(types.TypedArray[float32])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -71762,10 +71762,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71776,7 +71776,7 @@ var (
 						if i.sp == len(i.stack) {
 							panic(trapped{ErrStackOverflow, 0})
 						}
-						v0, v1 := i.heap[v3].(types.TypedArray[float32])
+						v0, v1 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v1 {
 							panic(ErrTypeMismatch)
 						}
@@ -71803,10 +71803,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71825,7 +71825,7 @@ var (
 						}
 						v0 := i.globals[v6]
 						v1 := v0.F32()
-						v2, v4 := i.heap[v3].(types.TypedArray[float32])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -71852,10 +71852,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71875,7 +71875,7 @@ var (
 						v0 := i.fr.bp + v6
 						v1 := i.stack[v0]
 						v2 := v1.F32()
-						v4, v7 := i.heap[v3].(types.TypedArray[float32])
+						v4, v7 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v7 {
 							panic(ErrTypeMismatch)
 						}
@@ -71902,10 +71902,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71920,7 +71920,7 @@ var (
 							panic(trapped{ErrStackOverflow, 0})
 						}
 						v0 := v6.F32()
-						v1, v2 := i.heap[v3].(types.TypedArray[float32])
+						v1, v2 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v2 {
 							panic(ErrTypeMismatch)
 						}
@@ -71947,10 +71947,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -71969,7 +71969,7 @@ var (
 						}
 						v0 := i.fr.upvals[v6]
 						v1 := v0.F32()
-						v2, v4 := i.heap[v3].(types.TypedArray[float32])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -71996,10 +71996,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72018,7 +72018,7 @@ var (
 						}
 						v0 := i.globals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[float64])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -72045,10 +72045,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72075,7 +72075,7 @@ var (
 						}
 						v2 := i.globals[v7]
 						v4 := v2.F64()
-						v6, v8 := i.heap[v3].(types.TypedArray[float64])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -72102,10 +72102,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72133,7 +72133,7 @@ var (
 						v2 := i.fr.bp + v7
 						v4 := i.stack[v2]
 						v6 := v4.F64()
-						v8, v9 := i.heap[v3].(types.TypedArray[float64])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -72160,10 +72160,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72186,7 +72186,7 @@ var (
 						v0 := i.globals[v5]
 						v1 := v0.I32()
 						v2 := v7.F64()
-						v4, v6 := i.heap[v3].(types.TypedArray[float64])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -72213,10 +72213,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72243,7 +72243,7 @@ var (
 						}
 						v2 := i.fr.upvals[v7]
 						v4 := v2.F64()
-						v6, v8 := i.heap[v3].(types.TypedArray[float64])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -72270,10 +72270,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72293,7 +72293,7 @@ var (
 						v0 := i.fr.bp + v5
 						v1 := i.stack[v0]
 						v2 := v1.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[float64])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -72320,10 +72320,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72351,7 +72351,7 @@ var (
 						}
 						v4 := i.globals[v7]
 						v6 := v4.F64()
-						v8, v9 := i.heap[v3].(types.TypedArray[float64])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -72378,10 +72378,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72410,7 +72410,7 @@ var (
 						v4 := i.fr.bp + v7
 						v6 := i.stack[v4]
 						v8 := v6.F64()
-						v9, v10 := i.heap[v3].(types.TypedArray[float64])
+						v9, v10 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v10 {
 							panic(ErrTypeMismatch)
 						}
@@ -72437,10 +72437,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72464,7 +72464,7 @@ var (
 						v1 := i.stack[v0]
 						v2 := v1.I32()
 						v4 := v7.F64()
-						v6, v8 := i.heap[v3].(types.TypedArray[float64])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -72491,10 +72491,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72522,7 +72522,7 @@ var (
 						}
 						v4 := i.fr.upvals[v7]
 						v6 := v4.F64()
-						v8, v9 := i.heap[v3].(types.TypedArray[float64])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -72549,10 +72549,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72567,7 +72567,7 @@ var (
 							panic(trapped{ErrStackOverflow, 0})
 						}
 						v0 := v5.I32()
-						v1, v2 := i.heap[v3].(types.TypedArray[float64])
+						v1, v2 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v2 {
 							panic(ErrTypeMismatch)
 						}
@@ -72594,10 +72594,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72620,7 +72620,7 @@ var (
 						}
 						v1 := i.globals[v7]
 						v2 := v1.F64()
-						v4, v6 := i.heap[v3].(types.TypedArray[float64])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -72647,10 +72647,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72674,7 +72674,7 @@ var (
 						v1 := i.fr.bp + v7
 						v2 := i.stack[v1]
 						v4 := v2.F64()
-						v6, v8 := i.heap[v3].(types.TypedArray[float64])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -72701,10 +72701,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72723,7 +72723,7 @@ var (
 						}
 						v0 := v5.I32()
 						v1 := v7.F64()
-						v2, v4 := i.heap[v3].(types.TypedArray[float64])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -72750,10 +72750,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72776,7 +72776,7 @@ var (
 						}
 						v1 := i.fr.upvals[v7]
 						v2 := v1.F64()
-						v4, v6 := i.heap[v3].(types.TypedArray[float64])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -72803,10 +72803,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72825,7 +72825,7 @@ var (
 						}
 						v0 := i.fr.upvals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[float64])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -72852,10 +72852,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72882,7 +72882,7 @@ var (
 						}
 						v2 := i.globals[v7]
 						v4 := v2.F64()
-						v6, v8 := i.heap[v3].(types.TypedArray[float64])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -72909,10 +72909,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72940,7 +72940,7 @@ var (
 						v2 := i.fr.bp + v7
 						v4 := i.stack[v2]
 						v6 := v4.F64()
-						v8, v9 := i.heap[v3].(types.TypedArray[float64])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -72967,10 +72967,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -72993,7 +72993,7 @@ var (
 						v0 := i.fr.upvals[v5]
 						v1 := v0.I32()
 						v2 := v7.F64()
-						v4, v6 := i.heap[v3].(types.TypedArray[float64])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -73020,10 +73020,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -73050,7 +73050,7 @@ var (
 						}
 						v2 := i.fr.upvals[v7]
 						v4 := v2.F64()
-						v6, v8 := i.heap[v3].(types.TypedArray[float64])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -73077,10 +73077,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -73091,7 +73091,7 @@ var (
 						if i.sp == len(i.stack) {
 							panic(trapped{ErrStackOverflow, 0})
 						}
-						v0, v1 := i.heap[v3].(types.TypedArray[float64])
+						v0, v1 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v1 {
 							panic(ErrTypeMismatch)
 						}
@@ -73118,10 +73118,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -73140,7 +73140,7 @@ var (
 						}
 						v0 := i.globals[v6]
 						v1 := v0.F64()
-						v2, v4 := i.heap[v3].(types.TypedArray[float64])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -73167,10 +73167,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -73190,7 +73190,7 @@ var (
 						v0 := i.fr.bp + v6
 						v1 := i.stack[v0]
 						v2 := v1.F64()
-						v4, v7 := i.heap[v3].(types.TypedArray[float64])
+						v4, v7 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v7 {
 							panic(ErrTypeMismatch)
 						}
@@ -73217,10 +73217,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -73235,7 +73235,7 @@ var (
 							panic(trapped{ErrStackOverflow, 0})
 						}
 						v0 := v6.F64()
-						v1, v2 := i.heap[v3].(types.TypedArray[float64])
+						v1, v2 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v2 {
 							panic(ErrTypeMismatch)
 						}
@@ -73262,10 +73262,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -73284,7 +73284,7 @@ var (
 						}
 						v0 := i.fr.upvals[v6]
 						v1 := v0.F64()
-						v2, v4 := i.heap[v3].(types.TypedArray[float64])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -73311,10 +73311,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -73341,7 +73341,7 @@ var (
 						}
 						v2 := i.globals[v7]
 						v4 := v2.I32()
-						v6, v8 := i.heap[v3].(types.TypedArray[int32])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -73368,10 +73368,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -73399,7 +73399,7 @@ var (
 						v2 := i.fr.bp + v7
 						v4 := i.stack[v2]
 						v6 := v4.I32()
-						v8, v9 := i.heap[v3].(types.TypedArray[int32])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -73426,10 +73426,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -73452,7 +73452,7 @@ var (
 						v0 := i.globals[v5]
 						v1 := v0.I32()
 						v2 := v7.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[int32])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -73479,10 +73479,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -73509,7 +73509,7 @@ var (
 						}
 						v2 := i.fr.upvals[v7]
 						v4 := v2.I32()
-						v6, v8 := i.heap[v3].(types.TypedArray[int32])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -73536,10 +73536,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -73558,7 +73558,7 @@ var (
 						}
 						v0 := i.globals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[int32])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -73585,10 +73585,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -73616,7 +73616,7 @@ var (
 						}
 						v4 := i.globals[v7]
 						v6 := v4.I32()
-						v8, v9 := i.heap[v3].(types.TypedArray[int32])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -73643,10 +73643,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -73675,7 +73675,7 @@ var (
 						v4 := i.fr.bp + v7
 						v6 := i.stack[v4]
 						v8 := v6.I32()
-						v9, v10 := i.heap[v3].(types.TypedArray[int32])
+						v9, v10 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v10 {
 							panic(ErrTypeMismatch)
 						}
@@ -73702,10 +73702,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -73729,7 +73729,7 @@ var (
 						v1 := i.stack[v0]
 						v2 := v1.I32()
 						v4 := v7.I32()
-						v6, v8 := i.heap[v3].(types.TypedArray[int32])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -73756,10 +73756,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -73787,7 +73787,7 @@ var (
 						}
 						v4 := i.fr.upvals[v7]
 						v6 := v4.I32()
-						v8, v9 := i.heap[v3].(types.TypedArray[int32])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -73814,10 +73814,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -73837,7 +73837,7 @@ var (
 						v0 := i.fr.bp + v5
 						v1 := i.stack[v0]
 						v2 := v1.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[int32])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -73864,10 +73864,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -73890,7 +73890,7 @@ var (
 						}
 						v1 := i.globals[v7]
 						v2 := v1.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[int32])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -73917,10 +73917,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -73944,7 +73944,7 @@ var (
 						v1 := i.fr.bp + v7
 						v2 := i.stack[v1]
 						v4 := v2.I32()
-						v6, v8 := i.heap[v3].(types.TypedArray[int32])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -73971,10 +73971,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -73993,7 +73993,7 @@ var (
 						}
 						v0 := v5.I32()
 						v1 := v7.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[int32])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -74020,10 +74020,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -74046,7 +74046,7 @@ var (
 						}
 						v1 := i.fr.upvals[v7]
 						v2 := v1.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[int32])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -74073,10 +74073,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -74091,7 +74091,7 @@ var (
 							panic(trapped{ErrStackOverflow, 0})
 						}
 						v0 := v5.I32()
-						v1, v2 := i.heap[v3].(types.TypedArray[int32])
+						v1, v2 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v2 {
 							panic(ErrTypeMismatch)
 						}
@@ -74118,10 +74118,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -74148,7 +74148,7 @@ var (
 						}
 						v2 := i.globals[v7]
 						v4 := v2.I32()
-						v6, v8 := i.heap[v3].(types.TypedArray[int32])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -74175,10 +74175,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -74206,7 +74206,7 @@ var (
 						v2 := i.fr.bp + v7
 						v4 := i.stack[v2]
 						v6 := v4.I32()
-						v8, v9 := i.heap[v3].(types.TypedArray[int32])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -74233,10 +74233,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -74259,7 +74259,7 @@ var (
 						v0 := i.fr.upvals[v5]
 						v1 := v0.I32()
 						v2 := v7.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[int32])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -74286,10 +74286,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -74316,7 +74316,7 @@ var (
 						}
 						v2 := i.fr.upvals[v7]
 						v4 := v2.I32()
-						v6, v8 := i.heap[v3].(types.TypedArray[int32])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -74343,10 +74343,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -74365,7 +74365,7 @@ var (
 						}
 						v0 := i.fr.upvals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[int32])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -74392,10 +74392,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -74414,7 +74414,7 @@ var (
 						}
 						v0 := i.globals[v6]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[int32])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -74441,10 +74441,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -74464,7 +74464,7 @@ var (
 						v0 := i.fr.bp + v6
 						v1 := i.stack[v0]
 						v2 := v1.I32()
-						v4, v7 := i.heap[v3].(types.TypedArray[int32])
+						v4, v7 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v7 {
 							panic(ErrTypeMismatch)
 						}
@@ -74491,10 +74491,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -74509,7 +74509,7 @@ var (
 							panic(trapped{ErrStackOverflow, 0})
 						}
 						v0 := v6.I32()
-						v1, v2 := i.heap[v3].(types.TypedArray[int32])
+						v1, v2 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v2 {
 							panic(ErrTypeMismatch)
 						}
@@ -74536,10 +74536,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -74558,7 +74558,7 @@ var (
 						}
 						v0 := i.fr.upvals[v6]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[int32])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -74585,10 +74585,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -74599,7 +74599,7 @@ var (
 						if i.sp == len(i.stack) {
 							panic(trapped{ErrStackOverflow, 0})
 						}
-						v0, v1 := i.heap[v3].(types.TypedArray[int32])
+						v0, v1 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v1 {
 							panic(ErrTypeMismatch)
 						}
@@ -74626,10 +74626,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -74656,7 +74656,7 @@ var (
 						}
 						v2 := i.globals[v7]
 						v4 := i.borrowI64(v2)
-						v6, v8 := i.heap[v3].(types.TypedArray[int64])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -74683,10 +74683,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -74714,7 +74714,7 @@ var (
 						v2 := i.fr.bp + v7
 						v4 := i.stack[v2]
 						v6 := i.borrowI64(v4)
-						v8, v9 := i.heap[v3].(types.TypedArray[int64])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -74741,10 +74741,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -74767,7 +74767,7 @@ var (
 						v0 := i.globals[v5]
 						v1 := v0.I32()
 						v2 := i.borrowI64(v7)
-						v4, v6 := i.heap[v3].(types.TypedArray[int64])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -74794,10 +74794,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -74824,7 +74824,7 @@ var (
 						}
 						v2 := i.fr.upvals[v7]
 						v4 := i.borrowI64(v2)
-						v6, v8 := i.heap[v3].(types.TypedArray[int64])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -74851,10 +74851,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -74873,7 +74873,7 @@ var (
 						}
 						v0 := i.globals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[int64])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -74900,10 +74900,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -74931,7 +74931,7 @@ var (
 						}
 						v4 := i.globals[v7]
 						v6 := i.borrowI64(v4)
-						v8, v9 := i.heap[v3].(types.TypedArray[int64])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -74958,10 +74958,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -74990,7 +74990,7 @@ var (
 						v4 := i.fr.bp + v7
 						v6 := i.stack[v4]
 						v8 := i.borrowI64(v6)
-						v9, v10 := i.heap[v3].(types.TypedArray[int64])
+						v9, v10 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v10 {
 							panic(ErrTypeMismatch)
 						}
@@ -75017,10 +75017,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -75044,7 +75044,7 @@ var (
 						v1 := i.stack[v0]
 						v2 := v1.I32()
 						v4 := i.borrowI64(v7)
-						v6, v8 := i.heap[v3].(types.TypedArray[int64])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -75071,10 +75071,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -75102,7 +75102,7 @@ var (
 						}
 						v4 := i.fr.upvals[v7]
 						v6 := i.borrowI64(v4)
-						v8, v9 := i.heap[v3].(types.TypedArray[int64])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -75129,10 +75129,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -75152,7 +75152,7 @@ var (
 						v0 := i.fr.bp + v5
 						v1 := i.stack[v0]
 						v2 := v1.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[int64])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -75179,10 +75179,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -75205,7 +75205,7 @@ var (
 						}
 						v1 := i.globals[v7]
 						v2 := i.borrowI64(v1)
-						v4, v6 := i.heap[v3].(types.TypedArray[int64])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -75232,10 +75232,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -75259,7 +75259,7 @@ var (
 						v1 := i.fr.bp + v7
 						v2 := i.stack[v1]
 						v4 := i.borrowI64(v2)
-						v6, v8 := i.heap[v3].(types.TypedArray[int64])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -75286,10 +75286,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -75308,7 +75308,7 @@ var (
 						}
 						v0 := v5.I32()
 						v1 := i.borrowI64(v7)
-						v2, v4 := i.heap[v3].(types.TypedArray[int64])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -75335,10 +75335,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -75361,7 +75361,7 @@ var (
 						}
 						v1 := i.fr.upvals[v7]
 						v2 := i.borrowI64(v1)
-						v4, v6 := i.heap[v3].(types.TypedArray[int64])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -75388,10 +75388,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -75406,7 +75406,7 @@ var (
 							panic(trapped{ErrStackOverflow, 0})
 						}
 						v0 := v5.I32()
-						v1, v2 := i.heap[v3].(types.TypedArray[int64])
+						v1, v2 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v2 {
 							panic(ErrTypeMismatch)
 						}
@@ -75433,10 +75433,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -75463,7 +75463,7 @@ var (
 						}
 						v2 := i.globals[v7]
 						v4 := i.borrowI64(v2)
-						v6, v8 := i.heap[v3].(types.TypedArray[int64])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -75490,10 +75490,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -75521,7 +75521,7 @@ var (
 						v2 := i.fr.bp + v7
 						v4 := i.stack[v2]
 						v6 := i.borrowI64(v4)
-						v8, v9 := i.heap[v3].(types.TypedArray[int64])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -75548,10 +75548,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -75574,7 +75574,7 @@ var (
 						v0 := i.fr.upvals[v5]
 						v1 := v0.I32()
 						v2 := i.borrowI64(v7)
-						v4, v6 := i.heap[v3].(types.TypedArray[int64])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -75601,10 +75601,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -75631,7 +75631,7 @@ var (
 						}
 						v2 := i.fr.upvals[v7]
 						v4 := i.borrowI64(v2)
-						v6, v8 := i.heap[v3].(types.TypedArray[int64])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -75658,10 +75658,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -75680,7 +75680,7 @@ var (
 						}
 						v0 := i.fr.upvals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[int64])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -75707,10 +75707,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -75729,7 +75729,7 @@ var (
 						}
 						v0 := i.globals[v6]
 						v1 := i.borrowI64(v0)
-						v2, v4 := i.heap[v3].(types.TypedArray[int64])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -75756,10 +75756,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -75779,7 +75779,7 @@ var (
 						v0 := i.fr.bp + v6
 						v1 := i.stack[v0]
 						v2 := i.borrowI64(v1)
-						v4, v7 := i.heap[v3].(types.TypedArray[int64])
+						v4, v7 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v7 {
 							panic(ErrTypeMismatch)
 						}
@@ -75806,10 +75806,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -75824,7 +75824,7 @@ var (
 							panic(trapped{ErrStackOverflow, 0})
 						}
 						v0 := i.borrowI64(v6)
-						v1, v2 := i.heap[v3].(types.TypedArray[int64])
+						v1, v2 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v2 {
 							panic(ErrTypeMismatch)
 						}
@@ -75851,10 +75851,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -75873,7 +75873,7 @@ var (
 						}
 						v0 := i.fr.upvals[v6]
 						v1 := i.borrowI64(v0)
-						v2, v4 := i.heap[v3].(types.TypedArray[int64])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -75900,10 +75900,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -75914,7 +75914,7 @@ var (
 						if i.sp == len(i.stack) {
 							panic(trapped{ErrStackOverflow, 0})
 						}
-						v0, v1 := i.heap[v3].(types.TypedArray[int64])
+						v0, v1 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v1 {
 							panic(ErrTypeMismatch)
 						}
@@ -75941,10 +75941,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -75971,7 +75971,7 @@ var (
 						}
 						v2 := i.globals[v7]
 						v4 := v2.I32()
-						v6, v8 := i.heap[v3].(types.TypedArray[int8])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -75998,10 +75998,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76029,7 +76029,7 @@ var (
 						v2 := i.fr.bp + v7
 						v4 := i.stack[v2]
 						v6 := v4.I32()
-						v8, v9 := i.heap[v3].(types.TypedArray[int8])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -76056,10 +76056,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76082,7 +76082,7 @@ var (
 						v0 := i.globals[v5]
 						v1 := v0.I32()
 						v2 := v7.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[int8])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -76109,10 +76109,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76139,7 +76139,7 @@ var (
 						}
 						v2 := i.fr.upvals[v7]
 						v4 := v2.I32()
-						v6, v8 := i.heap[v3].(types.TypedArray[int8])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -76166,10 +76166,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76188,7 +76188,7 @@ var (
 						}
 						v0 := i.globals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[int8])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -76215,10 +76215,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76246,7 +76246,7 @@ var (
 						}
 						v4 := i.globals[v7]
 						v6 := v4.I32()
-						v8, v9 := i.heap[v3].(types.TypedArray[int8])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -76273,10 +76273,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76305,7 +76305,7 @@ var (
 						v4 := i.fr.bp + v7
 						v6 := i.stack[v4]
 						v8 := v6.I32()
-						v9, v10 := i.heap[v3].(types.TypedArray[int8])
+						v9, v10 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v10 {
 							panic(ErrTypeMismatch)
 						}
@@ -76332,10 +76332,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76359,7 +76359,7 @@ var (
 						v1 := i.stack[v0]
 						v2 := v1.I32()
 						v4 := v7.I32()
-						v6, v8 := i.heap[v3].(types.TypedArray[int8])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -76386,10 +76386,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76417,7 +76417,7 @@ var (
 						}
 						v4 := i.fr.upvals[v7]
 						v6 := v4.I32()
-						v8, v9 := i.heap[v3].(types.TypedArray[int8])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -76444,10 +76444,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76467,7 +76467,7 @@ var (
 						v0 := i.fr.bp + v5
 						v1 := i.stack[v0]
 						v2 := v1.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[int8])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -76494,10 +76494,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76520,7 +76520,7 @@ var (
 						}
 						v1 := i.globals[v7]
 						v2 := v1.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[int8])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -76547,10 +76547,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76574,7 +76574,7 @@ var (
 						v1 := i.fr.bp + v7
 						v2 := i.stack[v1]
 						v4 := v2.I32()
-						v6, v8 := i.heap[v3].(types.TypedArray[int8])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -76601,10 +76601,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76623,7 +76623,7 @@ var (
 						}
 						v0 := v5.I32()
 						v1 := v7.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[int8])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -76650,10 +76650,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76676,7 +76676,7 @@ var (
 						}
 						v1 := i.fr.upvals[v7]
 						v2 := v1.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[int8])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -76703,10 +76703,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76721,7 +76721,7 @@ var (
 							panic(trapped{ErrStackOverflow, 0})
 						}
 						v0 := v5.I32()
-						v1, v2 := i.heap[v3].(types.TypedArray[int8])
+						v1, v2 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v2 {
 							panic(ErrTypeMismatch)
 						}
@@ -76748,10 +76748,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76778,7 +76778,7 @@ var (
 						}
 						v2 := i.globals[v7]
 						v4 := v2.I32()
-						v6, v8 := i.heap[v3].(types.TypedArray[int8])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -76805,10 +76805,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76836,7 +76836,7 @@ var (
 						v2 := i.fr.bp + v7
 						v4 := i.stack[v2]
 						v6 := v4.I32()
-						v8, v9 := i.heap[v3].(types.TypedArray[int8])
+						v8, v9 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v9 {
 							panic(ErrTypeMismatch)
 						}
@@ -76863,10 +76863,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76889,7 +76889,7 @@ var (
 						v0 := i.fr.upvals[v5]
 						v1 := v0.I32()
 						v2 := v7.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[int8])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -76916,10 +76916,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76946,7 +76946,7 @@ var (
 						}
 						v2 := i.fr.upvals[v7]
 						v4 := v2.I32()
-						v6, v8 := i.heap[v3].(types.TypedArray[int8])
+						v6, v8 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v8 {
 							panic(ErrTypeMismatch)
 						}
@@ -76973,10 +76973,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -76995,7 +76995,7 @@ var (
 						}
 						v0 := i.fr.upvals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[int8])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -77022,10 +77022,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -77044,7 +77044,7 @@ var (
 						}
 						v0 := i.globals[v6]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[int8])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -77071,10 +77071,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -77094,7 +77094,7 @@ var (
 						v0 := i.fr.bp + v6
 						v1 := i.stack[v0]
 						v2 := v1.I32()
-						v4, v7 := i.heap[v3].(types.TypedArray[int8])
+						v4, v7 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v7 {
 							panic(ErrTypeMismatch)
 						}
@@ -77121,10 +77121,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -77139,7 +77139,7 @@ var (
 							panic(trapped{ErrStackOverflow, 0})
 						}
 						v0 := v6.I32()
-						v1, v2 := i.heap[v3].(types.TypedArray[int8])
+						v1, v2 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v2 {
 							panic(ErrTypeMismatch)
 						}
@@ -77166,10 +77166,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -77188,7 +77188,7 @@ var (
 						}
 						v0 := i.fr.upvals[v6]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[int8])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -77215,10 +77215,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -77229,7 +77229,7 @@ var (
 						if i.sp == len(i.stack) {
 							panic(trapped{ErrStackOverflow, 0})
 						}
-						v0, v1 := i.heap[v3].(types.TypedArray[int8])
+						v0, v1 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v1 {
 							panic(ErrTypeMismatch)
 						}
@@ -78920,10 +78920,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -78941,7 +78941,7 @@ var (
 						}
 						v0 := i.globals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[bool])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -78969,10 +78969,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -78991,7 +78991,7 @@ var (
 						v0 := i.fr.bp + v5
 						v1 := i.stack[v0]
 						v2 := v1.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[bool])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -79019,10 +79019,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -79036,7 +79036,7 @@ var (
 							panic(trapped{ErrStackOverflow, 0})
 						}
 						v0 := v5.I32()
-						v1, v2 := i.heap[v3].(types.TypedArray[bool])
+						v1, v2 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v2 {
 							panic(ErrTypeMismatch)
 						}
@@ -79064,10 +79064,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -79085,7 +79085,7 @@ var (
 						}
 						v0 := i.fr.upvals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[bool])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -79113,10 +79113,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[bool])
+					_, v4 := c.heap.At(v3).(types.TypedArray[bool])
 					if !v4 {
 						return nil
 					}
@@ -79126,7 +79126,7 @@ var (
 						if i.sp == len(i.stack) {
 							panic(trapped{ErrStackOverflow, 0})
 						}
-						v0, v1 := i.heap[v3].(types.TypedArray[bool])
+						v0, v1 := i.heap.At(v3).(types.TypedArray[bool])
 						if !v1 {
 							panic(ErrTypeMismatch)
 						}
@@ -79154,10 +79154,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -79175,7 +79175,7 @@ var (
 						}
 						v0 := i.globals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[float32])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -79203,10 +79203,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -79225,7 +79225,7 @@ var (
 						v0 := i.fr.bp + v5
 						v1 := i.stack[v0]
 						v2 := v1.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[float32])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -79253,10 +79253,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -79270,7 +79270,7 @@ var (
 							panic(trapped{ErrStackOverflow, 0})
 						}
 						v0 := v5.I32()
-						v1, v2 := i.heap[v3].(types.TypedArray[float32])
+						v1, v2 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v2 {
 							panic(ErrTypeMismatch)
 						}
@@ -79298,10 +79298,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -79319,7 +79319,7 @@ var (
 						}
 						v0 := i.fr.upvals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[float32])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -79347,10 +79347,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float32])
 					if !v4 {
 						return nil
 					}
@@ -79360,7 +79360,7 @@ var (
 						if i.sp == len(i.stack) {
 							panic(trapped{ErrStackOverflow, 0})
 						}
-						v0, v1 := i.heap[v3].(types.TypedArray[float32])
+						v0, v1 := i.heap.At(v3).(types.TypedArray[float32])
 						if !v1 {
 							panic(ErrTypeMismatch)
 						}
@@ -79388,10 +79388,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -79409,7 +79409,7 @@ var (
 						}
 						v0 := i.globals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[float64])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -79437,10 +79437,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -79459,7 +79459,7 @@ var (
 						v0 := i.fr.bp + v5
 						v1 := i.stack[v0]
 						v2 := v1.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[float64])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -79487,10 +79487,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -79504,7 +79504,7 @@ var (
 							panic(trapped{ErrStackOverflow, 0})
 						}
 						v0 := v5.I32()
-						v1, v2 := i.heap[v3].(types.TypedArray[float64])
+						v1, v2 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v2 {
 							panic(ErrTypeMismatch)
 						}
@@ -79532,10 +79532,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -79553,7 +79553,7 @@ var (
 						}
 						v0 := i.fr.upvals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[float64])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -79581,10 +79581,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[float64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[float64])
 					if !v4 {
 						return nil
 					}
@@ -79594,7 +79594,7 @@ var (
 						if i.sp == len(i.stack) {
 							panic(trapped{ErrStackOverflow, 0})
 						}
-						v0, v1 := i.heap[v3].(types.TypedArray[float64])
+						v0, v1 := i.heap.At(v3).(types.TypedArray[float64])
 						if !v1 {
 							panic(ErrTypeMismatch)
 						}
@@ -79622,10 +79622,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -79643,7 +79643,7 @@ var (
 						}
 						v0 := i.globals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[int32])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -79671,10 +79671,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -79693,7 +79693,7 @@ var (
 						v0 := i.fr.bp + v5
 						v1 := i.stack[v0]
 						v2 := v1.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[int32])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -79721,10 +79721,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -79738,7 +79738,7 @@ var (
 							panic(trapped{ErrStackOverflow, 0})
 						}
 						v0 := v5.I32()
-						v1, v2 := i.heap[v3].(types.TypedArray[int32])
+						v1, v2 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v2 {
 							panic(ErrTypeMismatch)
 						}
@@ -79766,10 +79766,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -79787,7 +79787,7 @@ var (
 						}
 						v0 := i.fr.upvals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[int32])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -79815,10 +79815,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int32])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int32])
 					if !v4 {
 						return nil
 					}
@@ -79828,7 +79828,7 @@ var (
 						if i.sp == len(i.stack) {
 							panic(trapped{ErrStackOverflow, 0})
 						}
-						v0, v1 := i.heap[v3].(types.TypedArray[int32])
+						v0, v1 := i.heap.At(v3).(types.TypedArray[int32])
 						if !v1 {
 							panic(ErrTypeMismatch)
 						}
@@ -79856,10 +79856,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -79877,7 +79877,7 @@ var (
 						}
 						v0 := i.globals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[int64])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -79905,10 +79905,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -79927,7 +79927,7 @@ var (
 						v0 := i.fr.bp + v5
 						v1 := i.stack[v0]
 						v2 := v1.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[int64])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -79955,10 +79955,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -79972,7 +79972,7 @@ var (
 							panic(trapped{ErrStackOverflow, 0})
 						}
 						v0 := v5.I32()
-						v1, v2 := i.heap[v3].(types.TypedArray[int64])
+						v1, v2 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v2 {
 							panic(ErrTypeMismatch)
 						}
@@ -80000,10 +80000,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -80021,7 +80021,7 @@ var (
 						}
 						v0 := i.fr.upvals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[int64])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -80049,10 +80049,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int64])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int64])
 					if !v4 {
 						return nil
 					}
@@ -80062,7 +80062,7 @@ var (
 						if i.sp == len(i.stack) {
 							panic(trapped{ErrStackOverflow, 0})
 						}
-						v0, v1 := i.heap[v3].(types.TypedArray[int64])
+						v0, v1 := i.heap.At(v3).(types.TypedArray[int64])
 						if !v1 {
 							panic(ErrTypeMismatch)
 						}
@@ -80090,10 +80090,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -80111,7 +80111,7 @@ var (
 						}
 						v0 := i.globals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[int8])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -80139,10 +80139,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -80161,7 +80161,7 @@ var (
 						v0 := i.fr.bp + v5
 						v1 := i.stack[v0]
 						v2 := v1.I32()
-						v4, v6 := i.heap[v3].(types.TypedArray[int8])
+						v4, v6 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v6 {
 							panic(ErrTypeMismatch)
 						}
@@ -80189,10 +80189,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -80206,7 +80206,7 @@ var (
 							panic(trapped{ErrStackOverflow, 0})
 						}
 						v0 := v5.I32()
-						v1, v2 := i.heap[v3].(types.TypedArray[int8])
+						v1, v2 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v2 {
 							panic(ErrTypeMismatch)
 						}
@@ -80234,10 +80234,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -80255,7 +80255,7 @@ var (
 						}
 						v0 := i.fr.upvals[v5]
 						v1 := v0.I32()
-						v2, v4 := i.heap[v3].(types.TypedArray[int8])
+						v2, v4 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v4 {
 							panic(ErrTypeMismatch)
 						}
@@ -80283,10 +80283,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					_, v4 := c.heap[v3].(types.TypedArray[int8])
+					_, v4 := c.heap.At(v3).(types.TypedArray[int8])
 					if !v4 {
 						return nil
 					}
@@ -80296,7 +80296,7 @@ var (
 						if i.sp == len(i.stack) {
 							panic(trapped{ErrStackOverflow, 0})
 						}
-						v0, v1 := i.heap[v3].(types.TypedArray[int8])
+						v0, v1 := i.heap.At(v3).(types.TypedArray[int8])
 						if !v1 {
 							panic(ErrTypeMismatch)
 						}
@@ -80325,10 +80325,10 @@ var (
 						return nil
 					}
 					v4 := v2.Ref()
-					if v4 < 0 || v4 >= len(c.heap) {
+					if v4 < 0 || v4 >= c.heap.Len() {
 						return nil
 					}
-					if _, v0 := c.heap[v4].(types.String); v0 {
+					if _, v0 := c.heap.At(v4).(types.String); v0 {
 						return nil
 					}
 					c.ip += 3
@@ -80371,10 +80371,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					switch v0 := c.heap[v3].(type) {
+					switch v0 := c.heap.At(v3).(type) {
 					case *types.Function:
 						if v3 < len(c.coros) && c.coros[v3] {
 							return nil
@@ -80435,7 +80435,7 @@ var (
 							}
 							copy(i.stack[v6:v6+v1], i.stack[i.sp-v1:i.sp])
 							if v5.release {
-								i.release(v5.ref)
+								i.heap.Dec(v5.ref)
 							}
 							if v4 > 0 {
 								copy(i.stack[v6+v1:v6+v1+v4], i.zeros[v3])
@@ -80456,7 +80456,7 @@ var (
 							}
 						}
 					case *types.Closure:
-						v1, v2 := c.heap[v0.Fn].(*types.Function)
+						v1, v2 := c.heap.At(int(v0.Fn)).(*types.Function)
 						if !v2 {
 							return nil
 						}
@@ -80519,7 +80519,7 @@ var (
 							}
 							copy(i.stack[v7:v7+v4], i.stack[i.sp-v4:i.sp])
 							if v2.release {
-								i.release(v2.ref)
+								i.heap.Dec(v2.ref)
 							}
 							if v6 > 0 {
 								copy(i.stack[v7+v4:v7+v4+v6], i.zeros[int(v0.Fn)])
@@ -80572,7 +80572,7 @@ var (
 									}
 								}
 								if !v1 {
-									i.release(v0.Ref())
+									i.heap.Dec(v0.Ref())
 								}
 							}
 							i.sp += v2 - v1
@@ -80584,7 +80584,7 @@ var (
 								}
 								if v0.coro != 0 {
 									v1 := v0.coro
-									v2, v3 := i.heap[v1].(*coroutine)
+									v2, v3 := i.heap.At(v1).(*coroutine)
 									if !v3 {
 										panic(ErrTypeMismatch)
 									}
@@ -80597,14 +80597,14 @@ var (
 										for _, v1 := range i.stack[v0.bp:i.sp] {
 											i.releaseBox(v1)
 										}
-										i.retain(0)
+										i.heap.Inc(0, 1)
 										v2.value = types.BoxedNull
 									}
 									v2.done = true
 									v2.image = v2.image[:0]
 									v2.upvals = nil
 									if v0.release {
-										i.release(v0.ref)
+										i.heap.Dec(v0.ref)
 									}
 									v2.ref = 0
 									v2.release = false
@@ -80634,7 +80634,7 @@ var (
 								}
 								i.sp = v0.bp + v0.returns
 								if v0.release {
-									i.release(v0.ref)
+									i.heap.Dec(v0.ref)
 								}
 								v0.code = nil
 								i.fp--
@@ -80659,10 +80659,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					switch v0 := c.heap[v3].(type) {
+					switch v0 := c.heap.At(v3).(type) {
 					case *types.Function:
 						v1 := len(v0.Captures)
 						c.ip += 3
@@ -80675,10 +80675,10 @@ var (
 							}
 							v2 := i.sp - v1
 							v4 := append([]types.Boxed{}, i.stack[v2:v2+v1]...)
-							i.retain(v3)
+							i.heap.Inc(v3, 1)
 							v5 := types.NewClosure(v0.Typ, types.Ref(v3), v4)
 							i.sp = v2
-							i.stack[i.sp] = types.BoxRef(i.alloc(v5))
+							i.stack[i.sp] = types.BoxRef(i.heap.Add(v5))
 							i.sp++
 							i.fr.ip += 4
 						}
@@ -80700,10 +80700,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					switch v0 := c.heap[v3].(type) {
+					switch v0 := c.heap.At(v3).(type) {
 					case *types.Function:
 						if v3 < len(c.coros) && c.coros[v3] {
 							return nil
@@ -80753,7 +80753,7 @@ var (
 							}
 						}
 					case *types.Closure:
-						v1, v2 := c.heap[v0.Fn].(*types.Function)
+						v1, v2 := c.heap.At(int(v0.Fn)).(*types.Function)
 						if !v2 {
 							return nil
 						}
@@ -80834,7 +80834,7 @@ var (
 									}
 								}
 								if !v1 {
-									i.release(v0.Ref())
+									i.heap.Dec(v0.Ref())
 								}
 							}
 							i.sp += v2 - v1
@@ -81674,7 +81674,7 @@ var (
 						}
 						v3 := v2.Ref()
 						v4 := i.arrayGet(v3, int(v0))
-						i.release(v3)
+						i.heap.Dec(v3)
 						i.sp--
 						i.stack[i.sp] = v4
 						i.sp++
@@ -81706,7 +81706,7 @@ var (
 						}
 						v3 := v2.Ref()
 						v4 := i.structGet(v3, int(v0))
-						i.release(v3)
+						i.heap.Dec(v3)
 						i.sp--
 						i.stack[i.sp] = v4
 						i.sp++
@@ -83020,10 +83020,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					if _, v0 := c.heap[v3].(types.String); v0 {
+					if _, v0 := c.heap.At(v3).(types.String); v0 {
 						return nil
 					}
 					c.ip += 3
@@ -83045,10 +83045,10 @@ var (
 						return nil
 					}
 					v3 := v1.Ref()
-					if v3 < 0 || v3 >= len(c.heap) {
+					if v3 < 0 || v3 >= c.heap.Len() {
 						return nil
 					}
-					if _, v0 := c.heap[v3].(types.String); v0 {
+					if _, v0 := c.heap.At(v3).(types.String); v0 {
 						return nil
 					}
 					c.ip += 3
@@ -91210,7 +91210,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -91273,7 +91273,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -91331,7 +91331,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -91393,7 +91393,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -91447,7 +91447,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -91510,7 +91510,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -91574,7 +91574,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -91633,7 +91633,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -91696,7 +91696,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -91751,7 +91751,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -91809,7 +91809,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -91868,7 +91868,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -91922,7 +91922,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -91980,7 +91980,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -92030,7 +92030,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -92092,7 +92092,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -92155,7 +92155,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -92213,7 +92213,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -92275,7 +92275,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -92329,7 +92329,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -92383,7 +92383,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -92438,7 +92438,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -92488,7 +92488,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -92542,7 +92542,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -92588,7 +92588,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -92642,7 +92642,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -92704,7 +92704,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -92767,7 +92767,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -92825,7 +92825,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -92887,7 +92887,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -92942,7 +92942,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -93005,7 +93005,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -93069,7 +93069,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -93128,7 +93128,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -93191,7 +93191,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -93241,7 +93241,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -93299,7 +93299,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -93358,7 +93358,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -93412,7 +93412,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -93470,7 +93470,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -93524,7 +93524,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -93586,7 +93586,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -93649,7 +93649,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -93707,7 +93707,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -93769,7 +93769,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -93815,7 +93815,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -93869,7 +93869,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -93924,7 +93924,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -93974,7 +93974,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -94028,7 +94028,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -94082,7 +94082,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -94144,7 +94144,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -94207,7 +94207,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -94265,7 +94265,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -94327,7 +94327,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -94382,7 +94382,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -94445,7 +94445,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -94509,7 +94509,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -94568,7 +94568,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -94631,7 +94631,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -94681,7 +94681,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -94739,7 +94739,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -94798,7 +94798,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -94852,7 +94852,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -94910,7 +94910,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -94964,7 +94964,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -95026,7 +95026,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -95089,7 +95089,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -95147,7 +95147,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -95209,7 +95209,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -95255,7 +95255,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -95309,7 +95309,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -95364,7 +95364,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -95414,7 +95414,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -95468,7 +95468,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -95530,7 +95530,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -95593,7 +95593,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -95651,7 +95651,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -95713,7 +95713,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -95767,7 +95767,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -95830,7 +95830,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -95894,7 +95894,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -95953,7 +95953,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -96016,7 +96016,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -96071,7 +96071,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -96129,7 +96129,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -96188,7 +96188,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -96242,7 +96242,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -96300,7 +96300,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -96350,7 +96350,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -96412,7 +96412,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -96475,7 +96475,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -96533,7 +96533,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -96595,7 +96595,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -96649,7 +96649,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -96703,7 +96703,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -96758,7 +96758,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -96808,7 +96808,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -96862,7 +96862,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -96908,7 +96908,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -96970,7 +96970,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -97033,7 +97033,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -97091,7 +97091,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -97153,7 +97153,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -97207,7 +97207,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -97270,7 +97270,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -97334,7 +97334,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -97393,7 +97393,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -97456,7 +97456,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -97511,7 +97511,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -97569,7 +97569,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -97628,7 +97628,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -97682,7 +97682,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -97740,7 +97740,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -97790,7 +97790,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -97852,7 +97852,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -97915,7 +97915,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -97973,7 +97973,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -98035,7 +98035,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -98089,7 +98089,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -98143,7 +98143,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -98198,7 +98198,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -98248,7 +98248,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -98302,7 +98302,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -98348,7 +98348,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -98410,7 +98410,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -98473,7 +98473,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -98531,7 +98531,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -98593,7 +98593,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -98647,7 +98647,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -98710,7 +98710,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -98774,7 +98774,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v11 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v11 < 0 || v11+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -98833,7 +98833,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -98896,7 +98896,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -98951,7 +98951,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -99009,7 +99009,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -99068,7 +99068,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -99122,7 +99122,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -99180,7 +99180,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -99230,7 +99230,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -99292,7 +99292,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -99355,7 +99355,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v10 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v10 < 0 || v10+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -99413,7 +99413,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -99475,7 +99475,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v9 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v9 < 0 || v9+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -99529,7 +99529,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -99583,7 +99583,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -99638,7 +99638,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v8 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v8 < 0 || v8+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -99688,7 +99688,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -99742,7 +99742,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -99788,7 +99788,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -114319,7 +114319,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -114351,7 +114351,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -114383,7 +114383,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -114415,7 +114415,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -114447,7 +114447,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -114479,7 +114479,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -114511,7 +114511,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v8 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -114571,7 +114571,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -114603,7 +114603,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -114635,7 +114635,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -114667,7 +114667,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -114699,7 +114699,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -114731,7 +114731,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -114763,7 +114763,7 @@ var (
 							if v0.Kind() != types.KindRef {
 								panic(ErrTypeMismatch)
 							}
-							if v0, v1 := i.heap[v2].(*types.Struct); v1 {
+							if v0, v1 := i.heap.At(v2).(*types.Struct); v1 {
 								if v6 >= len(v0.Typ.Fields) {
 									panic(ErrSegmentationFault)
 								}
@@ -114826,7 +114826,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -114882,7 +114882,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -114933,7 +114933,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -114988,7 +114988,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115035,7 +115035,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[bool]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[bool]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115090,7 +115090,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115146,7 +115146,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115197,7 +115197,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115252,7 +115252,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115299,7 +115299,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float32]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115354,7 +115354,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115410,7 +115410,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115461,7 +115461,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115516,7 +115516,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115563,7 +115563,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[float64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[float64]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115618,7 +115618,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115674,7 +115674,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115725,7 +115725,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115780,7 +115780,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115827,7 +115827,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int32]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int32]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115882,7 +115882,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115938,7 +115938,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -115989,7 +115989,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -116044,7 +116044,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -116091,7 +116091,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int64]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int64]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -116146,7 +116146,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -116202,7 +116202,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v7 := int(v6)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v7 < 0 || v7+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -116253,7 +116253,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v4 := int(v3)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v4 < 0 || v4+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -116308,7 +116308,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v6 := int(v4)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v6 < 0 || v6+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -116355,7 +116355,7 @@ var (
 							panic(ErrTypeMismatch)
 						}
 						v3 := int(v5)
-						if v0, v1 := i.heap[v2].(types.TypedArray[int8]); v1 {
+						if v0, v1 := i.heap.At(v2).(types.TypedArray[int8]); v1 {
 							if v3 < 0 || v3+1 > len(v0) {
 								panic(ErrIndexOutOfRange)
 							}
@@ -119402,7 +119402,7 @@ var (
 						}
 						v2 := v0.Ref()
 						v3 := i.arrayGet(v2, int(v1))
-						i.release(v2)
+						i.heap.Dec(v2)
 						i.sp--
 						i.stack[i.sp] = v3
 						i.sp++
@@ -119430,7 +119430,7 @@ var (
 						}
 						v2 := v0.Ref()
 						v3 := i.structGet(v2, int(v1))
-						i.release(v2)
+						i.heap.Dec(v2)
 						i.sp--
 						i.stack[i.sp] = v3
 						i.sp++
@@ -125225,10 +125225,10 @@ func (c *threader) constant(at int, kind types.Kind) (types.Boxed, bool) {
 		case types.KindI64:
 		case types.KindRef:
 			v0 := v1.Ref()
-			if v0 < 0 || v0 >= len(c.heap) {
+			if v0 < 0 || v0 >= c.heap.Len() {
 				return types.Boxed(0), false
 			}
-			if _, v1 := c.heap[v0].(types.I64); !v1 {
+			if _, v1 := c.heap.At(v0).(types.I64); !v1 {
 				return types.Boxed(0), false
 			}
 		default:

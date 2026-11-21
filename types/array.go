@@ -84,8 +84,16 @@ func TypeF64Array() *ArrayType {
 	return typeF64Array
 }
 
-// NewArray returns an array of type typ holding elems.
-func NewArray(typ *ArrayType, elems ...Boxed) *Array {
+// NewArray returns an array of type typ holding elems. A non-nil heap supplies
+// a header it kept for reuse, which holds elems in the storage it kept.
+func NewArray(heap *Heap, typ *ArrayType, elems ...Boxed) *Array {
+	if heap != nil {
+		if a, ok := heap.arrays.get(); ok {
+			a.Typ = typ
+			a.Elems = append(a.Elems[:0], elems...)
+			return a
+		}
+	}
 	return &Array{Typ: typ, Elems: elems}
 }
 

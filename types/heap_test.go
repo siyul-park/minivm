@@ -1,0 +1,494 @@
+package types_test
+
+import (
+	"math"
+	"testing"
+
+	types "github.com/siyul-park/minivm/types"
+	"github.com/stretchr/testify/require"
+)
+
+type closer struct{ types.I32 }
+
+func (c *closer) Close() error { return nil }
+
+func TestHeap(t *testing.T) {
+	t.Run("collects an unreachable cycle", func(t *testing.T) {
+		typ := types.NewArrayType(types.TypeAny())
+		h := types.NewHeap(8, 8, types.Hooks{})
+		h.Add(types.Null)
+		h.Recount(nil)
+		a, b := types.NewArray(nil, typ), types.NewArray(nil, typ)
+		ra, rb := h.Add(a), h.Add(b)
+		a.Elems, b.Elems = []types.Boxed{types.BoxRef(rb)}, []types.Boxed{types.BoxRef(ra)}
+		for range 5 {
+			h.Add(types.I32(1))
+		}
+
+		h.Add(types.I32(2))
+		require.Equal(t, 7, h.Live())
+		require.NotEqual(t, types.Value(a), h.At(ra))
+		require.NotEqual(t, types.Value(b), h.At(rb))
+	})
+
+	t.Run("keeps a cycle a root holds until the root lets go", func(t *testing.T) {
+		typ := types.NewArrayType(types.TypeAny())
+		h := types.NewHeap(8, 0, types.Hooks{})
+		h.Add(types.Null)
+		h.Recount(nil)
+		a, b := types.NewArray(nil, typ), types.NewArray(nil, typ)
+		ra, rb := h.Add(a), h.Add(b)
+		a.Elems, b.Elems = []types.Boxed{types.BoxRef(rb)}, []types.Boxed{types.BoxRef(ra)}
+		h.Inc(ra, 1)
+
+		for h.Room() > 0 {
+			h.Add(types.I32(1))
+		}
+		h.Add(types.I32(2))
+		require.True(t, h.Alive(ra))
+		require.True(t, h.Alive(rb))
+
+		h.Dec(ra)
+		for h.Room() > 0 {
+			h.Add(types.I32(1))
+		}
+		h.Add(types.I32(2))
+		require.NotEqual(t, types.Value(a), h.At(ra))
+		require.NotEqual(t, types.Value(b), h.At(rb))
+	})
+
+	t.Run("counts null like any slot", func(t *testing.T) {
+		h := types.NewHeap(2, 0, types.Hooks{})
+		h.Add(types.Null)
+		h.Inc(0, 1)
+		require.Equal(t, 2, h.Count(0))
+	})
+}
+
+func TestHooks(t *testing.T) {
+	t.Run("exhaust frees space and the heap retries", func(t *testing.T) {
+		var h *types.Heap
+		calls := 0
+		h = types.NewHeap(2, 2, types.Hooks{Exhaust: func() {
+			calls++
+			h.Dec(1)
+		}})
+		h.Add(types.Null)
+		h.Add(types.I32(1))
+
+		addr := h.Add(types.I32(2))
+		require.Equal(t, 1, calls)
+		require.Equal(t, 1, addr)
+		require.Equal(t, types.I32(2), h.At(addr))
+	})
+
+	t.Run("nil exhaust panics at the limit", func(t *testing.T) {
+		h := types.NewHeap(2, 2, types.Hooks{})
+		h.Add(types.Null)
+		h.Add(types.I32(1))
+		require.Panics(t, func() { h.Add(types.I32(2)) })
+	})
+
+	t.Run("fault panics from a collection that finds corruption", func(t *testing.T) {
+		h := types.NewHeap(2, 2, types.Hooks{Fault: func() { panic("fault") }})
+		h.Add(types.Null)
+		h.Add(types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(9)))
+		require.PanicsWithValue(t, "fault", func() { h.Add(types.I32(1)) })
+	})
+
+	t.Run("nil fault panics from a collection that finds corruption", func(t *testing.T) {
+		h := types.NewHeap(2, 2, types.Hooks{})
+		h.Add(types.Null)
+		h.Add(types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(9)))
+		require.Panics(t, func() { h.Add(types.I32(1)) })
+	})
+
+	t.Run("finalize sees only functions and closers leaving their slot", func(t *testing.T) {
+		var got []int
+		h := types.NewHeap(4, 0, types.Hooks{Finalize: func(addr int, _ types.Value) { got = append(got, addr) }})
+		fn := h.Add(&types.Function{Typ: &types.FunctionType{}})
+		cl := h.Add(&closer{})
+		plain := h.Add(types.I32(1))
+
+		h.Dec(plain)
+		require.Empty(t, got)
+		h.Dec(fn)
+		h.Dec(cl)
+		require.Equal(t, []int{fn, cl}, got)
+	})
+
+	t.Run("nil finalize does nothing", func(t *testing.T) {
+		h := types.NewHeap(2, 0, types.Hooks{})
+		addr := h.Add(&closer{})
+		require.NotPanics(t, func() { h.Dec(addr) })
+	})
+
+	t.Run("collect reports the slots walked and freed", func(t *testing.T) {
+		var slots, freed, calls int
+		h := types.NewHeap(8, 8, types.Hooks{Collect: func(s, f int) { slots, freed, calls = s, f, calls+1 }})
+		typ := types.NewArrayType(types.TypeAny())
+		h.Add(types.Null)
+		h.Recount(nil)
+		for range 3 {
+			a, b := types.NewArray(nil, typ), types.NewArray(nil, typ)
+			ra, rb := h.Add(a), h.Add(b)
+			a.Elems, b.Elems = []types.Boxed{types.BoxRef(rb)}, []types.Boxed{types.BoxRef(ra)}
+		}
+		h.Add(types.I32(1))
+		require.Zero(t, calls)
+
+		h.Add(types.I32(2))
+		require.Equal(t, 1, calls)
+		require.Equal(t, 8, slots)
+		require.Equal(t, 6, freed)
+	})
+
+	t.Run("nil collect does nothing", func(t *testing.T) {
+		h := types.NewHeap(2, 2, types.Hooks{})
+		h.Add(types.Null)
+		h.Add(types.I32(1))
+		h.Dec(1)
+		require.NotPanics(t, func() { h.Add(types.I32(2)) })
+	})
+}
+
+func TestNewHeap(t *testing.T) {
+	t.Run("starts empty", func(t *testing.T) {
+		h := types.NewHeap(4, 0, types.Hooks{})
+		require.Equal(t, 0, h.Len())
+		require.Equal(t, 0, h.Live())
+		require.Equal(t, 0, h.Limit())
+	})
+
+	t.Run("keeps the limit", func(t *testing.T) {
+		h := types.NewHeap(4, 7, types.Hooks{})
+		require.Equal(t, 7, h.Limit())
+	})
+}
+
+func TestHeap_At(t *testing.T) {
+	h := types.NewHeap(2, 0, types.Hooks{})
+	addr := h.Add(types.I32(7))
+	require.Equal(t, types.I32(7), h.At(addr))
+}
+
+func TestHeap_Set(t *testing.T) {
+	h := types.NewHeap(2, 0, types.Hooks{})
+	addr := h.Add(types.I32(7))
+	h.Set(addr, types.I32(8))
+	require.Equal(t, types.I32(8), h.At(addr))
+	require.Equal(t, 1, h.Count(addr))
+}
+
+func TestHeap_Add(t *testing.T) {
+	t.Run("returns a new address with one reference", func(t *testing.T) {
+		h := types.NewHeap(2, 0, types.Hooks{})
+		first, second := h.Add(types.I32(1)), h.Add(types.I32(2))
+		require.Equal(t, 0, first)
+		require.Equal(t, 1, second)
+		require.Equal(t, 1, h.Count(second))
+	})
+
+	t.Run("reuses the last freed slot", func(t *testing.T) {
+		h := types.NewHeap(4, 0, types.Hooks{})
+		a, b := h.Add(types.I32(1)), h.Add(types.I32(2))
+		h.Dec(a)
+		h.Dec(b)
+		require.Equal(t, b, h.Add(types.I32(3)))
+		require.Equal(t, a, h.Add(types.I32(4)))
+	})
+
+	t.Run("grows past its capacity", func(t *testing.T) {
+		h := types.NewHeap(0, 0, types.Hooks{})
+		for n := range 9 {
+			require.Equal(t, n, h.Add(types.I32(n)))
+		}
+		require.Equal(t, 9, h.Len())
+		require.Equal(t, types.I32(8), h.At(8))
+	})
+}
+
+func TestHeap_Inc(t *testing.T) {
+	h := types.NewHeap(2, 0, types.Hooks{})
+	addr := h.Add(types.I32(1))
+	h.Inc(addr, 3)
+	require.Equal(t, 4, h.Count(addr))
+}
+
+func TestHeap_Dec(t *testing.T) {
+	t.Run("keeps a value another reference holds", func(t *testing.T) {
+		h := types.NewHeap(2, 0, types.Hooks{})
+		addr := h.Add(types.I32(1))
+		h.Inc(addr, 1)
+		h.Dec(addr)
+		require.True(t, h.Alive(addr))
+		require.Equal(t, 1, h.Count(addr))
+	})
+
+	t.Run("releases what the last reference held", func(t *testing.T) {
+		h := types.NewHeap(4, 0, types.Hooks{})
+		child := h.Add(types.I32(1))
+		grandchild := h.Add(types.NewArray(nil, types.NewArrayType(types.TypeAny())))
+		parent := h.Add(types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(child), types.BoxRef(grandchild)))
+
+		h.Dec(parent)
+		require.False(t, h.Alive(parent))
+		require.False(t, h.Alive(child))
+		require.False(t, h.Alive(grandchild))
+	})
+}
+
+func TestHeap_Count(t *testing.T) {
+	h := types.NewHeap(2, 0, types.Hooks{})
+	addr := h.Add(types.I32(1))
+	require.Equal(t, 1, h.Count(addr))
+	h.Inc(addr, 2)
+	require.Equal(t, 3, h.Count(addr))
+}
+
+func TestHeap_Alive(t *testing.T) {
+	h := types.NewHeap(2, 0, types.Hooks{})
+	addr := h.Add(types.I32(1))
+	freed := h.Add(types.I32(2))
+	h.Dec(freed)
+
+	for _, tt := range []struct {
+		name string
+		addr int
+		want bool
+	}{
+		{name: "allocated", addr: addr, want: true},
+		{name: "freed", addr: freed, want: false},
+		{name: "negative", addr: -1, want: false},
+		{name: "past the heap", addr: 2, want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, h.Alive(tt.addr))
+		})
+	}
+}
+
+func TestHeap_Len(t *testing.T) {
+	h := types.NewHeap(2, 0, types.Hooks{})
+	h.Add(types.I32(1))
+	h.Add(types.I32(2))
+	h.Dec(0)
+	require.Equal(t, 2, h.Len())
+}
+
+func TestHeap_Live(t *testing.T) {
+	h := types.NewHeap(2, 0, types.Hooks{})
+	h.Add(types.I32(1))
+	h.Add(types.I32(2))
+	h.Dec(0)
+	require.Equal(t, 1, h.Live())
+}
+
+func TestHeap_Dispose(t *testing.T) {
+	var finalized []int
+	h := types.NewHeap(4, 0, types.Hooks{Finalize: func(addr int, _ types.Value) { finalized = append(finalized, addr) }})
+	child := h.Add(types.I32(1))
+	holder := h.Add(types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(child)))
+	old := h.At(holder)
+	h.Set(holder, &closer{})
+
+	h.Dispose(holder, old)
+	require.False(t, h.Alive(child))
+	require.True(t, h.Alive(holder))
+	require.Equal(t, 1, h.Count(holder))
+	require.Empty(t, finalized)
+
+	h.Dispose(holder, h.At(holder))
+	require.Equal(t, []int{holder}, finalized)
+}
+
+func TestHeap_Recount(t *testing.T) {
+	t.Run("counts roots and edges", func(t *testing.T) {
+		h := types.NewHeap(4, 0, types.Hooks{})
+		h.Add(types.Null)
+		leaf := h.Add(types.I32(1))
+		root := h.Add(types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(leaf)))
+		h.Inc(leaf, 5)
+
+		h.Recount([]types.Boxed{types.BoxRef(root), types.BoxI32(1)})
+		require.Equal(t, 1, h.Count(0))
+		require.Equal(t, 1, h.Count(leaf))
+		require.Equal(t, 1, h.Count(root))
+	})
+
+	t.Run("paces from the baseline", func(t *testing.T) {
+		h := types.NewHeap(4, 0, types.Hooks{})
+		h.Add(types.Null)
+		h.Recount(nil)
+		require.Equal(t, 64, h.Room())
+	})
+
+	t.Run("waits for a fresh heap's capacity, then paces a reloaded one from the live set", func(t *testing.T) {
+		h := types.NewHeap(256, 0, types.Hooks{})
+		h.Add(types.Null)
+		h.Recount(nil)
+		require.Equal(t, 255, h.Room())
+
+		h.Reset()
+		h.Add(types.Null)
+		h.Recount(nil)
+		require.Equal(t, 64, h.Room())
+	})
+
+	t.Run("paces within the limit", func(t *testing.T) {
+		h := types.NewHeap(4, 10, types.Hooks{})
+		h.Add(types.Null)
+		h.Recount(nil)
+		require.Equal(t, 9, h.Room())
+	})
+}
+
+func TestHeap_Reset(t *testing.T) {
+	t.Run("finalizes live dynamic values and empties the heap", func(t *testing.T) {
+		var finalized []int
+		h := types.NewHeap(8, 0, types.Hooks{Finalize: func(addr int, _ types.Value) { finalized = append(finalized, addr) }})
+		h.Add(&closer{})
+		h.Recount(nil)
+		live := h.Add(&closer{})
+		freed := h.Add(&closer{})
+		h.Dec(freed)
+		finalized = nil
+
+		h.Reset()
+		require.Equal(t, []int{live}, finalized)
+		require.Equal(t, 0, h.Len())
+		require.Equal(t, 0, h.Live())
+		require.Equal(t, math.MaxInt, h.Room())
+	})
+
+	t.Run("keeps freed structs for reuse", func(t *testing.T) {
+		typ := types.NewStructType(types.NewStructField(types.TypeI32()))
+		h := types.NewHeap(4, 0, types.Hooks{})
+		h.Add(types.Null)
+		h.Recount(nil)
+		s := types.NewStruct(nil, typ)
+		h.Add(s)
+
+		h.Reset()
+		require.Same(t, s, types.NewStruct(h, typ))
+	})
+}
+
+func TestHeap_Drain(t *testing.T) {
+	typ := types.NewStructType(types.NewStructField(types.TypeI32()))
+	h := types.NewHeap(4, 0, types.Hooks{})
+	s := types.NewStruct(nil, typ)
+	h.Dec(h.Add(s))
+
+	h.Drain()
+	require.NotSame(t, s, types.NewStruct(h, typ))
+}
+
+func TestHeap_Undo(t *testing.T) {
+	t.Run("frees an unpublished value without finalizing it", func(t *testing.T) {
+		finalized := 0
+		h := types.NewHeap(4, 0, types.Hooks{Finalize: func(int, types.Value) { finalized++ }})
+		addr := h.Add(&closer{})
+
+		h.Undo(addr)
+		require.False(t, h.Alive(addr))
+		require.Equal(t, 0, h.Live())
+		require.Zero(t, finalized)
+	})
+
+	t.Run("returns the nulls a generic array holds and keeps its storage", func(t *testing.T) {
+		typ := types.NewArrayType(types.TypeAny())
+		h := types.NewHeap(4, 0, types.Hooks{})
+		h.Add(types.Null)
+		h.Inc(0, 2)
+		array := types.NewArray(nil, typ, types.BoxedNull, types.BoxedNull)
+		addr := h.Add(array)
+
+		h.Undo(addr)
+		require.Equal(t, 1, h.Count(0))
+		reused := types.NewArray(h, typ)
+		require.Same(t, array, reused)
+		require.Empty(t, reused.Elems)
+		require.GreaterOrEqual(t, cap(reused.Elems), 2)
+	})
+}
+
+func TestHeap_Mark(t *testing.T) {
+	h := types.NewHeap(4, 0, types.Hooks{})
+	require.Equal(t, 0, h.Mark())
+	h.Dec(h.Add(types.I32(1)))
+	require.Equal(t, 1, h.Mark())
+}
+
+func TestHeap_Shrink(t *testing.T) {
+	t.Run("drops the freed slots that end the heap", func(t *testing.T) {
+		h := types.NewHeap(4, 0, types.Hooks{})
+		h.Add(types.I32(0))
+		mark := h.Mark()
+		a, b := h.Add(types.I32(1)), h.Add(types.I32(2))
+		h.Dec(a)
+		h.Dec(b)
+
+		h.Shrink(mark)
+		require.Equal(t, 1, h.Len())
+		require.Equal(t, 1, h.Live())
+	})
+
+	t.Run("keeps the freed slots inside the heap", func(t *testing.T) {
+		h := types.NewHeap(4, 0, types.Hooks{})
+		h.Add(types.I32(0))
+		mark := h.Mark()
+		a := h.Add(types.I32(1))
+		h.Add(types.I32(2))
+		h.Dec(a)
+
+		h.Shrink(mark)
+		require.Equal(t, 3, h.Len())
+		require.Equal(t, 2, h.Live())
+		require.Equal(t, a, h.Add(types.I32(3)))
+	})
+}
+
+func TestHeap_Room(t *testing.T) {
+	t.Run("is unbounded before a baseline", func(t *testing.T) {
+		h := types.NewHeap(2, 0, types.Hooks{})
+		require.Equal(t, math.MaxInt, h.Room())
+	})
+
+	t.Run("shrinks as the heap fills", func(t *testing.T) {
+		h := types.NewHeap(4, 0, types.Hooks{})
+		h.Add(types.Null)
+		h.Recount(nil)
+		before := h.Room()
+		h.Add(types.I32(1))
+		require.Equal(t, before-1, h.Room())
+	})
+}
+
+func TestHeap_Limit(t *testing.T) {
+	h := types.NewHeap(2, 5, types.Hooks{})
+	require.Equal(t, 5, h.Limit())
+}
+
+func TestHeap_SetLimit(t *testing.T) {
+	h := types.NewHeap(2, 2, types.Hooks{})
+	h.Add(types.I32(0))
+	h.Add(types.I32(1))
+	require.Panics(t, func() { h.Add(types.I32(2)) })
+
+	h.SetLimit(0)
+	require.Equal(t, 0, h.Limit())
+	require.NotPanics(t, func() { h.Add(types.I32(2)) })
+}
+
+func TestHeap_Bases(t *testing.T) {
+	h := types.NewHeap(1, 0, types.Hooks{})
+	h.Add(types.I32(0))
+	objects, rc := h.Bases()
+	require.NotZero(t, objects)
+	require.NotZero(t, rc)
+
+	h.Add(types.I32(1))
+	grown, _ := h.Bases()
+	require.NotEqual(t, objects, grown)
+}

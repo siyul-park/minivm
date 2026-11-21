@@ -1482,7 +1482,7 @@ var runTests = []struct {
 			[]instr.Instruction{instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0)},
 			program.WithTypes(types.NewArrayType(types.TypeAny())),
 		),
-		values: []types.Value{types.NewArray(types.NewArrayType(types.TypeAny()), types.BoxedNull, types.BoxedNull)},
+		values: []types.Value{types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxedNull, types.BoxedNull)},
 	},
 	{
 		program: program.New([]instr.Instruction{
@@ -1586,7 +1586,7 @@ var runTests = []struct {
 		program: program.New([]instr.Instruction{
 			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.F64_CONST, math.Float64bits(2.5)), instr.MustNew(instr.STRUCT_NEW, 0),
 		}, program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64())))),
-		values: []types.Value{types.NewStruct(
+		values: []types.Value{types.NewStruct(nil,
 			types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64())),
 			types.BoxI32(7), types.BoxF64(2.5),
 		)},
@@ -1594,7 +1594,7 @@ var runTests = []struct {
 	{
 		program: program.New([]instr.Instruction{instr.MustNew(instr.STRUCT_NEW_DEFAULT, 0)},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64())))),
-		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64())))},
+		values: []types.Value{types.NewStruct(nil, types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64())))},
 	},
 	{
 		program: program.New([]instr.Instruction{
@@ -2074,7 +2074,7 @@ var runTests = []struct {
 			instr.MustNew(instr.CONST_GET, 0),
 			instr.MustNew(instr.I32_CONST, 0),
 			instr.MustNew(instr.STRUCT_GET),
-		}, program.WithConstants(types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32())), types.BoxI32(7)))),
+		}, program.WithConstants(types.NewStruct(nil, types.NewStructType(types.NewStructField(types.TypeI32())), types.BoxI32(7)))),
 		values: []types.Value{types.I32(7)},
 	},
 	{
@@ -3069,8 +3069,8 @@ func TestWithHeapLimit(t *testing.T) {
 		const midAddr = 2
 
 		leaf := &trackedValue{}
-		mid := types.NewArray(types.NewArrayType(types.TypeAny()), types.BoxRef(leafAddr))
-		root := types.NewArray(types.NewArrayType(types.TypeAny()), types.BoxRef(midAddr), types.BoxRef(midAddr))
+		mid := types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(leafAddr))
+		root := types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(midAddr), types.BoxRef(midAddr))
 		prog := program.New(nil, program.WithConstants(leaf, mid, root))
 		i := interp.MustNew(prog, interp.WithHeap(4), interp.WithHeapLimit(4))
 		defer i.Close()
@@ -7867,7 +7867,7 @@ func TestWithThreshold(t *testing.T) {
 		sumFn := sum.MustBuild()
 		sumFn.Locals = []types.Type{types.TypeI32(), types.TypeI32()}
 
-		arr := types.NewArray(types.NewArrayType(types.TypeI32()), types.BoxI32(10), types.BoxI32(20), types.BoxI32(30), types.BoxI32(40))
+		arr := types.NewArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(10), types.BoxI32(20), types.BoxI32(30), types.BoxI32(40))
 		b := instr.NewBuilder()
 		loop, loopDone := b.Label(), b.Label()
 		b.Bind(loop)
@@ -8039,7 +8039,7 @@ func TestWithThreshold(t *testing.T) {
 		})
 		at.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.RETURN))
 		atFn := at.MustBuild()
-		arr := types.NewArray(types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
+		arr := types.NewArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
 
 		b := instr.NewBuilder()
 		warmLoop, warmDone, start, end, catch := b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
@@ -8163,7 +8163,7 @@ func TestWithThreshold(t *testing.T) {
 		at.Bind(count).Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 8), instr.MustNew(instr.I32_GE_S)).BrIf(counted)
 		at.Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2)).Br(count)
 		at.Bind(counted).Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.RETURN))
-		arr := types.NewArray(types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
+		arr := types.NewArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
 
 		b := instr.NewBuilder()
 		loop, done, live, start, end, catch, next, null, picked := b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
@@ -10828,7 +10828,7 @@ func TestInterpreter_Run(t *testing.T) {
 		nested := types.NewFunctionBuilder(fnType).
 			Append(instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)).
 			MustBuild()
-		raw := types.NewArray(types.NewArrayType(types.TypeI32()), types.BoxI32(1))
+		raw := types.NewArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(1))
 		lit := &types.ArrayLiteral{Typ: types.NewArrayType(fnType), Elems: []types.Value{nested}}
 
 		prog := program.New([]instr.Instruction{
@@ -10865,7 +10865,7 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("shares one mutable constant between its positions", func(t *testing.T) {
 		typ := types.NewArrayType(types.TypeI32())
-		shared := types.NewArray(typ, types.BoxI32(1))
+		shared := types.NewArray(nil, typ, types.BoxI32(1))
 		typed := types.TypedArray[int32]{1}
 
 		tests := []struct {
@@ -12653,8 +12653,8 @@ func TestInterpreter_Store(t *testing.T) {
 			old  types.Value
 			val  types.Value
 		}{
-			{"struct to string", types.NewStruct(structU, types.BoxI32(1)), types.String("s")},
-			{"struct T to struct U", types.NewStruct(structU, types.BoxI32(1)), types.NewStruct(structT, types.BoxF64(1))},
+			{"struct to string", types.NewStruct(nil, structU, types.BoxI32(1)), types.String("s")},
+			{"struct T to struct U", types.NewStruct(nil, structU, types.BoxI32(1)), types.NewStruct(nil, structT, types.BoxF64(1))},
 			{"i32 array to f64 array", types.TypedArray[int32]{1}, types.TypedArray[float64]{1}},
 			{"map type to map type", types.NewMap(types.NewMapType(types.TypeString(), types.TypeI32())), types.NewMap(types.NewMapType(types.TypeString(), types.TypeF64()))},
 			{"string to scalar", types.String("s"), types.I32(1)},
@@ -12683,7 +12683,7 @@ func TestInterpreter_Store(t *testing.T) {
 			old  types.Value
 			val  types.Value
 		}{
-			{"struct", types.NewStruct(typ, types.BoxI32(1)), types.NewStruct(typ, types.BoxI32(2))},
+			{"struct", types.NewStruct(nil, typ, types.BoxI32(1)), types.NewStruct(nil, typ, types.BoxI32(2))},
 			{"array", types.TypedArray[int32]{1}, types.TypedArray[int32]{2, 3}},
 			{"map", types.NewMap(mapTyp), types.NewMap(mapTyp)},
 			{"string", types.String("a"), types.String("b")},
@@ -12917,6 +12917,19 @@ func TestInterpreter_HeapLen(t *testing.T) {
 		require.Less(t, addr, i.HeapLen())
 		_, err = i.RefCount(addr)
 		require.ErrorIs(t, err, interp.ErrSegmentationFault)
+	})
+}
+
+func TestInterpreter_Heap(t *testing.T) {
+	t.Run("returns the heap the interpreter allocates in", func(t *testing.T) {
+		i := interp.MustNew(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.String("hi"))
+		require.NoError(t, err)
+		require.Same(t, i.Heap(), i.Heap())
+		require.Equal(t, types.String("hi"), i.Heap().At(addr))
+		require.Equal(t, i.HeapLen(), i.Heap().Len())
 	})
 }
 

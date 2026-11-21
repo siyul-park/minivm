@@ -625,7 +625,7 @@ func refArrayProgram(t *testing.T, warm int) *program.Program {
 	)
 	rwFn := rw.MustBuild()
 
-	arr := types.NewArray(types.NewArrayType(types.TypeAny()), types.BoxedNull, types.BoxedNull)
+	arr := types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxedNull, types.BoxedNull)
 	b := instr.NewBuilder()
 	loop, done := b.Label(), b.Label()
 	b.Bind(loop)
@@ -666,9 +666,9 @@ func structTreeProgram(t *testing.T, warm int) *program.Program {
 	walkFn := walk.MustBuild()
 	walkFn.Locals = []types.Type{record, types.TypeI32()}
 
-	leaf := types.NewStruct(record, types.BoxI32(10), types.BoxedNull)
-	mid := types.NewStruct(record, types.BoxI32(20), types.BoxedNull)
-	root := types.NewStruct(record, types.BoxI32(30), types.BoxedNull)
+	leaf := types.NewStruct(nil, record, types.BoxI32(10), types.BoxedNull)
+	mid := types.NewStruct(nil, record, types.BoxI32(20), types.BoxedNull)
+	root := types.NewStruct(nil, record, types.BoxI32(30), types.BoxedNull)
 
 	b := instr.NewBuilder()
 	b.Emit(instr.CONST_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.CONST_GET, 2).Emit(instr.STRUCT_SET)

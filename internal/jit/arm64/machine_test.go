@@ -871,7 +871,7 @@ func TestNew(t *testing.T) {
 		f, _, err := transform.Translate(m, nil, 1, fn, 0)
 		require.NoError(t, err)
 
-		s := types.NewStruct(record, types.BoxI32(5))
+		s := types.NewStruct(nil, record, types.BoxI32(5))
 		heap := []types.Value{nil, nil, s}
 		stack := make([]types.Boxed, 4)
 		code, _ := lower(t, arm64.New(), f, fn, m.Objects, 0, false)
@@ -904,7 +904,7 @@ func TestNew(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpStructSet, Args: []ssa.Value{guarded, idx, val}, State: at})
 		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 
-		s := types.NewStruct(record, types.BoxI32(0))
+		s := types.NewStruct(nil, record, types.BoxI32(0))
 		heap := []types.Value{nil, s}
 		stack := []types.Boxed{0}
 		code, _ := lower(t, arm64.New(), b.Build(), frame(nil, nil), nil, 0, false)
@@ -934,7 +934,7 @@ func TestNew(t *testing.T) {
 		b.Add(entry, ssa.Operation{Op: ssa.OpStructSet, Args: []ssa.Value{guarded, idx, val}, State: at})
 		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
 
-		s := types.NewStruct(record, types.BoxI1(false))
+		s := types.NewStruct(nil, record, types.BoxI1(false))
 		heap := []types.Value{nil, s}
 		stack := []types.Boxed{0}
 		code, exits := lower(t, arm64.New(), b.Build(), frame(nil, nil), nil, 0, false)

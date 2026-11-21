@@ -269,9 +269,9 @@ func (l loader) constantGuard(result *value, current step) error {
 	ref := fmt.Sprintf("c%d", l.slot)
 	result.compile = append(result.compile,
 		jen.Id(ref).Op(":=").Id(l.boxed).Dot("Ref").Call(),
-		jen.If(jen.Id(ref).Op("<").Lit(0).Op("||").Id(ref).Op(">=").Len(jen.Id("c").Dot("heap"))).Block(reject(l.label)),
+		jen.If(jen.Id(ref).Op("<").Lit(0).Op("||").Id(ref).Op(">=").Id("c").Dot("heap").Dot("Len").Call()).Block(reject(l.label)),
 	)
-	guard := jen.List(jen.Id("_"), jen.Id("ok")).Op(":=").Id("c").Dot("heap").Index(jen.Id(ref)).Assert(jen.Qual(typesPkg, guardName))
+	guard := jen.List(jen.Id("_"), jen.Id("ok")).Op(":=").Id("c").Dot("heap").Dot("At").Call(jen.Id(ref)).Assert(jen.Qual(typesPkg, guardName))
 	if current.exclude {
 		result.compile = append(result.compile, jen.If(guard, jen.Id("ok")).Block(reject(l.label)))
 	} else {
@@ -455,7 +455,7 @@ func constStandalone(current step, input value) jen.Code {
 	owned = append(owned, input.check...)
 	owned = append(owned, input.body...)
 	owned = append(owned,
-		jen.Id("i").Dot("retain").Call(jen.Id("addr")),
+		jen.Id("i").Dot("heap").Dot("Inc").Call(jen.Id("addr"), jen.Lit(1)),
 		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Add(input.boxed),
 		jen.Id("i").Dot("sp").Op("++"),
 		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(width(current.op)),

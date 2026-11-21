@@ -164,7 +164,7 @@ func TestWithUnmarshaler(t *testing.T) {
 		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry(millis)
 		defer i.Close()
-		src := types.NewStruct(
+		src := types.NewStruct(nil,
 			types.NewStructType(
 				types.NewStructField(types.TypeI64(), types.FieldWithName("Delay")),
 				types.NewStructField(types.TypeI32(), types.FieldWithName("Count"))),
@@ -882,7 +882,7 @@ func TestRegistry_Marshal(t *testing.T) {
 		// Not a host value: the receiver decodes into a fresh Go struct, so the
 		// call still runs and the mutation stays on that copy.
 		typ := types.NewStructType(types.NewStructField(types.TypeI32(), types.FieldWithName("Count")))
-		recv, err := i.Alloc(types.NewStruct(typ, types.BoxI32(5)))
+		recv, err := i.Alloc(types.NewStruct(nil, typ, types.BoxI32(5)))
 		require.NoError(t, err)
 
 		got, err := fn.(*interp.HostFunction).Fn(i, []types.Boxed{types.BoxRef(recv), types.BoxI32(2)})

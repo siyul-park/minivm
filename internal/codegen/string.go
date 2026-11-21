@@ -20,10 +20,10 @@ func stringConcat() jen.Code {
 		underflow(2),
 		jen.List(jen.Id("right"), jen.Id("left")).Op(":=").List(top(1), top(2)),
 		jen.Id("text").Op(":=").Id("i").Dot("concat").Call(jen.Id("left"), jen.Id("right")),
-		jen.Id("i").Dot("release").Call(jen.Id("right").Dot("Ref").Call()),
-		jen.Id("i").Dot("release").Call(jen.Id("left").Dot("Ref").Call()),
+		jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("right").Dot("Ref").Call()),
+		jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("left").Dot("Ref").Call()),
 		jen.Id("i").Dot("sp").Op("--"),
-		top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("text"))),
+		top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("heap").Dot("Add").Call(jen.Id("text"))),
 		next(),
 	)
 }
@@ -46,11 +46,11 @@ func stringEncodeUTF32() jen.Code {
 func stringIter() jen.Code {
 	return handler(underflow(1),
 		container(1),
-		jen.List(jen.Id("val"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(jen.Id("addr")).Assert(jen.Qual(typesPkg, "String")),
+		jen.List(jen.Id("val"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Id("addr")).Assert(jen.Qual(typesPkg, "String")),
 		jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
 		jen.Id("iter").Op(":=").Qual(typesPkg, "NewStringIterator").Call(jen.Qual(typesPkg, "Ref").Call(jen.Id("addr")), jen.Id("val")),
 		jen.Id("iter").Dot("Next").Call(),
-		top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("iter"))),
+		top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("heap").Dot("Add").Call(jen.Id("iter"))),
 		next())
 }
 
@@ -59,7 +59,7 @@ func stringIter() jen.Code {
 func convertCall(method string) jen.Code {
 	return handler(underflow(1),
 		jen.Id("val").Op(":=").Id("i").Dot(method).Call(top(1)),
-		jen.Id("i").Dot("release").Call(top(1).Dot("Ref").Call()),
-		top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("val"))),
+		jen.Id("i").Dot("heap").Dot("Dec").Call(top(1).Dot("Ref").Call()),
+		top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("heap").Dot("Add").Call(jen.Id("val"))),
 		next())
 }
