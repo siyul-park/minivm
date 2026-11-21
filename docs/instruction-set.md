@@ -73,7 +73,7 @@ Query them with `op.Reads(effect)` and `op.Writes(effect)`. Rules:
 - allocating a container writes `Heap`; overwriting the contents of one both reads and writes it, which is where a replaced reference is released;
 - only `call` and `return_call` write `Frame`; resuming a coroutine pushes no frame;
 - `op.IsPure()` is derived, not declared: an opcode that reads nothing, writes nothing, and pushes at least one value computes from its operands alone, so a consumer `MAY` number, fold, or reorder it.
-- `op.Traps()` is declared: integer `div` and `rem` trap on a zero divisor. A trapping opcode can still be pure, so a consumer `MAY` number equal occurrences, but it `MUST NOT` remove one whose result is unused or hoist one the program might not run.
+- `op.Traps()` is declared: integer `div` and `rem` trap on a zero divisor, and `ref.cast` on a value its type does not admit. A trapping opcode can still be pure, so a consumer `MAY` number equal occurrences, but it `MUST NOT` remove one whose result is unused or hoist one the program might not run.
 
 New opcodes `MUST` declare effects beside stack effects in `instr/type.go`; consumers `MUST` query `instr` rather than re-derive effects.
 
@@ -112,8 +112,8 @@ One opcode per row, in opcode-value order.
 | References | `REF_NEW` | `ref.new` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
 | References | `REF_GET` | `ref.get` | ⬜ | 🔲 | its result kind is not static: the translator declines the whole unit |
 | References | `REF_SET` | `ref.set` | ⬜ | 🔲 | bridges and resumes native code on ARM64 |
-| References | `REF_TEST` | `ref.test` | ⬜ | 🔲 | lowered on ARM64 for scalar types; bridges for ref, struct, array and any |
-| References | `REF_CAST` | `ref.cast` | ⬜ | 🔲 | lowered on ARM64 for scalar types, a miss deoptimizes to the trap; bridges for ref, struct, array and any |
+| References | `REF_TEST` | `ref.test` | ⬜ | 🔲 | lowered on ARM64 for scalar types, inline or a heap cell; bridges for every other type |
+| References | `REF_CAST` | `ref.cast` | ⬜ | 🔲 | lowered on ARM64 for scalar types, inline or a heap cell, a miss deoptimizes to the trap; bridges for every other type |
 | References | `REF_IS_NULL` | `ref.is_null` | ✅ | 🔲 | |
 | References | `REF_EQ` | `ref.eq` | ✅ | 🔲 | lowered on ARM64 |
 | References | `REF_NE` | `ref.ne` | ✅ | 🔲 | lowered on ARM64 |

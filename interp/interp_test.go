@@ -5109,6 +5109,7 @@ func TestWithThreshold(t *testing.T) {
 		const n = 1000
 		scalars := []types.Type{types.TypeI1(), types.TypeI8(), types.TypeI32(), types.TypeI64(), types.TypeF32(), types.TypeF64()}
 		names := []string{"i1", "i8", "i32", "i64", "f32", "f64"}
+		cell := func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0).Emit(instr.REF_NEW) }
 		values := []struct {
 			name  string
 			load  func(b *instr.Builder)
@@ -5125,6 +5126,12 @@ func TestWithThreshold(t *testing.T) {
 			{"positive NaN", nil, types.F64(math.NaN()), 5},
 			{"negative NaN", nil, types.F64(math.Float64frombits(0xFFF8000000000001)), 5},
 			{"positive infinity", nil, types.F64(math.Inf(1)), 5},
+			{"heap i1 cell", cell, types.I1(true), 0},
+			{"heap i8 cell", cell, types.I8(-5), 1},
+			{"heap i32 cell", cell, types.I32(7), 2},
+			{"heap i64 cell", cell, types.I64(9), 3},
+			{"heap f32 cell", cell, types.F32(1.5), 4},
+			{"heap f64 cell", cell, types.F64(2.5), 5},
 			{"string", nil, types.String("hello"), -1},
 			{"null", func(b *instr.Builder) { b.Emit(instr.REF_NULL) }, nil, -1},
 		}
