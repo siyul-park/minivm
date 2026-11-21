@@ -77,6 +77,10 @@ dbg.BreakIf(0, 10, func(vm *interp.Interpreter) bool { return vm.Len() > 0 })
 | `Const(n)` | constant |
 | `Load(addr)` | heap value |
 
+## Source Positions
+
+A front-end maps bytecode back to its source through two optional fields beside `Handlers`: `types.Function.Positions` and, for module code, `program.Program.Positions`. Each `instr.Position` maps the instructions from its `IP` up to the next entry's to an opaque front-end source ID, ID `0` being none; IPs strictly ascend and lie on instruction boundaries; `instr.Find` returns the ID covering an ip. `types.Function.Name` is the function's source name. The VM never interprets either, and the interpreter never reads them, so a program without them pays nothing. Resolving IDs to files, lines, and names stays in the front-end, as a source map's `sources` and `names` do. Text form: `name "<quoted>"` and `position ip=N source=M` lines in a function, and a `.positions` section in a program.
+
 ## Precision
 
 On optimized code (bytecode `optimize.O3` or native), locals are not program semantics (`pass-system.md`): `Local` and `SetLocal` from a hook do not observe or affect the program's computation, as they do on threaded code. Debug the unoptimized program.

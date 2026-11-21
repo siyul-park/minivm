@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/siyul-park/minivm/instr"
@@ -17,13 +18,17 @@ type FunctionBuilder struct {
 	captures []Type
 }
 
-// Function is compiled code with its signature, local and capture slots, and exception handlers.
+// Function is compiled code with its signature, local and capture slots, exception handlers,
+// and the optional debug facts a front-end attaches: Name is its source name and
+// Positions maps Code to front-end source IDs (instr.Position). The interpreter never reads either.
 type Function struct {
-	Typ      *FunctionType
-	Locals   []Type
-	Captures []Type
-	Code     []byte
-	Handlers []instr.Handler
+	Typ       *FunctionType
+	Locals    []Type
+	Captures  []Type
+	Code      []byte
+	Handlers  []instr.Handler
+	Positions []instr.Position
+	Name      string
 }
 
 // FunctionType is a function signature.
@@ -183,15 +188,17 @@ func (f *Function) Declared() []Type {
 	return out
 }
 
-// Clone returns a copy of f owning its Locals, Captures, Code, and Handlers.
+// Clone returns a copy of f owning its Locals, Captures, Code, Handlers, and Positions.
 // The signature is shared.
 func (f *Function) Clone() *Function {
 	return &Function{
-		Typ:      f.Typ,
-		Locals:   slices.Clone(f.Locals),
-		Captures: slices.Clone(f.Captures),
-		Code:     slices.Clone(f.Code),
-		Handlers: slices.Clone(f.Handlers),
+		Typ:       f.Typ,
+		Locals:    slices.Clone(f.Locals),
+		Captures:  slices.Clone(f.Captures),
+		Code:      slices.Clone(f.Code),
+		Handlers:  slices.Clone(f.Handlers),
+		Positions: slices.Clone(f.Positions),
+		Name:      f.Name,
 	}
 }
 
@@ -206,9 +213,19 @@ func (f *Function) Type() Type {
 func (f *Function) String() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("%s\n", f.Type().String()))
+	if f.Name != "" {
+		sb.WriteString("name ")
+		sb.WriteString(strconv.Quote(f.Name))
+		sb.WriteString("\n")
+	}
 	for _, t := range f.Captures {
 		sb.WriteString("capture ")
 		sb.WriteString(t.String())
+		sb.WriteString("\n")
+	}
+	for _, p := range f.Positions {
+		sb.WriteString("position ")
+		sb.WriteString(p.String())
 		sb.WriteString("\n")
 	}
 	for i, t := range f.Locals {

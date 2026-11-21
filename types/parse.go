@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -11,7 +12,8 @@ import (
 // ParseFunction parses lines from Function.String() output:
 //
 //	line 0:       FunctionType string ("func(params) returns")
-//	lines 1..k-1: local type strings (one per line)
+//	lines 1..j:   optional `name "<quoted>"`, `capture <type>`, and `position ip=N source=M` lines
+//	lines j+1..k-1: local type strings (one per line)
 //	lines k..:    disassembly lines ("0000:\t…")
 func ParseFunction(lines []string) (*Function, error) {
 	if len(lines) == 0 {
@@ -27,22 +29,36 @@ func ParseFunction(lines []string) (*Function, error) {
 		return nil, fmt.Errorf("expected func type, got %q", lines[0])
 	}
 
-	capturesEnd := 1
+	headEnd := 1
+	var name string
 	var captures []Type
-	for capturesEnd < len(lines) {
-		rest, ok := strings.CutPrefix(strings.TrimSpace(lines[capturesEnd]), "capture ")
-		if !ok {
+	var positions []instr.Position
+	for headEnd < len(lines) {
+		line := strings.TrimSpace(lines[headEnd])
+		if rest, ok := strings.CutPrefix(line, "name "); ok {
+			name, err = strconv.Unquote(strings.TrimSpace(rest))
+			if err != nil {
+				return nil, fmt.Errorf("function name: %w", err)
+			}
+		} else if rest, ok := strings.CutPrefix(line, "capture "); ok {
+			t, err := Parse(strings.TrimSpace(rest))
+			if err != nil {
+				return nil, fmt.Errorf("capture type: %w", err)
+			}
+			captures = append(captures, t)
+		} else if rest, ok := strings.CutPrefix(line, "position "); ok {
+			p, err := instr.ParsePosition(rest)
+			if err != nil {
+				return nil, fmt.Errorf("function position: %w", err)
+			}
+			positions = append(positions, p)
+		} else {
 			break
 		}
-		t, err := Parse(strings.TrimSpace(rest))
-		if err != nil {
-			return nil, fmt.Errorf("capture type: %w", err)
-		}
-		captures = append(captures, t)
-		capturesEnd++
+		headEnd++
 	}
 
-	localsEnd := capturesEnd
+	localsEnd := headEnd
 	for localsEnd < len(lines) {
 		line := strings.TrimSpace(lines[localsEnd])
 		if isFormatLine(line) || isInstrLine(line) {
@@ -52,7 +68,7 @@ func ParseFunction(lines []string) (*Function, error) {
 	}
 
 	var locals []Type
-	for _, l := range lines[capturesEnd:localsEnd] {
+	for _, l := range lines[headEnd:localsEnd] {
 		t, err := Parse(strings.TrimSpace(l))
 		if err != nil {
 			return nil, fmt.Errorf("local type: %w", err)
@@ -67,6 +83,8 @@ func ParseFunction(lines []string) (*Function, error) {
 
 	fn := NewFunction(ft, locals, codeInstrs)
 	fn.Captures = captures
+	fn.Positions = positions
+	fn.Name = name
 	return fn, nil
 }
 
