@@ -1417,7 +1417,7 @@ func (i *Interpreter) slice(array types.Boxed, start, end int) types.Value {
 		if start < 0 || end > len(source.Elems) || start > end {
 			panic(ErrIndexOutOfRange)
 		}
-		out := i.newArray(source.Typ, end-start)
+		out := types.MakeArray(&i.heap, source.Typ, end-start)
 		copy(out.Elems, source.Elems[start:end])
 		return out
 	default:
@@ -1470,25 +1470,13 @@ func (i *Interpreter) newArrayDefault(typ *types.ArrayType, size types.Boxed) ty
 	case types.KindF64:
 		return make(types.TypedArray[float64], n)
 	default:
-		val := i.newArray(typ, int(n))
+		val := types.MakeArray(&i.heap, typ, int(n))
 		for j := range val.Elems {
 			val.Elems[j] = types.BoxedNull
 		}
 		i.heap.Inc(0, int(n))
 		return val
 	}
-}
-
-// newArray is an array of size elements that reuses the header and storage the
-// heap kept when it can.
-func (i *Interpreter) newArray(typ *types.ArrayType, size int) *types.Array {
-	array := types.NewArray(&i.heap, typ)
-	if cap(array.Elems) < size {
-		array.Elems = make([]types.Boxed, size)
-	} else {
-		array.Elems = array.Elems[:size]
-	}
-	return array
 }
 
 // arrayGet is the generic ARRAY_GET path for all container representations.

@@ -13,6 +13,36 @@ func TestArrayLiteral(t *testing.T) {
 	require.Len(t, value.Elems, 1)
 }
 
+func TestMakeArray(t *testing.T) {
+	typ := types.NewArrayType(types.TypeAny())
+
+	t.Run("holds size zero elements", func(t *testing.T) {
+		array := types.MakeArray(nil, typ, 3)
+		require.Same(t, typ, array.Typ)
+		require.Equal(t, make([]types.Boxed, 3), array.Elems)
+	})
+
+	t.Run("reuses a header the heap kept with its cleared storage", func(t *testing.T) {
+		h := types.NewHeap(2, 0, types.Hooks{})
+		kept := types.NewArray(nil, typ, types.BoxRef(1), types.BoxRef(2))
+		h.Undo(h.Add(kept))
+
+		array := types.MakeArray(h, typ, 2)
+		require.Same(t, kept, array)
+		require.Equal(t, make([]types.Boxed, 2), array.Elems)
+	})
+
+	t.Run("grows kept storage that is too small", func(t *testing.T) {
+		h := types.NewHeap(2, 0, types.Hooks{})
+		kept := types.NewArray(nil, typ, types.BoxRef(1))
+		h.Undo(h.Add(kept))
+
+		array := types.MakeArray(h, typ, 4)
+		require.Same(t, kept, array)
+		require.Equal(t, make([]types.Boxed, 4), array.Elems)
+	})
+}
+
 func TestNewArray(t *testing.T) {
 	typ := types.NewArrayType(types.TypeAny())
 

@@ -251,7 +251,7 @@ func arrayNew() jen.Code {
 		closure(underflow(1),
 			jen.Id("size").Op(":=").Id("int").Call(top(1).Dot("I32").Call()),
 			jen.If(jen.Id("i").Dot("sp").Op("<").Id("size").Op("+").Lit(1)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
-			jen.Id("val").Op(":=").Id("i").Dot("newArray").Call(jen.Id("typ"), jen.Id("size")),
+			jen.Id("val").Op(":=").Qual(typesPkg, "MakeArray").Call(jen.Op("&").Id("i").Dot("heap"), jen.Id("typ"), jen.Id("size")),
 			jen.Id("copy").Call(jen.Id("val").Dot("Elems"), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("size").Op("-").Lit(1).Op(":").Id("i").Dot("sp").Op("-").Lit(1))),
 			jen.Id("i").Dot("sp").Op("-=").Id("size"),
 			top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("heap").Dot("Add").Call(jen.Id("val"))),

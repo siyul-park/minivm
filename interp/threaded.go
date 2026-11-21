@@ -123342,7 +123342,7 @@ var (
 					if i.sp < v0+1 {
 						panic(ErrStackUnderflow)
 					}
-					v2 := i.newArray(v1, v0)
+					v2 := types.MakeArray(&i.heap, v1, v0)
 					copy(v2.Elems, i.stack[i.sp-v0-1:i.sp-1])
 					i.sp -= v0
 					i.stack[i.sp-1] = types.BoxRef(i.heap.Add(v2))
@@ -124602,56 +124602,56 @@ var (
 				}
 				switch v0 := v3.(type) {
 				case *types.TypedMap[int8]:
-					v2 = i.newArray(types.NewArrayType(v0.Typ.Key), v0.Len())
+					v2 = types.MakeArray(&i.heap, types.NewArrayType(v0.Typ.Key), v0.Len())
 					v1 := 0
 					v0.Range(func(k int8, _ types.Boxed) {
 						v2.Elems[v1] = types.BoxI8(k)
 						v1++
 					})
 				case *types.TypedMap[bool]:
-					v2 = i.newArray(types.NewArrayType(v0.Typ.Key), v0.Len())
+					v2 = types.MakeArray(&i.heap, types.NewArrayType(v0.Typ.Key), v0.Len())
 					v1 := 0
 					v0.Range(func(k bool, _ types.Boxed) {
 						v2.Elems[v1] = types.BoxI1(k)
 						v1++
 					})
 				case *types.TypedMap[int32]:
-					v2 = i.newArray(types.NewArrayType(v0.Typ.Key), v0.Len())
+					v2 = types.MakeArray(&i.heap, types.NewArrayType(v0.Typ.Key), v0.Len())
 					v1 := 0
 					v0.Range(func(k int32, _ types.Boxed) {
 						v2.Elems[v1] = types.BoxI32(k)
 						v1++
 					})
 				case *types.TypedMap[int64]:
-					v2 = i.newArray(types.NewArrayType(v0.Typ.Key), v0.Len())
+					v2 = types.MakeArray(&i.heap, types.NewArrayType(v0.Typ.Key), v0.Len())
 					v1 := 0
 					v0.Range(func(k int64, _ types.Boxed) {
 						v2.Elems[v1] = i.boxI64(k)
 						v1++
 					})
 				case *types.TypedMap[float32]:
-					v2 = i.newArray(types.NewArrayType(v0.Typ.Key), v0.Len())
+					v2 = types.MakeArray(&i.heap, types.NewArrayType(v0.Typ.Key), v0.Len())
 					v1 := 0
 					v0.Range(func(k float32, _ types.Boxed) {
 						v2.Elems[v1] = types.BoxF32(k)
 						v1++
 					})
 				case *types.TypedMap[float64]:
-					v2 = i.newArray(types.NewArrayType(v0.Typ.Key), v0.Len())
+					v2 = types.MakeArray(&i.heap, types.NewArrayType(v0.Typ.Key), v0.Len())
 					v1 := 0
 					v0.Range(func(k float64, _ types.Boxed) {
 						v2.Elems[v1] = types.BoxF64(k)
 						v1++
 					})
 				case *types.StringMap:
-					v2 = i.newArray(types.NewArrayType(v0.Typ.Key), v0.Len())
+					v2 = types.MakeArray(&i.heap, types.NewArrayType(v0.Typ.Key), v0.Len())
 					v1 := 0
 					v0.Range(func(k string, _ types.Boxed) {
 						v2.Elems[v1] = types.BoxRef(i.heap.Add(types.String(k)))
 						v1++
 					})
 				case *types.Map:
-					v2 = i.newArray(types.NewArrayType(v0.Typ.Key), v0.Len())
+					v2 = types.MakeArray(&i.heap, types.NewArrayType(v0.Typ.Key), v0.Len())
 					v1 := 0
 					v0.Range(func(_ types.MapKey, entry types.MapEntry) {
 						i.retainBox(entry.Key)

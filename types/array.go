@@ -84,6 +84,23 @@ func TypeF64Array() *ArrayType {
 	return typeF64Array
 }
 
+// MakeArray returns an array of type typ holding size zero elements. A non-nil
+// heap supplies a header and storage it kept for reuse.
+func MakeArray(heap *Heap, typ *ArrayType, size int) *Array {
+	if heap != nil {
+		if a, ok := heap.arrays.get(); ok {
+			a.Typ = typ
+			if cap(a.Elems) < size {
+				a.Elems = make([]Boxed, size)
+			} else {
+				a.Elems = a.Elems[:size]
+			}
+			return a
+		}
+	}
+	return &Array{Typ: typ, Elems: make([]Boxed, size)}
+}
+
 // NewArray returns an array of type typ holding elems. A non-nil heap supplies
 // a header it kept for reuse, which holds elems in the storage it kept.
 func NewArray(heap *Heap, typ *ArrayType, elems ...Boxed) *Array {

@@ -209,7 +209,7 @@ func mapKeys() jen.Code {
 	// intermediate slice.
 	collect := func(params []jen.Code, key jen.Code, body ...jen.Code) []jen.Code {
 		return []jen.Code{
-			jen.Id("arr").Op("=").Id("i").Dot("newArray").Call(jen.Qual(typesPkg, "NewArrayType").Call(jen.Id("m").Dot("Typ").Dot("Key")), jen.Id("m").Dot("Len").Call()),
+			jen.Id("arr").Op("=").Qual(typesPkg, "MakeArray").Call(jen.Op("&").Id("i").Dot("heap"), jen.Qual(typesPkg, "NewArrayType").Call(jen.Id("m").Dot("Typ").Dot("Key")), jen.Id("m").Dot("Len").Call()),
 			jen.Id("n").Op(":=").Lit(0),
 			jen.Id("m").Dot("Range").Call(jen.Func().Params(params...).Block(append(body,
 				jen.Id("arr").Dot("Elems").Index(jen.Id("n")).Op("=").Add(key),
