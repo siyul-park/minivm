@@ -719,9 +719,9 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("reads a sliced array across bridge and safepoint resumes that relocate Context.Heap", func(t *testing.T) {
-		// sum(a[i] + len(m)) over i < len(a): the bridged map.len (a float key keeps
+		// sum(a[i] + len(m)) over i < len(a): the bridged map.len (a string key keeps
 		// the interpreter's map) keeps the loop quiet, so the hoist pass slices a.
-		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32()), types.NewMapType(types.TypeF64(), types.TypeI32())}, []types.Type{types.TypeI32(), types.TypeI32()}, func(b *instr.Builder) {
+		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32()), types.NewMapType(types.TypeString(), types.TypeI32())}, []types.Type{types.TypeI32(), types.TypeI32()}, func(b *instr.Builder) {
 			header, done := b.Label(), b.Label()
 			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
 			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
@@ -745,7 +745,7 @@ func TestNew(t *testing.T) {
 		}
 		require.Contains(t, ssa.Format(f), "array.view")
 
-		heap := []types.Value{nil, types.TypedArray[int32]{10, 20, 30, 40, 50, 60, 70}, types.NewMap(nil, types.NewMapType(types.TypeF64(), types.TypeI32()), 0)}
+		heap := []types.Value{nil, types.TypedArray[int32]{10, 20, 30, 40, 50, 60, 70}, types.NewMap(nil, types.NewMapType(types.TypeString(), types.TypeI32()), 0)}
 		stack := []types.Boxed{types.BoxRef(1), types.BoxRef(2), 0, 0}
 		// RETURN releases both reference params; counts above one keep
 		// those releases from reaching the last reference.
@@ -3296,6 +3296,19 @@ func TestMachine_Lower(t *testing.T) {
 		return []asm.Instruction{target.SBFX(target.X16, key, 0, types.VBits), target.CMP(target.X16, key), target.BCondLabel(target.OpBNE, exit)}
 	}
 	zext := func(key asm.VReg, into int) []asm.Instruction { return []asm.Instruction{target.UXTW(vr(into), key)} }
+	// float is the word of an f32 or f64 key: a NaN branches to nan, else the
+	// bits fold -0 to the word of +0 by zeroing a word whose low bits below the
+	// sign are all clear.
+	float := func(key asm.VReg, nan asm.Label, into int) []asm.Instruction {
+		move, mask := target.FMOV(target.X16, key), uint64(1<<63-1)
+		if key.Width() == asm.Width32 {
+			move, mask = target.FMOV(target.W16, key), 1<<31-1
+		}
+		return []asm.Instruction{
+			target.FCMP(key, key), target.BCondLabel(target.OpBVS, nan), move,
+			target.TSTI(target.X16, mask), target.CSEL(vr(into), target.XZR, target.X16, target.CondEQ),
+		}
+	}
 	box32 := func(value asm.VReg) []asm.Instruction {
 		return append(boxed(types.KindI32, target.UXTW(target.X16, value)), target.MOV(vr(1), target.X16))
 	}
@@ -3330,6 +3343,41 @@ func TestMachine_Lower(t *testing.T) {
 			regs: regs{1: ref, 2: ref, 3: ssa.TypeI1, 4: f32}, guard: intMap(types.KindI1, types.KindF32),
 			op:   mapped(ssa.OpMapGet, 1, 2, 3),
 			rows: get(reg(ref, 2), reg(f32, 4), vr(3), []asm.Instruction{target.CMPI(reg(ssa.TypeI1, 3), 0), target.CSET(vr(3), target.CondNE)}, asm.VReg{}, nil), lower: true,
+		},
+		{
+			name: "map.get of an f64 key sends a NaN to the miss and folds -0 into the word of +0",
+			regs: regs{1: ref, 2: ref, 3: f64, 4: i32}, guard: intMap(types.KindF64, types.KindI32),
+			op:   mapped(ssa.OpMapGet, 1, 2, 3),
+			rows: get(reg(ref, 2), reg(i32, 4), vr(3), float(reg(f64, 3), 3, 3), asm.VReg{}, nil), lower: true,
+		},
+		{
+			name: "map.lookup of an f32 key moves its 32 bits and folds -0 above the sign",
+			regs: regs{1: ref, 2: ref, 3: f32, 4: f64, 5: ssa.TypeI1}, guard: intMap(types.KindF32, types.KindF64),
+			op:   mapped(ssa.OpMapLookup, 2, 2, 3),
+			rows: get(reg(ref, 2), reg(f64, 4), vr(3), float(reg(f32, 3), 3, 3), reg(ssa.TypeI1, 5), nil), lower: true,
+		},
+		{
+			name: "map.set of an f64 key bridges a NaN before it touches the table",
+			regs: regs{1: ref, 2: ref, 3: f64, 4: i32}, guard: intMap(types.KindF64, types.KindI32),
+			op:   ssa.Operation{Op: ssa.OpMapSet, Args: []ssa.Value{2, 3, 4}},
+			rows: set(reg(ref, 2), vr(4), float(reg(f64, 3), exit, 4), box32(reg(i32, 4)), vr(1), false), lower: true,
+		},
+		{
+			name: "map.set of an f32 key bridges a NaN before it touches the table",
+			regs: regs{1: ref, 2: ref, 3: f32, 4: i32}, guard: intMap(types.KindF32, types.KindI32),
+			op:   ssa.Operation{Op: ssa.OpMapSet, Args: []ssa.Value{2, 3, 4}},
+			rows: set(reg(ref, 2), vr(4), float(reg(f32, 3), exit, 4), box32(reg(i32, 4)), vr(1), false), lower: true,
+		},
+		{
+			name: "map.delete of an f64 key ends at a NaN, which no slot holds",
+			regs: regs{1: ref, 2: ref, 3: f64}, guard: intMap(types.KindF64, types.KindI32),
+			op:   ssa.Operation{Op: ssa.OpMapDelete, Args: []ssa.Value{2, 3}},
+			rows: del(reg(ref, 2), vr(3), float(reg(f64, 3), 3, 3), false), lower: true,
+		},
+		{
+			name: "map.get declines an f64 operand of an f32 map",
+			regs: regs{1: ref, 2: ref, 3: f64, 4: i32}, guard: intMap(types.KindF32, types.KindI32),
+			op: mapped(ssa.OpMapGet, 1, 2, 3),
 		},
 		{
 			name: "map.get of an i64 key bridges outside the inline range and else hashes the register itself",
@@ -3457,6 +3505,22 @@ func TestMachine_Lower(t *testing.T) {
 		t.Run("i64 keys", func(t *testing.T) {
 			mirror[int64](t, types.TypeI64(), types.BoxI64, func(n int) int64 { return int64(n) << 33 })
 		})
+		t.Run("f64 keys including -0 and +0", func(t *testing.T) {
+			mirror[float64](t, types.TypeF64(), types.BoxF64, func(n int) float64 {
+				if n%4 < 2 {
+					return math.Copysign(0, float64(1-n%4*2))
+				}
+				return float64(n)*1.5 - 20
+			})
+		})
+		t.Run("f32 keys including -0 and +0", func(t *testing.T) {
+			mirror[float32](t, types.TypeF32(), types.BoxF32, func(n int) float32 {
+				if n%4 < 2 {
+					return float32(math.Copysign(0, float64(1-n%4*2)))
+				}
+				return float32(n)*1.5 - 20
+			})
+		})
 	})
 
 	t.Run("the map guard admits exactly the declared key kind, element kind, and class", func(t *testing.T) {
@@ -3492,6 +3556,67 @@ func TestMachine_Lower(t *testing.T) {
 					want = jit.TrapDeopt
 				}
 				require.Equal(t, want, jit.Enter(code, ctx))
+			})
+		}
+	})
+
+	t.Run("a NaN float key bridges a set before the table is touched and never hits a get or delete", func(t *testing.T) {
+		testenv.MustHaveArch(t, "arm64")
+
+		for _, tt := range []struct {
+			name string
+			key  types.Type
+			nan  types.Boxed
+			one  types.Boxed
+		}{
+			{"f64", types.TypeF64(), types.BoxF64(math.NaN()), types.BoxF64(1)},
+			{"f32", types.TypeF32(), types.BoxF32(float32(math.NaN())), types.BoxF32(1)},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				typ := types.NewMapType(tt.key, types.TypeI32())
+				run := func(emit func(*instr.Builder), returns ...types.Type) (uintptr, []jit.Exit) {
+					fn := function(t, []types.Type{typ, tt.key, types.TypeI32()}, nil, emit)
+					fn.Typ.Returns = returns
+					return lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
+				}
+				set, setExits := run(func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.MAP_SET).Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+				}, types.TypeI32())
+				del, delExits := run(func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_DELETE).Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+				}, types.TypeI32())
+				lookup, lookupExits := run(func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_LOOKUP).Emit(instr.RETURN)
+				}, types.TypeI32(), types.TypeI1())
+
+				m := types.NewMap(nil, typ, 0)
+				m.Store(tt.one, types.BoxI32(7))
+				before := snapshot(m)
+				call := func(code uintptr, exits []jit.Exit, op instr.Opcode) (stack []types.Boxed, bridges int) {
+					stack = []types.Boxed{types.BoxRef(1), tt.nan, types.BoxI32(9), 0, 0}
+					ctx := enter(t, stack)
+					ctx.Heap = address(t, []types.Value{nil, m})
+					ctx.RC = address(t, []int{0, 1 << 20})
+					for trap := jit.Enter(code, ctx); trap != jit.TrapReturn; trap = jit.Resume(ctx) {
+						require.Equal(t, jit.TrapBridge, trap)
+						exit := exits[ctx.Exit()]
+						require.Equal(t, jit.ExitBridge, exit.Kind)
+						require.Equal(t, op, exit.Code)
+						require.Equal(t, before, snapshot(m), "native code wrote the table before it bridged")
+						bridges++
+					}
+					return stack, bridges
+				}
+
+				_, bridges := call(del, delExits, instr.MAP_DELETE)
+				require.Zero(t, bridges)
+				out, bridges := call(lookup, lookupExits, instr.MAP_LOOKUP)
+				require.Zero(t, bridges)
+				require.Equal(t, []types.Boxed{m.Zero, types.BoxI1(false)}, out[:2])
+				require.Equal(t, before, snapshot(m))
+				_, bridges = call(set, setExits, instr.MAP_SET)
+				require.Equal(t, 1, bridges)
+				require.Equal(t, before, snapshot(m))
 			})
 		}
 	})

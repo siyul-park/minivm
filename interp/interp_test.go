@@ -1937,6 +1937,48 @@ var runTests = []struct {
 		values: []types.Value{types.I32(0)},
 	},
 	{
+		// A key set as -0 is found by +0.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.F64_CONST, math.Float64bits(math.Copysign(0, -1))), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.F64_CONST, 0), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeF64(), types.TypeI32()))),
+		values: []types.Value{types.I32(10)},
+	},
+	{
+		// -0 and +0 are one f32 key.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(float32(math.Copysign(0, -1))))), instr.MustNew(instr.I32_CONST, 10),
+			instr.MustNew(instr.F32_CONST, 0), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.MAP_LEN),
+		}, program.WithTypes(types.NewMapType(types.TypeF32(), types.TypeI32()))),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		// A key set as -0 is found by +0.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(float32(math.Copysign(0, -1))))), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.F32_CONST, 0), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeF32(), types.TypeI32()))),
+		values: []types.Value{types.I32(10)},
+	},
+	{
+		// NaN never matches, so both f32 entries stay.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(float32(math.NaN())))), instr.MustNew(instr.I32_CONST, 10),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(float32(math.NaN())))), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.MAP_LEN),
+		}, program.WithTypes(types.NewMapType(types.TypeF32(), types.TypeI32()))),
+		values: []types.Value{types.I32(2)},
+	},
+	{
+		// NaN never matches, so an f32 get misses.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(float32(math.NaN())))), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(float32(math.NaN())))), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeF32(), types.TypeI32()))),
+		values: []types.Value{types.I32(0)},
+	},
+	{
 		program: program.New([]instr.Instruction{
 			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
 			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.MAP_GET),
@@ -10174,6 +10216,51 @@ func TestWithThreshold(t *testing.T) {
 				prog := mapProgram(t, typ, 128, 3000, nil, nil, mapBody(mapKey{tt.key, tt.shift, tt.wide}, tt.space, identity, identity))
 				exits := compareNative(t, prog)
 				require.LessOrEqual(t, exits["bridge"], float64(rehashes(128, 3000, 61)), "only a rehash bridges")
+				require.Zero(t, exits["deopt"])
+			})
+		}
+	})
+
+	t.Run("runs map operations natively for float keys, with -0 and +0 one key", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		for _, key := range []types.Type{types.TypeF32(), types.TypeF64()} {
+			t.Run(key.String(), func(t *testing.T) {
+				typ := types.NewMapType(key, types.TypeI32())
+				prog := mapProgram(t, typ, 128, 3000, nil, nil, mapBody(mapKey{key, 15, false}, 31, identity, identity))
+				exits := compareNative(t, prog)
+				require.LessOrEqual(t, exits["bridge"], float64(rehashes(128, 3000, 61)), "only a rehash bridges")
+				require.Zero(t, exits["deopt"])
+			})
+		}
+	})
+
+	t.Run("bridges a NaN float map key and serves it as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		for _, key := range []types.Type{types.TypeF32(), types.TypeF64()} {
+			t.Run(key.String(), func(t *testing.T) {
+				typ := types.NewMapType(key, types.TypeI32())
+				nan := func(b *instr.Builder) {
+					if key.Kind() == types.KindF32 {
+						b.Emit(instr.F32_CONST, uint64(math.Float32bits(float32(math.NaN()))))
+					} else {
+						b.Emit(instr.F64_CONST, math.Float64bits(math.NaN()))
+					}
+				}
+				prog := mapProgram(t, typ, 4096, 3000, nil, nil, func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0)
+					nan(b)
+					b.Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_SET)
+					b.Emit(instr.LOCAL_GET, 0)
+					nan(b)
+					b.Emit(instr.MAP_DELETE)
+					b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0)
+					nan(b)
+					b.Emit(instr.MAP_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+				})
+				exits := compareNative(t, prog)
+				require.Positive(t, exits["bridge"], "a NaN set leaves native code")
 				require.Zero(t, exits["deopt"])
 			})
 		}

@@ -1375,7 +1375,7 @@ func (m *Machine) mapGet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 	exit, resume := s.Bridge()
 	hit, miss, done := a.Label(), a.Label(), a.Label()
 	data := m.container(a, s.Reg(op.Args[0]))
-	key := m.key(a, s, shape, op.Args[1], exit)
+	key := m.key(a, s, shape, op.Args[1], exit, miss)
 	t := m.table(a, data)
 	index, tag := m.home(a, t, key)
 	slot := m.probe(a, t, key, index, tag, asm.VReg{}, hit, miss)
@@ -1431,7 +1431,7 @@ func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 		word = boxed
 	}
 	data := m.container(a, s.Reg(op.Args[0]))
-	key := m.key(a, s, shape, op.Args[1], exit)
+	key := m.key(a, s, shape, op.Args[1], exit, exit)
 	t := m.table(a, data)
 	index, tag := m.home(a, t, key)
 	free := m.vreg()
@@ -1479,7 +1479,7 @@ func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 	exit, resume := s.Bridge()
 	hit, done := a.Label(), a.Label()
 	data := m.container(a, s.Reg(op.Args[0]))
-	key := m.key(a, s, shape, op.Args[1], exit)
+	key := m.key(a, s, shape, op.Args[1], exit, done)
 	t := m.table(a, data)
 	index, tag := m.home(a, t, key)
 	slot := m.probe(a, t, key, index, tag, asm.VReg{}, hit, done)
@@ -1511,8 +1511,11 @@ func (m *Machine) mapOf(v ssa.Value) (ssa.Shape, bool) {
 // its own register, which bridges through exit when it is outside the inline
 // range, since the table holds such a key as a heap cell native code neither
 // compares nor creates; an i32 zero-extends, an i8 keeps its low byte, and an
-// i1 is 0 or 1 (a Boxed.Bool is any nonzero payload).
-func (m *Machine) key(a *asm.Assembler, s compile.Site, shape ssa.Shape, v ssa.Value, exit asm.Label) asm.VReg {
+// i1 is 0 or 1 (a Boxed.Bool is any nonzero payload). A float is its bits, with
+// -0 folded into the word of +0 by zeroing a word whose bits below the sign are
+// clear; a NaN never hits, so it branches to nan, which a lookup or delete ends
+// and a set bridges through before the table is touched.
+func (m *Machine) key(a *asm.Assembler, s compile.Site, shape ssa.Shape, v ssa.Value, exit, nan asm.Label) asm.VReg {
 	word := s.Reg(v)
 	if shape.Key == types.KindI64 {
 		a.Emit(target.SBFX(target.X16, word, 0, types.VBits), target.CMP(target.X16, word), target.BCondLabel(target.OpBNE, exit))
@@ -1524,6 +1527,12 @@ func (m *Machine) key(a *asm.Assembler, s compile.Site, shape ssa.Shape, v ssa.V
 		a.Emit(target.UXTW(key, word))
 	case types.KindI8:
 		a.Emit(target.UXTB(key, word))
+	case types.KindF32:
+		a.Emit(target.FCMP(word, word), target.BCondLabel(target.OpBVS, nan), target.FMOV(target.W16, word))
+		a.Emit(target.TSTI(target.X16, 1<<31-1), target.CSEL(key, target.XZR, target.X16, target.CondEQ))
+	case types.KindF64:
+		a.Emit(target.FCMP(word, word), target.BCondLabel(target.OpBVS, nan), target.FMOV(target.X16, word))
+		a.Emit(target.TSTI(target.X16, 1<<63-1), target.CSEL(key, target.XZR, target.X16, target.CondEQ))
 	default:
 		a.Emit(target.CMPI(word, 0), target.CSET(key, target.CondNE))
 	}

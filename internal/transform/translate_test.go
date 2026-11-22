@@ -1299,7 +1299,15 @@ blk0: ()
 			require.Contains(t, sequence(out), fmt.Sprintf("guard map key %s elem i32", key.Kind()))
 		}
 
-		for _, key := range []types.Type{types.TypeF32(), types.TypeF64(), types.TypeString(), types.TypeAny()} {
+		// The operations here push i32 keys, which no float map serves, so only the
+		// length of a float map is guarded.
+		for _, key := range []types.Type{types.TypeF32(), types.TypeF64()} {
+			out, _, err = transform.Translate(transform.Module{}, nil, 1, mapped(key, types.TypeI32()), 0)
+			require.NoError(t, err)
+			require.Equal(t, []string{fmt.Sprintf("guard map key %s elem i32", key.Kind()), "map.len", "map.set", "map.delete", "map.get", "map.lookup"}, sequence(out))
+		}
+
+		for _, key := range []types.Type{types.TypeString(), types.TypeAny()} {
 			out, _, err = transform.Translate(transform.Module{}, nil, 1, mapped(key, types.TypeI32()), 0)
 			require.NoError(t, err)
 			require.Equal(t, []string{"map.len", "map.set", "map.delete", "map.get", "map.lookup"}, sequence(out))
