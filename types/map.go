@@ -139,9 +139,6 @@ const (
 	hashMix1 = 0xe7037ed1a0b428db
 )
 
-// refTag is the top of a reference word once its payload is shifted away.
-const refTag = (exponent | uint64(KindRef)<<VBits) >> VBits
-
 var (
 	_ Value     = (*MapLiteral)(nil)
 	_ Traceable = (*Map)(nil)
@@ -510,6 +507,13 @@ func (m *Map) own(key Boxed) Boxed {
 
 // drop releases the references an entry's key and value hold.
 func (m *Map) drop(key, value Boxed) {
+	if m.Typ.TraceKeys || m.Typ.TraceValues {
+		m.release(key, value)
+	}
+}
+
+// release releases key and value, each when it is a traced reference.
+func (m *Map) release(key, value Boxed) {
 	if m.Typ.TraceKeys && key.Kind() == KindRef {
 		m.bound().Release(key)
 	}
@@ -522,7 +526,19 @@ func (m *Map) drop(key, value Boxed) {
 // first tombstone on the probe or else the empty slot that ended it; and the
 // control byte and table word of key. A NaN key never hits.
 func (m *Map) find(key Boxed) (hit, free int, tag byte, word uint64, match byte) {
-	word, match = m.resolve(key)
+	match = matchWord
+	switch {
+	case m.Typ.Class != ClassWord || uint64(key)>>VBits == refTag:
+		word, match = m.resolve(key)
+	case m.Typ.KeyKind == KindI1:
+		word = min(uint64(key)&VMask, 1)
+	case m.Typ.KeyKind == KindI8:
+		word = uint64(uint8(key))
+	case m.Typ.KeyKind == KindI32:
+		word = uint64(uint32(key))
+	default:
+		word = uint64(int64(key<<(64-VBits)) >> (64 - VBits))
+	}
 	t := &m.table
 	h := (m.hash(word) ^ t.seed) * tableHash
 	i := (h >> t.shift) & t.mask
@@ -553,24 +569,12 @@ func (m *Map) find(key Boxed) (hit, free int, tag byte, word uint64, match byte)
 	}
 }
 
-// resolve returns the table word of a borrowed key and how it matches a slot.
+// resolve returns the table word of a borrowed key find does not read inline,
+// a reference or a key of a class other than ClassWord, and how it matches a
+// slot.
 func (m *Map) resolve(key Boxed) (word uint64, match byte) {
 	switch m.Typ.Class {
 	case ClassWord:
-		switch m.Typ.KeyKind {
-		case KindI1:
-			if key.Bool() {
-				return 1, matchWord
-			}
-			return 0, matchWord
-		case KindI8:
-			return uint64(uint8(key.I8())), matchWord
-		case KindI32:
-			return uint64(uint32(key.I32())), matchWord
-		}
-		if key.Kind() != KindRef {
-			return uint64(key.I64()), matchWord
-		}
 		if v, ok := m.bound().At(key.Ref()).(I64); ok {
 			if IsBoxable(int64(v)) {
 				return uint64(v), matchWord
@@ -695,6 +699,11 @@ func (m *Map) hash(word uint64) uint64 {
 	if m.Typ.Class == ClassFloat || word>>VBits != refTag {
 		return word
 	}
+	return m.digest(word)
+}
+
+// digest returns the base hash of a ref word, read through the heap.
+func (m *Map) digest(word uint64) uint64 {
 	switch v := m.bound().At(Boxed(word).Ref()).(type) {
 	case String:
 		return strhash(string(v))

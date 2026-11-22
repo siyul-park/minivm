@@ -175,8 +175,9 @@ func (h *Heap) Retain(v Boxed) {
 // ignores null and a v that is not a reference, for the runtime that owns the
 // heap.
 func (h *Heap) Release(v Boxed) {
-	if v.Kind() == KindRef && v.Ref() != 0 {
-		h.Dec(v.Ref())
+	// int32(v) is v.Ref() without the payload mask, which keeps Release inlinable.
+	if addr := int(int32(v)); uint64(v)>>VBits == refTag && addr != 0 {
+		h.Dec(addr)
 	}
 }
 

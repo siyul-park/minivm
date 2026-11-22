@@ -492,6 +492,14 @@ func TestMap_Load(t *testing.T) {
 		require.False(t, ok)
 	})
 
+	t.Run("i1 reads any nonzero payload as true", func(t *testing.T) {
+		m := types.NewMap(nil, types.NewMapType(types.TypeI1(), types.TypeI32()), 0)
+		m.Store(types.BoxI1(true), types.BoxI32(1))
+		v, ok := m.Load(types.Box(2, types.KindI1))
+		require.True(t, ok)
+		require.Equal(t, types.BoxI32(1), v)
+	})
+
 	t.Run("any retags i1 and i8 as i32", func(t *testing.T) {
 		m := types.NewMap(newHeap(), types.NewMapType(types.TypeAny(), types.TypeI32()), 0)
 		m.Store(types.BoxI8(5), types.BoxI32(1))

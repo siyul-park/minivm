@@ -32,8 +32,12 @@ const (
 	BoxedNaN = Boxed(exponent | 1)
 )
 
-// exponent is the all-ones float64 exponent that marks a boxed non-f64 value.
-const exponent = 0x7FF << 52
+const (
+	// exponent is the all-ones float64 exponent that marks a boxed non-f64 value.
+	exponent = 0x7FF << 52
+	// refTag is the top of a reference word once its payload is shifted away.
+	refTag = (exponent | uint64(KindRef)<<VBits) >> VBits
+)
 
 var _ Value = Boxed(0)
 
