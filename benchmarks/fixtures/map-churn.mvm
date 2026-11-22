@@ -1,0 +1,66 @@
+.code
+0000:	i32.const 0x00000400
+0005:	map.new_default 0x0000
+0008:	local.set 0x00
+0010:	i32.const 0x00000000
+0015:	local.set 0x01
+L0017:
+0017:	local.get 0x01
+0019:	i32.const 0x00004000
+0024:	i32.ge_s
+0025:	br_if L0133
+0028:	local.get 0x00
+0030:	local.get 0x01
+0032:	i32.const 0x00001EEF
+0037:	i32.mul
+0038:	i32.const 0x0000FFF1
+0043:	i32.rem_s
+0044:	local.get 0x01
+0046:	map.set
+0047:	local.get 0x01
+0049:	i32.const 0x00000200
+0054:	i32.lt_s
+0055:	br_if L0081
+0058:	local.get 0x00
+0060:	local.get 0x01
+0062:	i32.const 0x00000200
+0067:	i32.sub
+0068:	i32.const 0x00001EEF
+0073:	i32.mul
+0074:	i32.const 0x0000FFF1
+0079:	i32.rem_s
+0080:	map.delete
+L0081:
+0081:	local.get 0x01
+0083:	i32.const 0x00000100
+0088:	i32.lt_s
+0089:	br_if L0120
+0092:	local.get 0x02
+0094:	local.get 0x00
+0096:	local.get 0x01
+0098:	i32.const 0x00000100
+0103:	i32.sub
+0104:	i32.const 0x00001EEF
+0109:	i32.mul
+0110:	i32.const 0x0000FFF1
+0115:	i32.rem_s
+0116:	map.get
+0117:	i32.add
+0118:	local.set 0x02
+L0120:
+0120:	local.get 0x01
+0122:	i32.const 0x00000001
+0127:	i32.add
+0128:	local.set 0x01
+0130:	br L0017
+L0133:
+0133:	local.get 0x02
+0135:	local.get 0x00
+0137:	map.len
+0138:	i32.add
+.locals
+0000:	map[i32]i32
+0001:	i32
+0002:	i32
+.types
+0000:	map[i32]i32
