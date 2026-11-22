@@ -10850,6 +10850,93 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, types.I64(5), inline)
 	})
 
+	t.Run("map.new leaves every count exact when a later allocation traps", func(t *testing.T) {
+		mapType := types.NewMapType(types.TypeAny(), types.TypeAny())
+		fn := types.NewFunctionBuilder(&types.FunctionType{}).Append(
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I32_CONST, 2),
+			instr.MustNew(instr.I64_CONST, 1<<50), instr.MustNew(instr.DUP), instr.MustNew(instr.I32_CONST, 3),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.MAP_NEW, 0), instr.MustNew(instr.DROP),
+			instr.MustNew(instr.RETURN),
+		).MustBuild()
+		for limit := 3; limit <= 14; limit++ {
+			t.Run(fmt.Sprintf("heap limit %d", limit), func(t *testing.T) {
+				prog := program.New(nil, program.WithConstants(types.String("a")), program.WithTypes(mapType))
+				vm, err := interp.New(prog, interp.WithThreshold(-1), interp.WithHeapLimit(limit))
+				require.NoError(t, err)
+				defer vm.Close()
+				var call func() error
+				if err := interp.NewRegistry().Unmarshal(vm, fn, &call); err != nil {
+					t.Skip("heap too small to bind the call")
+				}
+				_ = call()
+				_, counts := heapOf(vm)
+				require.Equal(t, 1, counts[0], "the constant a")
+				for addr, count := range counts[1:] {
+					require.Zero(t, count, "address %d", addr+2)
+				}
+			})
+		}
+	})
+
+	t.Run("map.keys leaves every count exact when a later allocation traps", func(t *testing.T) {
+		mapType := types.NewMapType(types.TypeAny(), types.TypeI32())
+		fn := types.NewFunctionBuilder(&types.FunctionType{}).Append(
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.I64_CONST, 1<<50), instr.MustNew(instr.I32_CONST, 2),
+			instr.MustNew(instr.I64_CONST, 1<<51), instr.MustNew(instr.I32_CONST, 3),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.MAP_KEYS), instr.MustNew(instr.DROP), instr.MustNew(instr.RETURN),
+		).MustBuild()
+		for limit := 3; limit <= 14; limit++ {
+			t.Run(fmt.Sprintf("heap limit %d", limit), func(t *testing.T) {
+				prog := program.New(nil, program.WithConstants(types.String("a")), program.WithTypes(mapType))
+				vm, err := interp.New(prog, interp.WithThreshold(-1), interp.WithHeapLimit(limit))
+				require.NoError(t, err)
+				defer vm.Close()
+				var call func() error
+				if err := interp.NewRegistry().Unmarshal(vm, fn, &call); err != nil {
+					t.Skip("heap too small to bind the call")
+				}
+				_ = call()
+				_, counts := heapOf(vm)
+				require.Equal(t, 1, counts[0], "the constant a")
+				for addr, count := range counts[1:] {
+					require.Zero(t, count, "address %d", addr+2)
+				}
+			})
+		}
+	})
+
+	t.Run("map.iter over a host map view leaves the view's count when a later allocation traps", func(t *testing.T) {
+		typ := types.NewMapType(types.TypeString(), types.TypeString())
+		fn := types.NewFunctionBuilder(&types.FunctionType{}).Append(
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.MAP_ITER), instr.MustNew(instr.DROP), instr.MustNew(instr.RETURN),
+		).MustBuild()
+		for limit := 2; limit <= 8; limit++ {
+			t.Run(fmt.Sprintf("heap limit %d", limit), func(t *testing.T) {
+				vm, err := interp.New(program.New(nil, program.WithGlobals(typ)), interp.WithThreshold(-1), interp.WithHeapLimit(limit))
+				require.NoError(t, err)
+				defer vm.Close()
+				value, err := interp.NewRegistry().Marshal(vm, map[string]string{"a": "x"})
+				require.NoError(t, err)
+				addr, err := vm.Alloc(value)
+				if err != nil {
+					t.Skip("heap too small to alloc")
+				}
+				require.NoError(t, vm.SetGlobal(0, types.BoxRef(addr)))
+				var call func() error
+				if err := interp.NewRegistry().Unmarshal(vm, fn, &call); err != nil {
+					t.Skip("heap too small to bind the call")
+				}
+				_ = call()
+				count, err := vm.RefCount(addr)
+				require.NoError(t, err)
+				require.Equal(t, 1, count)
+			})
+		}
+	})
+
 	t.Run("keeps a string constant a map literal also holds as a key after the map deletes it", func(t *testing.T) {
 		b := program.NewBuilder()
 		b.ConstGet(&types.MapLiteral{
@@ -10895,7 +10982,7 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 	})
 
-	t.Run("lists map keys in insertion order for every key class", func(t *testing.T) {
+	t.Run("lists map keys in insertion order for every key kind", func(t *testing.T) {
 		// The keys 3, 1, 2 go in, 3 leaves and comes back, 1 is updated: an update
 		// keeps its place and a reinserted key goes last, so the order is 1, 2, 3.
 		tests := []struct {

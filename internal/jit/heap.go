@@ -61,7 +61,7 @@ const (
 // Offsets native code reads and writes in a *types.Map: the
 // words of its pointer-free table (types/map.go owns the layout). They are
 // taken from reflection, since the table is unexported, and TestHeap_Layout pins
-// every value. Every key class shares one layout.
+// every value. Every key kind shares one layout.
 var (
 	// OffsetMapCtrl, OffsetMapSlots, OffsetMapOrder, and OffsetMapPos are the
 	// data words of the control bytes, of the key and value words, of the

@@ -124130,10 +124130,13 @@ var (
 						panic(ErrTypeMismatch)
 					}
 				}
+				v4 := i.heap.Add(v2)
+				i.stack[i.sp-1] = types.BoxRef(v4)
 				for v1 := 0; v1 < v0; v1++ {
 					v2.Store(i.stack[v3+v1*2], i.stack[v3+v1*2+1])
+					i.stack[v3+v1*2] = types.BoxI32(0)
+					i.stack[v3+v1*2+1] = types.BoxI32(0)
 				}
-				v4 := i.heap.Add(v2)
 				i.sp = v3 + 1
 				i.stack[v3] = types.BoxRef(v4)
 				i.fr.ip += 3
@@ -124365,37 +124368,45 @@ var (
 				}
 				v1 := v0.Ref()
 				var v2 *types.Map
-				v3 := false
 				switch v0 := i.heap.At(v1).(type) {
 				case *types.Map:
 					v2 = v0
 				case *HostMap:
-					v1, v4 := v0.Map(i)
+					v3, v4 := v0.Map(i)
 					if v4 != nil {
 						panic(v4)
 					}
-					v2, v3 = v1, true
+					v5 := v1
+					v1 = i.heap.Add(v3)
+					i.stack[i.sp-1] = types.BoxRef(v1)
+					i.heap.Dec(v5)
+					v2 = v3
 				default:
 					panic(ErrTypeMismatch)
 				}
-				v5 := types.MakeArray(&i.heap, types.NewArrayType(v2.Typ.Key), v2.Len())
-				v6 := 0
-				v2.Range(func(key, _ types.Boxed) bool {
-					if key.Kind() == types.KindRef {
-						if v0, v1 := i.heap.At(key.Ref()).(types.I64); v1 {
-							key = types.BoxRef(i.heap.Add(v0))
-						} else {
-							i.heap.Retain(key)
+				v6 := types.MakeArray(&i.heap, types.NewArrayType(v2.Typ.Key), v2.Len())
+				v7 := types.BoxRef(i.heap.Add(v6))
+				v8 := 0
+				func() {
+					defer func() {
+						if v0 := recover(); v0 != nil {
+							i.heap.Release(v7)
+							panic(v0)
 						}
-					}
-					v5.Elems[v6] = key
-					v6++
-					return true
-				})
-				if v3 {
-					v2.Clear()
-				}
-				v7 := types.BoxRef(i.heap.Add(v5))
+					}()
+					v2.Range(func(key, _ types.Boxed) bool {
+						if key.Kind() == types.KindRef {
+							if v0, v1 := i.heap.At(key.Ref()).(types.I64); v1 {
+								key = types.BoxRef(i.heap.Add(v0))
+							} else {
+								i.heap.Retain(key)
+							}
+						}
+						v6.Elems[v8] = key
+						v8++
+						return true
+					})
+				}()
 				i.heap.Dec(v1)
 				i.stack[i.sp-1] = v7
 				i.fr.ip++
@@ -124447,6 +124458,7 @@ var (
 					}
 					v5 := v1
 					v1 = i.heap.Add(v3)
+					i.stack[i.sp-1] = types.BoxRef(v1)
 					i.heap.Dec(v5)
 					v2 = v3
 				default:

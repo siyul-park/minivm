@@ -1239,6 +1239,7 @@ func (i *Interpreter) load(constants []types.Value) {
 				})
 			}
 		case *types.Map:
+			// The words are copied before Recount, which holds only for scalar keys and values.
 			m := types.NewMap(&i.heap, value.Typ, value.Len())
 			value.Range(func(key, val types.Boxed) bool {
 				m.Store(key, val)

@@ -56,7 +56,7 @@ func ctrlLen(m *types.Map) int {
 	return reflect.ValueOf(m).Elem().FieldByName("table").FieldByName("ctrl").Len()
 }
 
-// TestMap owns the whole-map contract: every key class behaves exactly as the
+// TestMap owns the whole-map contract: every key kind behaves exactly as the
 // insertion-ordered model, and every reference it takes it gives back.
 func TestMap(t *testing.T) {
 	type item struct {
@@ -395,6 +395,7 @@ func TestMap_Accepts(t *testing.T) {
 	h := newHeap()
 	str, wide := text(h, "a"), cell(h, 1<<50)
 	array := types.BoxRef(h.Add(types.NewArray(nil, types.NewArrayType(types.TypeI32()))))
+	structKey := types.NewStructType(types.NewStructField(types.TypeI32()))
 	tests := []struct {
 		name string
 		key  types.Type
@@ -420,6 +421,9 @@ func TestMap_Accepts(t *testing.T) {
 		{"any null", types.TypeAny(), types.BoxedNull, true},
 		{"any array", types.TypeAny(), array, true},
 		{"any string", types.TypeAny(), str, true},
+		{"struct scalar", structKey, types.BoxI32(1), false},
+		{"struct null", structKey, types.BoxedNull, true},
+		{"struct array", structKey, array, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1012,7 +1016,7 @@ func TestMapIterator_Next(t *testing.T) {
 		require.Equal(t, []types.Ref{7}, it.Refs(nil))
 	})
 
-	t.Run("every key class visits each entry once", func(t *testing.T) {
+	t.Run("every key kind visits each entry once", func(t *testing.T) {
 		h := newHeap()
 		drain := func(m *types.Map) []string {
 			var out []string

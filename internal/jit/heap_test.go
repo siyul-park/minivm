@@ -72,7 +72,7 @@ func TestHeap_Layout(t *testing.T) {
 			require.Equal(t, uintptr(144), jit.OffsetMapUsed)
 		})
 
-		t.Run("reads the fields of every key class's table", func(t *testing.T) {
+		t.Run("reads the fields of every key kind's table", func(t *testing.T) {
 			var keys []*types.Map
 			for _, key := range []types.Type{types.TypeI1(), types.TypeI8(), types.TypeI32(), types.TypeI64(), types.TypeF64(), types.TypeString(), types.TypeAny()} {
 				keys = append(keys, types.NewMap(nil, types.NewMapType(key, types.TypeI32()), 0))

@@ -39,7 +39,7 @@ type known struct {
 	words map[ssa.Value]uint64
 }
 
-// table is the state of a TypedMap's table, read through reflection (snapshot).
+// table is the state of a types.Map's table, read through reflection (snapshot).
 type table struct {
 	ctrl, slots, order     []uint64
 	pos                    []uint64

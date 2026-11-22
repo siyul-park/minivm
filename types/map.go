@@ -180,7 +180,7 @@ func (m *Map) Accepts(key Boxed) bool {
 
 // Load returns the value for key, which it borrows, and whether it exists.
 func (m *Map) Load(key Boxed) (Boxed, bool) {
-	hit, _, _, _, _ := m.find(key)
+	hit, _, _, _ := m.find(key)
 	if hit < 0 {
 		return 0, false
 	}
@@ -201,7 +201,7 @@ func (m *Map) Swap(key, value Boxed) (Boxed, bool) {
 	if uint64(key)>>VBits == refTag {
 		key = m.own(key)
 	}
-	hit, free, tag, word, _ := m.find(key)
+	hit, free, tag, word := m.find(key)
 	if hit < 0 {
 		m.insert(free, tag, word, value)
 		return 0, false
@@ -216,7 +216,7 @@ func (m *Map) Swap(key, value Boxed) (Boxed, bool) {
 // LoadAndDelete removes key, which it borrows, and returns its value, which
 // moves to the caller. It releases the stored key.
 func (m *Map) LoadAndDelete(key Boxed) (Boxed, bool) {
-	hit, _, _, _, _ := m.find(key)
+	hit, _, _, _ := m.find(key)
 	if hit < 0 {
 		return 0, false
 	}
@@ -230,7 +230,7 @@ func (m *Map) LoadAndDelete(key Boxed) (Boxed, bool) {
 
 // Delete removes key, which it borrows, and releases the stored key and value.
 func (m *Map) Delete(key Boxed) {
-	hit, _, _, _, _ := m.find(key)
+	hit, _, _, _ := m.find(key)
 	if hit < 0 {
 		return
 	}
@@ -446,13 +446,17 @@ func (m *Map) accepts(key Boxed) bool {
 	isRef := uint64(key)>>VBits == refTag
 	switch m.Typ.KeyKind {
 	case KindRef:
-		if !m.Typ.Key.Equals(TypeString()) {
+		switch m.Typ.Key {
+		case TypeAny():
 			return true
+		case TypeString():
+			if isRef {
+				_, ok := m.bound().At(key.Ref()).(String)
+				return ok
+			}
+			return false
 		}
-		if isRef {
-			_, ok := m.bound().At(key.Ref()).(String)
-			return ok
-		}
+		return isRef
 	case KindI64:
 		if isRef {
 			_, ok := m.bound().At(key.Ref()).(I64)
@@ -506,8 +510,8 @@ func (m *Map) release(key, value Boxed) {
 // find returns the slot holding key, or -1; the slot a new key goes in, the
 // first tombstone on the probe or else the empty slot that ended it; and the
 // control byte and table word of key. A NaN key never hits.
-func (m *Map) find(key Boxed) (hit, free int, tag byte, word uint64, match byte) {
-	match = matchWord
+func (m *Map) find(key Boxed) (hit, free int, tag byte, word uint64) {
+	match := matchWord
 	switch m.Typ.KeyKind {
 	case KindI1:
 		word = min(uint64(key)&VMask, 1)
@@ -535,7 +539,7 @@ func (m *Map) find(key Boxed) (hit, free int, tag byte, word uint64, match byte)
 			if free < 0 {
 				free = int(i)
 			}
-			return -1, free, tag, word, match
+			return -1, free, tag, word
 		case slotDead:
 			if free < 0 {
 				free = int(i)
@@ -544,10 +548,10 @@ func (m *Map) find(key Boxed) (hit, free int, tag byte, word uint64, match byte)
 			slot := t.slots[2*i]
 			if slot == word {
 				if match != matchNone {
-					return int(i), -1, tag, word, match
+					return int(i), -1, tag, word
 				}
 			} else if match == matchContent && m.equal(slot, word) {
-				return int(i), -1, tag, word, match
+				return int(i), -1, tag, word
 			}
 		}
 		i = (i + 1) & t.mask

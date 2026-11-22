@@ -15,13 +15,18 @@ func mapNew() jen.Code {
 			jen.For(jen.Id("j").Op(":=").Lit(0), jen.Id("j").Op("<").Id("size"), jen.Id("j").Op("++")).Block(
 				jen.If(jen.Op("!").Id("m").Dot("Accepts").Call(jen.Id("i").Dot("stack").Index(jen.Id("base").Op("+").Id("j").Op("*").Lit(2)))).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
 			),
+			// The map takes its place on the stack first, in the size slot, and each Store
+			// overwrites the two slots it consumed, so a trap unwinds every reference once.
+			jen.Id("addr").Op(":=").Id("i").Dot("heap").Dot("Add").Call(jen.Id("m")),
+			top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("addr")),
 			jen.For(jen.Id("j").Op(":=").Lit(0), jen.Id("j").Op("<").Id("size"), jen.Id("j").Op("++")).Block(
 				jen.Id("m").Dot("Store").Call(
 					jen.Id("i").Dot("stack").Index(jen.Id("base").Op("+").Id("j").Op("*").Lit(2)),
 					jen.Id("i").Dot("stack").Index(jen.Id("base").Op("+").Id("j").Op("*").Lit(2).Op("+").Lit(1)),
 				),
+				jen.Id("i").Dot("stack").Index(jen.Id("base").Op("+").Id("j").Op("*").Lit(2)).Op("=").Qual(typesPkg, "BoxI32").Call(jen.Lit(0)),
+				jen.Id("i").Dot("stack").Index(jen.Id("base").Op("+").Id("j").Op("*").Lit(2).Op("+").Lit(1)).Op("=").Qual(typesPkg, "BoxI32").Call(jen.Lit(0)),
 			),
-			jen.Id("addr").Op(":=").Id("i").Dot("heap").Dot("Add").Call(jen.Id("m")),
 			jen.Id("i").Dot("sp").Op("=").Id("base").Op("+").Lit(1),
 			jen.Id("i").Dot("stack").Index(jen.Id("base")).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("addr")),
 			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(3),
@@ -153,32 +158,44 @@ func mapKeys() jen.Code {
 	return handler(underflow(1),
 		container(1),
 		jen.Var().Id("m").Op("*").Qual(typesPkg, "Map"),
-		jen.Id("view").Op(":=").Lit(false),
 		jen.Switch(jen.Id("source").Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Id("addr")).Assert(jen.Type())).Block(
 			jen.Case(jen.Op("*").Qual(typesPkg, "Map")).Block(jen.Id("m").Op("=").Id("source")),
 			hostMapCase(
 				jen.List(jen.Id("copied"), jen.Id("err")).Op(":=").Id("source").Dot("Map").Call(jen.Id("i")),
 				jen.If(jen.Id("err").Op("!=").Nil()).Block(jen.Panic(jen.Id("err"))),
-				jen.List(jen.Id("m"), jen.Id("view")).Op("=").List(jen.Id("copied"), jen.Lit(true)),
+				jen.Id("held").Op(":=").Id("addr"),
+				jen.Id("addr").Op("=").Id("i").Dot("heap").Dot("Add").Call(jen.Id("copied")),
+				top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("addr")),
+				jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("held")),
+				jen.Id("m").Op("=").Id("copied"),
 			),
 			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
 		),
+		// The result is in the heap before it is filled, so a trap while it fills frees it
+		// with the keys it already holds; the map reference stays on the stack for unwinding.
 		jen.Id("arr").Op(":=").Qual(typesPkg, "MakeArray").Call(jen.Op("&").Id("i").Dot("heap"), jen.Qual(typesPkg, "NewArrayType").Call(jen.Id("m").Dot("Typ").Dot("Key")), jen.Id("m").Dot("Len").Call()),
-		jen.Id("n").Op(":=").Lit(0),
-		jen.Id("m").Dot("Range").Call(jen.Func().Params(jen.Id("key"), jen.Id("_").Qual(typesPkg, "Boxed")).Bool().Block(
-			jen.If(jen.Id("key").Dot("Kind").Call().Op("==").Qual(typesPkg, "KindRef")).Block(
-				jen.If(jen.List(jen.Id("wide"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Id("key").Dot("Ref").Call()).Assert(jen.Qual(typesPkg, "I64")), jen.Id("ok")).Block(
-					jen.Id("key").Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("heap").Dot("Add").Call(jen.Id("wide"))),
-				).Else().Block(
-					jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("key")),
-				),
-			),
-			jen.Id("arr").Dot("Elems").Index(jen.Id("n")).Op("=").Id("key"),
-			jen.Id("n").Op("++"),
-			jen.Return(jen.True()),
-		)),
-		jen.If(jen.Id("view")).Block(jen.Id("m").Dot("Clear").Call()),
 		jen.Id("out").Op(":=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("heap").Dot("Add").Call(jen.Id("arr"))),
+		jen.Id("n").Op(":=").Lit(0),
+		jen.Func().Params().Block(
+			jen.Defer().Func().Params().Block(
+				jen.If(jen.Id("r").Op(":=").Id("recover").Call(), jen.Id("r").Op("!=").Nil()).Block(
+					jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("out")),
+					jen.Panic(jen.Id("r")),
+				),
+			).Call(),
+			jen.Id("m").Dot("Range").Call(jen.Func().Params(jen.Id("key"), jen.Id("_").Qual(typesPkg, "Boxed")).Bool().Block(
+				jen.If(jen.Id("key").Dot("Kind").Call().Op("==").Qual(typesPkg, "KindRef")).Block(
+					jen.If(jen.List(jen.Id("wide"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Id("key").Dot("Ref").Call()).Assert(jen.Qual(typesPkg, "I64")), jen.Id("ok")).Block(
+						jen.Id("key").Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("heap").Dot("Add").Call(jen.Id("wide"))),
+					).Else().Block(
+						jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("key")),
+					),
+				),
+				jen.Id("arr").Dot("Elems").Index(jen.Id("n")).Op("=").Id("key"),
+				jen.Id("n").Op("++"),
+				jen.Return(jen.True()),
+			)),
+		).Call(),
 		jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("addr")),
 		top(1).Op("=").Id("out"),
 		next(),
@@ -196,6 +213,7 @@ func mapIter() jen.Code {
 				jen.If(jen.Id("err").Op("!=").Nil()).Block(jen.Panic(jen.Id("err"))),
 				jen.Id("held").Op(":=").Id("addr"),
 				jen.Id("addr").Op("=").Id("i").Dot("heap").Dot("Add").Call(jen.Id("copied")),
+				top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("addr")),
 				jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("held")),
 				jen.Id("m").Op("=").Id("copied"),
 			),
