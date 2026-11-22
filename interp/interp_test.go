@@ -1909,6 +1909,70 @@ var runTests = []struct {
 		values: []types.Value{types.String("HiThere"), types.String("other")},
 	},
 	{
+		// An i8 key and an i32 key of the same value are one key of an any map.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 1), instr.MustNew(instr.LOCAL_SET, 1),
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.MAP_SET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.MAP_LEN),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeAny(), types.TypeI32()), types.TypeI8Array()),
+			program.WithLocals(types.NewMapType(types.TypeAny(), types.TypeI32()), types.TypeI8Array())),
+		values: []types.Value{types.I32(20), types.I32(1)},
+	},
+	{
+		// -0 and +0 are one key of an any map.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.F64_CONST, 1<<63), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.F64_CONST, 0), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.MAP_SET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.MAP_LEN),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.F64_CONST, 1<<63), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeAny(), types.TypeI32())),
+			program.WithLocals(types.NewMapType(types.TypeAny(), types.TypeI32()))),
+		values: []types.Value{types.I32(20), types.I32(1)},
+	},
+	{
+		// A wide i64 key of an any map is found through another cell of equal value.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, 1<<60), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I64_CONST, 1<<60), instr.MustNew(instr.MAP_GET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I64_CONST, 7), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeAny(), types.TypeI32())),
+			program.WithLocals(types.NewMapType(types.TypeAny(), types.TypeI32()))),
+		values: []types.Value{types.I32(0), types.I32(10)},
+	},
+	{
+		// A null key of an any map is a key.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.REF_NULL), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeAny(), types.TypeI32())),
+			program.WithLocals(types.NewMapType(types.TypeAny(), types.TypeI32()))),
+		values: []types.Value{types.I32(10)},
+	},
+	{
+		// A struct key of an any map is its identity: another struct of equal fields is another key.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.STRUCT_NEW_DEFAULT, 1), instr.MustNew(instr.LOCAL_SET, 1),
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.MAP_GET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.STRUCT_NEW_DEFAULT, 1), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeAny(), types.TypeI32()), types.NewStructType(types.NewStructField(types.TypeI32()))),
+			program.WithLocals(types.NewMapType(types.TypeAny(), types.TypeI32()), types.NewStructType(types.NewStructField(types.TypeI32())))),
+		values: []types.Value{types.I32(0), types.I32(10)},
+	},
+	{
+		// A string key of an any map is found through a ref of equal content.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeAny(), types.TypeI32())),
+			program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere")),
+			program.WithLocals(types.NewMapType(types.TypeAny(), types.TypeI32()))),
+		values: []types.Value{types.I32(10)},
+	},
+	{
 		// A scalar is no key of a string map.
 		program: program.New([]instr.Instruction{
 			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
@@ -10380,6 +10444,81 @@ func TestWithThreshold(t *testing.T) {
 				}, strs)
 				exits := compareNative(t, prog)
 				require.LessOrEqual(t, exits["bridge"], float64(rehashes(capacity, 3000, space)), "only a rehash bridges")
+				require.Zero(t, exits["deopt"])
+			})
+		}
+	})
+
+	t.Run("runs map operations natively for any keys of every kind, as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		// Two arrays of any hold the keys: strings (a literal and one string.concat
+		// built, so two refs of equal content), the integers below space, -0 and +0,
+		// 1.5, and a struct (each array its own, so another key). A set through an
+		// i32 operand lands on the same keys as the integers.
+		const space = 20
+		const count = 2*space + 3
+		anys := types.NewArrayType(types.TypeAny())
+		shape := types.NewStructType(types.NewStructField(types.TypeI32()))
+		var constants []types.Value
+		for i := range space {
+			text := strings.Repeat("k", i%12) + strconv.Itoa(i)
+			constants = append(constants, types.String(text), types.String(text[:len(text)/2]), types.String(text[len(text)/2:]))
+		}
+		key := func(array uint64, mul uint64) func(b *instr.Builder) {
+			return func(b *instr.Builder) {
+				b.Emit(instr.LOCAL_GET, array).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, mul).Emit(instr.I32_MUL).Emit(instr.I32_CONST, count).Emit(instr.I32_REM_S).Emit(instr.ARRAY_GET)
+			}
+		}
+		typ := types.NewMapType(types.TypeAny(), types.TypeI32())
+		for _, capacity := range []int{128, 4096} {
+			t.Run(strconv.Itoa(capacity), func(t *testing.T) {
+				prog := mapProgramFrom(t, typ, func(b *instr.Builder) {
+					b.Emit(instr.I32_CONST, uint64(capacity)).Emit(instr.MAP_NEW_DEFAULT, 0).Emit(instr.LOCAL_SET, 0)
+					for i := range space {
+						b.Emit(instr.CONST_GET, uint64(3*i))
+					}
+					for i := range space {
+						b.Emit(instr.I32_CONST, uint64(i))
+					}
+					b.Emit(instr.F64_CONST, 1<<63).Emit(instr.F64_CONST, math.Float64bits(1.5)).Emit(instr.STRUCT_NEW_DEFAULT, 2)
+					b.Emit(instr.I32_CONST, count).Emit(instr.ARRAY_NEW, 1).Emit(instr.LOCAL_SET, 3)
+					for i := range space {
+						b.Emit(instr.CONST_GET, uint64(3*i+1)).Emit(instr.CONST_GET, uint64(3*i+2)).Emit(instr.STRING_CONCAT)
+					}
+					for i := range space {
+						b.Emit(instr.I32_CONST, uint64(i))
+					}
+					b.Emit(instr.F64_CONST, 0).Emit(instr.F64_CONST, math.Float64bits(1.5)).Emit(instr.STRUCT_NEW_DEFAULT, 2)
+					b.Emit(instr.I32_CONST, count).Emit(instr.ARRAY_NEW, 1).Emit(instr.LOCAL_SET, 4)
+				}, 3000, constants, []types.Type{anys, anys}, func(b *instr.Builder) {
+					skip, hit, next := b.Label(), b.Label(), b.Label()
+					b.Emit(instr.LOCAL_GET, 0)
+					key(3, 37)(b)
+					b.Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_SET)
+
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 5).Emit(instr.I32_REM_S).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_SET)
+
+					b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 3).Emit(instr.I32_REM_S).BrIf(skip)
+					b.Emit(instr.LOCAL_GET, 0)
+					key(4, 5)(b)
+					b.Emit(instr.MAP_DELETE)
+					b.Bind(skip)
+
+					b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0)
+					key(4, 11)(b)
+					b.Emit(instr.MAP_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+
+					b.Emit(instr.LOCAL_GET, 0)
+					key(3, 13)(b)
+					b.Emit(instr.MAP_LOOKUP).BrIf(hit)
+					b.Emit(instr.DROP).Br(next)
+					b.Bind(hit)
+					b.Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+					b.Bind(next)
+				}, anys, shape)
+				exits := compareNative(t, prog)
+				require.LessOrEqual(t, exits["bridge"], float64(rehashes(capacity, 3000, count)), "only a rehash bridges")
 				require.Zero(t, exits["deopt"])
 			})
 		}

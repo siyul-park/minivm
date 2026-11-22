@@ -142,6 +142,7 @@ func TestShape_Serves(t *testing.T) {
 	f32 := ssa.Shape{Form: ssa.FormMap, Key: types.KindF32, Elem: types.KindI32}
 	f64 := ssa.Shape{Form: ssa.FormMap, Key: types.KindF64, Elem: types.KindI32}
 	str := ssa.Shape{Form: ssa.FormMap, Key: types.KindRef, Elem: types.KindI32}
+	anyMap := ssa.Shape{Form: ssa.FormMap, Key: types.KindAny, Elem: types.KindI32}
 	tests := []struct {
 		name   string
 		shape  ssa.Shape
@@ -180,8 +181,15 @@ func TestShape_Serves(t *testing.T) {
 		{"string map with an f64 operand", str, ssa.OpMapSet, types.KindF64, types.KindI32, false},
 		{"i32 map with a reference operand", i32, ssa.OpMapGet, types.KindRef, 0, false},
 		{"string map with an i64 element", ssa.Shape{Form: ssa.FormMap, Key: types.KindRef, Elem: types.KindI64}, ssa.OpMapGet, types.KindRef, 0, false},
-		{"len of an any map", ssa.Shape{Form: ssa.FormMap, Key: types.KindAny, Elem: types.KindI32}, ssa.OpMapLen, 0, 0, false},
-		{"get of an any key", ssa.Shape{Form: ssa.FormMap, Key: types.KindAny, Elem: types.KindI32}, ssa.OpMapGet, types.KindRef, 0, false},
+		{"len of an any map", anyMap, ssa.OpMapLen, 0, 0, true},
+		{"get of an i1 key in an any map", anyMap, ssa.OpMapGet, types.KindI1, 0, true},
+		{"get of an i8 key in an any map", anyMap, ssa.OpMapGet, types.KindI8, 0, true},
+		{"get of an i32 key in an any map", anyMap, ssa.OpMapGet, types.KindI32, 0, true},
+		{"lookup of an i64 key in an any map", anyMap, ssa.OpMapLookup, types.KindI64, 0, true},
+		{"get of an f32 key in an any map", anyMap, ssa.OpMapGet, types.KindF32, 0, true},
+		{"set of an f64 key in an any map", anyMap, ssa.OpMapSet, types.KindF64, types.KindI32, true},
+		{"delete of a reference key in an any map", anyMap, ssa.OpMapDelete, types.KindRef, 0, true},
+		{"any map with an i64 element", ssa.Shape{Form: ssa.FormMap, Key: types.KindAny, Elem: types.KindI64}, ssa.OpMapGet, types.KindRef, 0, false},
 		{"array shape", ssa.Shape{Form: ssa.FormArray, Elem: types.KindI32}, ssa.OpMapLen, 0, 0, false},
 	}
 	for _, tt := range tests {

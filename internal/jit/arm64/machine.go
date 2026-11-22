@@ -62,8 +62,13 @@ type table struct {
 
 // key is what a map operation derives from its key operand: the table word,
 // the base hash home mixes, and, for a String, the data pointer and size the
-// probe compares by content (zero registers otherwise).
-type key struct{ word, base, ptr, size asm.VReg }
+// probe compares by content (zero registers otherwise). A key of an any map
+// whose operand is a reference holds the size -1 when it is no String, so the
+// probe skips the content check (mixed).
+type key struct {
+	word, base, ptr, size asm.VReg
+	mixed                 bool
+}
 
 // Ctx holds the *jit.Context for as long as native code runs: the trampoline
 // (internal/jit/enter_arm64.s) hands it over in R26 and reads it back on every
@@ -1406,7 +1411,7 @@ func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 		target.ADDI(used, used, 1), target.STR(used, data, int16(jit.OffsetMapUsed)),
 		target.LDR(count, data, int16(jit.OffsetMapCount)), target.ADDI(count, count, 1), target.STR(count, data, int16(jit.OffsetMapCount)),
 	)
-	if shape.Key == types.KindRef {
+	if s.Type(op.Args[1]).Kind() == types.KindRef {
 		m.retain(a, k.word)
 	}
 	a.Emit(target.BLabel(resume))
@@ -1457,7 +1462,7 @@ func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 		target.STRBR(state, t.ctrl, index),
 		target.LDR(count, data, int16(jit.OffsetMapCount)), target.SUBI(count, count, 1), target.STR(count, data, int16(jit.OffsetMapCount)),
 	)
-	if shape.Key == types.KindRef {
+	if shape.Key == types.KindRef || shape.Key == types.KindAny {
 		stored := m.vreg()
 		a.Emit(target.LDR(stored, slot, 0))
 		m.release(a, stored, s)
@@ -1468,8 +1473,8 @@ func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 		m.release(a, old, s)
 	}
 	a.Bind(done)
-	if shape.Key == types.KindRef {
-		m.release(a, k.word, s)
+	if s.Type(op.Args[1]).Kind() == types.KindRef {
+		m.release(a, s.Reg(op.Args[1]), s)
 	}
 	a.Bind(resume)
 	return true
@@ -1495,6 +1500,8 @@ func (m *Machine) mapOf(v ssa.Value) (ssa.Shape, bool) {
 func (m *Machine) key(a *asm.Assembler, s compile.Site, shape ssa.Shape, v ssa.Value, exit, nan asm.Label) key {
 	word := s.Reg(v)
 	switch shape.Key {
+	case types.KindAny:
+		return m.boxed(a, word, s.Type(v).Kind(), exit, nan)
 	case types.KindI64:
 		a.Emit(target.SBFX(target.X16, word, 0, types.VBits), target.CMP(target.X16, word), target.BCondLabel(target.OpBNE, exit))
 		return key{word: word, base: word}
@@ -1519,6 +1526,95 @@ func (m *Machine) key(a *asm.Assembler, s compile.Site, shape ssa.Shape, v ssa.V
 		a.Emit(target.CMPI(word, 0), target.CSET(k, target.CondNE))
 	}
 	return key{word: k, base: k}
+}
+
+// boxed derives the table word of operand word of kind in an any map, as
+// Map.resolve does for the boxed value: an i1, i8, or i32 retags to an i32
+// carrying its payload, so equal integers of any width are one key; a float is
+// its boxed bits, an f32 with its tag and -0 folded into +0; an inline i64 is
+// its boxed word, and a wide one bridges through exit, since the table holds
+// such a key as a heap cell. A reference operand is a boxed value of unknown
+// kind, which dispatches on its tag at run time: an integer retags, an inline
+// i64 is itself, an f64 folds -0 and branches to nan on a NaN, a String is its
+// word hashed by its bytes, any other reference is its word by identity, and a
+// null reference, an I64 cell, or an f32 bridges through exit.
+func (m *Machine) boxed(a *asm.Assembler, word asm.Reg, kind types.Kind, exit, nan asm.Label) key {
+	if kind == types.KindRef {
+		return m.dispatch(a, word, exit, nan)
+	}
+	k := m.vreg()
+	tag := func(kind types.Kind) {
+		a.Emit(target.LDI(target.X17, types.Tag(kind))...)
+		a.Emit(target.ORR(k, k, target.X17))
+	}
+	switch kind {
+	case types.KindI1:
+		a.Emit(target.CMPI(word, 0), target.CSET(k, target.CondNE))
+		tag(types.KindI32)
+	case types.KindI8:
+		low := m.ivreg(asm.Width32)
+		a.Emit(target.SXTB(low, word), target.UXTW(k, low))
+		tag(types.KindI32)
+	case types.KindI32:
+		a.Emit(target.UXTW(k, word))
+		tag(types.KindI32)
+	case types.KindI64:
+		a.Emit(target.SBFX(target.X16, word, 0, types.VBits), target.CMP(target.X16, word), target.BCondLabel(target.OpBNE, exit))
+		a.Emit(target.ANDI(k, word, types.VMask))
+		tag(types.KindI64)
+	case types.KindF32:
+		a.Emit(target.FCMP(word, word), target.BCondLabel(target.OpBVS, nan), target.FMOV(target.W16, word))
+		a.Emit(target.TSTI(target.X16, 1<<31-1), target.CSEL(k, target.XZR, target.X16, target.CondEQ))
+		tag(types.KindF32)
+	case types.KindF64:
+		a.Emit(target.FCMP(word, word), target.BCondLabel(target.OpBVS, nan), target.FMOV(target.X16, word))
+		a.Emit(target.TSTI(target.X16, 1<<63-1), target.CSEL(k, target.XZR, target.X16, target.CondEQ))
+	}
+	return key{word: k, base: k}
+}
+
+// dispatch derives the key of a boxed word of unknown kind (see boxed). Its
+// tag, less that of an i32, is 0, 1, or 2 for an i32, i8, or i1, -1 for a
+// reference, -2 for an inline i64, and -3 for an f32; every other word is an f64,
+// which includes +Inf and BoxedNaN at -4. An f64 is tested for a NaN and for -0
+// on the word shifted left once, without the sign. The size starts at -1 and
+// only a String key gives it a length.
+func (m *Machine) dispatch(a *asm.Assembler, word asm.Reg, exit, nan asm.Label) key {
+	small, ref, same, other, done := a.Label(), a.Label(), a.Label(), a.Label(), a.Label()
+	k := key{word: m.vreg(), base: m.vreg(), ptr: m.vreg(), size: m.vreg(), mixed: true}
+	a.Emit(target.MOVN(k.size, 0, 0), target.MOVZ(k.ptr, 0, 0))
+	a.Emit(target.LSRI(target.X16, word, types.VBits))
+	a.Emit(target.LDI(target.X17, types.Tag(types.KindI32)>>types.VBits)...)
+	a.Emit(
+		target.SUB(target.X16, target.X16, target.X17),
+		target.CMPI(target.X16, 2), target.BCondLabel(target.OpBLS, small),
+		target.CMNI(target.X16, 1), target.BCondLabel(target.OpBEQ, ref),
+		target.CMNI(target.X16, 2), target.BCondLabel(target.OpBEQ, same),
+		target.CMNI(target.X16, 3), target.BCondLabel(target.OpBEQ, exit),
+		target.LSLI(target.X16, word, 1),
+	)
+	a.Emit(target.LDI(target.X17, 0xFFE0<<48)...)
+	a.Emit(
+		target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBHI, nan),
+		target.CMPI(target.X16, 0), target.CSEL(k.word, target.XZR, word, target.CondEQ),
+		target.MOV(k.base, k.word), target.BLabel(done),
+	)
+	a.Bind(small)
+	a.Emit(target.UXTW(k.word, word))
+	a.Emit(target.LDI(target.X17, types.Tag(types.KindI32))...)
+	a.Emit(target.ORR(k.word, k.word, target.X17), target.MOV(k.base, k.word), target.BLabel(done))
+	a.Bind(same)
+	a.Emit(target.MOV(k.word, word), target.MOV(k.base, word), target.BLabel(done))
+	a.Bind(ref)
+	a.Emit(target.SBFX(target.X16, word, 0, 32), target.CBZLabel(target.X16, exit))
+	ptr, size := m.text(a, word, other)
+	a.Emit(target.MOV(k.ptr, ptr), target.MOV(k.size, size), target.MOV(k.word, word))
+	a.Emit(target.MOV(k.base, m.hash(a, ptr, size)), target.BLabel(done))
+	a.Bind(other)
+	a.Emit(target.LDI(target.X17, uint64(jit.Itab(types.I64(0))))...)
+	a.Emit(target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBEQ, exit), target.MOV(k.word, word), target.MOV(k.base, word))
+	a.Bind(done)
+	return k
 }
 
 // hash is String.Hash of the size bytes at ptr, emitted bit for bit: a string of
@@ -1638,8 +1734,12 @@ func (m *Machine) probe(a *asm.Assembler, t table, k key, index, tag, free asm.V
 // content branches to hit when the table word word refers to a String of the
 // key's bytes, and to next when it refers to anything else or to other bytes.
 // A map of another reference type may hold any reference, so the word is
-// checked; the key's pointer is copied since strcmp advances what it is given.
+// checked, and a key that is no String (a mixed key of size -1) matches by
+// word alone; the key's pointer is copied since strcmp advances what it is given.
 func (m *Machine) content(a *asm.Assembler, word asm.VReg, k key, hit, next asm.Label) {
+	if k.mixed {
+		a.Emit(target.CMPI(k.size, 0), target.BCondLabel(target.OpBLT, next))
+	}
 	expectRef(a, word, next)
 	ptr, size := m.text(a, word, next)
 	own := m.vreg()

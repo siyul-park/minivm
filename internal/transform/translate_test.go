@@ -1308,16 +1308,26 @@ blk0: ()
 		}
 
 		// A string map is guarded for its length, since an i32 key is no string; a
-		// map of another reference type or of any is not guarded at all.
+		// map of another reference type is not guarded at all, and an any map is
+		// guarded before every operation, since it serves every key kind.
 		out, _, err = transform.Translate(transform.Module{}, nil, 1, mapped(types.TypeString(), types.TypeI32()), 0)
 		require.NoError(t, err)
 		require.Equal(t, []string{"guard map key ref elem i32", "map.len", "map.set", "map.delete", "map.get", "map.lookup"}, sequence(out))
 
-		for _, key := range []types.Type{types.NewArrayType(types.TypeI32()), types.TypeAny()} {
-			out, _, err = transform.Translate(transform.Module{}, nil, 1, mapped(key, types.TypeI32()), 0)
-			require.NoError(t, err)
-			require.Equal(t, []string{"map.len", "map.set", "map.delete", "map.get", "map.lookup"}, sequence(out))
-		}
+		out, _, err = transform.Translate(transform.Module{}, nil, 1, mapped(types.NewArrayType(types.TypeI32()), types.TypeI32()), 0)
+		require.NoError(t, err)
+		require.Equal(t, []string{"map.len", "map.set", "map.delete", "map.get", "map.lookup"}, sequence(out))
+
+		out, _, err = transform.Translate(transform.Module{}, nil, 1, mapped(types.TypeAny(), types.TypeI32()), 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, []string{
+			"guard map key any elem i32", "map.len",
+			"guard map key any elem i32", "map.set",
+			"guard map key any elem i32", "map.delete",
+			"guard map key any elem i32", "map.get",
+			"guard map key any elem i32", "map.lookup",
+		}, sequence(out))
 	})
 
 	t.Run("guards a string map before each operation of a string key and no other reference-keyed map", func(t *testing.T) {

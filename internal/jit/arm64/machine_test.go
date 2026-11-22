@@ -727,9 +727,9 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("reads a sliced array across bridge and safepoint resumes that relocate Context.Heap", func(t *testing.T) {
-		// sum(a[i] + len(m)) over i < len(a): the bridged map.len (an any key keeps
-		// the interpreter's map) keeps the loop quiet, so the hoist pass slices a.
-		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32()), types.NewMapType(types.TypeAny(), types.TypeI32())}, []types.Type{types.TypeI32(), types.TypeI32()}, func(b *instr.Builder) {
+		// sum(a[i] + len(m)) over i < len(a): the bridged map.len (a map keyed by an array type gets no
+		// guard and keeps the interpreter's map) keeps the loop quiet, so the hoist pass slices a.
+		fn := function(t, []types.Type{types.NewArrayType(types.TypeI32()), types.NewMapType(types.NewArrayType(types.TypeI32()), types.TypeI32())}, []types.Type{types.TypeI32(), types.TypeI32()}, func(b *instr.Builder) {
 			header, done := b.Label(), b.Label()
 			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
 			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
@@ -753,7 +753,7 @@ func TestNew(t *testing.T) {
 		}
 		require.Contains(t, ssa.Format(f), "array.view")
 
-		heap := []types.Value{nil, types.TypedArray[int32]{10, 20, 30, 40, 50, 60, 70}, types.NewMap(nil, types.NewMapType(types.TypeAny(), types.TypeI32()), 0)}
+		heap := []types.Value{nil, types.TypedArray[int32]{10, 20, 30, 40, 50, 60, 70}, types.NewMap(nil, types.NewMapType(types.NewArrayType(types.TypeI32()), types.TypeI32()), 0)}
 		stack := []types.Boxed{types.BoxRef(1), types.BoxRef(2), 0, 0}
 		// RETURN releases both reference params; counts above one keep
 		// those releases from reaching the last reference.
@@ -3143,10 +3143,13 @@ func TestMachine_Lower(t *testing.T) {
 		step                                                         asm.Label
 	}
 	// keyRegs is the registers a key's rows derive: an i64 key is its own register,
-	// and its rows only check it.
+	// and its rows only check it (three rows); an i8 key of an any map takes two.
 	keyRegs := func(rows []asm.Instruction) int {
-		if len(rows) == 0 || rows[0].Op == uint16(target.OpSBFX) {
+		switch {
+		case len(rows) == 0, rows[0].Op == uint16(target.OpSBFX) && len(rows) == 3:
 			return 0
+		case rows[0].Op == uint16(target.OpSXTB):
+			return 2
 		}
 		return 1
 	}
@@ -3465,6 +3468,119 @@ func TestMachine_Lower(t *testing.T) {
 		}
 		return append(rows, released(key)...)
 	}
+	// anyWord is the word of a key operand of a scalar kind in an any map, as the
+	// interpreter boxes it: the integer kinds retag to an i32, a float keeps its
+	// bits (an f32 with its tag), and an inline i64 is its payload and tag.
+	anyWord := func(tag types.Kind, rows ...asm.Instruction) []asm.Instruction {
+		rows = append(rows, target.LDI(target.X17, types.Tag(tag))...)
+		return append(rows, target.ORR(vr(3), vr(3), target.X17))
+	}
+	// anyKey derives the key of a reference operand of an any map, which is a
+	// boxed word of unknown kind: the registers from from on are the word, the
+	// base hash, the pointer, and the size (-1 for a key that is no String), then
+	// the String's heap slot, data, size, and pointer, and the eleven of its hash.
+	// The labels are the dispatch's, then the hash's five; nan is where a NaN goes.
+	anyKey := func(ref asm.Reg, from int, labels [5]asm.Label, hashLabels [5]asm.Label, nan asm.Label) []asm.Instruction {
+		word, base, ptr, size := vr(from), vr(from+1), vr(from+2), vr(from+3)
+		small, refer, same, other, done := labels[0], labels[1], labels[2], labels[3], labels[4]
+		rows := []asm.Instruction{
+			target.MOVN(size, 0, 0), target.MOVZ(ptr, 0, 0),
+			target.LSRI(target.X16, ref, 49),
+		}
+		rows = append(rows, target.LDI(target.X17, types.Tag(types.KindI32)>>49)...)
+		rows = append(rows,
+			target.SUB(target.X16, target.X16, target.X17),
+			target.CMPI(target.X16, 2), target.BCondLabel(target.OpBLS, small),
+			target.CMNI(target.X16, 1), target.BCondLabel(target.OpBEQ, refer),
+			target.CMNI(target.X16, 2), target.BCondLabel(target.OpBEQ, same),
+			target.CMNI(target.X16, 3), target.BCondLabel(target.OpBEQ, exit),
+			target.LSLI(target.X16, ref, 1),
+		)
+		rows = append(rows, target.LDI(target.X17, 0xFFE0<<48)...)
+		rows = append(rows,
+			target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBHI, nan),
+			target.CMPI(target.X16, 0), target.CSEL(word, target.XZR, ref, target.CondEQ),
+			target.MOV(base, word), target.BLabel(done),
+			// small
+			target.UXTW(word, ref),
+		)
+		rows = append(rows, target.LDI(target.X17, types.Tag(types.KindI32))...)
+		rows = append(rows,
+			target.ORR(word, word, target.X17), target.MOV(base, word), target.BLabel(done),
+			// same
+			target.MOV(word, ref), target.MOV(base, ref), target.BLabel(done),
+			// reference
+			target.SBFX(target.X16, ref, 0, 32), target.CBZLabel(target.X16, exit),
+		)
+		rows = append(rows, text(ref, vr(from+4), vr(from+5), vr(from+6), vr(from+7), other)...)
+		rows = append(rows, target.MOV(ptr, vr(from+7)), target.MOV(size, vr(from+6)), target.MOV(word, ref))
+		rows = append(rows, hashRows(vr(from+7), vr(from+6), from+8, hashLabels[0], hashLabels[1], hashLabels[2], hashLabels[3], hashLabels[4])...)
+		rows = append(rows, target.MOV(base, vr(from+18)), target.BLabel(done))
+		rows = append(rows, target.LDI(target.X17, uint64(jit.Itab(types.I64(0))))...)
+		return append(rows,
+			target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBEQ, exit),
+			target.MOV(word, ref), target.MOV(base, ref),
+		)
+	}
+	// anyContent is the probe's content check of an any map: a key that is no
+	// String has the size -1 and matches by word alone.
+	anyContent := func(word asm.VReg, from int, ptr, size asm.VReg, next, hit asm.Label, labels [5]asm.Label) []asm.Instruction {
+		return append([]asm.Instruction{target.CMPI(size, 0), target.BCondLabel(target.OpBLT, next)}, content(word, from, ptr, size, next, hit, labels)...)
+	}
+	// anyGet is map.get of a reference operand in an any map: the key takes
+	// registers 3 to 21 and its labels 5 to 14, the table 22 to 24, the home slot
+	// 25 and 26, and the probe 27 to 29, then the content check 30 to 35; the
+	// probe's labels are 15 and 16 and the string comparison's 17 to 21.
+	anyGet := func(ref, dst asm.VReg, key asm.Reg) []asm.Instruction {
+		w := layout(2, 22, false)
+		rows := slices.Concat(tableOf(ref, 1), anyKey(key, 3, [5]asm.Label{5, 6, 7, 8, 9}, [5]asm.Label{10, 11, 12, 13, 14}, 3), words(w), home(w, vr(4)),
+			probe(w, vr(3), 15, 16, 2, 3, anyContent(vr(w.word), w.word+1, vr(5), vr(6), 16, 2, [5]asm.Label{17, 18, 19, 20, 21})...))
+		return append(rows, target.LDR(dst, vr(w.slot), 8), target.BLabel(4), target.LDR(dst, vr(2), offset(jit.OffsetMapZero)))
+	}
+	// anySet is map.set of a reference operand in an any map and an i32 value in
+	// vr(1): the key takes registers 4 to 22 and the labels 4 to 13, the table 23
+	// to 25, the probe's labels are 14 and 15, the string comparison's 16 to 20, the
+	// dead-slot step 21, and the retain's skip 22. A miss counts one more reference
+	// to the key word.
+	anySet := func(ref asm.VReg, key asm.Reg, value asm.Reg) []asm.Instruction {
+		w := layout(3, 23, true)
+		w.step = 21
+		used, want, limit, order, pos, count := w.word+7, w.word+8, w.word+9, w.word+10, w.word+11, w.word+12
+		rows := slices.Concat(box32(reg(i32, 4)), tableOf(ref, 2), anyKey(key, 4, [5]asm.Label{4, 5, 6, 7, 8}, [5]asm.Label{9, 10, 11, 12, 13}, exit), words(w), home(w, vr(5)),
+			[]asm.Instruction{target.MOVN(vr(w.free), 0, 0)},
+			probe(w, vr(4), 14, 15, 2, 3, anyContent(vr(w.word), w.word+1, vr(6), vr(7), 15, 2, [5]asm.Label{16, 17, 18, 19, 20})...))
+		rows = append(rows,
+			target.LDR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)), target.ADDI(vr(want), vr(used), 1), target.LSLI(vr(want), vr(want), 2),
+			target.ADDI(vr(limit), vr(w.mask), 1), target.LSLI(target.X16, vr(limit), 1), target.ADD(vr(limit), vr(limit), target.X16),
+			target.CMP(vr(want), vr(limit)), target.BCondLabel(target.OpBGT, exit),
+			target.CMPI(vr(w.free), 0), target.CSEL(vr(w.index), vr(w.free), vr(w.index), target.CondGE),
+			target.STRBR(vr(w.tag), vr(w.ctrl), vr(w.index)),
+			target.LSLI(vr(w.slot), vr(w.index), 4), target.ADD(vr(w.slot), vr(w.slots), vr(w.slot)),
+			target.STR(vr(4), vr(w.slot), 0), target.STR(value, vr(w.slot), 8),
+			target.LDR(vr(order), vr(w.data), offset(jit.OffsetMapOrder)), target.STRWR(vr(w.index), vr(order), vr(used)),
+			target.LDR(vr(pos), vr(w.data), offset(jit.OffsetMapPos)), target.STRWR(vr(used), vr(pos), vr(w.index)),
+			target.ADDI(vr(used), vr(used), 1), target.STR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)),
+			target.LDR(vr(count), vr(w.data), offset(jit.OffsetMapCount)), target.ADDI(vr(count), vr(count), 1), target.STR(vr(count), vr(w.data), offset(jit.OffsetMapCount)),
+		)
+		rows = append(rows, retained(vr(4), 22)...)
+		return append(rows, target.BLabel(resume), target.STR(value, vr(w.slot), 8))
+	}
+	// anyDelete is map.delete of a reference operand in an any map: a hit releases
+	// the stored key, then the incoming operand it adopts, which a miss releases too.
+	anyDelete := func(ref asm.VReg, key asm.VReg) []asm.Instruction {
+		w := layout(2, 22, false)
+		state, count, stored := w.word+7, w.word+8, w.word+9
+		rows := slices.Concat(tableOf(ref, 1), anyKey(key, 3, [5]asm.Label{4, 5, 6, 7, 8}, [5]asm.Label{9, 10, 11, 12, 13}, 3), words(w), home(w, vr(4)),
+			probe(w, vr(3), 14, 15, 2, 3, anyContent(vr(w.word), w.word+1, vr(5), vr(6), 15, 2, [5]asm.Label{16, 17, 18, 19, 20})...))
+		rows = append(rows, target.LDI(vr(state), jit.SlotDead)...)
+		rows = append(rows,
+			target.STRBR(vr(state), vr(w.ctrl), vr(w.index)),
+			target.LDR(vr(count), vr(w.data), offset(jit.OffsetMapCount)), target.SUBI(vr(count), vr(count), 1), target.STR(vr(count), vr(w.data), offset(jit.OffsetMapCount)),
+			target.LDR(vr(stored), vr(w.slot), 0),
+		)
+		rows = append(rows, released(vr(stored))...)
+		return append(rows, released(key)...)
+	}
 	ref, mapped := ssa.TypeRef, func(kind ssa.Op, results int, args ...ssa.Value) ssa.Operation {
 		op := ssa.Operation{Op: kind, Args: args}
 		for i := range results {
@@ -3611,6 +3727,76 @@ func TestMachine_Lower(t *testing.T) {
 			rows: stringDelete(reg(ref, 2), reg(ref, 3), true), lower: true,
 		},
 		{
+			name: "map.get of an i1 key in an any map retags it to an i32 holding 0 or 1",
+			regs: regs{1: ref, 2: ref, 3: ssa.TypeI1, 4: i32}, guard: intMap(types.KindAny, types.KindI32),
+			op:   mapped(ssa.OpMapGet, 1, 2, 3),
+			rows: get(reg(ref, 2), reg(i32, 4), vr(3), anyWord(types.KindI32, target.CMPI(reg(ssa.TypeI1, 3), 0), target.CSET(vr(3), target.CondNE)), asm.VReg{}, nil), lower: true,
+		},
+		{
+			name: "map.get of an i8 key in an any map sign-extends its low byte, then retags it to an i32",
+			regs: regs{1: ref, 2: ref, 3: ssa.TypeI8, 4: i32}, guard: intMap(types.KindAny, types.KindI32),
+			op:   mapped(ssa.OpMapGet, 1, 2, 3),
+			rows: get(reg(ref, 2), reg(i32, 4), vr(3), anyWord(types.KindI32, target.SXTB(iv(4, asm.Width32), reg(ssa.TypeI8, 3)), target.UXTW(vr(3), iv(4, asm.Width32))), asm.VReg{}, nil), lower: true,
+		},
+		{
+			name: "map.get of an i32 key in an any map zero-extends it and retags it to an i32",
+			regs: regs{1: ref, 2: ref, 3: i32, 4: i32}, guard: intMap(types.KindAny, types.KindI32),
+			op:   mapped(ssa.OpMapGet, 1, 2, 3),
+			rows: get(reg(ref, 2), reg(i32, 4), vr(3), anyWord(types.KindI32, target.UXTW(vr(3), reg(i32, 3))), asm.VReg{}, nil), lower: true,
+		},
+		{
+			name: "map.get of an i64 key in an any map bridges outside the inline range and else is its payload with the i64 tag",
+			regs: regs{1: ref, 2: ref, 3: i64, 4: i32}, guard: intMap(types.KindAny, types.KindI32),
+			op:   mapped(ssa.OpMapGet, 1, 2, 3),
+			rows: get(reg(ref, 2), reg(i32, 4), vr(3), anyWord(types.KindI64, slices.Concat(wide(reg(i64, 3)), []asm.Instruction{target.ANDI(vr(3), reg(i64, 3), types.VMask)})...), asm.VReg{}, nil), lower: true,
+		},
+		{
+			name: "map.get of an f32 key in an any map folds -0 and tags the bits as an f32",
+			regs: regs{1: ref, 2: ref, 3: f32, 4: i32}, guard: intMap(types.KindAny, types.KindI32),
+			op:   mapped(ssa.OpMapGet, 1, 2, 3),
+			rows: get(reg(ref, 2), reg(i32, 4), vr(3), anyWord(types.KindF32, float(reg(f32, 3), 3, 3)...), asm.VReg{}, nil), lower: true,
+		},
+		{
+			name: "map.get of an f64 key in an any map is the float map's word",
+			regs: regs{1: ref, 2: ref, 3: f64, 4: i32}, guard: intMap(types.KindAny, types.KindI32),
+			op:   mapped(ssa.OpMapGet, 1, 2, 3),
+			rows: get(reg(ref, 2), reg(i32, 4), vr(3), float(reg(f64, 3), 3, 3), asm.VReg{}, nil), lower: true,
+		},
+		{
+			name: "map.get of a reference key in an any map dispatches on its tag and compares content only for a String",
+			regs: regs{1: ref, 2: ref, 3: ref, 4: i32}, guard: intMap(types.KindAny, types.KindI32),
+			op:   mapped(ssa.OpMapGet, 1, 2, 3),
+			rows: anyGet(reg(ref, 2), reg(i32, 4), reg(ref, 3)), lower: true,
+		},
+		{
+			name: "map.set of a reference key in an any map counts one more reference to its word on a miss only",
+			regs: regs{1: ref, 2: ref, 3: ref, 4: i32}, guard: intMap(types.KindAny, types.KindI32),
+			op:   ssa.Operation{Op: ssa.OpMapSet, Args: []ssa.Value{2, 3, 4}},
+			rows: anySet(reg(ref, 2), reg(ref, 3), vr(1)), lower: true,
+		},
+		{
+			name: "map.delete of a reference key in an any map releases the stored key, then the incoming key it adopts",
+			regs: regs{1: ref, 2: ref, 3: ref}, guard: intMap(types.KindAny, types.KindI32),
+			op:   ssa.Operation{Op: ssa.OpMapDelete, Args: []ssa.Value{2, 3}},
+			rows: anyDelete(reg(ref, 2), reg(ref, 3)), lower: true,
+		},
+		{
+			name: "map.delete of a scalar key in an any map still releases the stored key",
+			regs: regs{1: ref, 2: ref, 3: i32}, guard: intMap(types.KindAny, types.KindI32),
+			op: ssa.Operation{Op: ssa.OpMapDelete, Args: []ssa.Value{2, 3}},
+			rows: func() []asm.Instruction {
+				w := layout(2, 4, false)
+				rows := slices.Concat(tableOf(reg(ref, 2), 1), anyWord(types.KindI32, target.UXTW(vr(3), reg(i32, 3))), words(w), home(w, vr(3)), probe(w, vr(3), 4, 5, 2, 3))
+				rows = append(rows, target.LDI(vr(w.word+1), jit.SlotDead)...)
+				rows = append(rows,
+					target.STRBR(vr(w.word+1), vr(w.ctrl), vr(w.index)),
+					target.LDR(vr(w.word+2), vr(w.data), offset(jit.OffsetMapCount)), target.SUBI(vr(w.word+2), vr(w.word+2), 1), target.STR(vr(w.word+2), vr(w.data), offset(jit.OffsetMapCount)),
+					target.LDR(vr(w.word+3), vr(w.slot), 0),
+				)
+				return append(rows, released(vr(w.word+3))...)
+			}(), lower: true,
+		},
+		{
 			name: "map.get declines a scalar operand of a string map",
 			regs: regs{1: ref, 2: ref, 3: i32, 4: i32}, guard: intMap(types.KindRef, types.KindI32),
 			op: mapped(ssa.OpMapGet, 1, 2, 3),
@@ -3722,6 +3908,25 @@ func TestMachine_Lower(t *testing.T) {
 				return []types.Boxed{types.BoxRef(h.Add(types.String(text))), types.BoxRef(h.Add(types.String(strings.Clone(text))))}
 			})
 		})
+		t.Run("any keys of every dispatched kind", func(t *testing.T) {
+			mirror(t, types.TypeAny(), func(h *types.Heap, n int) []types.Boxed {
+				switch n % 6 {
+				case 0:
+					return []types.Boxed{types.BoxI32(int32(n/6 - 3))}
+				case 1:
+					return []types.Boxed{types.BoxI8(int8(n/6 - 3))}
+				case 2:
+					return []types.Boxed{types.BoxF64(math.Copysign(float64(n/6%2), float64(n/6%3-1)))}
+				case 3:
+					text := strings.Repeat("k", n%19) + strconv.Itoa(n)
+					return []types.Boxed{types.BoxRef(h.Add(types.String(text))), types.BoxRef(h.Add(types.String(strings.Clone(text))))}
+				case 4:
+					return []types.Boxed{types.BoxRef(h.Add(types.TypedArray[int32]{int32(n)}))}
+				default:
+					return []types.Boxed{types.BoxI64(int64(n) << 33)}
+				}
+			})
+		})
 	})
 
 	t.Run("the map guard admits exactly the declared key kind, element kind, and class", func(t *testing.T) {
@@ -3794,6 +3999,159 @@ func TestMachine_Lower(t *testing.T) {
 				require.Equal(t, want, jit.Enter(code, ctx))
 			})
 		}
+	})
+
+	t.Run("the any map guard admits an any map and no map of another key kind", func(t *testing.T) {
+		testenv.MustHaveArch(t, "arm64")
+
+		fn := function(t, []types.Type{types.NewMapType(types.TypeAny(), types.TypeI32())}, nil, func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_LEN).Emit(instr.RETURN)
+		})
+		fn.Typ.Returns = []types.Type{types.TypeI32()}
+		code, _ := lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
+
+		for _, tt := range []struct {
+			name  string
+			key   types.Type
+			admit bool
+		}{
+			{"the declared any map", types.TypeAny(), true},
+			{"a string key", types.TypeString(), false},
+			{"an i32 key", types.TypeI32(), false},
+			{"an f64 key", types.TypeF64(), false},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				stack := []types.Boxed{types.BoxRef(1), 0}
+				ctx := enter(t, stack)
+				ctx.Heap = address(t, []types.Value{nil, types.NewMap(nil, types.NewMapType(tt.key, types.TypeI32()), 0)})
+				ctx.RC = address(t, []int{0, 2})
+				want := jit.TrapReturn
+				if !tt.admit {
+					want = jit.TrapDeopt
+				}
+				require.Equal(t, want, jit.Enter(code, ctx))
+			})
+		}
+	})
+
+	t.Run("a key of an any map that native code does not lower bridges before the table is touched", func(t *testing.T) {
+		testenv.MustHaveArch(t, "arm64")
+
+		typ := types.NewMapType(types.TypeAny(), types.TypeI32())
+		params := []types.Type{typ, types.TypeAny(), types.TypeI32()}
+		run := func(emit func(*instr.Builder), returns ...types.Type) (uintptr, []jit.Exit) {
+			fn := function(t, params, nil, emit)
+			fn.Typ.Returns = returns
+			return lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
+		}
+		set, setExits := run(func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.MAP_SET).Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+		}, types.TypeI32())
+		del, delExits := run(func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_DELETE).Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+		}, types.TypeI32())
+		lookup, lookupExits := run(func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_LOOKUP).Emit(instr.RETURN)
+		}, types.TypeI32(), types.TypeI1())
+
+		// The heap holds null, an array, a wide i64 cell, a string, and the map.
+		tests := []struct {
+			name   string
+			key    types.Boxed
+			bridge bool
+		}{
+			{"null", types.BoxedNull, true},
+			{"an I64 cell", types.BoxRef(2), true},
+			{"an f32", types.BoxF32(1.5), true},
+			{"an i32", types.BoxI32(1), false},
+			{"an inline i64", types.BoxI64(1 << 40), false},
+			{"an f64", types.BoxF64(-0.0), false},
+			{"an array", types.BoxRef(1), false},
+			{"a string", types.BoxRef(3), false},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				heap := types.NewHeap(16, 0, types.Hooks{})
+				heap.Add(nil)
+				heap.Add(types.TypedArray[int32]{1})
+				heap.Add(types.I64(1 << 60))
+				heap.Add(types.String("key"))
+				m := types.NewMap(heap, typ, 0)
+				m.Store(types.BoxRef(heap.Add(types.String("seed"))), types.BoxI32(7))
+				heap.Add(m)
+				for _, addr := range []int{1, 2, 3, 5} {
+					heap.Inc(addr, 1<<20)
+				}
+				before := snapshot(m)
+				call := func(code uintptr, exits []jit.Exit, op instr.Opcode) (bridges int) {
+					stack := []types.Boxed{types.BoxRef(5), tt.key, types.BoxI32(9), 0, 0}
+					ctx := enter(t, stack)
+					ctx.Heap, ctx.RC = heap.Bases()
+					for trap := jit.Enter(code, ctx); trap != jit.TrapReturn; trap = jit.Resume(ctx) {
+						require.Equal(t, jit.TrapBridge, trap)
+						exit := exits[ctx.Exit()]
+						require.Equal(t, jit.ExitBridge, exit.Kind)
+						require.Equal(t, op, exit.Code)
+						require.Equal(t, before, snapshot(m), "native code wrote the table before it bridged")
+						bridges++
+					}
+					return bridges
+				}
+				require.Equal(t, btoi(tt.bridge), call(del, delExits, instr.MAP_DELETE))
+				require.Equal(t, btoi(tt.bridge), call(lookup, lookupExits, instr.MAP_LOOKUP))
+				if tt.bridge {
+					require.Equal(t, 1, call(set, setExits, instr.MAP_SET))
+				}
+			})
+		}
+	})
+
+	t.Run("a NaN key of an any map bridges a set before the table is touched and never hits a get or delete", func(t *testing.T) {
+		testenv.MustHaveArch(t, "arm64")
+
+		typ := types.NewMapType(types.TypeAny(), types.TypeI32())
+		params := []types.Type{typ, types.TypeAny(), types.TypeI32()}
+		run := func(emit func(*instr.Builder), returns ...types.Type) (uintptr, []jit.Exit) {
+			fn := function(t, params, nil, emit)
+			fn.Typ.Returns = returns
+			return lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
+		}
+		set, setExits := run(func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.MAP_SET).Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+		}, types.TypeI32())
+		del, _ := run(func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_DELETE).Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+		}, types.TypeI32())
+		lookup, _ := run(func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_LOOKUP).Emit(instr.RETURN)
+		}, types.TypeI32(), types.TypeI1())
+
+		heap := types.NewHeap(8, 0, types.Hooks{})
+		heap.Add(nil)
+		m := types.NewMap(heap, typ, 0)
+		addr := heap.Add(m)
+		heap.Inc(addr, 1<<20)
+		m.Store(types.BoxI32(1), types.BoxI32(7))
+		before := snapshot(m)
+		call := func(code uintptr, exits []jit.Exit) (stack []types.Boxed, bridges int) {
+			stack = []types.Boxed{types.BoxRef(addr), types.BoxedNaN, types.BoxI32(9), 0, 0}
+			ctx := enter(t, stack)
+			ctx.Heap, ctx.RC = heap.Bases()
+			for trap := jit.Enter(code, ctx); trap != jit.TrapReturn; trap = jit.Resume(ctx) {
+				require.Equal(t, jit.TrapBridge, trap)
+				require.Equal(t, instr.MAP_SET, exits[ctx.Exit()].Code)
+				require.Equal(t, before, snapshot(m), "native code wrote the table before it bridged")
+				bridges++
+			}
+			return stack, bridges
+		}
+		_, bridges := call(del, nil)
+		require.Zero(t, bridges)
+		out, bridges := call(lookup, nil)
+		require.Zero(t, bridges)
+		require.Equal(t, []types.Boxed{m.Zero, types.BoxI1(false)}, out[:2])
+		_, bridges = call(set, setExits)
+		require.Equal(t, 1, bridges)
 	})
 
 	t.Run("a key no string map accepts bridges before the table is touched", func(t *testing.T) {
