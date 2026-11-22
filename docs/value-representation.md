@@ -97,9 +97,10 @@ A map key is one table word whose form depends on the map's key kind (`memory-mo
 | `i1`, `i8`, `i32` | the value zero-extended to its own width: `i1` 0 or 1, `i8` the low byte, `i32` the low 32 bits |
 | `i64` | all 64 bits when the value fits the inline range, else the `Boxed` ref of a map-owned `I64` cell |
 | `f32`, `f64` | the raw bits (`f32` in the low 32); `-0` is stored as `+0` |
-| reference (`string`, `any`, any other reference type) | the `Boxed` word; in an `any` map `i1`, `i8`, and `i32` retag to `i32` and floats follow the float rule |
+| `string`, other reference types | the `Boxed` word |
+| `any` (`KindAny`) | the `Boxed` word; `i1`, `i8`, and `i32` retag to `i32` and floats follow the float rule |
 
-Keys compare as their Go values: a float `-0` equals `+0`, and a `NaN` key never matches, so each store adds an entry that only `map.clear` removes. A reference key compares by its value, in every map: a `String` by content, an `I64` cell by its integer, any other reference by identity.
+Keys compare as their Go values: a float `-0` equals `+0`, and a `NaN` key never matches, so each store adds an entry that only `map.clear` removes. The hash of a key is its base hash: the table word, except the content hash `String.Hash` (which mixes the process `Hashkey`) for a `String` and the value for a wide `I64` cell. A reference key compares by its value, in every map: a `String` by content, an `I64` cell by its integer, any other reference by identity.
 
 ## Native Representation
 

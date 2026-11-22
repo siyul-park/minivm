@@ -44,14 +44,14 @@ Transfers `MUST` preserve counts exactly. Native execution `MAY` borrow backing 
 
 `types/map.go` owns map storage. One `Map` serves every key type: it keeps its entries in an open-addressing table of four flat arrays that hold no Go pointers, so native code reads them without touching a Go map. A `Map` `MUST` come from `NewMap`; its zero value is not usable.
 
-The key kind (`MapType.KeyKind`) fixes how a key is stored and compared. `value-representation.md`, Map Key Words, owns the table word each key kind stores and how it matches.
+The key kind (`MapType.KeyKind`, which is `KindAny` for an `any` key) fixes how a key is stored and compared. `value-representation.md`, Map Key Words, owns the table word each key kind stores and how it matches.
 
 An `i64` key outside the inline range is a map-owned `I64` heap cell: `Store` and `Swap` adopt the incoming cell when the caller holds the only reference, else copy it, and release a cell whose value fits inline. `Range` lends the cell; `map.keys` and `map.iter` hand out fresh copies, so a guest never holds the map's own cell. `Accepts` is the check before a key enters: a scalar fits unless the map is keyed by a reference type, and a reference fits a `string` map when it is a `String`, an `i64` map when it is an `I64`, and any other reference-keyed map always; an `any` map also takes a scalar.
 
 | Part | Contract |
 |---|---|
 | Capacity | a power of two, at least 8 |
-| Hash | the key word xor a random per-table seed, times a fixed constant; the top bits pick the home slot and the seven bits below them the tag. The seed survives rehash and `Clone`, so keys crafted to collide for the bare constant spread out; it never affects iteration order |
+| Hash | the key's base hash (its word, else the content hash of a `String`) xor a random per-table seed, times a fixed constant; the top bits pick the home slot and the seven bits below them the tag. The seed survives rehash and `Clone`, so keys crafted to collide for the bare constant spread out; it never affects iteration order |
 | Slot | key word, then `Boxed` value word, in `slots`; control byte `empty` (0), `dead` (1, a tombstone), or `full` (`0x80` with the tag) in `ctrl`; probing is linear and passes every slot whose control byte is not the key's tag. An insert takes the first tombstone on its probe, else the empty slot that ended it |
 | Order | `order[:used]` lists the slot of every insert since the last rehash, the rehash's own re-inserts first, and `pos[slot]` is the position of the slot's latest insert; position `p` is live while slot `order[p]` is full and `pos[order[p]]` is `p` |
 | Load | `used`, which bounds live entries plus tombstones, stays at or below three quarters of capacity; an insert past that rehashes the live entries, in order, into fresh arrays, doubling them when live entries exceed three eighths and keeping the size otherwise |

@@ -630,7 +630,7 @@ func mapKey(mt *types.MapType, key *conversion) func(*Encoder, unsafe.Pointer) (
 			}
 			return types.BoxF64(f), nil
 		}
-	case types.KindRef:
+	case types.KindRef, types.KindAny:
 		return func(e *Encoder, p unsafe.Pointer) (types.Boxed, error) {
 			val, err := key.value(e, p)
 			if err != nil {

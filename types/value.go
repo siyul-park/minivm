@@ -73,6 +73,8 @@ const (
 	KindI1 = instr.KindI1
 	// KindRef is the ref value kind.
 	KindRef = instr.KindRef
+	// KindAny is the key kind of an any map; it is not a value kind.
+	KindAny = instr.KindAny
 )
 
 // IsNull reports whether v is the null reference.

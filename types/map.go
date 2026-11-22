@@ -1,14 +1,12 @@
 package types
 
 import (
-	"encoding/binary"
 	"fmt"
 	"math"
 	"math/bits"
 	"math/rand/v2"
 	"slices"
 	"strings"
-	"unsafe"
 )
 
 // Map is a map from a key of any kind to boxed values, in insertion order.
@@ -31,7 +29,8 @@ type MapLiteral struct {
 }
 
 // MapType is the type of maps from Key to Elem. KeyKind and ElemKind are
-// consecutive bytes, so native code reads them with one load.
+// consecutive bytes, so native code reads them with one load. KeyKind is
+// KindAny for an any key, which tells an any map from a string map.
 type MapType struct {
 	Key         Type
 	Elem        Type
@@ -121,11 +120,6 @@ const (
 	matchNone                // never: a NaN
 )
 
-const (
-	hashMix0 = 0xa0761d6478bd642f
-	hashMix1 = 0xe7037ed1a0b428db
-)
-
 var (
 	_ Value     = (*MapLiteral)(nil)
 	_ Traceable = (*Map)(nil)
@@ -133,9 +127,6 @@ var (
 	_ Iterator  = (*MapIterator)(nil)
 	_ Type      = (*MapType)(nil)
 )
-
-// hashkey seeds strhash for the process. It never affects order.
-var hashkey = rand.Uint64()
 
 // NewMap returns an empty map of type typ sized for capacity entries. A nil
 // heap makes an unbound map: the first reference it must read, retain, or
@@ -148,10 +139,14 @@ func NewMap(heap *Heap, typ *MapType, capacity int) *Map {
 
 // NewMapType returns the map type from key to elem.
 func NewMapType(key Type, elem Type) *MapType {
+	keyKind := key.Kind()
+	if key == TypeAny() {
+		keyKind = KindAny
+	}
 	return &MapType{
 		Key:         key,
 		Elem:        elem,
-		KeyKind:     key.Kind(),
+		KeyKind:     keyKind,
 		ElemKind:    elem.Kind(),
 		TraceKeys:   key.Kind() == KindRef || key.Kind() == KindI64,
 		TraceValues: elem.Kind() == KindRef || elem.Kind() == KindI64,
@@ -445,11 +440,10 @@ func (m *Map) clone() Value {
 func (m *Map) accepts(key Boxed) bool {
 	isRef := uint64(key)>>VBits == refTag
 	switch m.Typ.KeyKind {
+	case KindAny:
+		return true
 	case KindRef:
-		switch m.Typ.Key {
-		case TypeAny():
-			return true
-		case TypeString():
+		if _, ok := m.Typ.Key.(stringType); ok {
 			if isRef {
 				_, ok := m.bound().At(key.Ref()).(String)
 				return ok
@@ -471,7 +465,7 @@ func (m *Map) accepts(key Boxed) bool {
 // map alone holds, and a sole-owned wide cell is adopted as it is. It changes
 // no counts but the key's, and does so before the table is touched.
 func (m *Map) own(key Boxed) Boxed {
-	if m.Typ.KeyKind != KindI64 && m.Typ.KeyKind != KindRef {
+	if m.Typ.KeyKind != KindI64 && m.Typ.KeyKind != KindRef && m.Typ.KeyKind != KindAny {
 		return key
 	}
 	h := m.bound()
@@ -512,24 +506,29 @@ func (m *Map) release(key, value Boxed) {
 // control byte and table word of key. A NaN key never hits.
 func (m *Map) find(key Boxed) (hit, free int, tag byte, word uint64) {
 	match := matchWord
+	var base uint64
 	switch m.Typ.KeyKind {
 	case KindI1:
 		word = min(uint64(key)&VMask, 1)
+		base = word
 	case KindI8:
 		word = uint64(uint8(key))
+		base = word
 	case KindI32:
 		word = uint64(uint32(key))
+		base = word
 	case KindI64:
 		if uint64(key)>>VBits == refTag {
-			word, match = m.resolve(key)
+			word, base, match = m.resolve(key)
 		} else {
 			word = uint64(int64(key<<(64-VBits)) >> (64 - VBits))
+			base = word
 		}
 	default:
-		word, match = m.resolve(key)
+		word, base, match = m.resolve(key)
 	}
 	t := &m.table
-	h := (m.hash(word) ^ t.seed) * tableHash
+	h := (base ^ t.seed) * tableHash
 	i := (h >> t.shift) & t.mask
 	tag = slotFull | byte(h>>(t.shift-7))&^slotFull
 	free = -1
@@ -558,55 +557,60 @@ func (m *Map) find(key Boxed) (hit, free int, tag byte, word uint64) {
 	}
 }
 
-// resolve returns the table word of a borrowed key find does not read inline,
-// a float, a key of a reference-keyed map, or a reference in an i64 map, and
-// how it matches a slot. A reference key matches by value when it is a String
-// or an I64 cell, else by identity.
-func (m *Map) resolve(key Boxed) (word uint64, match byte) {
+// resolve returns the table word and the base hash of a borrowed key find does
+// not read inline, a float, a key of a reference-keyed map, or a reference in
+// an i64 map, and how it matches a slot. The base hash is what hash returns
+// for the word. A reference key matches by value when it is a String or an I64
+// cell, else by identity.
+func (m *Map) resolve(key Boxed) (word, base uint64, match byte) {
 	switch m.Typ.KeyKind {
 	case KindF32:
 		f := key.F32()
 		if f == 0 {
-			return 0, matchWord
+			return 0, 0, matchWord
 		}
-		return uint64(math.Float32bits(f)), nanMatch(float64(f))
+		word = uint64(math.Float32bits(f))
+		return word, word, nanMatch(float64(f))
 	case KindF64:
 		f := key.F64()
 		if f == 0 {
-			return 0, matchWord
+			return 0, 0, matchWord
 		}
-		return uint64(key), nanMatch(f)
+		return uint64(key), uint64(key), nanMatch(f)
 	}
 	switch key.Kind() {
 	case KindI1, KindI8, KindI32:
-		return uint64(BoxI32(key.I32())), matchWord
+		word = uint64(BoxI32(key.I32()))
+		return word, word, matchWord
 	case KindF32:
 		if f := key.F32(); f == 0 {
-			return uint64(BoxF32(0)), matchWord
+			word = uint64(BoxF32(0))
+			return word, word, matchWord
 		} else {
-			return uint64(key), nanMatch(float64(f))
+			return uint64(key), uint64(key), nanMatch(float64(f))
 		}
 	case KindF64:
 		if f := key.F64(); f == 0 {
-			return 0, matchWord
+			return 0, 0, matchWord
 		} else {
-			return uint64(key), nanMatch(f)
+			return uint64(key), uint64(key), nanMatch(f)
 		}
 	case KindRef:
 		switch v := m.bound().At(key.Ref()).(type) {
 		case String:
-			return uint64(key), matchContent
+			return uint64(key), v.Hash(), matchContent
 		case I64:
 			switch {
 			case !IsBoxable(int64(v)):
-				return uint64(key), matchContent
+				return uint64(key), uint64(v), matchContent
 			case m.Typ.KeyKind == KindI64:
-				return uint64(v), matchWord
+				return uint64(v), uint64(v), matchWord
 			}
-			return uint64(BoxI64(int64(v))), matchWord
+			word = uint64(BoxI64(int64(v)))
+			return word, word, matchWord
 		}
 	}
-	return uint64(key), matchWord
+	return uint64(key), uint64(key), matchWord
 }
 
 func nanMatch(f float64) byte {
@@ -688,7 +692,7 @@ func (m *Map) hash(word uint64) uint64 {
 func (m *Map) digest(word uint64) uint64 {
 	switch v := m.bound().At(Boxed(word).Ref()).(type) {
 	case String:
-		return strhash(string(v))
+		return v.Hash()
 	case I64:
 		return uint64(v)
 	}
@@ -801,36 +805,4 @@ func (t *table) live(p int) (uint32, bool) {
 // split cuts buf into pos, its first n words, and order, the rest.
 func split(buf []uint32, n int) (pos, order []uint32) {
 	return buf[:n:n], buf[n:]
-}
-
-// strhash folds s, reading only inside it, as native code does.
-func strhash(s string) uint64 {
-	n := len(s)
-	h := hashkey ^ uint64(n)
-	var a, b uint64
-	switch {
-	case n >= 8:
-		for i := 0; i+8 < n; i += 8 {
-			h = mix(le64(s, i)^hashMix1, h^hashMix0)
-		}
-		a = le64(s, n-8)
-	case n >= 4:
-		a, b = le32(s, 0), le32(s, n-4)
-	case n > 0:
-		a = uint64(s[0])<<16 | uint64(s[n>>1])<<8 | uint64(s[n-1])
-	}
-	return mix(a^hashMix1, b^h^hashMix0)
-}
-
-func mix(a, b uint64) uint64 {
-	hi, lo := bits.Mul64(a, b)
-	return hi ^ lo
-}
-
-func le64(s string, i int) uint64 {
-	return binary.LittleEndian.Uint64(unsafe.Slice(unsafe.StringData(s), len(s))[i:])
-}
-
-func le32(s string, i int) uint64 {
-	return uint64(binary.LittleEndian.Uint32(unsafe.Slice(unsafe.StringData(s), len(s))[i:]))
 }

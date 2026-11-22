@@ -70,7 +70,7 @@ func TestKind_String(t *testing.T) {
 		{kind: instr.KindF32, want: "f32"},
 		{kind: instr.KindF64, want: "f64"},
 		{kind: instr.KindRef, want: "ref"},
-		{kind: instr.KindAny, want: "unknown"},
+		{kind: instr.KindAny, want: "any"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.kind.String(), func(t *testing.T) {

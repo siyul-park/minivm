@@ -355,7 +355,7 @@ func TestNewMapType(t *testing.T) {
 		{types.TypeF32(), false, types.KindF32, "f32"},
 		{types.TypeF64(), false, types.KindF64, "f64"},
 		{types.TypeString(), true, types.KindRef, "string"},
-		{types.TypeAny(), true, types.KindRef, "any"},
+		{types.TypeAny(), true, types.KindAny, "any"},
 		{structType, true, types.KindRef, "struct"},
 	}
 	for _, tt := range tests {
