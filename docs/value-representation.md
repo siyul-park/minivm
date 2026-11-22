@@ -90,16 +90,16 @@ Unboxing methods: `I32`, `I8`, `I64`, `F32`, `F64`, `Ref`, `Bool`. Callers `MUST
 
 ## Map Key Words
 
-A map key is one table word whose form depends on the map's class (`memory-model.md`, Map Storage, owns the table that holds it):
+A map key is one table word whose form depends on the map's key kind (`memory-model.md`, Map Storage, owns the table that holds it):
 
-| Class | Key types | Table word | Match |
-|---|---|---|---|
-| `ClassWord` | `i1`, `i8`, `i32`, `i64` | the value zero-extended to its own width: `i1` 0 or 1, `i8` the low byte, `i32` the low 32 bits, `i64` all 64 when it fits the inline range, else the `Boxed` ref of a map-owned `I64` cell | the word; a wide cell matches by value |
-| `ClassFloat` | `f32`, `f64` | the raw bits (`f32` in the low 32); `-0` is stored as `+0` | the word; a `NaN` matches nothing |
-| `ClassText` | `string` | the `Boxed` ref of a `String` | the content |
-| `ClassAny` | `any` and every other reference type | the `Boxed` word, with `i1`, `i8`, and `i32` retagged to `i32` and floats as `ClassFloat` | the word; a `String` or a wide `i64` cell matches by content |
+| Key kind | Table word |
+|---|---|
+| `i1`, `i8`, `i32` | the value zero-extended to its own width: `i1` 0 or 1, `i8` the low byte, `i32` the low 32 bits |
+| `i64` | all 64 bits when the value fits the inline range, else the `Boxed` ref of a map-owned `I64` cell |
+| `f32`, `f64` | the raw bits (`f32` in the low 32); `-0` is stored as `+0` |
+| reference (`string`, `any`, any other reference type) | the `Boxed` word; in an `any` map `i1`, `i8`, and `i32` retag to `i32` and floats follow the float rule |
 
-Keys compare as their Go values: a float `-0` equals `+0`, and a `NaN` key never matches, so each store adds an entry that only `map.clear` removes.
+Keys compare as their Go values: a float `-0` equals `+0`, and a `NaN` key never matches, so each store adds an entry that only `map.clear` removes. A reference key compares by its value, in every map: a `String` by content, an `I64` cell by its integer, any other reference by identity.
 
 ## Native Representation
 

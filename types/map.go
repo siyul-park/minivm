@@ -30,14 +30,13 @@ type MapLiteral struct {
 	Values []Value
 }
 
-// MapType is the type of maps from Key to Elem. KeyKind, ElemKind, and Class
-// are consecutive bytes, so native code reads them with one load.
+// MapType is the type of maps from Key to Elem. KeyKind and ElemKind are
+// consecutive bytes, so native code reads them with one load.
 type MapType struct {
 	Key         Type
 	Elem        Type
 	KeyKind     Kind
 	ElemKind    Kind
-	Class       Class
 	TraceKeys   bool
 	TraceValues bool
 }
@@ -61,9 +60,6 @@ type MapIterator struct {
 	started bool
 	done    bool
 }
-
-// Class is how a map hashes and compares its keys.
-type Class uint8
 
 // table is an open-addressing hash table from a key word to a Boxed value word
 // that remembers insertion order. Native code reaches only its four slices and
@@ -106,15 +102,6 @@ type epoch struct {
 	next  *epoch
 	holes []uint32
 }
-
-// The key classes. A key is one table word in every class: a scalar as its
-// bits, a reference as its Boxed word.
-const (
-	ClassWord  Class = iota // i1, i8, i32, i64
-	ClassFloat              // f32, f64
-	ClassText               // string
-	ClassAny                // any, any other reference type
-)
 
 const (
 	slotEmpty byte = 0
@@ -161,23 +148,12 @@ func NewMap(heap *Heap, typ *MapType, capacity int) *Map {
 
 // NewMapType returns the map type from key to elem.
 func NewMapType(key Type, elem Type) *MapType {
-	var class Class
-	switch key.Kind() {
-	case KindF32, KindF64:
-		class = ClassFloat
-	case KindRef:
-		class = ClassAny
-		if key.Equals(TypeString()) {
-			class = ClassText
-		}
-	}
 	return &MapType{
 		Key:         key,
 		Elem:        elem,
 		KeyKind:     key.Kind(),
 		ElemKind:    elem.Kind(),
-		Class:       class,
-		TraceKeys:   class == ClassText || class == ClassAny || key.Kind() == KindI64,
+		TraceKeys:   key.Kind() == KindRef || key.Kind() == KindI64,
 		TraceValues: elem.Kind() == KindRef || elem.Kind() == KindI64,
 	}
 }
@@ -192,11 +168,12 @@ func NewMapIterator(ref Ref, m *Map) *MapIterator {
 }
 
 // Accepts reports whether key is a valid key of m. A scalar is valid unless m
-// is keyed by string; the verifier checks its kind. A reference is valid when
-// m is keyed by any, by string and it is a String, or by i64 and it is an I64.
+// is keyed by a reference type; the verifier checks its kind. For a map keyed
+// by any a scalar or any reference is valid, by string a String, by another
+// reference type any reference, and by i64 an I64.
 func (m *Map) Accepts(key Boxed) bool {
-	if uint64(key)>>VBits != refTag {
-		return m.Typ.Class != ClassText
+	if uint64(key)>>VBits != refTag && m.Typ.KeyKind != KindRef {
+		return true
 	}
 	return m.accepts(key)
 }
@@ -466,17 +443,21 @@ func (m *Map) clone() Value {
 }
 
 func (m *Map) accepts(key Boxed) bool {
-	switch m.Typ.Class {
-	case ClassAny:
-		return true
-	case ClassWord:
-		if m.Typ.KeyKind == KindI64 {
+	isRef := uint64(key)>>VBits == refTag
+	switch m.Typ.KeyKind {
+	case KindRef:
+		if !m.Typ.Key.Equals(TypeString()) {
+			return true
+		}
+		if isRef {
+			_, ok := m.bound().At(key.Ref()).(String)
+			return ok
+		}
+	case KindI64:
+		if isRef {
 			_, ok := m.bound().At(key.Ref()).(I64)
 			return ok
 		}
-	case ClassText:
-		_, ok := m.bound().At(key.Ref()).(String)
-		return ok
 	}
 	return false
 }
@@ -486,7 +467,7 @@ func (m *Map) accepts(key Boxed) bool {
 // map alone holds, and a sole-owned wide cell is adopted as it is. It changes
 // no counts but the key's, and does so before the table is touched.
 func (m *Map) own(key Boxed) Boxed {
-	if m.Typ.Class == ClassFloat || m.Typ.Class == ClassText {
+	if m.Typ.KeyKind != KindI64 && m.Typ.KeyKind != KindRef {
 		return key
 	}
 	h := m.bound()
@@ -527,17 +508,21 @@ func (m *Map) release(key, value Boxed) {
 // control byte and table word of key. A NaN key never hits.
 func (m *Map) find(key Boxed) (hit, free int, tag byte, word uint64, match byte) {
 	match = matchWord
-	switch {
-	case m.Typ.Class != ClassWord || uint64(key)>>VBits == refTag:
-		word, match = m.resolve(key)
-	case m.Typ.KeyKind == KindI1:
+	switch m.Typ.KeyKind {
+	case KindI1:
 		word = min(uint64(key)&VMask, 1)
-	case m.Typ.KeyKind == KindI8:
+	case KindI8:
 		word = uint64(uint8(key))
-	case m.Typ.KeyKind == KindI32:
+	case KindI32:
 		word = uint64(uint32(key))
+	case KindI64:
+		if uint64(key)>>VBits == refTag {
+			word, match = m.resolve(key)
+		} else {
+			word = uint64(int64(key<<(64-VBits)) >> (64 - VBits))
+		}
 	default:
-		word = uint64(int64(key<<(64-VBits)) >> (64 - VBits))
+		word, match = m.resolve(key)
 	}
 	t := &m.table
 	h := (m.hash(word) ^ t.seed) * tableHash
@@ -570,33 +555,23 @@ func (m *Map) find(key Boxed) (hit, free int, tag byte, word uint64, match byte)
 }
 
 // resolve returns the table word of a borrowed key find does not read inline,
-// a reference or a key of a class other than ClassWord, and how it matches a
-// slot.
+// a float, a key of a reference-keyed map, or a reference in an i64 map, and
+// how it matches a slot. A reference key matches by value when it is a String
+// or an I64 cell, else by identity.
 func (m *Map) resolve(key Boxed) (word uint64, match byte) {
-	switch m.Typ.Class {
-	case ClassWord:
-		if v, ok := m.bound().At(key.Ref()).(I64); ok {
-			if IsBoxable(int64(v)) {
-				return uint64(v), matchWord
-			}
-			return uint64(key), matchContent
+	switch m.Typ.KeyKind {
+	case KindF32:
+		f := key.F32()
+		if f == 0 {
+			return 0, matchWord
 		}
-		return uint64(key), matchWord
-	case ClassFloat:
-		if m.Typ.KeyKind == KindF32 {
-			f := key.F32()
-			if f == 0 {
-				return 0, matchWord
-			}
-			return uint64(math.Float32bits(f)), nanMatch(float64(f))
-		}
+		return uint64(math.Float32bits(f)), nanMatch(float64(f))
+	case KindF64:
 		f := key.F64()
 		if f == 0 {
 			return 0, matchWord
 		}
 		return uint64(key), nanMatch(f)
-	case ClassText:
-		return uint64(key), matchContent
 	}
 	switch key.Kind() {
 	case KindI1, KindI8, KindI32:
@@ -618,10 +593,13 @@ func (m *Map) resolve(key Boxed) (word uint64, match byte) {
 		case String:
 			return uint64(key), matchContent
 		case I64:
-			if IsBoxable(int64(v)) {
-				return uint64(BoxI64(int64(v))), matchWord
+			switch {
+			case !IsBoxable(int64(v)):
+				return uint64(key), matchContent
+			case m.Typ.KeyKind == KindI64:
+				return uint64(v), matchWord
 			}
-			return uint64(key), matchContent
+			return uint64(BoxI64(int64(v))), matchWord
 		}
 	}
 	return uint64(key), matchWord
@@ -696,7 +674,7 @@ func (m *Map) rehash() {
 // hash returns the base hash of a table word: the word itself, the content
 // hash of a String, or the value of an I64 cell.
 func (m *Map) hash(word uint64) uint64 {
-	if m.Typ.Class == ClassFloat || word>>VBits != refTag {
+	if word>>VBits != refTag || m.Typ.KeyKind == KindF64 {
 		return word
 	}
 	return m.digest(word)

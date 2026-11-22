@@ -2210,7 +2210,7 @@ func TestMachine_Lower(t *testing.T) {
 			lower: true,
 		},
 		{
-			name: "admits a map of the exact key and additionally checks the declared kinds and class in one word",
+			name: "admits a map of the exact key and additionally checks the declared key and element kinds in one halfword",
 			regs: regs{1: ssa.TypeRef, 2: ssa.TypeRef},
 			op:   ssa.Operation{Op: ssa.OpGuardShape, Shape: ssa.Shape{Form: ssa.FormMap, Key: types.KindI32, Elem: types.KindRef}, Args: []ssa.Value{1}, Results: []ssa.Value{2}},
 			rows: func() []asm.Instruction {
@@ -2225,8 +2225,7 @@ func TestMachine_Lower(t *testing.T) {
 				rows = append(rows,
 					target.LDR(target.X16, vr(1), int16(jit.OffsetData)),
 					target.LDR(target.X16, target.X16, int16(jit.OffsetMapTyp)),
-					target.LDR(target.W16, target.X16, int16(jit.OffsetMapTypeKinds)),
-					target.ANDI(target.X16, target.X16, 0xFFFFFF),
+					target.LDRH(target.W16, target.X16, int16(jit.OffsetMapTypeKinds)),
 				)
 				rows = append(rows, target.LDI(target.X17, uint64(types.KindI32)|uint64(types.KindRef)<<8)...)
 				return append(rows,

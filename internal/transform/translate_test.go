@@ -1263,7 +1263,6 @@ blk0: ()
 				case op.Op == ssa.OpGuardShape:
 					got = append(got, fmt.Sprintf("guard map key %s elem %s", op.Shape.Key, op.Shape.Elem))
 					require.Equal(t, ssa.FormMap, op.Shape.Form)
-					require.Equal(t, types.ClassWord, op.Shape.Class)
 				case op.Reads()&ssa.EffectHeap != 0:
 					got = append(got, op.Op.String())
 				}

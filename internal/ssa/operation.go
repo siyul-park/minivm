@@ -86,7 +86,7 @@ type Slot struct {
 // container allocation names. Form selects which fields apply: FormArray an
 // array whose elements are of Elem in its canonical representation
 // (types.TypedArray[T] for a scalar kind, *types.Array for KindRef);
-// FormMap a *types.Map of key kind Key, element kind Elem, and key class Class;
+// FormMap a *types.Map of key kind Key and element kind Elem;
 // FormStruct a *types.Struct of struct type Type; FormClosure a
 // *types.Closure over Function of function type Type holding at least
 // Captures upvals. An array.new_default or struct.new_default names the
@@ -101,8 +101,6 @@ type Shape struct {
 	Key types.Kind
 	// Elem is the element kind of a FormArray or FormMap.
 	Elem types.Kind
-	// Class is the key class of a FormMap.
-	Class types.Class
 	// Type identifies the struct type of a FormStruct or the function type
 	// of a FormClosure or FormSignature.
 	Type uintptr
@@ -475,7 +473,7 @@ func (c Cond) Invert() Cond {
 
 // Serves reports whether native code lowers op on a map this shape admits,
 // given the kinds of its key and value operands (ignored by an operation without
-// them): the key class is ClassWord, so the key is an integer held in its key kind's register class, and an
+// them): the key kind is i1, i8, i32, or i64, so the key is an integer held in its key kind's register class, and an
 // element or value fits one register, which excludes an i64, whose boxed word
 // may be a reference to a heap-promoted value. Translation guards a map only for
 // an operation Serves accepts, and the lowering lowers exactly those.
@@ -483,7 +481,9 @@ func (s Shape) Serves(op Op, key, value types.Kind) bool {
 	if s.Form != FormMap {
 		return false
 	}
-	if s.Class != types.ClassWord {
+	switch s.Key {
+	case types.KindI1, types.KindI8, types.KindI32, types.KindI64:
+	default:
 		return false
 	}
 	if op == OpMapLen {

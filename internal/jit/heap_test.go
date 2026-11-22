@@ -60,7 +60,6 @@ func TestHeap_Layout(t *testing.T) {
 			require.Equal(t, uintptr(0), jit.OffsetMapTyp)
 			require.Equal(t, unsafe.Offsetof(types.MapType{}.KeyKind), jit.OffsetMapTypeKinds)
 			require.Equal(t, jit.OffsetMapTypeKinds+1, unsafe.Offsetof(types.MapType{}.ElemKind))
-			require.Equal(t, jit.OffsetMapTypeKinds+2, unsafe.Offsetof(types.MapType{}.Class))
 			require.Equal(t, uintptr(8), jit.OffsetMapZero)
 			require.Equal(t, uintptr(16), jit.OffsetMapCtrl)
 			require.Equal(t, uintptr(40), jit.OffsetMapSlots)

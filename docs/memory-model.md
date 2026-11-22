@@ -44,9 +44,9 @@ Transfers `MUST` preserve counts exactly. Native execution `MAY` borrow backing 
 
 `types/map.go` owns map storage. One `Map` serves every key type: it keeps its entries in an open-addressing table of four flat arrays that hold no Go pointers, so native code reads them without touching a Go map. A `Map` `MUST` come from `NewMap`; its zero value is not usable.
 
-A key's class is `ClassWord` (`i1`, `i8`, `i32`, `i64`), `ClassFloat` (`f32`, `f64`), `ClassText` (`string`), or `ClassAny` (`any` and every other reference type). `value-representation.md`, Map Key Words, owns the table word each class stores and how it matches.
+The key kind (`MapType.KeyKind`) fixes how a key is stored and compared. `value-representation.md`, Map Key Words, owns the table word each key kind stores and how it matches.
 
-An `i64` key outside the inline range is a map-owned `I64` heap cell: `Store` and `Swap` adopt the incoming cell when the caller holds the only reference, else copy it, and release a cell whose value fits inline. `Range` lends the cell; `map.keys` and `map.iter` hand out fresh copies, so a guest never holds the map's own cell. `Accepts` is the check before a key enters: a scalar fits unless the map is keyed by `string`, and a reference fits a `string` map when it is a `String`, an `i64` map when it is an `I64`, and an `any` map always.
+An `i64` key outside the inline range is a map-owned `I64` heap cell: `Store` and `Swap` adopt the incoming cell when the caller holds the only reference, else copy it, and release a cell whose value fits inline. `Range` lends the cell; `map.keys` and `map.iter` hand out fresh copies, so a guest never holds the map's own cell. `Accepts` is the check before a key enters: a scalar fits unless the map is keyed by a reference type, and a reference fits a `string` map when it is a `String`, an `i64` map when it is an `I64`, and any other reference-keyed map always; an `any` map also takes a scalar.
 
 | Part | Contract |
 |---|---|
@@ -56,7 +56,7 @@ An `i64` key outside the inline range is a map-owned `I64` heap cell: `Store` an
 | Order | `order[:used]` lists the slot of every insert since the last rehash, the rehash's own re-inserts first, and `pos[slot]` is the position of the slot's latest insert; position `p` is live while slot `order[p]` is full and `pos[order[p]]` is `p` |
 | Load | `used`, which bounds live entries plus tombstones, stays at or below three quarters of capacity; an insert past that rehashes the live entries, in order, into fresh arrays, doubling them when live entries exceed three eighths and keeping the size otherwise |
 
-Native code serves `ClassWord` maps only; every other class bridges or deopts (`jit-internals.md`, Maps). It reads and writes the table through `jit.OffsetMap*`, and `MUST` choose the same slot, write the same control byte, append the same `order` entry, write the same `pos` word, and make the same `count` and `used` updates as `Store`, `Delete`, and `Load`, and `MUST NOT` rehash: an insert past the load takes the Go `Store`. It `MUST NOT` write `gen`, `epoch`, a slice header, or `seed`.
+Native code serves maps keyed by `i1`, `i8`, `i32`, or `i64` only; every other key kind bridges or deopts (`jit-internals.md`, Maps). It reads and writes the table through `jit.OffsetMap*`, and `MUST` choose the same slot, write the same control byte, append the same `order` entry, write the same `pos` word, and make the same `count` and `used` updates as `Store`, `Delete`, and `Load`, and `MUST NOT` rehash: an insert past the load takes the Go `Store`. It `MUST NOT` write `gen`, `epoch`, a slice header, or `seed`.
 
 ## Map Ownership
 

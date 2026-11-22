@@ -39,10 +39,10 @@ const (
 	OffsetClosureFn        = unsafe.Offsetof(types.Closure{}.Fn)
 	OffsetClosureUpvals    = unsafe.Offsetof(types.Closure{}.Upvals)
 
-	// OffsetMapTyp is a Map's declared *types.MapType, whose KeyKind, ElemKind,
-	// and Class bytes the map guard reads as one 32-bit word at
-	// OffsetMapTypeKinds. A key kind alone does not fix the element or the key
-	// class: one Map layout serves map[i32]string and map[i32]i32 alike.
+	// OffsetMapTyp is a Map's declared *types.MapType, whose KeyKind and
+	// ElemKind bytes the map guard reads as one 16-bit word at
+	// OffsetMapTypeKinds. A key kind alone does not fix the element: one Map
+	// layout serves map[i32]string and map[i32]i32 alike.
 	OffsetMapTyp       = unsafe.Offsetof(types.Map{}.Typ)
 	OffsetMapTypeKinds = unsafe.Offsetof(types.MapType{}.KeyKind)
 	// OffsetMapZero is the Boxed word MAP_GET returns for an absent key.

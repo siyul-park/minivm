@@ -942,9 +942,8 @@ func (m *Machine) shape(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 	if op.Shape.Form == ssa.FormMap {
 		a.Emit(target.LDR(target.X16, addr, int16(jit.OffsetData)))
 		a.Emit(target.LDR(target.X16, target.X16, int16(jit.OffsetMapTyp)))
-		a.Emit(target.LDR(target.W16, target.X16, int16(jit.OffsetMapTypeKinds)))
-		a.Emit(target.ANDI(target.X16, target.X16, 0xFFFFFF))
-		expect(a, uint64(op.Shape.Key)|uint64(op.Shape.Elem)<<8|uint64(op.Shape.Class)<<16, s.Deopt())
+		a.Emit(target.LDRH(target.W16, target.X16, int16(jit.OffsetMapTypeKinds)))
+		expect(a, uint64(op.Shape.Key)|uint64(op.Shape.Elem)<<8, s.Deopt())
 	}
 	if op.Shape.Form == ssa.FormClosure {
 		m.closure(a, addr, op.Shape, s)

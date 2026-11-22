@@ -344,20 +344,19 @@ func TestNewMapType(t *testing.T) {
 	structType := types.NewStructType(types.NewStructField(types.TypeI32()))
 	tests := []struct {
 		key        types.Type
-		class      types.Class
 		traceKeys  bool
 		keyKind    types.Kind
 		keyKindStr string
 	}{
-		{types.TypeI1(), types.ClassWord, false, types.KindI1, "i1"},
-		{types.TypeI8(), types.ClassWord, false, types.KindI8, "i8"},
-		{types.TypeI32(), types.ClassWord, false, types.KindI32, "i32"},
-		{types.TypeI64(), types.ClassWord, true, types.KindI64, "i64"},
-		{types.TypeF32(), types.ClassFloat, false, types.KindF32, "f32"},
-		{types.TypeF64(), types.ClassFloat, false, types.KindF64, "f64"},
-		{types.TypeString(), types.ClassText, true, types.KindRef, "string"},
-		{types.TypeAny(), types.ClassAny, true, types.KindRef, "any"},
-		{structType, types.ClassAny, true, types.KindRef, "struct"},
+		{types.TypeI1(), false, types.KindI1, "i1"},
+		{types.TypeI8(), false, types.KindI8, "i8"},
+		{types.TypeI32(), false, types.KindI32, "i32"},
+		{types.TypeI64(), true, types.KindI64, "i64"},
+		{types.TypeF32(), false, types.KindF32, "f32"},
+		{types.TypeF64(), false, types.KindF64, "f64"},
+		{types.TypeString(), true, types.KindRef, "string"},
+		{types.TypeAny(), true, types.KindRef, "any"},
+		{structType, true, types.KindRef, "struct"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.keyKindStr, func(t *testing.T) {
@@ -366,7 +365,6 @@ func TestNewMapType(t *testing.T) {
 			require.Equal(t, types.TypeI32(), typ.Elem)
 			require.Equal(t, tt.keyKind, typ.KeyKind)
 			require.Equal(t, types.KindI32, typ.ElemKind)
-			require.Equal(t, tt.class, typ.Class)
 			require.Equal(t, tt.traceKeys, typ.TraceKeys)
 			require.False(t, typ.TraceValues)
 		})
@@ -382,9 +380,7 @@ func TestNewMapType(t *testing.T) {
 		typ := reflect.TypeOf(types.MapType{})
 		kinds, _ := typ.FieldByName("KeyKind")
 		elem, _ := typ.FieldByName("ElemKind")
-		class, _ := typ.FieldByName("Class")
 		require.Equal(t, kinds.Offset+1, elem.Offset)
-		require.Equal(t, kinds.Offset+2, class.Offset)
 	})
 }
 
@@ -490,6 +486,20 @@ func TestMap_Load(t *testing.T) {
 		}
 		_, ok := m.Load(text(h, "abcdefgi"))
 		require.False(t, ok)
+	})
+
+	t.Run("string key of distinct refs hits by content in string and any maps", func(t *testing.T) {
+		for _, typ := range []types.Type{types.TypeString(), types.TypeAny()} {
+			h := newHeap()
+			m := types.NewMap(h, types.NewMapType(typ, types.TypeI32()), 0)
+			first, second := text(h, "key"), text(h, "key")
+			require.NotEqual(t, first, second)
+			m.Store(first, types.BoxI32(1))
+			v, ok := m.Load(second)
+			require.True(t, ok, typ.String())
+			require.Equal(t, types.BoxI32(1), v)
+			require.Equal(t, 1, m.Len())
+		}
 	})
 
 	t.Run("i1 reads any nonzero payload as true", func(t *testing.T) {
