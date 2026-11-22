@@ -1263,8 +1263,8 @@ func mapProgram(t *testing.T, typ *types.MapType, capacity, iterations int, cons
 }
 
 // mapProgramFrom is mapProgram with the module's first instructions, which
-// leave the map in local 0, given by start.
-func mapProgramFrom(t *testing.T, typ *types.MapType, start func(b *instr.Builder), iterations int, constants []types.Value, extra []types.Type, body func(b *instr.Builder)) *program.Program {
+// leave the map in local 0, given by start, and the types declared after typ.
+func mapProgramFrom(t *testing.T, typ *types.MapType, start func(b *instr.Builder), iterations int, constants []types.Value, extra []types.Type, body func(b *instr.Builder), declared ...types.Type) *program.Program {
 	t.Helper()
 	b := instr.NewBuilder()
 	loop, done := b.Label(), b.Label()
@@ -1278,7 +1278,7 @@ func mapProgramFrom(t *testing.T, typ *types.MapType, start func(b *instr.Builde
 	code, err := b.Assemble()
 	require.NoError(t, err)
 	locals := append([]types.Type{typ, types.TypeI32(), types.TypeI32()}, extra...)
-	return program.New(code, program.WithLocals(locals...), program.WithTypes(typ), program.WithConstants(constants...))
+	return program.New(code, program.WithLocals(locals...), program.WithTypes(append([]types.Type{typ}, declared...)...), program.WithConstants(constants...))
 }
 
 // rehashes bounds how often a mapProgram loop of iterations steps over at most

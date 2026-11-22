@@ -23,9 +23,11 @@ type String string
 
 type stringType struct{}
 
+// HashMix0 and HashMix1 are the multipliers String.Hash mixes with; native
+// code emits the same hash with them.
 const (
-	hashMix0 = 0xa0761d6478bd642f
-	hashMix1 = 0xe7037ed1a0b428db
+	HashMix0 = 0xa0761d6478bd642f
+	HashMix1 = 0xe7037ed1a0b428db
 )
 
 var (
@@ -93,7 +95,7 @@ func (s String) Hash() uint64 {
 	switch {
 	case n >= 8:
 		for i := 0; i+8 < n; i += 8 {
-			h = mix(s.le64(i)^hashMix1, h^hashMix0)
+			h = mix(s.le64(i)^HashMix1, h^HashMix0)
 		}
 		a = s.le64(n - 8)
 	case n >= 4:
@@ -101,7 +103,7 @@ func (s String) Hash() uint64 {
 	case n > 0:
 		a = uint64(s[0])<<16 | uint64(s[n>>1])<<8 | uint64(s[n-1])
 	}
-	return mix(a^hashMix1, b^h^hashMix0)
+	return mix(a^HashMix1, b^h^HashMix0)
 }
 
 // Kind returns the value kind.

@@ -60,6 +60,11 @@ type table struct {
 	data, ctrl, slots, mask asm.VReg
 }
 
+// key is what a map operation derives from its key operand: the table word,
+// the base hash home mixes, and, for a String, the data pointer and size the
+// probe compares by content (zero registers otherwise).
+type key struct{ word, base, ptr, size asm.VReg }
+
 // Ctx holds the *jit.Context for as long as native code runs: the trampoline
 // (internal/jit/enter_arm64.s) hands it over in R26 and reads it back on every
 // exit, so native code never writes it.
@@ -1040,63 +1045,17 @@ func (m *Machine) stringLen(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 // stringCompare orders two strings' bytes, as threaded STRING_EQ through
 // STRING_GE do: a slot holding anything else, null included, is the
 // operation's own type mismatch, a trap. Interning is gone, so equal contents
-// may sit behind different refs: a shared data pointer skips the bytes, and
-// otherwise a word loop compares 8 bytes while that many of the shorter
-// length remain and a byte loop the tail. The first differing word, byte-
-// reversed to big-endian, or byte leaves the flags of left against right; no
-// difference leaves those of the lengths, and cond reads them unsigned. Equality
-// relations leave early on unequal lengths. It only loads, so no Go pointer
-// is written.
+// may sit behind different refs, so strcmp compares the bytes. It only loads,
+// so no Go pointer is written.
 func (m *Machine) stringCompare(a *asm.Assembler, op ssa.Operation, s compile.Site, cond uint8) bool {
 	if !has(op, 2, 1) {
 		return false
 	}
-	var data, size, ptr [2]asm.VReg
-	for i := range data {
-		addr := m.heap(a, s.Reg(op.Args[i]))
-		a.Emit(target.LDR(target.X16, addr, 0))
-		expect(a, uint64(jit.Itab(types.String(""))), s.Trap())
-		data[i], size[i], ptr[i] = m.vreg(), m.vreg(), m.vreg()
-		a.Emit(
-			target.LDR(data[i], addr, int16(jit.OffsetData)),
-			target.LDR(size[i], data[i], int16(jit.OffsetStringLen)),
-			target.LDR(ptr[i], data[i], 0),
-		)
+	var size, ptr [2]asm.VReg
+	for i := range size {
+		ptr[i], size[i] = m.text(a, s.Reg(op.Args[i]), s.Trap())
 	}
-	out, tail, step, words, bytes := a.Label(), a.Label(), a.Label(), a.Label(), a.Label()
-	rest := m.vreg()
-	a.Emit(target.CMP(size[0], size[1]))
-	if cond == target.CondEQ || cond == target.CondNE {
-		a.Emit(target.BCondLabel(target.OpBNE, out))
-	}
-	a.Emit(
-		target.CSEL(rest, size[0], size[1], target.CondCC),
-		target.CMP(ptr[0], ptr[1]), target.BCondLabel(target.OpBEQ, tail),
-	)
-	a.Bind(words)
-	a.Emit(
-		target.CMPI(rest, 8), target.BCondLabel(target.OpBCC, bytes),
-		target.LDR(target.X16, ptr[0], 0), target.LDR(target.X17, ptr[1], 0),
-		target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBEQ, step),
-		target.REV(target.X16, target.X16), target.REV(target.X17, target.X17),
-		target.CMP(target.X16, target.X17), target.BLabel(out),
-	)
-	a.Bind(step)
-	a.Emit(
-		target.ADDI(ptr[0], ptr[0], 8), target.ADDI(ptr[1], ptr[1], 8),
-		target.SUBI(rest, rest, 8), target.BLabel(words),
-	)
-	a.Bind(bytes)
-	a.Emit(
-		target.CBZLabel(rest, tail),
-		target.LDRB(target.X16, ptr[0], 0), target.LDRB(target.X17, ptr[1], 0),
-		target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, out),
-		target.ADDI(ptr[0], ptr[0], 1), target.ADDI(ptr[1], ptr[1], 1),
-		target.SUBI(rest, rest, 1), target.BLabel(bytes),
-	)
-	a.Bind(tail)
-	a.Emit(target.CMP(size[0], size[1]))
-	a.Bind(out)
+	m.strcmp(a, size, ptr, cond)
 	m.set(a, s, op.Results[0], s.Reg(op.Results[0]), cond)
 	return true
 }
@@ -1375,10 +1334,10 @@ func (m *Machine) mapGet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 	exit, resume := s.Bridge()
 	hit, miss, done := a.Label(), a.Label(), a.Label()
 	data := m.container(a, s.Reg(op.Args[0]))
-	key := m.key(a, s, shape, op.Args[1], exit, miss)
+	k := m.key(a, s, shape, op.Args[1], exit, miss)
 	t := m.table(a, data)
-	index, tag := m.home(a, t, key)
-	slot := m.probe(a, t, key, index, tag, asm.VReg{}, hit, miss)
+	index, tag := m.home(a, t, k)
+	slot := m.probe(a, t, k, index, tag, asm.VReg{}, hit, miss)
 
 	a.Bind(hit)
 	a.Emit(target.LDR(dst, slot, 8))
@@ -1399,21 +1358,14 @@ func (m *Machine) mapGet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 	return true
 }
 
-// retain counts one more reference to ref, as Heap.Retain:
-// any reference, the null one included.
-func (m *Machine) retain(a *asm.Assembler, ref asm.VReg) {
-	skip := a.Label()
-	m.count(a, ref, skip, true)
-	a.Emit(target.ADDI(target.X17, target.X17, 1), target.STR(target.X17, target.X16, 0))
-	a.Bind(skip)
-}
-
 // mapSet stores a value under a key of a guarded map, as Map.Swap does: it
 // replaces the value of a full slot holding the key, else fills the first
 // tombstone on the probe, or the empty slot that ended it, and appends that
 // slot to the insertion order. An insert that would rehash changes nothing and
 // bridges, so the Go set owns growth. A map of references (or wide i64s) adopts
-// the value and releases the one it replaced.
+// the value and releases the one it replaced. A String key borrowed from the
+// caller is retained when it is stored, and only then: a hit leaves the stored key
+// and the caller releases the incoming one, as Store does.
 func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	if !has(op, 3, 0) {
 		return false
@@ -1431,12 +1383,12 @@ func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 		word = boxed
 	}
 	data := m.container(a, s.Reg(op.Args[0]))
-	key := m.key(a, s, shape, op.Args[1], exit, exit)
+	k := m.key(a, s, shape, op.Args[1], exit, exit)
 	t := m.table(a, data)
-	index, tag := m.home(a, t, key)
+	index, tag := m.home(a, t, k)
 	free := m.vreg()
 	a.Emit(target.MOVN(free, 0, 0))
-	slot := m.probe(a, t, key, index, tag, free, hit, empty)
+	slot := m.probe(a, t, k, index, tag, free, hit, empty)
 
 	a.Bind(empty)
 	used, want, limit, order, pos, count := m.vreg(), m.vreg(), m.vreg(), m.vreg(), m.vreg(), m.vreg()
@@ -1448,13 +1400,16 @@ func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 		target.CMPI(free, 0), target.CSEL(index, free, index, target.CondGE),
 		target.STRBR(tag, t.ctrl, index),
 		target.LSLI(slot, index, 4), target.ADD(slot, t.slots, slot),
-		target.STR(key, slot, 0), target.STR(word, slot, 8),
+		target.STR(k.word, slot, 0), target.STR(word, slot, 8),
 		target.LDR(order, data, int16(jit.OffsetMapOrder)), target.STRWR(index, order, used),
 		target.LDR(pos, data, int16(jit.OffsetMapPos)), target.STRWR(used, pos, index),
 		target.ADDI(used, used, 1), target.STR(used, data, int16(jit.OffsetMapUsed)),
 		target.LDR(count, data, int16(jit.OffsetMapCount)), target.ADDI(count, count, 1), target.STR(count, data, int16(jit.OffsetMapCount)),
-		target.BLabel(resume),
 	)
+	if shape.Key == types.KindRef {
+		m.retain(a, k.word)
+	}
+	a.Emit(target.BLabel(resume))
 	a.Bind(hit)
 	if owns(shape.Elem) {
 		m.replace(a, s, address{base: slot, offset: 8}, word)
@@ -1465,9 +1420,20 @@ func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 	return true
 }
 
+// retain counts one more reference to ref, as Heap.Retain:
+// any reference, the null one included.
+func (m *Machine) retain(a *asm.Assembler, ref asm.VReg) {
+	skip := a.Label()
+	m.count(a, ref, skip, true)
+	a.Emit(target.ADDI(target.X17, target.X17, 1), target.STR(target.X17, target.X16, 0))
+	a.Bind(skip)
+}
+
 // mapDelete removes a key from a guarded map, as Map.Delete does: the slot
 // becomes a tombstone the order passes over and the count drops, leaving the key
-// and value words in place. A map of references releases the removed value.
+// and value words in place. A map of references releases the removed value, and
+// a map of String keys the stored key before it. The operation adopts a String
+// key, so a hit or a miss ends releasing the incoming one.
 func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	if !has(op, 2, 0) {
 		return false
@@ -1479,10 +1445,10 @@ func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 	exit, resume := s.Bridge()
 	hit, done := a.Label(), a.Label()
 	data := m.container(a, s.Reg(op.Args[0]))
-	key := m.key(a, s, shape, op.Args[1], exit, done)
+	k := m.key(a, s, shape, op.Args[1], exit, done)
 	t := m.table(a, data)
-	index, tag := m.home(a, t, key)
-	slot := m.probe(a, t, key, index, tag, asm.VReg{}, hit, done)
+	index, tag := m.home(a, t, k)
+	slot := m.probe(a, t, k, index, tag, asm.VReg{}, hit, done)
 
 	a.Bind(hit)
 	state, count := m.vreg(), m.vreg()
@@ -1491,12 +1457,20 @@ func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 		target.STRBR(state, t.ctrl, index),
 		target.LDR(count, data, int16(jit.OffsetMapCount)), target.SUBI(count, count, 1), target.STR(count, data, int16(jit.OffsetMapCount)),
 	)
+	if shape.Key == types.KindRef {
+		stored := m.vreg()
+		a.Emit(target.LDR(stored, slot, 0))
+		m.release(a, stored, s)
+	}
 	if owns(shape.Elem) {
 		old := m.vreg()
 		a.Emit(target.LDR(old, slot, 8))
 		m.release(a, old, s)
 	}
 	a.Bind(done)
+	if shape.Key == types.KindRef {
+		m.release(a, k.word, s)
+	}
 	a.Bind(resume)
 	return true
 }
@@ -1507,36 +1481,93 @@ func (m *Machine) mapOf(v ssa.Value) (ssa.Shape, bool) {
 	return shape, ok && shape.Form == ssa.FormMap
 }
 
-// key is the table's key word of operand v, as Map.resolve makes it: an i64 is
+// key derives the table word of operand v, as Map.resolve makes it: an i64 is
 // its own register, which bridges through exit when it is outside the inline
 // range, since the table holds such a key as a heap cell native code neither
 // compares nor creates; an i32 zero-extends, an i8 keeps its low byte, and an
 // i1 is 0 or 1 (a Boxed.Bool is any nonzero payload). A float is its bits, with
 // -0 folded into the word of +0 by zeroing a word whose bits below the sign are
 // clear; a NaN never hits, so it branches to nan, which a lookup or delete ends
-// and a set bridges through before the table is touched.
-func (m *Machine) key(a *asm.Assembler, s compile.Site, shape ssa.Shape, v ssa.Value, exit, nan asm.Label) asm.VReg {
+// and a set bridges through before the table is touched. A reference is a
+// String's own word hashed by its bytes, and anything else, a scalar word, null,
+// or another reference, bridges through exit, so the interpreter raises the
+// type mismatch Map.Accepts does before the table is touched.
+func (m *Machine) key(a *asm.Assembler, s compile.Site, shape ssa.Shape, v ssa.Value, exit, nan asm.Label) key {
 	word := s.Reg(v)
-	if shape.Key == types.KindI64 {
+	switch shape.Key {
+	case types.KindI64:
 		a.Emit(target.SBFX(target.X16, word, 0, types.VBits), target.CMP(target.X16, word), target.BCondLabel(target.OpBNE, exit))
-		return word
+		return key{word: word, base: word}
+	case types.KindRef:
+		expectRef(a, word, exit)
+		ptr, size := m.text(a, word, exit)
+		return key{word: word, base: m.hash(a, ptr, size), ptr: ptr, size: size}
 	}
-	key := m.vreg()
+	k := m.vreg()
 	switch shape.Key {
 	case types.KindI32:
-		a.Emit(target.UXTW(key, word))
+		a.Emit(target.UXTW(k, word))
 	case types.KindI8:
-		a.Emit(target.UXTB(key, word))
+		a.Emit(target.UXTB(k, word))
 	case types.KindF32:
 		a.Emit(target.FCMP(word, word), target.BCondLabel(target.OpBVS, nan), target.FMOV(target.W16, word))
-		a.Emit(target.TSTI(target.X16, 1<<31-1), target.CSEL(key, target.XZR, target.X16, target.CondEQ))
+		a.Emit(target.TSTI(target.X16, 1<<31-1), target.CSEL(k, target.XZR, target.X16, target.CondEQ))
 	case types.KindF64:
 		a.Emit(target.FCMP(word, word), target.BCondLabel(target.OpBVS, nan), target.FMOV(target.X16, word))
-		a.Emit(target.TSTI(target.X16, 1<<63-1), target.CSEL(key, target.XZR, target.X16, target.CondEQ))
+		a.Emit(target.TSTI(target.X16, 1<<63-1), target.CSEL(k, target.XZR, target.X16, target.CondEQ))
 	default:
-		a.Emit(target.CMPI(word, 0), target.CSET(key, target.CondNE))
+		a.Emit(target.CMPI(word, 0), target.CSET(k, target.CondNE))
 	}
-	return key
+	return key{word: k, base: k}
+}
+
+// hash is String.Hash of the size bytes at ptr, emitted bit for bit: a string of
+// 8 or more bytes folds all but its last 8 in 8-byte mixes of the running hash
+// and takes its last 8 as a; one of 4 to 7 takes its first and last 4 as a and
+// b; one of 1 to 3 packs its first, middle, and last byte into a; and a final
+// mix of a and b with the hash yields the result. Every load stays inside the
+// string, the tails by backing up from its end.
+func (m *Machine) hash(a *asm.Assembler, ptr, size asm.VReg) asm.VReg {
+	loop, last, short, tiny, fold := a.Label(), a.Label(), a.Label(), a.Label(), a.Label()
+	k0, k1, h, lo, hi, end, at, t, u, v, base := m.vreg(), m.vreg(), m.vreg(), m.vreg(), m.vreg(), m.vreg(), m.vreg(), m.vreg(), m.vreg(), m.vreg(), m.vreg()
+	a.Emit(target.LDI(k0, types.HashMix0)...)
+	a.Emit(target.LDI(k1, types.HashMix1)...)
+	a.Emit(target.LDI(target.X17, types.Hashkey())...)
+	a.Emit(
+		target.EOR(h, target.X17, size), target.MOVZ(lo, 0, 0), target.MOVZ(hi, 0, 0),
+		target.CMPI(size, 8), target.BCondLabel(target.OpBCC, short),
+		// at < end is i+8 < size.
+		target.ADD(end, ptr, size), target.SUBI(end, end, 8), target.MOV(at, ptr),
+	)
+	a.Bind(loop)
+	a.Emit(
+		target.CMP(at, end), target.BCondLabel(target.OpBCS, last),
+		target.LDR(t, at, 0), target.EOR(t, t, k1), target.EOR(u, h, k0),
+		target.MUL(v, t, u), target.UMULH(h, t, u), target.EOR(h, h, v),
+		target.ADDI(at, at, 8), target.BLabel(loop),
+	)
+	a.Bind(last)
+	a.Emit(target.LDR(lo, end, 0), target.BLabel(fold))
+	a.Bind(short)
+	a.Emit(
+		target.CMPI(size, 4), target.BCondLabel(target.OpBCC, tiny),
+		target.LDR(target.W16, ptr, 0), target.MOV(lo, target.X16),
+		target.ADD(t, ptr, size), target.SUBI(t, t, 4), target.LDR(target.W16, t, 0), target.MOV(hi, target.X16),
+		target.BLabel(fold),
+	)
+	a.Bind(tiny)
+	a.Emit(
+		target.CBZLabel(size, fold),
+		target.LDRB(lo, ptr, 0), target.LSLI(lo, lo, 16),
+		target.LSRI(t, size, 1), target.LDRBR(t, ptr, t), target.LSLI(t, t, 8), target.ORR(lo, lo, t),
+		target.SUBI(t, size, 1), target.LDRBR(t, ptr, t), target.ORR(lo, lo, t),
+	)
+	a.Bind(fold)
+	a.Emit(
+		target.EOR(lo, lo, k1), target.EOR(hi, hi, h), target.EOR(hi, hi, k0),
+		target.MUL(v, lo, hi), target.UMULH(t, lo, hi), target.EOR(base, v, t),
+	)
+	return base
 }
 
 // table loads the words of the map table whose data word is data.
@@ -1550,12 +1581,12 @@ func (m *Machine) table(a *asm.Assembler, data asm.VReg) table {
 	return t
 }
 
-// home is the home slot and control byte of key, as Map.find computes them
-// from the hash (key ^ seed) * MapHash: the slot is hash >> shift & mask, and
+// home is the home slot and control byte of k, as Map.find computes them
+// from the hash (base ^ seed) * MapHash: the slot is hash >> shift & mask, and
 // the control byte SlotFull with the seven hash bits below the slot's.
-func (m *Machine) home(a *asm.Assembler, t table, key asm.VReg) (index, tag asm.VReg) {
+func (m *Machine) home(a *asm.Assembler, t table, k key) (index, tag asm.VReg) {
 	index, tag = m.vreg(), m.vreg()
-	a.Emit(target.LDR(target.X16, t.data, int16(jit.OffsetMapSeed)), target.EOR(tag, key, target.X16))
+	a.Emit(target.LDR(target.X16, t.data, int16(jit.OffsetMapSeed)), target.EOR(tag, k.base, target.X16))
 	a.Emit(target.LDI(target.X17, jit.MapHash)...)
 	a.Emit(
 		target.MUL(tag, tag, target.X17),
@@ -1571,11 +1602,13 @@ func (m *Machine) home(a *asm.Assembler, t table, key asm.VReg) (index, tag asm.
 }
 
 // probe walks the table linearly from index, as Map.find does. It branches
-// to miss at an empty slot and to hit at a full slot holding key, leaving the
-// slot's index in index and its address in the returned register. A slot whose
-// control byte is not tag, a dead one included, is passed over. A set passes
-// free, holding -1, and probe leaves in it the first dead slot it passed.
-func (m *Machine) probe(a *asm.Assembler, t table, key, index, tag, free asm.VReg, hit, miss asm.Label) asm.VReg {
+// to miss at an empty slot and to hit at a full slot holding k's word, or, for a
+// String key, a String of equal content: that check runs only on a tag hit of
+// another word. It leaves the slot's index in index and its address in the
+// returned register. A slot whose control byte is not tag, a dead one included,
+// is passed over. A set passes free, holding -1, and probe leaves in it the first
+// dead slot it passed.
+func (m *Machine) probe(a *asm.Assembler, t table, k key, index, tag, free asm.VReg, hit, miss asm.Label) asm.VReg {
 	loop, next := a.Label(), a.Label()
 	state, slot, word := m.vreg(), m.vreg(), m.vreg()
 	a.Bind(loop)
@@ -1583,8 +1616,11 @@ func (m *Machine) probe(a *asm.Assembler, t table, key, index, tag, free asm.VRe
 		target.LDRBR(state, t.ctrl, index), target.CBZLabel(state, miss),
 		target.CMP(state, tag), target.BCondLabel(target.OpBNE, next),
 		target.LSLI(slot, index, 4), target.ADD(slot, t.slots, slot),
-		target.LDR(word, slot, 0), target.CMP(word, key), target.BCondLabel(target.OpBEQ, hit),
+		target.LDR(word, slot, 0), target.CMP(word, k.word), target.BCondLabel(target.OpBEQ, hit),
 	)
+	if k.size != (asm.VReg{}) {
+		m.content(a, word, k, hit, next)
+	}
 	a.Bind(next)
 	if free != (asm.VReg{}) {
 		step := a.Label()
@@ -1597,6 +1633,78 @@ func (m *Machine) probe(a *asm.Assembler, t table, key, index, tag, free asm.VRe
 	}
 	a.Emit(target.ADDI(index, index, 1), target.AND(index, index, t.mask), target.BLabel(loop))
 	return slot
+}
+
+// content branches to hit when the table word word refers to a String of the
+// key's bytes, and to next when it refers to anything else or to other bytes.
+// A map of another reference type may hold any reference, so the word is
+// checked; the key's pointer is copied since strcmp advances what it is given.
+func (m *Machine) content(a *asm.Assembler, word asm.VReg, k key, hit, next asm.Label) {
+	expectRef(a, word, next)
+	ptr, size := m.text(a, word, next)
+	own := m.vreg()
+	a.Emit(target.MOV(own, k.ptr))
+	m.strcmp(a, [2]asm.VReg{size, k.size}, [2]asm.VReg{ptr, own}, target.CondEQ)
+	a.Emit(target.BCondLabel(target.OpBEQ, hit))
+}
+
+// text loads the bytes of the String ref refers to: its data pointer and its
+// size. It branches to miss when ref refers to anything else, null included.
+func (m *Machine) text(a *asm.Assembler, ref asm.Reg, miss asm.Label) (ptr, size asm.VReg) {
+	addr := m.heap(a, ref)
+	a.Emit(target.LDR(target.X16, addr, 0))
+	expect(a, uint64(jit.Itab(types.String(""))), miss)
+	data := m.vreg()
+	size, ptr = m.vreg(), m.vreg()
+	a.Emit(
+		target.LDR(data, addr, int16(jit.OffsetData)),
+		target.LDR(size, data, int16(jit.OffsetStringLen)),
+		target.LDR(ptr, data, 0),
+	)
+	return ptr, size
+}
+
+// strcmp compares the strings of data pointers ptr and sizes size, which it
+// advances ptr through: it leaves the flags of the first differing word or
+// byte, else of the sizes, for cond to read unsigned. A shared data pointer skips
+// the bytes, and an equality relation leaves early on unequal sizes. Otherwise
+// a word loop compares 8 bytes while that many of the shorter size remain, and
+// a byte loop the tail. It only loads.
+func (m *Machine) strcmp(a *asm.Assembler, size, ptr [2]asm.VReg, cond uint8) {
+	out, tail, step, words, bytes := a.Label(), a.Label(), a.Label(), a.Label(), a.Label()
+	rest := m.vreg()
+	a.Emit(target.CMP(size[0], size[1]))
+	if cond == target.CondEQ || cond == target.CondNE {
+		a.Emit(target.BCondLabel(target.OpBNE, out))
+	}
+	a.Emit(
+		target.CSEL(rest, size[0], size[1], target.CondCC),
+		target.CMP(ptr[0], ptr[1]), target.BCondLabel(target.OpBEQ, tail),
+	)
+	a.Bind(words)
+	a.Emit(
+		target.CMPI(rest, 8), target.BCondLabel(target.OpBCC, bytes),
+		target.LDR(target.X16, ptr[0], 0), target.LDR(target.X17, ptr[1], 0),
+		target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBEQ, step),
+		target.REV(target.X16, target.X16), target.REV(target.X17, target.X17),
+		target.CMP(target.X16, target.X17), target.BLabel(out),
+	)
+	a.Bind(step)
+	a.Emit(
+		target.ADDI(ptr[0], ptr[0], 8), target.ADDI(ptr[1], ptr[1], 8),
+		target.SUBI(rest, rest, 8), target.BLabel(words),
+	)
+	a.Bind(bytes)
+	a.Emit(
+		target.CBZLabel(rest, tail),
+		target.LDRB(target.X16, ptr[0], 0), target.LDRB(target.X17, ptr[1], 0),
+		target.CMP(target.X16, target.X17), target.BCondLabel(target.OpBNE, out),
+		target.ADDI(ptr[0], ptr[0], 1), target.ADDI(ptr[1], ptr[1], 1),
+		target.SUBI(rest, rest, 1), target.BLabel(bytes),
+	)
+	a.Bind(tail)
+	a.Emit(target.CMP(size[0], size[1]))
+	a.Bind(out)
 }
 
 // elements is the element pointer and length of guarded array v: the ones
