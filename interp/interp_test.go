@@ -45,6 +45,13 @@ type writerCloser struct {
 	called error
 }
 
+// observerCloser is a host value whose Close calls observe, the way a finalizer
+// reads the container that held it.
+type observerCloser struct {
+	trackedValue
+	observe func()
+}
+
 // sinkCloser is a host value whose Close calls sink, the way a host object that
 // shut down calls a Go func the VM bound to one of its functions.
 type sinkCloser struct {
@@ -2518,6 +2525,12 @@ func (v *trackedValue) Close() error {
 	return nil
 }
 
+func (c *observerCloser) Close() error {
+	c.closed++
+	c.observe()
+	return nil
+}
+
 func (*panicCloser) Close() error {
 	panic("close")
 }
@@ -3236,6 +3249,51 @@ func TestWithHeap(t *testing.T) {
 }
 
 func TestWithHeapLimit(t *testing.T) {
+	t.Run("leaves every operand counted when a container allocation traps", func(t *testing.T) {
+		arr, rec := types.NewArrayType(types.TypeAny()), types.NewStructType(types.NewStructField(types.TypeAny()), types.NewStructField(types.TypeAny()))
+		tests := []struct {
+			name  string
+			limit int
+			build func(b *instr.Builder)
+		}{
+			{name: "array.new", limit: 2, build: func(b *instr.Builder) {
+				b.Emit(instr.CONST_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_NEW, 0)
+			}},
+			{name: "struct.new", limit: 2, build: func(b *instr.Builder) {
+				b.Emit(instr.CONST_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.STRUCT_NEW, 1)
+			}},
+			{name: "array.slice", limit: 3, build: func(b *instr.Builder) {
+				b.Emit(instr.CONST_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_NEW, 0)
+				b.Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SLICE)
+			}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				b := instr.NewBuilder()
+				tt.build(b)
+				code, err := b.Assemble()
+				require.NoError(t, err)
+				vm := interp.MustNew(program.New(code, program.WithConstants(types.String("s")), program.WithTypes(arr, rec)),
+					interp.WithThreshold(-1), interp.WithHeapLimit(tt.limit))
+				defer vm.Close()
+
+				require.ErrorIs(t, vm.Run(context.Background()), interp.ErrHeapExhausted)
+				text, err := vm.Const(0)
+				require.NoError(t, err)
+				for vm.Len() > 0 {
+					word, err := vm.PopBoxed()
+					require.NoError(t, err)
+					if word.Kind() == types.KindRef {
+						require.NoError(t, vm.Release(word.Ref()))
+					}
+				}
+				count, err := vm.RefCount(text.Ref())
+				require.NoError(t, err)
+				require.Equal(t, 1, count)
+			})
+		}
+	})
+
 	t.Run("rejects live heap at limit", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.REF_NEW)})
 		i := interp.MustNew(prog, interp.WithHeapLimit(1))
@@ -8198,6 +8256,51 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, wantCount, count)
 	})
 
+	t.Run("stores and overwrites null in containers as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		arr := types.NewArrayType(types.TypeAny())
+		rec := types.NewStructType(types.NewStructField(types.TypeAny()))
+		// mix stores null over a string, a string over null, and null over null in
+		// both containers, reading each element back.
+		m := instr.NewBuilder()
+		for _, at := range []uint64{0, 1, 1, 0, 1} {
+			m.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, at).Emit(instr.REF_NULL).Emit(instr.ARRAY_SET)
+			m.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, at).Emit(instr.CONST_GET, 1).Emit(instr.ARRAY_SET)
+			m.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, at).Emit(instr.ARRAY_GET).Emit(instr.DROP)
+			m.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, at).Emit(instr.REF_NULL).Emit(instr.ARRAY_SET)
+			m.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, at).Emit(instr.REF_NULL).Emit(instr.ARRAY_SET)
+			m.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, at).Emit(instr.ARRAY_GET).Emit(instr.DROP)
+		}
+		for range 2 {
+			m.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.REF_NULL).Emit(instr.STRUCT_SET)
+			m.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).Emit(instr.DROP)
+			m.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 1).Emit(instr.STRUCT_SET)
+			m.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).Emit(instr.DROP)
+		}
+		m.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.REF_NULL).Emit(instr.STRUCT_SET)
+		m.Emit(instr.RETURN)
+		body, err := m.Assemble()
+		require.NoError(t, err)
+		mix := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{arr, rec}})
+		mix.Append(body...)
+
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2000).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.CONST_GET, 2).Emit(instr.CONST_GET, 3).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithTypes(arr, rec),
+			program.WithConstants(mix.MustBuild(), types.String("s"),
+				types.NewArray(nil, arr, types.BoxedNull, types.BoxedNull), types.NewStruct(nil, rec, types.BoxedNull)))
+
+		compareNative(t, prog)
+	})
+
 	t.Run("walks a struct tree", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 
@@ -11035,6 +11138,212 @@ func TestNew(t *testing.T) {
 }
 
 func TestInterpreter_Run(t *testing.T) {
+	t.Run("slices a host array without leaking its elements", func(t *testing.T) {
+		code, err := instr.NewBuilder().Emit(instr.GLOBAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SLICE).Emit(instr.DROP).Assemble()
+		require.NoError(t, err)
+		vm := interp.MustNew(program.New(code, program.WithGlobals(types.TypeAny())), interp.WithThreshold(-1))
+		defer vm.Close()
+		names := []string{"a", "b"}
+		view, err := interp.NewRegistry().Marshal(vm, &names)
+		require.NoError(t, err)
+		require.IsType(t, &interp.HostArray{}, view)
+		addr, err := vm.Alloc(view)
+		require.NoError(t, err)
+		require.NoError(t, vm.SetGlobal(0, types.BoxRef(addr)))
+
+		require.NoError(t, vm.Run(context.Background()))
+		for slot := 1; slot < vm.HeapLen(); slot++ {
+			if slot == addr {
+				continue
+			}
+			if count, err := vm.RefCount(slot); err == nil {
+				require.Zero(t, count, "slot %d leaks", slot)
+			}
+		}
+	})
+
+	t.Run("finishes a container store before a replaced closer runs", func(t *testing.T) {
+		arr, rec := types.NewArrayType(types.TypeAny()), types.NewStructType(types.NewStructField(types.TypeAny()))
+		tests := []struct {
+			name  string
+			code  func(b *instr.Builder)
+			build func(vm *interp.Interpreter, closer types.Boxed) types.Value
+		}{
+			{
+				name: "struct.set",
+				code: func(b *instr.Builder) {
+					b.Emit(instr.GLOBAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.REF_NULL).Emit(instr.STRUCT_SET)
+				},
+				build: func(vm *interp.Interpreter, closer types.Boxed) types.Value {
+					return types.NewStruct(vm.Heap(), rec, closer)
+				},
+			},
+			{
+				name: "array.copy",
+				code: func(b *instr.Builder) {
+					b.Emit(instr.GLOBAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.GLOBAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_COPY)
+				},
+				build: func(vm *interp.Interpreter, closer types.Boxed) types.Value {
+					return types.NewArray(vm.Heap(), arr, closer)
+				},
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				b := instr.NewBuilder()
+				tt.code(b)
+				code, err := b.Assemble()
+				require.NoError(t, err)
+				vm := interp.MustNew(program.New(code, program.WithGlobals(types.TypeAny(), types.TypeAny()), program.WithTypes(arr, rec)), interp.WithThreshold(-1))
+				defer vm.Close()
+
+				var holder int
+				var seen types.Boxed
+				closer := &observerCloser{observe: func() {
+					value, err := vm.Load(holder)
+					require.NoError(t, err)
+					switch value := value.(type) {
+					case *types.Struct:
+						seen = value.Field(0)
+					case *types.Array:
+						seen = value.Index(0)
+					}
+				}}
+				closerAddr, err := vm.Alloc(closer)
+				require.NoError(t, err)
+				holder, err = vm.Alloc(tt.build(vm, types.BoxRef(closerAddr)))
+				require.NoError(t, err)
+				require.NoError(t, vm.SetGlobal(0, types.BoxRef(holder)))
+				source, err := vm.Alloc(types.NewArray(vm.Heap(), arr, types.BoxedNull))
+				require.NoError(t, err)
+				require.NoError(t, vm.SetGlobal(1, types.BoxRef(source)))
+
+				require.NoError(t, vm.Run(context.Background()))
+				require.Equal(t, 1, closer.closed)
+				require.Equal(t, types.BoxedNull, seen)
+			})
+		}
+	})
+
+	t.Run("keeps container reference counts exact", func(t *testing.T) {
+		arr, rec := types.NewArrayType(types.TypeAny()), types.NewStructType(types.NewStructField(types.TypeAny()), types.NewStructField(types.TypeI32()))
+		str := func(b *instr.Builder) *instr.Builder { return b.Emit(instr.CONST_GET, 0) }
+		// two builds a two-element array of the constant string.
+		two := func(b *instr.Builder) *instr.Builder {
+			return str(str(b)).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_NEW, 0)
+		}
+		// pair builds a struct holding the constant string and 7.
+		pair := func(b *instr.Builder) *instr.Builder {
+			return str(b).Emit(instr.I32_CONST, 7).Emit(instr.STRUCT_NEW, 1)
+		}
+		tests := []struct {
+			name  string
+			build func(b *instr.Builder)
+			err   error
+			// null is how far the count of null ends above its starting 2: a
+			// release skips null, so overwriting a retained null leaves it counted.
+			// The constant string ends with its one reference and every other slot at zero.
+			null int
+		}{
+			{name: "array.new", build: func(b *instr.Builder) { two(b) }},
+			{name: "array.new_default", build: func(b *instr.Builder) { b.Emit(instr.I32_CONST, 3).Emit(instr.ARRAY_NEW_DEFAULT, 0) }},
+			{name: "array.get", build: func(b *instr.Builder) { two(b).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_GET) }},
+			{name: "array.get out of range", err: interp.ErrIndexOutOfRange, build: func(b *instr.Builder) { two(b).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_GET) }},
+			{name: "array.set", build: func(b *instr.Builder) {
+				two(b).Emit(instr.DUP).Emit(instr.I32_CONST, 0).Emit(instr.REF_NULL).Emit(instr.ARRAY_SET)
+			}},
+			{name: "array.set overwrites null", null: 1, build: func(b *instr.Builder) {
+				b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.DUP).Emit(instr.I32_CONST, 0)
+				str(b).Emit(instr.ARRAY_SET)
+			}},
+			{name: "array.set out of range", err: interp.ErrIndexOutOfRange, build: func(b *instr.Builder) {
+				two(b).Emit(instr.I32_CONST, 2)
+				str(b).Emit(instr.ARRAY_SET)
+			}},
+			{name: "array.fill", build: func(b *instr.Builder) {
+				two(b).Emit(instr.DUP).Emit(instr.I32_CONST, 0)
+				str(b).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_FILL)
+			}},
+			{name: "array.fill out of range", err: interp.ErrIndexOutOfRange, build: func(b *instr.Builder) {
+				two(b).Emit(instr.I32_CONST, 1)
+				str(b).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_FILL)
+			}},
+			{name: "array.copy", build: func(b *instr.Builder) {
+				two(b).Emit(instr.I32_CONST, 0)
+				b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_COPY)
+			}},
+			{name: "array.copy within one array", build: func(b *instr.Builder) {
+				two(b).Emit(instr.DUP).Emit(instr.I32_CONST, 1).Emit(instr.SWAP).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_COPY)
+			}},
+			{name: "array.copy out of range", err: interp.ErrIndexOutOfRange, build: func(b *instr.Builder) {
+				two(b).Emit(instr.I32_CONST, 0)
+				two(b).Emit(instr.I32_CONST, 1).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_COPY)
+			}},
+			{name: "array.append", build: func(b *instr.Builder) {
+				two(b)
+				str(b).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_APPEND)
+			}},
+			{name: "array.delete", build: func(b *instr.Builder) { two(b).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_DELETE) }},
+			{name: "array.delete out of range", err: interp.ErrIndexOutOfRange, build: func(b *instr.Builder) { two(b).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_DELETE) }},
+			{name: "array.slice", build: func(b *instr.Builder) {
+				two(b).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SLICE)
+			}},
+			{name: "array.slice out of range", err: interp.ErrIndexOutOfRange, build: func(b *instr.Builder) {
+				two(b).Emit(instr.I32_CONST, 1).Emit(instr.I32_CONST, 3).Emit(instr.ARRAY_SLICE)
+			}},
+			{name: "struct.new", build: func(b *instr.Builder) { pair(b) }},
+			{name: "struct.new_default", build: func(b *instr.Builder) { b.Emit(instr.STRUCT_NEW_DEFAULT, 1) }},
+			{name: "struct.get", build: func(b *instr.Builder) { pair(b).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET) }},
+			{name: "struct.set", build: func(b *instr.Builder) {
+				pair(b).Emit(instr.DUP).Emit(instr.I32_CONST, 0).Emit(instr.REF_NULL).Emit(instr.STRUCT_SET)
+			}},
+			{name: "struct.set overwrites null", build: func(b *instr.Builder) {
+				b.Emit(instr.STRUCT_NEW_DEFAULT, 1).Emit(instr.DUP).Emit(instr.I32_CONST, 0)
+				str(b).Emit(instr.STRUCT_SET)
+			}},
+			{name: "struct.set out of range", err: interp.ErrSegmentationFault, build: func(b *instr.Builder) {
+				pair(b).Emit(instr.I32_CONST, 2)
+				str(b).Emit(instr.STRUCT_SET)
+			}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				b := instr.NewBuilder()
+				tt.build(b)
+				code, err := b.Assemble()
+				require.NoError(t, err)
+				vm := interp.MustNew(program.New(code, program.WithConstants(types.String("s")), program.WithTypes(arr, rec)), interp.WithThreshold(-1))
+				defer vm.Close()
+				text, err := vm.Const(0)
+				require.NoError(t, err)
+
+				require.ErrorIs(t, vm.Run(context.Background()), tt.err)
+				for vm.Len() > 0 {
+					word, err := vm.PopBoxed()
+					require.NoError(t, err)
+					if word.Kind() == types.KindRef {
+						require.NoError(t, vm.Release(word.Ref()))
+					}
+				}
+
+				got, err := vm.RefCount(text.Ref())
+				require.NoError(t, err)
+				require.Equal(t, 1, got)
+				null, err := vm.RefCount(0)
+				require.NoError(t, err)
+				require.Equal(t, 2+tt.null, null)
+				for addr := 1; addr < vm.HeapLen(); addr++ {
+					if addr == text.Ref() {
+						continue
+					}
+					if count, err := vm.RefCount(addr); err == nil {
+						require.Zero(t, count, "slot %d leaks", addr)
+					}
+				}
+			})
+		}
+	})
+
 	t.Run("records the frames of its first raise on a caught Error", func(t *testing.T) {
 		throws := func(t *testing.T) *types.Function {
 			b := instr.NewBuilder()

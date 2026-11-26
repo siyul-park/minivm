@@ -251,10 +251,13 @@ func arrayNew() jen.Code {
 		closure(underflow(1),
 			jen.Id("size").Op(":=").Id("int").Call(top(1).Dot("I32").Call()),
 			jen.If(jen.Id("i").Dot("sp").Op("<").Id("size").Op("+").Lit(1)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
-			jen.Id("val").Op(":=").Qual(typesPkg, "MakeArray").Call(jen.Op("&").Id("i").Dot("heap"), jen.Id("typ"), jen.Id("size")),
-			jen.Id("copy").Call(jen.Id("val").Dot("Elems"), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("size").Op("-").Lit(1).Op(":").Id("i").Dot("sp").Op("-").Lit(1))),
+			// The array is in the heap before it takes the operands, so a trap while
+			// allocating leaves them with the stack.
+			jen.Id("val").Op(":=").Qual(typesPkg, "NewArray").Call(jen.Op("&").Id("i").Dot("heap"), jen.Id("typ")),
+			jen.Id("addr").Op(":=").Id("i").Dot("heap").Dot("Add").Call(jen.Id("val")),
+			jen.Id("val").Dot("Append").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("size").Op("-").Lit(1).Op(":").Id("i").Dot("sp").Op("-").Lit(1)).Op("...")),
 			jen.Id("i").Dot("sp").Op("-=").Id("size"),
-			top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("heap").Dot("Add").Call(jen.Id("val"))),
+			top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("addr")),
 			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(3),
 		),
 	))
@@ -276,7 +279,7 @@ func arrayLen() jen.Code {
 		jen.Var().Id("n").Id("int32"),
 		arraySwitch(jen.Id("arr").Op(":=").Id("i").Dot("unbox").Call(top(1)).Assert(jen.Type()),
 			func(typedElem) []jen.Code { return length(jen.Id("len").Call(jen.Id("arr"))) },
-			genericArrayCase(length(jen.Id("len").Call(elems("arr")))...),
+			genericArrayCase(length(jen.Id("arr").Dot("Len").Call())...),
 			hostArrayCase(length(jen.Id("arr").Dot("Len").Call())...),
 		),
 		top(1).Op("=").Qual(typesPkg, "BoxI32").Call(jen.Id("n")),
@@ -298,14 +301,8 @@ func arrayFill() jen.Code {
 			}
 		},
 			genericArrayCase(
-				bounds(jen.Id("idx"), jen.Id("size"), elems("arr")),
-				jen.If(jen.Id("val").Dot("Kind").Call().Op("==").Qual(typesPkg, "KindRef").Op("&&").Id("size").Op(">").Lit(1)).Block(jen.Id("i").Dot("heap").Dot("Inc").Call(jen.Id("val").Dot("Ref").Call(), jen.Id("size").Op("-").Lit(1))),
-				jen.For(jen.Id("k").Op(":=").Id("idx"), jen.Id("k").Op("<").Id("idx").Op("+").Id("size"), jen.Id("k").Op("++")).Block(
-					jen.Id("old").Op(":=").Add(elems("arr")).Index(jen.Id("k")),
-					elems("arr").Index(jen.Id("k")).Op("=").Id("val"),
-					jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("old")),
-				),
-				jen.If(jen.Id("size").Op("<=").Lit(0)).Block(jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("val"))),
+				boundsOf(jen.Id("idx"), jen.Id("size"), jen.Id("arr").Dot("Len").Call()),
+				jen.Id("arr").Dot("Fill").Call(jen.Id("val"), jen.Id("idx"), jen.Id("size")),
 			),
 			hostArrayCase(check(jen.Id("arr").Dot("Fill").Call(jen.Id("i"), jen.Id("idx"), jen.Id("size"), jen.Id("val")))),
 		),
@@ -332,11 +329,9 @@ func arrayCopy() jen.Code {
 				genericArrayCase(
 					jen.List(jen.Id("src"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Id("srcAddr")).Assert(jen.Op("*").Qual(typesPkg, "Array")),
 					jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-					bounds(jen.Id("srcOffset"), jen.Id("size"), elems("src")),
-					bounds(jen.Id("dstOffset"), jen.Id("size"), elems("dst")),
-					jen.For(jen.List(jen.Id("_"), jen.Id("v")).Op(":=").Range().Add(window(elems("src"), "srcOffset", "size"))).Block(jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("v"))),
-					jen.For(jen.List(jen.Id("_"), jen.Id("v")).Op(":=").Range().Add(window(elems("dst"), "dstOffset", "size"))).Block(jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("v"))),
-					jen.Id("copy").Call(window(elems("dst"), "dstOffset", "size"), window(elems("src"), "srcOffset", "size")),
+					boundsOf(jen.Id("srcOffset"), jen.Id("size"), jen.Id("src").Dot("Len").Call()),
+					boundsOf(jen.Id("dstOffset"), jen.Id("size"), jen.Id("dst").Dot("Len").Call()),
+					jen.Id("dst").Dot("Copy").Call(jen.Id("dstOffset"), jen.Id("src"), jen.Id("srcOffset"), jen.Id("size")),
 				),
 				hostArrayCase(jen.For(jen.Id("k").Op(":=").Lit(0), jen.Id("k").Op("<").Id("size"), jen.Id("k").Op("++")).Block(
 					check(jen.Id("dst").Dot("SetElement").Call(jen.Id("i"), jen.Id("dstOffset").Op("+").Id("k"), jen.Id("i").Dot("arrayGet").Call(jen.Id("srcAddr"), jen.Id("srcOffset").Op("+").Id("k")))),
@@ -367,9 +362,7 @@ func arrayAppend() jen.Code {
 				jen.Id("i").Dot("heap").Dot("Set").Call(jen.Id("addr"), jen.Id("arr")),
 			}
 		},
-			genericArrayCase(jen.For(jen.Id("k").Op(":=").Lit(0), jen.Id("k").Op("<").Id("n"), jen.Id("k").Op("++")).Block(
-				elems("arr").Op("=").Id("append").Call(elems("arr"), jen.Id("i").Dot("stack").Index(jen.Id("base").Op("+").Id("k"))),
-			)),
+			genericArrayCase(jen.Id("arr").Dot("Append").Call(jen.Id("i").Dot("stack").Index(jen.Id("base"), jen.Id("base").Op("+").Id("n")).Op("..."))),
 			hostArrayCase(check(jen.Id("arr").Dot("Append").Call(jen.Id("i"), jen.Id("i").Dot("stack").Index(jen.Id("base"), jen.Id("base").Op("+").Id("n"))))),
 		),
 		jen.Id("i").Dot("sp").Op("-=").Id("n").Op("+").Lit(1),
@@ -391,11 +384,8 @@ func arrayDelete() jen.Code {
 			}
 		},
 			genericArrayCase(
-				bounds(jen.Id("idx"), jen.Lit(1), elems("arr")),
-				jen.Id("val").Op("=").Add(elems("arr")).Index(jen.Id("idx")),
-				jen.Id("copy").Call(elems("arr").Index(jen.Id("idx").Op(":")), elems("arr").Index(jen.Id("idx").Op("+").Lit(1).Op(":"))),
-				elems("arr").Index(jen.Id("len").Call(elems("arr")).Op("-").Lit(1)).Op("=").Qual(typesPkg, "BoxedNull"),
-				elems("arr").Op("=").Add(elems("arr")).Index(jen.Op(":").Id("len").Call(elems("arr")).Op("-").Lit(1)),
+				boundsOf(jen.Id("idx"), jen.Lit(1), jen.Id("arr").Dot("Len").Call()),
+				jen.Id("val").Op("=").Id("arr").Dot("Delete").Call(jen.Id("idx")),
 			),
 			hostArrayCase(
 				jen.List(jen.Id("removed"), jen.Id("err")).Op(":=").Id("arr").Dot("Delete").Call(jen.Id("i"), jen.Id("idx")),
@@ -414,7 +404,7 @@ func arraySlice() jen.Code {
 	return handler(underflow(3),
 		jen.Id("out").Op(":=").Id("i").Dot("slice").Call(top(3), jen.Id("int").Call(top(2).Dot("I32").Call()), jen.Id("int").Call(top(1).Dot("I32").Call())),
 		jen.Id("newAddr").Op(":=").Id("i").Dot("heap").Dot("Add").Call(jen.Id("out")),
-		jen.Id("i").Dot("share").Call(jen.Id("out")),
+		jen.Id("i").Dot("window").Call(jen.Id("newAddr"), top(3), jen.Id("int").Call(top(2).Dot("I32").Call()), jen.Id("int").Call(top(1).Dot("I32").Call())),
 		jen.Id("addr").Op(":=").Add(top(3)).Dot("Ref").Call(),
 		jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("addr")),
 		jen.Id("i").Dot("sp").Op("-=").Lit(2),
@@ -533,10 +523,15 @@ func (e typedElem) kindConst() string {
 
 // bounds traps unless [offset, offset+size) lies within slice.
 func bounds(offset, size, slice jen.Code) jen.Code {
+	return boundsOf(offset, size, jen.Id("len").Call(slice))
+}
+
+// boundsOf traps unless [offset, offset+size) lies within length.
+func boundsOf(offset, size, length jen.Code) jen.Code {
 	return jen.Block(
 		jen.Id("offset").Op(":=").Add(offset),
 		jen.Id("size").Op(":=").Add(size),
-		jen.Id("length").Op(":=").Id("len").Call(slice),
+		jen.Id("length").Op(":=").Add(length),
 		indexGuard(jen.Id("offset"), jen.Id("size"), jen.Id("length")),
 	)
 }
@@ -545,11 +540,6 @@ func indexGuard(offset, size, length jen.Code) jen.Code {
 	return jen.If(jen.Add(offset).Op("<").Lit(0).Op("||").Add(offset).Op("+").Add(size).Op(">").Add(length)).Block(
 		jen.Panic(jen.Id("ErrIndexOutOfRange")),
 	)
-}
-
-// elems is the boxed element slice of the array named name.
-func elems(name string) *jen.Statement {
-	return jen.Id(name).Dot("Elems")
 }
 
 // window is the n-element subslice of slice from offset.

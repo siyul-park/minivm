@@ -191,7 +191,7 @@ func mapKeys() jen.Code {
 						jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("key")),
 					),
 				),
-				jen.Id("arr").Dot("Elems").Index(jen.Id("n")).Op("=").Id("key"),
+				jen.Id("arr").Dot("SetIndex").Call(jen.Id("n"), jen.Id("key")),
 				jen.Id("n").Op("++"),
 				jen.Return(jen.True()),
 			)),

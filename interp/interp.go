@@ -1223,7 +1223,7 @@ func (i *Interpreter) load(constants []types.Value) {
 			for index, elem := range value.Elems {
 				queue = append(queue, elem)
 				slots = append(slots, func(value types.Boxed) {
-					array.Elems[index] = value
+					array.SetIndex(index, value)
 				})
 			}
 		case *types.MapLiteral:
@@ -1405,20 +1405,29 @@ func (i *Interpreter) concat(left, right types.Boxed) types.String {
 	return types.String(unsafe.String(unsafe.SliceData(i.tail), len(i.tail)))
 }
 
-// slice is a new array of the elements start through end of the array array
-// refers to, in the array's own representation. It retains nothing: the caller
-// allocates the result and then shares it.
+// slice is a new array shaped like the elements start through end of the array
+// array refers to. A scalar array comes back cut; a reference array comes back
+// sized but unfilled, since window fills it once it is in the heap, so a trap
+// while allocating leaves every operand as it was.
 func (i *Interpreter) slice(array types.Boxed, start, end int) types.Value {
 	if array.Kind() != types.KindRef {
 		panic(ErrTypeMismatch)
 	}
 	source := i.heap.At(array.Ref())
 	if view, ok := source.(*HostArray); ok {
-		value, err := view.Array(i)
-		if err != nil {
-			panic(err)
+		switch view.typ.ElemKind {
+		case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64:
+			value, err := view.Array(i)
+			if err != nil {
+				panic(err)
+			}
+			source = value
+		default:
+			if start < 0 || end > view.Len() || start > end {
+				panic(ErrIndexOutOfRange)
+			}
+			return types.MakeArray(&i.heap, view.typ, 0)
 		}
-		source = value
 	}
 	switch source := source.(type) {
 	case types.TypedArray[bool]:
@@ -1434,23 +1443,40 @@ func (i *Interpreter) slice(array types.Boxed, start, end int) types.Value {
 	case types.TypedArray[float64]:
 		return cut(source, start, end)
 	case *types.Array:
-		if start < 0 || end > len(source.Elems) || start > end {
+		if start < 0 || end > source.Len() || start > end {
 			panic(ErrIndexOutOfRange)
 		}
-		out := types.MakeArray(&i.heap, source.Typ, end-start)
-		copy(out.Elems, source.Elems[start:end])
-		return out
+		return types.MakeArray(&i.heap, source.Typ, end-start)
 	default:
 		panic(ErrTypeMismatch)
 	}
 }
 
-// share retains each reference an array value holds once more, for the new
-// owner an allocation gave it.
-func (i *Interpreter) share(value types.Value) {
-	if array, ok := value.(*types.Array); ok {
-		for _, v := range array.Elems {
-			i.heap.Retain(v)
+// window fills the array allocated at addr by slice with the elements start
+// through end of the array array refers to, each one more reference for its new
+// owner. A scalar array is already cut. When a host element fails to convert,
+// the new array is released with the elements it holds.
+func (i *Interpreter) window(addr int, array types.Boxed, start, end int) {
+	out, ok := i.heap.At(addr).(*types.Array)
+	if !ok {
+		return
+	}
+	switch source := i.heap.At(array.Ref()).(type) {
+	case *types.Array:
+		out.Copy(0, source, start, end-start)
+	case *HostArray:
+		defer func() {
+			if r := recover(); r != nil {
+				i.heap.Dec(addr)
+				panic(r)
+			}
+		}()
+		for at := start; at < end; at++ {
+			elem, err := source.Element(i, at)
+			if err != nil {
+				panic(err)
+			}
+			out.Append(elem)
 		}
 	}
 }
@@ -1491,10 +1517,10 @@ func (i *Interpreter) newArrayDefault(typ *types.ArrayType, size types.Boxed) ty
 		return make(types.TypedArray[float64], n)
 	default:
 		val := types.MakeArray(&i.heap, typ, int(n))
-		for j := range val.Elems {
-			val.Elems[j] = types.BoxedNull
+		if n > 0 {
+			i.heap.Retain(types.BoxedNull)
+			val.Fill(types.BoxedNull, 0, int(n))
 		}
-		i.heap.Inc(0, int(n))
 		return val
 	}
 }
@@ -1535,10 +1561,10 @@ func (i *Interpreter) arrayGet(addr, at int) types.Boxed {
 		}
 		return types.BoxF64(array[at])
 	case *types.Array:
-		if at < 0 || at >= len(array.Elems) {
+		if at < 0 || at >= array.Len() {
 			panic(ErrIndexOutOfRange)
 		}
-		result := array.Elems[at]
+		result := array.Index(at)
 		i.heap.Retain(result)
 		return result
 	case *HostArray:
@@ -1588,12 +1614,10 @@ func (i *Interpreter) arraySet(addr, at int, val types.Boxed) {
 		}
 		array[at] = val.F64()
 	case *types.Array:
-		if at < 0 || at >= len(array.Elems) {
+		if at < 0 || at >= array.Len() {
 			panic(ErrIndexOutOfRange)
 		}
-		elem := array.Elems[at]
-		array.Elems[at] = val
-		i.heap.Release(elem)
+		i.heap.Release(array.SwapIndex(at, val))
 	case *HostArray:
 		if err := array.SetElement(i, at, val); err != nil {
 			panic(err)
@@ -1611,7 +1635,7 @@ func (i *Interpreter) structGet(addr, at int) types.Boxed {
 		if at < 0 || at >= len(value.Typ.Fields) {
 			panic(ErrSegmentationFault)
 		}
-		data, kind := value.Data[at], value.Typ.Fields[at].Kind
+		data, kind := value.Raw(at), value.Typ.Fields[at].Kind
 		switch kind {
 		case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64:
 			return types.BoxWord(kind, data)

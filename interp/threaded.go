@@ -31379,7 +31379,7 @@ func fuseGlobalGet631(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindI1 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxI1(v0.Data[v7] != 0)
+					v1 := types.BoxI1(v0.Raw(v7) != 0)
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 7
@@ -31411,7 +31411,7 @@ func fuseGlobalGet631(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindI8 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxI8(int8(uint32(v0.Data[v7])))
+					v1 := types.BoxI8(int8(uint32(v0.Raw(v7))))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 7
@@ -31443,7 +31443,7 @@ func fuseGlobalGet631(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindI32 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxI32(int32(uint32(v0.Data[v7])))
+					v1 := types.BoxI32(int32(uint32(v0.Raw(v7))))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 7
@@ -31475,7 +31475,7 @@ func fuseGlobalGet631(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindI64 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := i.boxI64(int64(v0.Data[v7]))
+					v1 := i.boxI64(int64(v0.Raw(v7)))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 7
@@ -31507,7 +31507,7 @@ func fuseGlobalGet631(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindF32 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxF32(math.Float32frombits(uint32(v0.Data[v7])))
+					v1 := types.BoxF32(math.Float32frombits(uint32(v0.Raw(v7))))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 7
@@ -31539,7 +31539,7 @@ func fuseGlobalGet631(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindF64 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxF64(math.Float64frombits(v0.Data[v7]))
+					v1 := types.BoxF64(math.Float64frombits(v0.Raw(v7)))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 7
@@ -31571,7 +31571,7 @@ func fuseGlobalGet631(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindRef {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.Boxed(v0.Data[v7])
+					v1 := types.Boxed(v0.Raw(v7))
 					i.heap.Retain(v1)
 					i.stack[i.sp] = v1
 					i.sp++
@@ -31631,7 +31631,7 @@ func fuseGlobalGet632(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindI1 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxI1(v0.Data[v5] != 0)
+					v1 := types.BoxI1(v0.Raw(v5) != 0)
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 9
@@ -31663,7 +31663,7 @@ func fuseGlobalGet632(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindI8 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxI8(int8(uint32(v0.Data[v5])))
+					v1 := types.BoxI8(int8(uint32(v0.Raw(v5))))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 9
@@ -31695,7 +31695,7 @@ func fuseGlobalGet632(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindI32 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxI32(int32(uint32(v0.Data[v5])))
+					v1 := types.BoxI32(int32(uint32(v0.Raw(v5))))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 9
@@ -31727,7 +31727,7 @@ func fuseGlobalGet632(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindI64 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := i.boxI64(int64(v0.Data[v5]))
+					v1 := i.boxI64(int64(v0.Raw(v5)))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 9
@@ -31759,7 +31759,7 @@ func fuseGlobalGet632(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindF32 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxF32(math.Float32frombits(uint32(v0.Data[v5])))
+					v1 := types.BoxF32(math.Float32frombits(uint32(v0.Raw(v5))))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 9
@@ -31791,7 +31791,7 @@ func fuseGlobalGet632(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindF64 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxF64(math.Float64frombits(v0.Data[v5]))
+					v1 := types.BoxF64(math.Float64frombits(v0.Raw(v5)))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 9
@@ -31823,7 +31823,7 @@ func fuseGlobalGet632(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindRef {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.Boxed(v0.Data[v5])
+					v1 := types.Boxed(v0.Raw(v5))
 					i.heap.Retain(v1)
 					i.stack[i.sp] = v1
 					i.sp++
@@ -59725,7 +59725,7 @@ func fuseLocalGet475(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindI1 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxI1(v0.Data[v7] != 0)
+					v1 := types.BoxI1(v0.Raw(v7) != 0)
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 6
@@ -59758,7 +59758,7 @@ func fuseLocalGet475(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindI8 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxI8(int8(uint32(v0.Data[v7])))
+					v1 := types.BoxI8(int8(uint32(v0.Raw(v7))))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 6
@@ -59791,7 +59791,7 @@ func fuseLocalGet475(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindI32 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxI32(int32(uint32(v0.Data[v7])))
+					v1 := types.BoxI32(int32(uint32(v0.Raw(v7))))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 6
@@ -59824,7 +59824,7 @@ func fuseLocalGet475(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindI64 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := i.boxI64(int64(v0.Data[v7]))
+					v1 := i.boxI64(int64(v0.Raw(v7)))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 6
@@ -59857,7 +59857,7 @@ func fuseLocalGet475(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindF32 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxF32(math.Float32frombits(uint32(v0.Data[v7])))
+					v1 := types.BoxF32(math.Float32frombits(uint32(v0.Raw(v7))))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 6
@@ -59890,7 +59890,7 @@ func fuseLocalGet475(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindF64 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxF64(math.Float64frombits(v0.Data[v7]))
+					v1 := types.BoxF64(math.Float64frombits(v0.Raw(v7)))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 6
@@ -59923,7 +59923,7 @@ func fuseLocalGet475(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindRef {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.Boxed(v0.Data[v7])
+					v1 := types.Boxed(v0.Raw(v7))
 					i.heap.Retain(v1)
 					i.stack[i.sp] = v1
 					i.sp++
@@ -59984,7 +59984,7 @@ func fuseLocalGet476(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindI1 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxI1(v0.Data[v5] != 0)
+					v1 := types.BoxI1(v0.Raw(v5) != 0)
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 8
@@ -60017,7 +60017,7 @@ func fuseLocalGet476(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindI8 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxI8(int8(uint32(v0.Data[v5])))
+					v1 := types.BoxI8(int8(uint32(v0.Raw(v5))))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 8
@@ -60050,7 +60050,7 @@ func fuseLocalGet476(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindI32 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxI32(int32(uint32(v0.Data[v5])))
+					v1 := types.BoxI32(int32(uint32(v0.Raw(v5))))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 8
@@ -60083,7 +60083,7 @@ func fuseLocalGet476(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindI64 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := i.boxI64(int64(v0.Data[v5]))
+					v1 := i.boxI64(int64(v0.Raw(v5)))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 8
@@ -60116,7 +60116,7 @@ func fuseLocalGet476(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindF32 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxF32(math.Float32frombits(uint32(v0.Data[v5])))
+					v1 := types.BoxF32(math.Float32frombits(uint32(v0.Raw(v5))))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 8
@@ -60149,7 +60149,7 @@ func fuseLocalGet476(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindF64 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxF64(math.Float64frombits(v0.Data[v5]))
+					v1 := types.BoxF64(math.Float64frombits(v0.Raw(v5)))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 8
@@ -60182,7 +60182,7 @@ func fuseLocalGet476(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindRef {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.Boxed(v0.Data[v5])
+					v1 := types.Boxed(v0.Raw(v5))
 					i.heap.Retain(v1)
 					i.stack[i.sp] = v1
 					i.sp++
@@ -109318,7 +109318,7 @@ func fuseUpvalGet631(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindI1 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxI1(v0.Data[v7] != 0)
+					v1 := types.BoxI1(v0.Raw(v7) != 0)
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 6
@@ -109350,7 +109350,7 @@ func fuseUpvalGet631(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindI8 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxI8(int8(uint32(v0.Data[v7])))
+					v1 := types.BoxI8(int8(uint32(v0.Raw(v7))))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 6
@@ -109382,7 +109382,7 @@ func fuseUpvalGet631(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindI32 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxI32(int32(uint32(v0.Data[v7])))
+					v1 := types.BoxI32(int32(uint32(v0.Raw(v7))))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 6
@@ -109414,7 +109414,7 @@ func fuseUpvalGet631(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindI64 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := i.boxI64(int64(v0.Data[v7]))
+					v1 := i.boxI64(int64(v0.Raw(v7)))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 6
@@ -109446,7 +109446,7 @@ func fuseUpvalGet631(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindF32 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxF32(math.Float32frombits(uint32(v0.Data[v7])))
+					v1 := types.BoxF32(math.Float32frombits(uint32(v0.Raw(v7))))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 6
@@ -109478,7 +109478,7 @@ func fuseUpvalGet631(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindF64 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxF64(math.Float64frombits(v0.Data[v7]))
+					v1 := types.BoxF64(math.Float64frombits(v0.Raw(v7)))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 6
@@ -109510,7 +109510,7 @@ func fuseUpvalGet631(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v7].Kind != types.KindRef {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.Boxed(v0.Data[v7])
+					v1 := types.Boxed(v0.Raw(v7))
 					i.heap.Retain(v1)
 					i.stack[i.sp] = v1
 					i.sp++
@@ -109570,7 +109570,7 @@ func fuseUpvalGet632(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindI1 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxI1(v0.Data[v5] != 0)
+					v1 := types.BoxI1(v0.Raw(v5) != 0)
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 8
@@ -109602,7 +109602,7 @@ func fuseUpvalGet632(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindI8 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxI8(int8(uint32(v0.Data[v5])))
+					v1 := types.BoxI8(int8(uint32(v0.Raw(v5))))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 8
@@ -109634,7 +109634,7 @@ func fuseUpvalGet632(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindI32 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxI32(int32(uint32(v0.Data[v5])))
+					v1 := types.BoxI32(int32(uint32(v0.Raw(v5))))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 8
@@ -109666,7 +109666,7 @@ func fuseUpvalGet632(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindI64 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := i.boxI64(int64(v0.Data[v5]))
+					v1 := i.boxI64(int64(v0.Raw(v5)))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 8
@@ -109698,7 +109698,7 @@ func fuseUpvalGet632(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindF32 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxF32(math.Float32frombits(uint32(v0.Data[v5])))
+					v1 := types.BoxF32(math.Float32frombits(uint32(v0.Raw(v5))))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 8
@@ -109730,7 +109730,7 @@ func fuseUpvalGet632(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindF64 {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.BoxF64(math.Float64frombits(v0.Data[v5]))
+					v1 := types.BoxF64(math.Float64frombits(v0.Raw(v5)))
 					i.stack[i.sp] = v1
 					i.sp++
 					i.fr.ip += 8
@@ -109762,7 +109762,7 @@ func fuseUpvalGet632(c *threader, start int) func(*Interpreter) {
 					if v0.Typ.Fields[v5].Kind != types.KindRef {
 						panic(ErrTypeMismatch)
 					}
-					v1 := types.Boxed(v0.Data[v5])
+					v1 := types.Boxed(v0.Raw(v5))
 					i.heap.Retain(v1)
 					i.stack[i.sp] = v1
 					i.sp++
@@ -123342,10 +123342,11 @@ var (
 					if i.sp < v0+1 {
 						panic(ErrStackUnderflow)
 					}
-					v2 := types.MakeArray(&i.heap, v1, v0)
-					copy(v2.Elems, i.stack[i.sp-v0-1:i.sp-1])
+					v2 := types.NewArray(&i.heap, v1)
+					v3 := i.heap.Add(v2)
+					v2.Append(i.stack[i.sp-v0-1 : i.sp-1]...)
 					i.sp -= v0
-					i.stack[i.sp-1] = types.BoxRef(i.heap.Add(v2))
+					i.stack[i.sp-1] = types.BoxRef(v3)
 					i.fr.ip += 3
 				}
 			}
@@ -123394,7 +123395,7 @@ var (
 				case types.TypedArray[float64]:
 					v0 = int32(len(v1))
 				case *types.Array:
-					v0 = int32(len(v1.Elems))
+					v0 = int32(v1.Len())
 				case *HostArray:
 					v0 = int32(v1.Len())
 				default:
@@ -123543,22 +123544,12 @@ var (
 					{
 						v1 := v2
 						v4 := v0
-						v5 := len(v3.Elems)
+						v5 := v3.Len()
 						if v1 < 0 || v1+v4 > v5 {
 							panic(ErrIndexOutOfRange)
 						}
 					}
-					if v1.Kind() == types.KindRef && v0 > 1 {
-						i.heap.Inc(v1.Ref(), v0-1)
-					}
-					for v4 := v2; v4 < v2+v0; v4++ {
-						v0 := v3.Elems[v4]
-						v3.Elems[v4] = v1
-						i.heap.Release(v0)
-					}
-					if v0 <= 0 {
-						i.heap.Release(v1)
-					}
+					v3.Fill(v1, v2, v0)
 				case *HostArray:
 					if v4 := v3.Fill(i, v2, v0, v1); v4 != nil {
 						panic(v4)
@@ -123731,7 +123722,7 @@ var (
 					{
 						v2 := v1
 						v3 := v0
-						v5 := len(v4.Elems)
+						v5 := v4.Len()
 						if v2 < 0 || v2+v3 > v5 {
 							panic(ErrIndexOutOfRange)
 						}
@@ -123739,18 +123730,12 @@ var (
 					{
 						v1 := v3
 						v4 := v0
-						v5 := len(v2.Elems)
+						v5 := v2.Len()
 						if v1 < 0 || v1+v4 > v5 {
 							panic(ErrIndexOutOfRange)
 						}
 					}
-					for _, v2 := range v4.Elems[v1 : v1+v0] {
-						i.heap.Retain(v2)
-					}
-					for _, v1 := range v2.Elems[v3 : v3+v0] {
-						i.heap.Release(v1)
-					}
-					copy(v2.Elems[v3:v3+v0], v4.Elems[v1:v1+v0])
+					v2.Copy(v3, v4, v1, v0)
 				case *HostArray:
 					for v4 := 0; v4 < v0; v4++ {
 						if v0 := v2.SetElement(i, v3+v4, i.arrayGet(v5, v1+v4)); v0 != nil {
@@ -123814,9 +123799,7 @@ var (
 					}
 					i.heap.Set(v2, v1)
 				case *types.Array:
-					for v2 := 0; v2 < v0; v2++ {
-						v1.Elems = append(v1.Elems, i.stack[v3+v2])
-					}
+					v1.Append(i.stack[v3 : v3+v0]...)
 				case *HostArray:
 					if v2 := v1.Append(i, i.stack[v3:v3+v0]); v2 != nil {
 						panic(v2)
@@ -123918,15 +123901,12 @@ var (
 					{
 						v2 := v0
 						v3 := 1
-						v4 := len(v1.Elems)
+						v4 := v1.Len()
 						if v2 < 0 || v2+v3 > v4 {
 							panic(ErrIndexOutOfRange)
 						}
 					}
-					v3 = v1.Elems[v0]
-					copy(v1.Elems[v0:], v1.Elems[v0+1:])
-					v1.Elems[len(v1.Elems)-1] = types.BoxedNull
-					v1.Elems = v1.Elems[:len(v1.Elems)-1]
+					v3 = v1.Delete(v0)
 				case *HostArray:
 					v2, v4 := v1.Delete(i, v0)
 					if v4 != nil {
@@ -123950,7 +123930,7 @@ var (
 				}
 				v0 := i.slice(i.stack[i.sp-3], int(i.stack[i.sp-2].I32()), int(i.stack[i.sp-1].I32()))
 				v1 := i.heap.Add(v0)
-				i.share(v0)
+				i.window(v1, i.stack[i.sp-3], int(i.stack[i.sp-2].I32()), int(i.stack[i.sp-1].I32()))
 				v2 := i.stack[i.sp-3].Ref()
 				i.heap.Dec(v2)
 				i.sp -= 2
@@ -123978,6 +123958,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.NewStruct(&i.heap, v1)
+				v2 := i.heap.Add(v0)
 				for v2, v4 := range v1.Fields {
 					v1 := i.stack[i.sp-v3+v2]
 					switch v4.Kind {
@@ -123990,7 +123971,7 @@ var (
 					}
 				}
 				i.sp -= v3 - 1
-				i.stack[i.sp-1] = types.BoxRef(i.heap.Add(v0))
+				i.stack[i.sp-1] = types.BoxRef(v2)
 				i.fr.ip += 3
 			}
 		},
@@ -124064,25 +124045,23 @@ var (
 					v4 := v3.Fields[v1]
 					switch v4.Kind {
 					case types.KindI32:
-						v2.Data[v1] = uint64(uint32(v0.I32()))
+						v2.SetRaw(v1, uint64(uint32(v0.I32())))
 					case types.KindI8:
-						v2.Data[v1] = uint64(uint32(int32(v0.I8())))
+						v2.SetRaw(v1, uint64(uint32(int32(v0.I8()))))
 					case types.KindI1:
 						if v0.Bool() {
-							v2.Data[v1] = 1
+							v2.SetRaw(v1, 1)
 						} else {
-							v2.Data[v1] = 0
+							v2.SetRaw(v1, 0)
 						}
 					case types.KindI64:
-						v2.Data[v1] = uint64(i.unboxI64(v0))
+						v2.SetRaw(v1, uint64(i.unboxI64(v0)))
 					case types.KindF32:
-						v2.Data[v1] = uint64(math.Float32bits(v0.F32()))
+						v2.SetRaw(v1, uint64(math.Float32bits(v0.F32())))
 					case types.KindF64:
-						v2.Data[v1] = math.Float64bits(v0.F64())
+						v2.SetRaw(v1, math.Float64bits(v0.F64()))
 					case types.KindRef:
-						v3 := types.Boxed(v2.Data[v1])
-						i.heap.Release(v3)
-						v2.Data[v1] = uint64(v0)
+						i.heap.Release(v2.SwapField(v1, v0))
 					default:
 						panic(ErrTypeMismatch)
 					}
@@ -124402,7 +124381,7 @@ var (
 								i.heap.Retain(key)
 							}
 						}
-						v6.Elems[v8] = key
+						v6.SetIndex(v8, key)
 						v8++
 						return true
 					})

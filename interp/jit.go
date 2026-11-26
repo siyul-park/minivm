@@ -812,14 +812,15 @@ func (e *engine) callout(i *Interpreter, exit *jit.Exit, serve callout) (ok bool
 	}
 	code := i.function(m.Address).Code[m.IP:]
 	v := serve(i, code, args)
-	ctx.Results[0] = toWord(i, exit.Results[0], types.BoxRef(i.heap.Add(v)))
+	addr := i.heap.Add(v)
+	ctx.Results[0] = toWord(i, exit.Results[0], types.BoxRef(addr))
 	switch exit.Code {
 	case instr.STRUCT_NEW_DEFAULT:
 		e.tcache.fill(i, index(code), 0)
 	case instr.ARRAY_NEW_DEFAULT:
 		e.tcache.fill(i, index(code), int(args[0].I32()))
 	case instr.ARRAY_SLICE:
-		i.share(v)
+		i.window(addr, args[0], int(args[1].I32()), int(args[2].I32()))
 	}
 	return true
 }
