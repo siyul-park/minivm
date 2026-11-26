@@ -189,6 +189,8 @@ func (h *Heap) Retain(v Boxed) {
 // Release removes one reference from the value v refers to, as Dec, and
 // ignores null and a v that is not a reference, for the runtime that owns the
 // heap.
+//
+//gcassert:inline
 func (h *Heap) Release(v Boxed) {
 	// int32(v) is v.Ref() without the payload mask, which keeps Release inlinable.
 	if addr := int(int32(v)); uint64(v)>>VBits == refTag && addr != 0 {

@@ -13,7 +13,7 @@ plugins = [
   { id = "lang-typescript" },
   { id = "lang-python" },
 ]
-extends = ["core/recommended", "design/recommended", "testing/recommended", "go/recommended", "markdown/recommended"]
+extends = ["core/recommended", "design/recommended", "testing/recommended", "go/recommended", "markdown/recommended", "core/authoring"]
 
 [spec.generated]
 # Written by `make benchmark` (benchmarks/cmd/benchreport); edit the generator.
@@ -27,6 +27,9 @@ files = ["docs/benchmarks.md"]
 # Step 10's interface hooks include the types.Value, types.Type and
 # types.Traceable methods every value and type implements.
 [spec.rules]
+# A function whose doc comment ends with //gcassert:inline must inline at every
+# call site; .lighthouse/decisions/inline-calls.yaml runs gcassert.
+"local/inline-calls" = "error"
 "design/declaration-groups" = { level = "error", options = { groups = ["public-type", "private-type", "public-const", "private-const", "var", "init", "public-function", "method", "private"], blocks = "kind", hooks = ["Kind", "Type", "Cast", "Equals", "Refs", "Clone", "String", "GoString", "Error", "Unwrap", "MarshalJSON", "UnmarshalJSON", "MarshalText", "UnmarshalText", "MarshalBinary", "UnmarshalBinary"] } }
 
 # JavaScript and Python fixtures are benchmark programs: the Go runners call

@@ -7,6 +7,7 @@
 LIGHTHOUSE_VERSION := $(shell cat .lighthouse-version)
 RUFF_VERSION := 0.17.3
 LYCHEE_VERSION := 0.24.2
+GCASSERT_VERSION := v0.0.0-20260313214104-ad3fae17affe
 TARGETS := x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin
 LIGHTHOUSE_SHA256_x86_64-unknown-linux-gnu := cafc85ecdb2bdeacf4dee5cc2b153faccba21e6ea5273fad4ed136f33fb35966
 LIGHTHOUSE_SHA256_aarch64-unknown-linux-gnu := d652b262e3e17c6c58ee620d54c994a60c8c3da457ec5167a23a450418297a47
@@ -65,7 +66,7 @@ endif
 
 PROJECT = $(shell basename -s .git $(shell git config --get remote.origin.url))
 
-.PHONY: init install-hooks install-tools install-lighthouse install-lint-tools install-modules generate build clean tidy update clean-sum clean-cache sync check check-generated check-tidy check-fmt check-arm64 check-inline test coverage coverage-check benchmark benchmark-diff lighthouse lint fmt vet doc fuzz
+.PHONY: init install-hooks install-tools install-lighthouse install-lint-tools install-modules generate build clean tidy update clean-sum clean-cache sync check check-generated check-tidy check-fmt check-arm64 test coverage coverage-check benchmark benchmark-diff lighthouse lint fmt vet doc fuzz
 all: lint test build
 
 init:
@@ -81,6 +82,7 @@ install-hooks:
 install-tools:
 	@go install golang.org/x/tools/cmd/godoc@latest
 	@go install golang.org/x/tools/cmd/goimports@latest
+	@go install github.com/jordanlewis/gcassert/cmd/gcassert@$(GCASSERT_VERSION)
 
 # Lighthouse keeps its plugins next to the real executable, so the archive goes
 # to <prefix>/lib/lighthouse/<version>/ and bin/lighthouse links to it.
@@ -135,7 +137,7 @@ clean-cache:
 sync:
 	@go work sync
 
-check: check-generated check-tidy check-fmt lint check-inline test check-arm64
+check: check-generated check-tidy check-fmt lint test check-arm64
 	@go build ./...
 	@(cd benchmarks && go test ./...)
 
@@ -157,9 +159,6 @@ check-arm64:
 	@GOOS=linux GOARCH=arm64 go build ./...
 	@GOOS=linux GOARCH=arm64 go test -exec=true ./...
 	@(cd benchmarks && GOOS=linux GOARCH=arm64 go test -exec=true ./...)
-
-check-inline:
-	@go build -gcflags=-m ./interp 2>&1 | grep -q 'can inline (\*engine).call$$' || 		{ echo "(*engine).call no longer inlines"; exit 1; }
 
 test:
 	@go test -race $(test-options) ./...

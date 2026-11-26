@@ -128,6 +128,8 @@ func (s *Struct) SetField(i int, val Boxed) {
 
 // SwapField takes val as reference field i and returns the word it replaces, which
 // the caller now owns.
+//
+//gcassert:inline
 func (s *Struct) SwapField(i int, val Boxed) Boxed {
 	old := Boxed(s.Data[i])
 	s.Data[i] = uint64(val)
@@ -136,12 +138,16 @@ func (s *Struct) SwapField(i int, val Boxed) Boxed {
 
 // Raw returns the stored word of field i without per-kind decoding. It
 // indexes like a slice.
+//
+//gcassert:inline
 func (s *Struct) Raw(i int) uint64 {
 	return s.Data[i]
 }
 
 // SetRaw stores w as field i without per-kind encoding or counting. It MUST
 // NOT name a reference field.
+//
+//gcassert:inline
 func (s *Struct) SetRaw(i int, w uint64) {
 	s.Data[i] = w
 }

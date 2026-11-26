@@ -136,11 +136,15 @@ func NewArrayType(elem Type) *ArrayType {
 }
 
 // Len returns the number of elements.
+//
+//gcassert:inline
 func (a *Array) Len() int {
 	return len(a.Elems)
 }
 
 // Index returns element i, which a borrows.
+//
+//gcassert:inline
 func (a *Array) Index(i int) Boxed {
 	return a.Elems[i]
 }
@@ -160,6 +164,8 @@ func (a *Array) SetIndex(i int, v Boxed) {
 
 // SwapIndex takes v as element i and returns the word it replaces, which the caller
 // now owns.
+//
+//gcassert:inline
 func (a *Array) SwapIndex(i int, v Boxed) Boxed {
 	old := a.Elems[i]
 	a.Elems[i] = v

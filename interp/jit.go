@@ -231,6 +231,8 @@ func (e *engine) join(r *shared) error {
 // release and advance mirror the call site's own releaseTarget and ip
 // advance, since native completion must apply them exactly as pushFrame
 // would.
+//
+//gcassert:inline
 func (e *engine) call(i *Interpreter, addr int, fn *types.Function, release bool, advance int) bool {
 
 	if addr >= len(e.policy.gates) || e.policy.gates[addr] {
