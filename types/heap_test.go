@@ -20,7 +20,8 @@ func TestHeap(t *testing.T) {
 		h.Recount(nil)
 		a, b := types.NewArray(nil, typ), types.NewArray(nil, typ)
 		ra, rb := h.Add(a), h.Add(b)
-		a.Elems, b.Elems = []types.Boxed{types.BoxRef(rb)}, []types.Boxed{types.BoxRef(ra)}
+		a.Append(types.BoxRef(rb))
+		b.Append(types.BoxRef(ra))
 		for range 5 {
 			h.Add(types.I32(1))
 		}
@@ -38,7 +39,8 @@ func TestHeap(t *testing.T) {
 		h.Recount(nil)
 		a, b := types.NewArray(nil, typ), types.NewArray(nil, typ)
 		ra, rb := h.Add(a), h.Add(b)
-		a.Elems, b.Elems = []types.Boxed{types.BoxRef(rb)}, []types.Boxed{types.BoxRef(ra)}
+		a.Append(types.BoxRef(rb))
+		b.Append(types.BoxRef(ra))
 		h.Inc(ra, 1)
 
 		for h.Room() > 0 {
@@ -132,7 +134,8 @@ func TestHooks(t *testing.T) {
 		for range 3 {
 			a, b := types.NewArray(nil, typ), types.NewArray(nil, typ)
 			ra, rb := h.Add(a), h.Add(b)
-			a.Elems, b.Elems = []types.Boxed{types.BoxRef(rb)}, []types.Boxed{types.BoxRef(ra)}
+			a.Append(types.BoxRef(rb))
+			b.Append(types.BoxRef(ra))
 		}
 		h.Add(types.I32(1))
 		require.Zero(t, calls)
@@ -555,7 +558,7 @@ func TestHeap_Reset(t *testing.T) {
 
 		h.Reset()
 		require.Same(t, array, types.MakeArray(h, typ, 2))
-		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, array.Elems)
+		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, words(array))
 	})
 }
 
@@ -593,8 +596,12 @@ func TestHeap_Undo(t *testing.T) {
 		require.Equal(t, 1, h.Count(0))
 		reused := types.NewArray(h, typ)
 		require.Same(t, array, reused)
-		require.Empty(t, reused.Elems)
-		require.GreaterOrEqual(t, cap(reused.Elems), 2)
+		require.Zero(t, reused.Len())
+		require.Zero(t, testing.AllocsPerRun(1, func() {
+			reused.Append(types.BoxedNull, types.BoxedNull)
+			reused.Delete(1)
+			reused.Delete(0)
+		}))
 	})
 }
 

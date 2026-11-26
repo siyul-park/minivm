@@ -313,7 +313,7 @@ func (h *Heap) Drain() {
 func (h *Heap) Undo(addr int) {
 	v := h.objects[addr]
 	if array, ok := v.(*Array); ok {
-		h.rc[0] -= len(array.Elems)
+		h.rc[0] -= len(array.elems)
 	}
 	h.recycle(v, false)
 	h.objects[addr] = nil
@@ -532,9 +532,9 @@ func (h *Heap) recycle(v Value, escaped bool) {
 	case *Array:
 		h.arrays.remove()
 		if !escaped && h.arrays.room() {
-			clear(v.Elems[:cap(v.Elems)])
+			clear(v.elems[:cap(v.elems)])
 			v.Typ = nil
-			v.Elems = v.Elems[:0]
+			v.elems = v.elems[:0]
 			v.heap = nil
 			h.arrays.put(v)
 		}

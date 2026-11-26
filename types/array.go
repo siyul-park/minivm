@@ -12,7 +12,7 @@ type TypedArray[T Scalar] []T
 // Array is a heap array of boxed elements of a ref or i64-wide element type.
 type Array struct {
 	Typ   *ArrayType
-	Elems []Boxed
+	elems []Boxed
 	binding
 }
 
@@ -97,19 +97,19 @@ func MakeArray(heap *Heap, typ *ArrayType, size int) *Array {
 			a = kept
 			a.Typ = typ
 			a.heap = heap
-			if cap(a.Elems) < size {
-				a.Elems = make([]Boxed, size)
+			if cap(a.elems) < size {
+				a.elems = make([]Boxed, size)
 			} else {
-				a.Elems = a.Elems[:size]
+				a.elems = a.elems[:size]
 			}
 		}
 	}
 	if a == nil {
-		a = &Array{Typ: typ, Elems: make([]Boxed, size), binding: binding{heap}}
+		a = &Array{Typ: typ, elems: make([]Boxed, size), binding: binding{heap}}
 	}
 	if typ.ElemKind == KindRef {
-		for i := range a.Elems {
-			a.Elems[i] = BoxedNull
+		for i := range a.elems {
+			a.elems[i] = BoxedNull
 		}
 	}
 	return a
@@ -123,11 +123,11 @@ func NewArray(heap *Heap, typ *ArrayType, elems ...Boxed) *Array {
 		if a, ok := heap.arrays.get(); ok {
 			a.Typ = typ
 			a.heap = heap
-			a.Elems = append(a.Elems[:0], elems...)
+			a.elems = append(a.elems[:0], elems...)
 			return a
 		}
 	}
-	return &Array{Typ: typ, Elems: elems, binding: binding{heap}}
+	return &Array{Typ: typ, elems: elems, binding: binding{heap}}
 }
 
 // NewArrayType returns the array type with element type elem.
@@ -139,26 +139,26 @@ func NewArrayType(elem Type) *ArrayType {
 //
 //gcassert:inline
 func (a *Array) Len() int {
-	return len(a.Elems)
+	return len(a.elems)
 }
 
 // Index returns element i, which a borrows.
 //
 //gcassert:inline
 func (a *Array) Index(i int) Boxed {
-	return a.Elems[i]
+	return a.elems[i]
 }
 
 // SetIndex takes v as element i and releases the word it replaces. It panics with
 // ErrDetached when it must release and a is unbound.
 func (a *Array) SetIndex(i int, v Boxed) {
-	old := a.Elems[i]
+	old := a.elems[i]
 	if !owns(old) {
-		a.Elems[i] = v
+		a.elems[i] = v
 		return
 	}
 	h := a.bound()
-	a.Elems[i] = v
+	a.elems[i] = v
 	h.Release(old)
 }
 
@@ -167,8 +167,8 @@ func (a *Array) SetIndex(i int, v Boxed) {
 //
 //gcassert:inline
 func (a *Array) SwapIndex(i int, v Boxed) Boxed {
-	old := a.Elems[i]
-	a.Elems[i] = v
+	old := a.elems[i]
+	a.elems[i] = v
 	return old
 }
 
@@ -192,7 +192,7 @@ func (a *Array) Fill(v Boxed, from, n int) {
 		h.Inc(v.Ref(), n-1)
 	}
 	for i := from; i < from+n; i++ {
-		a.Elems[i] = v
+		a.elems[i] = v
 	}
 	for _, w := range old {
 		h.Release(w)
@@ -206,7 +206,7 @@ func (a *Array) Copy(at int, src *Array, from, n int) {
 	if n <= 0 {
 		return
 	}
-	words := src.Elems[from : from+n]
+	words := src.elems[from : from+n]
 	var local [8]Boxed
 	old := a.replaced(local[:0], at, n)
 	var h *Heap
@@ -221,7 +221,7 @@ func (a *Array) Copy(at int, src *Array, from, n int) {
 			h.Retain(w)
 		}
 	}
-	copy(a.Elems[at:at+n], words)
+	copy(a.elems[at:at+n], words)
 	for _, w := range old {
 		h.Release(w)
 	}
@@ -229,17 +229,17 @@ func (a *Array) Copy(at int, src *Array, from, n int) {
 
 // Append takes vs and adds them after the last element.
 func (a *Array) Append(vs ...Boxed) {
-	a.Elems = append(a.Elems, vs...)
+	a.elems = append(a.elems, vs...)
 }
 
 // Delete removes element i, shifts the later elements left, and returns
 // the removed word, which the caller now owns. The vacated word becomes null.
 func (a *Array) Delete(i int) Boxed {
-	old := a.Elems[i]
-	n := len(a.Elems) - 1
-	copy(a.Elems[i:], a.Elems[i+1:])
-	a.Elems[n] = BoxedNull
-	a.Elems = a.Elems[:n]
+	old := a.elems[i]
+	n := len(a.elems) - 1
+	copy(a.elems[i:], a.elems[i+1:])
+	a.elems[n] = BoxedNull
+	a.elems = a.elems[:n]
 	return old
 }
 
@@ -285,7 +285,7 @@ func (a *Array) Type() Type {
 }
 
 func (a *Array) Refs(dst []Ref) []Ref {
-	for _, e := range a.Elems {
+	for _, e := range a.elems {
 		if e.Kind() == KindRef {
 			dst = append(dst, Ref(e.Ref()))
 		}
@@ -297,9 +297,9 @@ func (a *Array) Refs(dst []Ref) []Ref {
 // every reference it holds, null included, so both arrays own theirs. An
 // unbound copy shares its words.
 func (a *Array) Clone() *Array {
-	c := &Array{Typ: a.Typ, Elems: slices.Clone(a.Elems), binding: a.binding}
+	c := &Array{Typ: a.Typ, elems: slices.Clone(a.elems), binding: a.binding}
 	if a.heap != nil {
-		for _, e := range c.Elems {
+		for _, e := range c.elems {
 			a.heap.Retain(e)
 		}
 	}
@@ -307,7 +307,7 @@ func (a *Array) Clone() *Array {
 }
 
 func (a *Array) String() string {
-	return formatSlice(a.Type(), len(a.Elems), func(i int) string { return a.Elems[i].String() })
+	return formatSlice(a.Type(), len(a.elems), func(i int) string { return a.elems[i].String() })
 }
 
 // Kind reports the reference kind.
@@ -383,7 +383,7 @@ func (a TypedArray[T]) clone() Value {
 // replaced appends the words of a that owns a reference in [from, from+n) to
 // dst.
 func (a *Array) replaced(dst []Boxed, from, n int) []Boxed {
-	for _, w := range a.Elems[from : from+n] {
+	for _, w := range a.elems[from : from+n] {
 		if owns(w) {
 			dst = append(dst, w)
 		}

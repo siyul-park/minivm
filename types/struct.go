@@ -3,12 +3,16 @@ package types
 import (
 	"math"
 	"strings"
+	"unsafe"
 )
 
 // Struct is a heap record whose fields are laid out by its StructType.
 type Struct struct {
-	Typ    *StructType
-	Data   []uint64
+	Typ *StructType
+	// data is the first of the words of the fields of Typ, one per field: inline
+	// for up to four fields. A pointer instead of a slice keeps the header in the
+	// 64-byte size class.
+	data   *uint64
 	inline [4]uint64
 	binding
 }
@@ -55,7 +59,7 @@ func NewStruct(heap *Heap, typ *StructType, fields ...Boxed) *Struct {
 	if !ok {
 		s = &Struct{}
 	}
-	s.Reset(typ)
+	s.reset(typ)
 	s.heap = heap
 	for i, field := range fields {
 		s.SetField(i, field)
@@ -80,18 +84,6 @@ func NewStructField(typ Type, opts ...func(field *StructField)) StructField {
 	return s
 }
 
-// Reset prepares s for reuse by an interpreter-owned struct pool. Small structs
-// keep their data inline, so reinitialization does not allocate.
-func (s *Struct) Reset(typ *StructType) {
-	s.Typ = typ
-	if len(typ.Fields) <= len(s.inline) {
-		s.Data = s.inline[:len(typ.Fields)]
-		clear(s.Data)
-		return
-	}
-	s.Data = make([]uint64, len(typ.Fields))
-}
-
 // FieldByName returns the named field, or 0 when it does not exist.
 func (s *Struct) FieldByName(name string) Boxed {
 	i := s.Typ.FieldIndex(name)
@@ -112,17 +104,18 @@ func (s *Struct) Field(i int) Boxed {
 // when it must and s is unbound. It indexes like a slice.
 func (s *Struct) SetField(i int, val Boxed) {
 	kind := s.Typ.Fields[i].Kind
+	words := s.words()
 	if kind != KindRef {
-		s.Data[i] = encode(kind, val, s.Data[i])
+		words[i] = encode(kind, val, words[i])
 		return
 	}
-	old := Boxed(s.Data[i])
+	old := Boxed(words[i])
 	if !owns(old) {
-		s.Data[i] = uint64(val)
+		words[i] = uint64(val)
 		return
 	}
 	h := s.bound()
-	s.Data[i] = uint64(val)
+	words[i] = uint64(val)
 	h.Release(old)
 }
 
@@ -131,8 +124,9 @@ func (s *Struct) SetField(i int, val Boxed) {
 //
 //gcassert:inline
 func (s *Struct) SwapField(i int, val Boxed) Boxed {
-	old := Boxed(s.Data[i])
-	s.Data[i] = uint64(val)
+	words := s.words()
+	old := Boxed(words[i])
+	words[i] = uint64(val)
 	return old
 }
 
@@ -141,7 +135,7 @@ func (s *Struct) SwapField(i int, val Boxed) Boxed {
 //
 //gcassert:inline
 func (s *Struct) Raw(i int) uint64 {
-	return s.Data[i]
+	return s.words()[i]
 }
 
 // SetRaw stores w as field i without per-kind encoding or counting. It MUST
@@ -149,7 +143,7 @@ func (s *Struct) Raw(i int) uint64 {
 //
 //gcassert:inline
 func (s *Struct) SetRaw(i int, w uint64) {
-	s.Data[i] = w
+	s.words()[i] = w
 }
 
 // FieldByName returns the field with the given name.
@@ -181,11 +175,12 @@ func (s *Struct) Type() Type {
 }
 
 func (s *Struct) Refs(dst []Ref) []Ref {
+	words := s.words()
 	for i, f := range s.Typ.Fields {
 		if f.Kind != KindRef {
 			continue
 		}
-		val := Boxed(s.Data[i])
+		val := Boxed(words[i])
 		if val.Kind() == KindRef {
 			dst = append(dst, Ref(val.Ref()))
 		}
@@ -198,11 +193,12 @@ func (s *Struct) Refs(dst []Ref) []Ref {
 // copy shares its words.
 func (s *Struct) Clone() *Struct {
 	c := NewStruct(s.heap, s.Typ)
-	copy(c.Data, s.Data)
+	words := s.words()
+	copy(c.words(), words)
 	if s.heap != nil {
 		for i, f := range s.Typ.Fields {
 			if f.Kind == KindRef {
-				s.heap.Retain(Boxed(s.Data[i]))
+				s.heap.Retain(Boxed(words[i]))
 			}
 		}
 	}
@@ -291,8 +287,25 @@ func (t *StructType) String() string {
 	return sb.String()
 }
 
+// reset gives s the type typ with every field word zero. Up to four fields
+// keep their words inline, so reuse does not allocate.
+func (s *Struct) reset(typ *StructType) {
+	s.Typ = typ
+	if len(typ.Fields) <= len(s.inline) {
+		s.inline = [4]uint64{}
+		s.data = &s.inline[0]
+		return
+	}
+	s.data = unsafe.SliceData(make([]uint64, len(typ.Fields)))
+}
+
 func (s *Struct) field(i int, f StructField) Boxed {
-	return BoxWord(f.Kind, s.Data[i])
+	return BoxWord(f.Kind, s.words()[i])
+}
+
+// words returns the field words of s, one per field of its type.
+func (s *Struct) words() []uint64 {
+	return unsafe.Slice(s.data, len(s.Typ.Fields))
 }
 
 func (s *Struct) clone() Value {

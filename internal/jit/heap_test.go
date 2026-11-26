@@ -46,9 +46,10 @@ func TestItab(t *testing.T) {
 
 func TestHeap_Layout(t *testing.T) {
 	t.Run("pins object headers", func(t *testing.T) {
-		require.Equal(t, unsafe.Offsetof(types.Array{}.Elems), jit.OffsetArrayElems)
+		require.Equal(t, uintptr(8), jit.OffsetArrayElems)
 		require.Equal(t, unsafe.Offsetof(types.Struct{}.Typ), jit.OffsetStructTyp)
-		require.Equal(t, unsafe.Offsetof(types.Struct{}.Data), jit.OffsetStructData)
+		require.Equal(t, uintptr(8), jit.OffsetStructData)
+		require.LessOrEqual(t, unsafe.Sizeof(types.Struct{}), uintptr(64))
 		require.Equal(t, unsafe.Offsetof(types.StructType{}.Fields), jit.OffsetStructTypeFields)
 		require.Equal(t, unsafe.Sizeof(struct{ a, b uintptr }{}), jit.SizeofValue)
 		text := "hello"

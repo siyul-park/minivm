@@ -151,8 +151,8 @@ func TestProgram_Clone(t *testing.T) {
 
 		got := clone.Constants[0].(*types.StructLiteral).Fields[0].(*types.Array)
 		require.NotSame(t, raw, got)
-		got.Elems[0] = types.BoxI32(9)
-		require.Equal(t, types.BoxI32(1), raw.Elems[0])
+		got.SwapIndex(0, types.BoxI32(9))
+		require.Equal(t, types.BoxI32(1), raw.Index(0))
 	})
 
 	t.Run("keeps aliasing", func(t *testing.T) {

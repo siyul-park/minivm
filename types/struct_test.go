@@ -37,6 +37,29 @@ func TestNewStruct(t *testing.T) {
 		require.Equal(t, types.BoxI32(2), s.Field(0))
 	})
 
+	t.Run("clears every field of a struct the heap kept", func(t *testing.T) {
+		typ := types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64()))
+		h := types.NewHeap(2, 0, types.Hooks{})
+		kept := types.NewStruct(nil, typ, types.BoxI32(1), types.BoxF64(2))
+		h.Dec(h.Add(kept))
+
+		s := types.NewStruct(h, typ)
+		require.Same(t, kept, s)
+		require.Zero(t, s.Raw(0))
+		require.Zero(t, s.Raw(1))
+	})
+
+	t.Run("holds more than four fields", func(t *testing.T) {
+		fields := make([]types.StructField, 5)
+		for i := range fields {
+			fields[i] = types.NewStructField(types.TypeI32())
+		}
+		s := types.NewStruct(nil, types.NewStructType(fields...), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3), types.BoxI32(4), types.BoxI32(5))
+		for i := range fields {
+			require.Equal(t, types.BoxI32(int32(i+1)), s.Field(i))
+		}
+	})
+
 	t.Run("builds a new struct without a heap", func(t *testing.T) {
 		typ := types.NewStructType(types.NewStructField(types.TypeI32()))
 		h := types.NewHeap(2, 0, types.Hooks{})
@@ -56,40 +79,6 @@ func TestNewStructType(t *testing.T) {
 func TestNewStructField(t *testing.T) {
 	field := types.NewStructField(types.TypeI8(), types.FieldWithName("small"))
 	require.Equal(t, types.StructField{Name: "small", Type: types.TypeI8(), Kind: types.KindI8}, field)
-}
-
-func TestStruct_Reset(t *testing.T) {
-	t.Run("small", func(t *testing.T) {
-		typ := types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeI32()))
-		s := types.NewStruct(nil, typ, types.BoxI32(1), types.BoxI32(2))
-
-		s.Reset(typ)
-		require.Same(t, typ, s.Typ)
-		require.Equal(t, types.BoxI32(0), s.Field(0))
-		require.Equal(t, types.BoxI32(0), s.Field(1))
-	})
-
-	t.Run("large", func(t *testing.T) {
-		typ := types.NewStructType(
-			types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeI32()),
-			types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeI32()),
-			types.NewStructField(types.TypeI32()),
-		)
-		s := types.NewStruct(nil, typ, types.BoxI32(1), types.BoxI32(2), types.BoxI32(3), types.BoxI32(4), types.BoxI32(5))
-
-		s.Reset(typ)
-		for i := range typ.Fields {
-			require.Equal(t, types.BoxI32(0), s.Field(i))
-		}
-	})
-
-	t.Run("reference", func(t *testing.T) {
-		typ := types.NewStructType(types.NewStructField(types.TypeAny()))
-		s := types.NewStruct(nil, typ, types.BoxRef(42))
-
-		s.Reset(typ)
-		require.Zero(t, s.Raw(0))
-	})
 }
 
 func TestStruct_FieldByName(t *testing.T) {

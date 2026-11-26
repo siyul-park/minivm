@@ -851,7 +851,7 @@ func TestNew(t *testing.T) {
 			Code: instr.Marshal(insts),
 		}
 
-		array := &types.Array{Typ: types.NewArrayType(types.TypeAny()), Elems: []types.Boxed{types.BoxRef(2)}}
+		array := types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(2))
 		heap := []types.Value{nil, array, nil}
 		rc := []int{0, 2, 1}
 		stack := []types.Boxed{types.BoxRef(1)}
@@ -896,7 +896,7 @@ func TestNew(t *testing.T) {
 
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		require.Equal(t, types.BoxI32(6), stack[0])
-		require.Equal(t, uint64(6), s.Data[0])
+		require.Equal(t, uint64(6), s.Raw(0))
 	})
 
 	t.Run("struct.set stores an i8 field sign-extended to 32 bits and zero-extended to 64, matching Struct.SetField", func(t *testing.T) {
@@ -929,7 +929,7 @@ func TestNew(t *testing.T) {
 
 		require.Equal(t, jit.TrapReturn, jit.Enter(code, ctx))
 		// int8(-1) -> int32(-1) -> uint32(0xFFFFFFFF) -> uint64(0x00000000FFFFFFFF).
-		require.Equal(t, uint64(0xFFFFFFFF), s.Data[0])
+		require.Equal(t, uint64(0xFFFFFFFF), s.Raw(0))
 	})
 
 	t.Run("deopts a struct.set whose value kind differs from the field's declared kind", func(t *testing.T) {
@@ -959,7 +959,7 @@ func TestNew(t *testing.T) {
 
 		require.Equal(t, jit.TrapDeopt, jit.Enter(code, ctx))
 		require.Equal(t, jit.ExitDeopt, exits[ctx.Exit()].Kind)
-		require.Equal(t, uint64(0), s.Data[0])
+		require.Equal(t, uint64(0), s.Raw(0))
 	})
 
 	t.Run("sorts a typed i32 array in place via a guarded insertion-sort loop", func(t *testing.T) {

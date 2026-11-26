@@ -20,6 +20,15 @@ func arrayFixture(hooks types.Hooks) (*types.Heap, func() types.Boxed) {
 	}
 }
 
+// words returns the elements of a in order.
+func words(a *types.Array) []types.Boxed {
+	out := make([]types.Boxed, a.Len())
+	for i := range out {
+		out[i] = a.Index(i)
+	}
+	return out
+}
+
 func TestArrayLiteral(t *testing.T) {
 	value := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeI32()), Elems: []types.Value{types.I32(1)}}
 	require.Len(t, value.Elems, 1)
@@ -38,12 +47,12 @@ func TestMakeArray(t *testing.T) {
 	t.Run("holds size null elements for a reference element", func(t *testing.T) {
 		array := types.MakeArray(nil, typ, 3)
 		require.Same(t, typ, array.Typ)
-		require.Equal(t, nulls(3), array.Elems)
+		require.Equal(t, nulls(3), words(array))
 	})
 
 	t.Run("keeps zero words for a scalar element", func(t *testing.T) {
 		array := types.MakeArray(nil, types.NewArrayType(types.TypeI32()), 3)
-		require.Equal(t, make([]types.Boxed, 3), array.Elems)
+		require.Equal(t, make([]types.Boxed, 3), words(array))
 	})
 
 	t.Run("leaves the null count unchanged", func(t *testing.T) {
@@ -62,7 +71,7 @@ func TestMakeArray(t *testing.T) {
 
 		array := types.MakeArray(h, typ, 2)
 		require.Same(t, kept, array)
-		require.Equal(t, nulls(2), array.Elems)
+		require.Equal(t, nulls(2), words(array))
 	})
 
 	t.Run("grows kept storage that is too small", func(t *testing.T) {
@@ -72,7 +81,7 @@ func TestMakeArray(t *testing.T) {
 
 		array := types.MakeArray(h, typ, 4)
 		require.Same(t, kept, array)
-		require.Equal(t, nulls(4), array.Elems)
+		require.Equal(t, nulls(4), words(array))
 	})
 }
 
@@ -84,7 +93,7 @@ func TestNewArray(t *testing.T) {
 		array := types.NewArray(nil, typ, elems...)
 
 		require.Same(t, typ, array.Typ)
-		require.Equal(t, elems, array.Elems)
+		require.Equal(t, elems, words(array))
 	})
 
 	t.Run("reuses a header the heap kept with its storage", func(t *testing.T) {
@@ -94,8 +103,12 @@ func TestNewArray(t *testing.T) {
 
 		array := types.NewArray(h, typ)
 		require.Same(t, kept, array)
-		require.Empty(t, array.Elems)
-		require.GreaterOrEqual(t, cap(array.Elems), 2)
+		require.Zero(t, array.Len())
+		require.Zero(t, testing.AllocsPerRun(1, func() {
+			array.Append(types.BoxedNull, types.BoxedNull)
+			array.Delete(1)
+			array.Delete(0)
+		}))
 	})
 
 	t.Run("builds a new header without a heap", func(t *testing.T) {
@@ -422,10 +435,10 @@ func TestArray_Clone(t *testing.T) {
 	c := src.Clone()
 
 	require.Same(t, typ, c.Typ)
-	require.Equal(t, src.Elems, c.Elems)
+	require.Equal(t, words(src), words(c))
 
-	c.Elems[0] = types.BoxRef(9)
-	require.Equal(t, types.BoxRef(1), src.Elems[0])
+	c.SwapIndex(0, types.BoxRef(9))
+	require.Equal(t, types.BoxRef(1), src.Index(0))
 
 	t.Run("a bound copy retains every reference it holds", func(t *testing.T) {
 		h, ref := arrayFixture(types.Hooks{})

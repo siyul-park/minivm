@@ -2986,6 +2986,15 @@ func structGetHostLoop(repeats int32) *program.Program {
 	return prog
 }
 
+// words returns the elements of a in order.
+func words(a *types.Array) []types.Boxed {
+	out := make([]types.Boxed, a.Len())
+	for i := range out {
+		out[i] = a.Index(i)
+	}
+	return out
+}
+
 func TestWithHook(t *testing.T) {
 	tests := []struct {
 		name string
@@ -10797,7 +10806,7 @@ func TestWithThreshold(t *testing.T) {
 				if key.Kind() == types.KindI8 {
 					box = func(v int32) types.Boxed { return types.BoxI8(int8(v)) }
 				}
-				require.Equal(t, []types.Boxed{box(1), box(2), box(3)}, want.(*types.Array).Elems)
+				require.Equal(t, []types.Boxed{box(1), box(2), box(3)}, words(want.(*types.Array)))
 				compareNative(t, prog)
 			})
 		}
@@ -11831,7 +11840,7 @@ func TestInterpreter_Run(t *testing.T) {
 					var out []string
 					switch arr := got.(type) {
 					case *types.Array:
-						for _, elem := range arr.Elems {
+						for _, elem := range words(arr) {
 							if elem.Kind() != types.KindRef {
 								out = append(out, types.Unbox(elem).String())
 								continue
@@ -11930,7 +11939,7 @@ func TestInterpreter_Run(t *testing.T) {
 		defer vm.Close()
 
 		nested.Code[1] = byte(instr.NOP)
-		raw.Elems[0] = types.BoxI32(100)
+		raw.SwapIndex(0, types.BoxI32(100))
 		lit.Elems[0] = types.I32(0)
 
 		for range 2 {
@@ -12004,7 +12013,7 @@ func TestInterpreter_Run(t *testing.T) {
 					require.Equal(t, types.BoxI32(9), got)
 					vm.Reset()
 				}
-				require.Equal(t, types.BoxI32(1), shared.Elems[0])
+				require.Equal(t, types.BoxI32(1), shared.Index(0))
 				require.Equal(t, int32(1), typed[0])
 			})
 		}
@@ -13364,14 +13373,17 @@ func requireEqualValue(t *testing.T, want, got types.Value, msgAndArgs ...any) {
 		g, ok := got.(*types.Array)
 		require.True(t, ok, msgAndArgs...)
 		require.Equal(t, w.Typ, g.Typ, msgAndArgs...)
-		require.Equal(t, w.Elems, g.Elems, msgAndArgs...)
+		require.Equal(t, words(w), words(g), msgAndArgs...)
 		return
 	}
 	if w, ok := want.(*types.Struct); ok {
 		g, ok := got.(*types.Struct)
 		require.True(t, ok, msgAndArgs...)
 		require.Equal(t, w.Typ, g.Typ, msgAndArgs...)
-		require.Equal(t, w.Data, g.Data, msgAndArgs...)
+		require.Equal(t, len(w.Typ.Fields), len(g.Typ.Fields), msgAndArgs...)
+		for i := range w.Typ.Fields {
+			require.Equal(t, w.Raw(i), g.Raw(i), msgAndArgs...)
+		}
 		return
 	}
 	require.Equal(t, want, got, msgAndArgs...)
@@ -14440,13 +14452,13 @@ func TestInterpreter_Reset(t *testing.T) {
 		require.NoError(t, i.Run(context.Background()))
 		first, _, err := popString(i)
 		require.NoError(t, err)
-		require.NotEqual(t, types.BoxedNull, array().Elems[0])
+		require.NotEqual(t, types.BoxedNull, array().Index(0))
 
 		i.Reset()
 		after, err := i.Const(3)
 		require.NoError(t, err)
 		require.Equal(t, constant, after)
-		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, array().Elems)
+		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, words(array()))
 
 		require.NoError(t, i.Run(context.Background()))
 		second, _, err := popString(i)
@@ -14469,8 +14481,8 @@ func TestInterpreter_Reset(t *testing.T) {
 		value, err := b.Load(constant.Ref())
 		require.NoError(t, err)
 		require.NotSame(t, original, value)
-		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, value.(*types.Array).Elems)
-		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, original.Elems)
+		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, words(value.(*types.Array)))
+		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, words(original))
 	})
 
 	t.Run("finalizes and clears dynamic values", func(t *testing.T) {
@@ -14514,7 +14526,7 @@ func TestInterpreter_Reset(t *testing.T) {
 		second := value.(*types.Array)
 		require.NotSame(t, first, second)
 		require.Same(t, typ, first.Typ)
-		require.Equal(t, []types.Boxed{types.BoxedNull}, first.Elems)
+		require.Equal(t, []types.Boxed{types.BoxedNull}, words(first))
 	})
 
 	t.Run("preserves arrays reclaimed before reset", func(t *testing.T) {
@@ -14541,7 +14553,7 @@ func TestInterpreter_Reset(t *testing.T) {
 		second := value.(*types.Array)
 		require.NotSame(t, first, second)
 		require.Same(t, typ, first.Typ)
-		require.Equal(t, []types.Boxed{types.BoxedNull}, first.Elems)
+		require.Equal(t, []types.Boxed{types.BoxedNull}, words(first))
 	})
 }
 

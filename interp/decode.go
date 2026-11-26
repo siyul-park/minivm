@@ -273,8 +273,8 @@ func (d *Decoder) elements(val types.Value) (int, func(int) (types.Value, error)
 	case types.TypedArray[float64]:
 		return len(v), func(i int) (types.Value, error) { return types.F64(v[i]), nil }, nil
 	case *types.Array:
-		return len(v.Elems), func(i int) (types.Value, error) {
-			return d.interp.deref(v.Elems[i])
+		return v.Len(), func(i int) (types.Value, error) {
+			return d.interp.deref(v.Index(i))
 		}, nil
 	default:
 		return 0, nil, fmt.Errorf("%w: source=%T", ErrTypeMismatch, val)
