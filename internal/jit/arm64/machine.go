@@ -1488,7 +1488,8 @@ func (m *Machine) mapOf(v ssa.Value) (ssa.Shape, bool) {
 
 // key derives the table word of operand v, as Map.resolve makes it. A scalar
 // is its word in the typed map of its kind (see scalar), and in an any map it
-// is the retagged word boxed derives. A NaN never hits, so it branches to nan,
+// is the retagged word boxed derives. A constant String operand takes its hash
+// from the module (see literal). A NaN never hits, so it branches to nan,
 // which a lookup or delete ends and a set bridges through before the table is
 // touched. A reference key is a String's own word hashed by its bytes, and
 // anything else, a scalar word, null, or another reference, bridges through
@@ -1498,14 +1499,38 @@ func (m *Machine) key(a *asm.Assembler, s compile.Site, shape ssa.Shape, v ssa.V
 	word := s.Reg(v)
 	switch shape.Key {
 	case types.KindAny:
+		if s.Type(v).Kind() == types.KindRef {
+			if k, ok := m.literal(a, s, v); ok {
+				return k
+			}
+		}
 		return m.boxed(a, word, s.Type(v).Kind(), exit, nan)
 	case types.KindRef:
+		if k, ok := m.literal(a, s, v); ok {
+			return k
+		}
 		expectRef(a, word, exit)
 		ptr, size := m.text(a, word, exit)
 		return key{word: word, base: m.hash(a, ptr, size), ptr: ptr, size: size}
 	}
 	k := m.scalar(a, word, shape.Key, exit, nan)
 	return key{word: k, base: k}
+}
+
+// literal derives the key of operand v when it is a constant String, in a map
+// of String or any keys: the word and bytes are the dynamic path's, and the hash
+// is an immediate, since the operand is known to be that String and no table
+// seed is part of the base.
+func (m *Machine) literal(a *asm.Assembler, s compile.Site, v ssa.Value) (key, bool) {
+	o, ok := s.Object(v)
+	if !ok || o.String == nil {
+		return key{}, false
+	}
+	word := s.Reg(v)
+	ptr, size := m.view(a, m.heap(a, word))
+	base := m.vreg()
+	a.Emit(target.LDI(base, o.String.Hash())...)
+	return key{word: word, base: base, ptr: ptr, size: size}, true
 }
 
 // boxed derives the table word of operand word of kind in an any map, as
@@ -1764,6 +1789,12 @@ func (m *Machine) text(a *asm.Assembler, ref asm.Reg, miss asm.Label) (ptr, size
 	addr := m.heap(a, ref)
 	a.Emit(target.LDR(target.X16, addr, 0))
 	expect(a, uint64(jit.Itab(types.String(""))), miss)
+	return m.view(a, addr)
+}
+
+// view loads the bytes of the String in the heap slot at addr: its data pointer
+// and its size.
+func (m *Machine) view(a *asm.Assembler, addr asm.VReg) (ptr, size asm.VReg) {
 	data := m.vreg()
 	size, ptr = m.vreg(), m.vreg()
 	a.Emit(

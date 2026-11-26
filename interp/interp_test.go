@@ -10449,6 +10449,53 @@ func TestWithThreshold(t *testing.T) {
 		}
 	})
 
+	t.Run("runs map operations natively for literal string keys against keys built at run time, as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		// Each key is a literal and the same text string.concat built from two
+		// halves, so a literal stored is probed through the built key and the
+		// reverse, in a string map and in an any map. The lengths take every path
+		// of the hash and of the content compare.
+		lengths := []int{1, 3, 8, 17, 20}
+		var constants []types.Value
+		for i, n := range lengths {
+			text := strings.Repeat("k", n-1) + strconv.Itoa(i)[:1]
+			constants = append(constants, types.String(text), types.String(text[:len(text)/2]), types.String(text[len(text)/2:]))
+		}
+		body := func(b *instr.Builder) {
+			built := func(j int) {
+				b.Emit(instr.CONST_GET, uint64(3*j+1)).Emit(instr.CONST_GET, uint64(3*j+2)).Emit(instr.STRING_CONCAT)
+			}
+			for j := range lengths {
+				skip, hit, next := b.Label(), b.Label(), b.Label()
+				// A literal key stored is probed through the built key.
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, uint64(3*j)).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_SET)
+				b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0)
+				built(j)
+				b.Emit(instr.MAP_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+				// A built key stored is probed through the literal.
+				b.Emit(instr.LOCAL_GET, 0)
+				built(j)
+				b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 2).Emit(instr.I32_ADD).Emit(instr.MAP_SET)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, uint64(3*j)).Emit(instr.MAP_LOOKUP).BrIf(hit)
+				b.Emit(instr.DROP).Br(next)
+				b.Bind(hit)
+				b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+				b.Bind(next)
+				// Every third iteration leaves the literal deleted.
+				b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 3).Emit(instr.I32_REM_S).BrIf(skip)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, uint64(3*j)).Emit(instr.MAP_DELETE)
+				b.Bind(skip)
+			}
+		}
+		for name, key := range map[string]types.Type{"string": types.TypeString(), "any": types.TypeAny()} {
+			t.Run(name, func(t *testing.T) {
+				exits := compareNative(t, mapProgram(t, types.NewMapType(key, types.TypeI32()), 128, 3000, constants, nil, body))
+				require.Zero(t, exits["deopt"])
+			})
+		}
+	})
+
 	t.Run("runs map operations natively for any keys of every kind, as threaded does", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 

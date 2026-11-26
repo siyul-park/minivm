@@ -6,6 +6,7 @@ import (
 	"github.com/siyul-park/minivm/internal/asm"
 	"github.com/siyul-park/minivm/internal/jit"
 	"github.com/siyul-park/minivm/internal/ssa"
+	"github.com/siyul-park/minivm/internal/transform"
 	"github.com/siyul-park/minivm/types"
 )
 
@@ -88,6 +89,8 @@ type Site interface {
 	Slot(slot ssa.Slot) ssa.Type
 	// Const reports the word of v when an OpConst defines it.
 	Const(v ssa.Value) (uint64, bool)
+	// Object reports what the module knows of the constant reference v.
+	Object(v ssa.Value) (transform.Object, bool)
 	// Fuse reports whether v's only use is the condition of the TermBrIf
 	// right after its operation, so the machine may leave v in condition
 	// flags instead of a register.

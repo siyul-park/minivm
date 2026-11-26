@@ -72,6 +72,8 @@ type Object struct {
 	Array *types.ArrayType
 	// I64 is the referenced i64 cell's value, when known.
 	I64 *types.I64
+	// String is the referenced string, when known.
+	String *types.String
 }
 
 // translation is what one Translate call compiles: a root function and the

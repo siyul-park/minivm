@@ -32,6 +32,8 @@ type machine struct {
 	spills    []int
 	sites     []compile.Call
 	consts    []uint64
+	// objects records what Site.Object reported for each operand of a lowered op.
+	objects map[ssa.Value]transform.Object
 	// operands records every Site.Operand a lowering read.
 	operands []int
 	// falls records, per Branch, whether one of its labels is next.
@@ -75,6 +77,14 @@ func (m *machine) Lower(a *asm.Assembler, op ssa.Operation, s compile.Site) bool
 		return false
 	}
 	m.calls = append(m.calls, op.Op.String())
+	for _, v := range op.Args {
+		if o, ok := s.Object(v); ok {
+			if m.objects == nil {
+				m.objects = map[ssa.Value]transform.Object{}
+			}
+			m.objects[v] = o
+		}
+	}
 	if m.regs == nil {
 		m.regs = map[ssa.Value]asm.VReg{}
 	}
@@ -217,6 +227,26 @@ func constant(b *ssa.Builder, block int, c types.Boxed) ssa.Value {
 }
 
 func TestLower(t *testing.T) {
+	t.Run("Site.Object reports the object of a constant reference and nothing else", func(t *testing.T) {
+		b := ssa.New("f")
+		entry := b.Block()
+		known, unknown, scalar := constant(b, entry, types.BoxRef(1)), constant(b, entry, types.BoxRef(2)), constant(b, entry, types.BoxI32(1))
+		dynamic, state := b.Value(ssa.TypeI32), b.Value(ssa.TypeState)
+		b.Add(entry, ssa.Operation{Op: ssa.OpState, Frames: []ssa.Frame{{Address: 1, IP: 1}}, Results: []ssa.Value{state}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntSDiv, Args: []ssa.Value{scalar, scalar}, State: state, Results: []ssa.Value{dynamic}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpIntSDiv, Args: []ssa.Value{dynamic, scalar}, State: state, Results: []ssa.Value{b.Value(ssa.TypeI32)}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpRefRelease, Args: []ssa.Value{known}})
+		b.Add(entry, ssa.Operation{Op: ssa.OpRefRelease, Args: []ssa.Value{unknown}})
+		b.Term(entry, ssa.Terminator{Term: ssa.TermReturn})
+
+		text := types.String("key")
+		objects := transform.Objects{1: {String: &text}}
+		m := new(machine)
+		_, err := compile.Lower(b.Build(), compile.Unit{Function: function(0, 0), Module: transform.Module{Objects: objects}, Tier: jit.Baseline}, m)
+		require.NoError(t, err)
+		require.Equal(t, map[ssa.Value]transform.Object{known: {String: &text}}, m.objects)
+	})
+
 	t.Run("saves a deopt-only local on the side exit", func(t *testing.T) {
 		b := ssa.New("f")
 		entry := b.Block()

@@ -36,10 +36,11 @@ type regs map[ssa.Value]ssa.Type
 // after its operation.
 type fused struct{ regs }
 
-// known is regs where an OpConst defines each value of words.
+// known is regs where an OpConst defines each value of words and objects.
 type known struct {
 	compile.Site
-	words map[ssa.Value]uint64
+	words   map[ssa.Value]uint64
+	objects map[ssa.Value]transform.Object
 }
 
 // table is the state of a types.Map's table, read through reflection (snapshot).
@@ -67,6 +68,8 @@ func (r regs) Fuse(ssa.Value) bool { return false }
 
 func (r regs) Const(ssa.Value) (uint64, bool) { return 0, false }
 
+func (r regs) Object(ssa.Value) (transform.Object, bool) { return transform.Object{}, false }
+
 func (r regs) Deopt() asm.Label { return exit }
 
 func (r regs) Trap() asm.Label { return exit }
@@ -82,6 +85,11 @@ func (fused) Fuse(ssa.Value) bool { return true }
 func (k known) Const(v ssa.Value) (uint64, bool) {
 	word, ok := k.words[v]
 	return word, ok
+}
+
+func (k known) Object(v ssa.Value) (transform.Object, bool) {
+	o, ok := k.objects[v]
+	return o, ok
 }
 
 func (r regs) Reg(v ssa.Value) asm.VReg {
@@ -1483,7 +1491,9 @@ func TestMachine_Lower(t *testing.T) {
 		slice, bound *ssa.Operation
 		// consts are the values an OpConst defines, by word.
 		consts map[ssa.Value]uint64
-		op     ssa.Operation
+		// objects are the facts the module knows of constant references.
+		objects map[ssa.Value]transform.Object
+		op      ssa.Operation
 		// fuse lowers op through a Site that fuses its result into the
 		// branch right after it.
 		fuse  bool
@@ -3386,6 +3396,20 @@ func TestMachine_Lower(t *testing.T) {
 			hashRows(vr(from+3), vr(from+2), from+4, labels[0], labels[1], labels[2], labels[3], labels[4]),
 		)
 	}
+	// constKey derives a constant String key: it loads the bytes through the
+	// registers from from on (heap slot, data, size, pointer) with no check, and
+	// the hash is the immediate in vr(from+4).
+	constKey := func(ref asm.Reg, from int, hash uint64) []asm.Instruction {
+		rows := []asm.Instruction{
+			target.SBFX(vr(from), ref, 0, 32), target.LSLI(vr(from), vr(from), 4),
+			target.LDR(target.X16, arm64.Ctx, int16(jit.OffsetHeap)),
+			target.ADD(vr(from), target.X16, vr(from)),
+			target.LDR(vr(from+1), vr(from), int16(jit.OffsetData)),
+			target.LDR(vr(from+2), vr(from+1), int16(jit.OffsetStringLen)),
+			target.LDR(vr(from+3), vr(from+1), 0),
+		}
+		return append(rows, target.LDI(vr(from+4), hash)...)
+	}
 	// content is the probe's check of a tag hit whose word differs from the key's:
 	// a slot holding a String of equal content is a hit.
 	content := func(word asm.VReg, from int, ptr, size asm.VReg, next, hit asm.Label, labels [5]asm.Label) []asm.Instruction {
@@ -3402,10 +3426,10 @@ func TestMachine_Lower(t *testing.T) {
 	// slot 21 and 22, and the probe 23 to 25, then the content check 26 to 31.
 	// Labels hit, miss, and done are 2 to 4, the hash 5 to 9, the probe 10 and
 	// 11, and the string comparison 12 to 16.
-	stringGet := func(ref, dst asm.VReg, key asm.Reg, flag asm.VReg) []asm.Instruction {
-		w := layout(2, 18, false)
-		rows := slices.Concat(tableOf(ref, 1), stringKey(key, 3, [5]asm.Label{5, 6, 7, 8, 9}), words(w), home(w, vr(17)),
-			probe(w, key, 10, 11, 2, 3, content(vr(w.word), w.word+1, vr(6), vr(5), 11, 2, [5]asm.Label{12, 13, 14, 15, 16})...))
+	stringGet := func(ref, dst asm.VReg, key asm.Reg, flag asm.VReg, keyRows []asm.Instruction, base, ctrl int, loop asm.Label) []asm.Instruction {
+		w := layout(2, ctrl, false)
+		rows := slices.Concat(tableOf(ref, 1), keyRows, words(w), home(w, vr(base)),
+			probe(w, key, loop, loop+1, 2, 3, content(vr(w.word), w.word+1, vr(6), vr(5), loop+1, 2, [5]asm.Label{loop + 2, loop + 3, loop + 4, loop + 5, loop + 6})...))
 		rows = append(rows, target.LDR(dst, vr(w.slot), 8))
 		if flag != (asm.VReg{}) {
 			rows = append(rows, target.LDI(flag, 1)...)
@@ -3416,19 +3440,29 @@ func TestMachine_Lower(t *testing.T) {
 		}
 		return rows
 	}
+	// hashedGet is stringGet of a String key hashed inline (see stringKey).
+	hashedGet := func(ref, dst asm.VReg, key asm.Reg, flag asm.VReg) []asm.Instruction {
+		return stringGet(ref, dst, key, flag, stringKey(key, 3, [5]asm.Label{5, 6, 7, 8, 9}), 17, 18, 10)
+	}
+	// constGet is stringGet of a constant String key (see constKey): the key
+	// takes registers 3 to 7, the table 8 to 10, and the labels are the
+	// probe's 5 and 6 and the string comparison's 7 to 11.
+	constGet := func(ref, dst asm.VReg, key asm.Reg, flag asm.VReg, hash uint64) []asm.Instruction {
+		return stringGet(ref, dst, key, flag, constKey(key, 3, hash), 7, 8, 5)
+	}
 	// stringSet is map.set of a String key and an i32 value in vr(1): the key
 	// takes registers 4 to 18, the table 19 to 21, the home slot 22 and 23, free
 	// 24, and the probe 25 to 27, then the content check 28 to 33. A miss counts
 	// one more reference to the key. Labels hit and empty are 2 and 3, the hash
 	// 4 to 8, the probe 9 and 10, the string comparison 11 to 15, the dead-slot
 	// step 16, and the retain's skip 17.
-	stringSet := func(ref asm.VReg, key asm.Reg, value asm.Reg) []asm.Instruction {
-		w := layout(3, 19, true)
-		w.step = 16
+	stringSet := func(ref asm.VReg, key asm.Reg, value asm.Reg, keyRows []asm.Instruction, base, ctrl int, loop asm.Label) []asm.Instruction {
+		w := layout(3, ctrl, true)
+		w.step = loop + 7
 		used, want, limit, order, pos, count := w.word+7, w.word+8, w.word+9, w.word+10, w.word+11, w.word+12
-		rows := slices.Concat(box32(reg(i32, 4)), tableOf(ref, 2), stringKey(key, 4, [5]asm.Label{4, 5, 6, 7, 8}), words(w), home(w, vr(18)),
+		rows := slices.Concat(box32(reg(i32, 4)), tableOf(ref, 2), keyRows, words(w), home(w, vr(base)),
 			[]asm.Instruction{target.MOVN(vr(w.free), 0, 0)},
-			probe(w, key, 9, 10, 2, 3, content(vr(w.word), w.word+1, vr(7), vr(6), 10, 2, [5]asm.Label{11, 12, 13, 14, 15})...))
+			probe(w, key, loop, loop+1, 2, 3, content(vr(w.word), w.word+1, vr(7), vr(6), loop+1, 2, [5]asm.Label{loop + 2, loop + 3, loop + 4, loop + 5, loop + 6})...))
 		rows = append(rows,
 			target.LDR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)), target.ADDI(vr(want), vr(used), 1), target.LSLI(vr(want), vr(want), 2),
 			target.ADDI(vr(limit), vr(w.mask), 1), target.LSLI(target.X16, vr(limit), 1), target.ADD(vr(limit), vr(limit), target.X16),
@@ -3442,8 +3476,19 @@ func TestMachine_Lower(t *testing.T) {
 			target.ADDI(vr(used), vr(used), 1), target.STR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)),
 			target.LDR(vr(count), vr(w.data), offset(jit.OffsetMapCount)), target.ADDI(vr(count), vr(count), 1), target.STR(vr(count), vr(w.data), offset(jit.OffsetMapCount)),
 		)
-		rows = append(rows, retained(key.(asm.VReg), 17)...)
+		rows = append(rows, retained(key.(asm.VReg), loop+8)...)
 		return append(rows, target.BLabel(resume), target.STR(value, vr(w.slot), 8))
+	}
+	// hashedSet is stringSet of a String key hashed inline (see stringKey).
+	hashedSet := func(ref asm.VReg, key asm.Reg, value asm.Reg) []asm.Instruction {
+		return stringSet(ref, key, value, stringKey(key, 4, [5]asm.Label{4, 5, 6, 7, 8}), 18, 19, 9)
+	}
+	// constSet is stringSet of a constant String key (see constKey): the key
+	// takes registers 4 to 8, the table 9 to 11, and the labels are the probe's
+	// 4 and 5, the string comparison's 6 to 10, the dead-slot step 11, and the
+	// retain's skip 12.
+	constSet := func(ref asm.VReg, key asm.Reg, value asm.Reg, hash uint64) []asm.Instruction {
+		return stringSet(ref, key, value, constKey(key, 4, hash), 8, 9, 4)
 	}
 	// stringDelete is map.delete of a String key, which the operation adopts: a
 	// hit releases the stored key, then the removed element when release, and
@@ -3588,6 +3633,7 @@ func TestMachine_Lower(t *testing.T) {
 		rows = append(rows, released(vr(stored))...)
 		return append(rows, released(key)...)
 	}
+	literal := types.String("constant-key")
 	ref, mapped := ssa.TypeRef, func(kind ssa.Op, results int, args ...ssa.Value) ssa.Operation {
 		op := ssa.Operation{Op: kind, Args: args}
 		for i := range results {
@@ -3707,19 +3753,37 @@ func TestMachine_Lower(t *testing.T) {
 			name: "map.get of a string key checks and hashes its bytes, and compares content on a tag hit of another word",
 			regs: regs{1: ref, 2: ref, 3: ref, 4: i32}, guard: intMap(types.KindRef, types.KindI32),
 			op:   mapped(ssa.OpMapGet, 1, 2, 3),
-			rows: stringGet(reg(ref, 2), reg(i32, 4), reg(ref, 3), asm.VReg{}), lower: true,
+			rows: hashedGet(reg(ref, 2), reg(i32, 4), reg(ref, 3), asm.VReg{}), lower: true,
 		},
 		{
 			name: "map.lookup of a string key also yields whether it was found",
 			regs: regs{1: ref, 2: ref, 3: ref, 4: f64, 5: ssa.TypeI1}, guard: intMap(types.KindRef, types.KindF64),
 			op:   mapped(ssa.OpMapLookup, 2, 2, 3),
-			rows: stringGet(reg(ref, 2), reg(f64, 4), reg(ref, 3), reg(ssa.TypeI1, 5)), lower: true,
+			rows: hashedGet(reg(ref, 2), reg(f64, 4), reg(ref, 3), reg(ssa.TypeI1, 5)), lower: true,
 		},
 		{
 			name: "map.set of a string key stores its word and counts one more reference to it on a miss only",
 			regs: regs{1: ref, 2: ref, 3: ref, 4: i32}, guard: intMap(types.KindRef, types.KindI32),
 			op:   ssa.Operation{Op: ssa.OpMapSet, Args: []ssa.Value{2, 3, 4}},
-			rows: stringSet(reg(ref, 2), reg(ref, 3), vr(1)), lower: true,
+			rows: hashedSet(reg(ref, 2), reg(ref, 3), vr(1)), lower: true,
+		},
+		{
+			name: "map.get of a constant string key loads its bytes unchecked and takes its hash as an immediate",
+			regs: regs{1: ref, 2: ref, 3: ref, 4: i32}, guard: intMap(types.KindRef, types.KindI32),
+			op: mapped(ssa.OpMapGet, 1, 2, 3), objects: map[ssa.Value]transform.Object{3: {String: &literal}},
+			rows: constGet(reg(ref, 2), reg(i32, 4), reg(ref, 3), asm.VReg{}, literal.Hash()), lower: true,
+		},
+		{
+			name: "map.set of a constant string key loads its bytes unchecked and takes its hash as an immediate",
+			regs: regs{1: ref, 2: ref, 3: ref, 4: i32}, guard: intMap(types.KindRef, types.KindI32),
+			op: ssa.Operation{Op: ssa.OpMapSet, Args: []ssa.Value{2, 3, 4}}, objects: map[ssa.Value]transform.Object{3: {String: &literal}},
+			rows: constSet(reg(ref, 2), reg(ref, 3), vr(1), literal.Hash()), lower: true,
+		},
+		{
+			name: "map.get of a constant string key in an any map skips the dispatch",
+			regs: regs{1: ref, 2: ref, 3: ref, 4: i32}, guard: intMap(types.KindAny, types.KindI32),
+			op: mapped(ssa.OpMapGet, 1, 2, 3), objects: map[ssa.Value]transform.Object{3: {String: &literal}},
+			rows: constGet(reg(ref, 2), reg(i32, 4), reg(ref, 3), asm.VReg{}, literal.Hash()), lower: true,
 		},
 		{
 			name: "map.delete of a string key releases the stored key, then the incoming key it adopts",
@@ -3867,8 +3931,8 @@ func TestMachine_Lower(t *testing.T) {
 			if tt.fuse {
 				s = fused{tt.regs}
 			}
-			if tt.consts != nil {
-				s = known{s, tt.consts}
+			if tt.consts != nil || tt.objects != nil {
+				s = known{Site: s, words: tt.consts, objects: tt.objects}
 			}
 			start := len(a.Rows())
 			require.Equal(t, tt.lower, m.Lower(a, tt.op, s))
@@ -3914,6 +3978,41 @@ func TestMachine_Lower(t *testing.T) {
 				text := strings.Repeat("k", n%19) + strconv.Itoa(n)
 				return []types.Boxed{types.BoxRef(h.Add(types.String(text))), types.BoxRef(h.Add(types.String(strings.Clone(text))))}
 			})
+		})
+		t.Run("constant string keys of every length", func(t *testing.T) {
+			for _, typ := range []types.Type{types.TypeString(), types.TypeAny()} {
+				mapType := types.NewMapType(typ, types.TypeI32())
+				for _, n := range []int{0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 24, 25, 33, 64} {
+					text := edge(t, strings.Repeat("k", n)+strconv.Itoa(n))
+					m := transform.Module{Constants: []types.Boxed{types.BoxRef(2)}, Objects: transform.Objects{2: {String: &text}}}
+					fn := function(t, []types.Type{mapType, types.TypeI32()}, nil, func(b *instr.Builder) {
+						b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_SET).Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+					})
+					f, _, err := transform.Translate(m, nil, 1, fn, 0)
+					require.NoError(t, err)
+					set, exits := lower(t, arm64.New(), f, fn, m.Objects, 0, false)
+
+					for range 4 {
+						heap := types.NewHeap(32, 0, types.Hooks{})
+						heap.Add(nil)
+						native := types.NewMap(heap, mapType, 1<<12)
+						twin := native.Clone()
+						addr := heap.Add(native)
+						key := types.BoxRef(heap.Add(text))
+						heap.Inc(addr, 1<<20)
+						heap.Retain(key)
+						twin.Store(key, types.BoxI32(1))
+
+						stack := []types.Boxed{types.BoxRef(addr), types.BoxI32(1), 0}
+						ctx := enter(t, stack)
+						ctx.Heap, ctx.RC = heap.Bases()
+						for trap := jit.Enter(set, ctx); trap != jit.TrapReturn; trap = jit.Resume(ctx) {
+							require.Fail(t, "native set bridged", "%v", exits[ctx.Exit()].Kind)
+						}
+						require.Equal(t, snapshot(twin), snapshot(native), "the constant hash of %q differs from String.Hash", string(text))
+					}
+				}
+			}
 		})
 		t.Run("any keys of every dispatched kind", func(t *testing.T) {
 			mirror(t, types.TypeAny(), func(h *types.Heap, n int) []types.Boxed {

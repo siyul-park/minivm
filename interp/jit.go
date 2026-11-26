@@ -1214,6 +1214,8 @@ func newModule(i *Interpreter) transform.Module {
 			objects[addr] = transform.Object{Struct: v.Typ}
 		case types.I64:
 			objects[addr] = transform.Object{I64: &v}
+		case types.String:
+			objects[addr] = transform.Object{String: &v}
 		default:
 			if at, ok := v.Type().(*types.ArrayType); ok {
 				objects[addr] = transform.Object{Array: at}
