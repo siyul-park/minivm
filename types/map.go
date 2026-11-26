@@ -18,7 +18,7 @@ type Map struct {
 	Typ   *MapType
 	Zero  Boxed
 	table table
-	heap  *Heap
+	binding
 }
 
 // MapLiteral is an unmaterialized map constant.
@@ -132,7 +132,7 @@ var (
 // heap makes an unbound map: the first reference it must read, retain, or
 // release panics with ErrDetached.
 func NewMap(heap *Heap, typ *MapType, capacity int) *Map {
-	m := &Map{Typ: typ, Zero: Zero(typ.ElemKind), heap: heap}
+	m := &Map{Typ: typ, Zero: Zero(typ.ElemKind), binding: binding{heap}}
 	m.table.init(capacity)
 	return m
 }
@@ -744,14 +744,6 @@ func (m *Map) format(key Boxed) string {
 		}
 	}
 	return key.String()
-}
-
-// bound returns the heap m's references live in.
-func (m *Map) bound() *Heap {
-	if m.heap == nil {
-		panic(ErrDetached)
-	}
-	return m.heap
 }
 
 func formatMap(typ Type, parts []string) string {

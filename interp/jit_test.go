@@ -1199,7 +1199,7 @@ func compareNative(t *testing.T, prog *program.Program) map[string]float64 {
 		got, err := vm.Pop()
 		require.NoError(t, err)
 		_, counts := heapOf(vm)
-		require.Equal(t, want, got)
+		requireEqualValue(t, want, got)
 		require.Equal(t, wantCounts, counts)
 		vm.Reset()
 		vm.Flush()

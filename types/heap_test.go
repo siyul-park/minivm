@@ -212,6 +212,35 @@ func TestHeap_Add(t *testing.T) {
 		require.Equal(t, 257-h.Live(), h.Room())
 	})
 
+	t.Run("binds an unbound container without changing a count", func(t *testing.T) {
+		h := types.NewHeap(8, 0, types.Hooks{})
+		h.Add(types.Null)
+		old := h.Add(types.I32(1))
+		array := types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(old))
+		structure := types.NewStruct(nil, types.NewStructType(types.NewStructField(types.TypeAny())), types.BoxRef(old))
+		m := types.NewMap(nil, types.NewMapType(types.TypeI32(), types.TypeAny()), 0)
+
+		h.Add(array)
+		h.Add(structure)
+		h.Add(m)
+		require.Equal(t, 1, h.Count(old))
+		require.NotPanics(t, func() { array.SetIndex(0, types.BoxedNull) })
+		require.False(t, h.Alive(old))
+		require.NotPanics(t, func() { structure.SetField(0, types.BoxedNull) })
+		require.NotPanics(t, func() { m.Store(types.BoxI32(1), types.BoxRef(0)) })
+	})
+
+	t.Run("never rebinds a container of another heap", func(t *testing.T) {
+		h, other := types.NewHeap(8, 0, types.Hooks{}), types.NewHeap(8, 0, types.Hooks{})
+		other.Add(types.Null)
+		old := other.Add(types.I32(1))
+		array := types.NewArray(other, types.NewArrayType(types.TypeAny()), types.BoxRef(old))
+
+		h.Add(array)
+		array.SetIndex(0, types.BoxedNull)
+		require.False(t, other.Alive(old))
+	})
+
 	t.Run("grows past its capacity", func(t *testing.T) {
 		h := types.NewHeap(0, 0, types.Hooks{})
 		for n := range 9 {
@@ -219,6 +248,68 @@ func TestHeap_Add(t *testing.T) {
 		}
 		require.Equal(t, 9, h.Len())
 		require.Equal(t, types.I32(8), h.At(8))
+	})
+}
+
+func TestHeap_Adopt(t *testing.T) {
+	arrayTyp := types.NewArrayType(types.TypeAny())
+	structTyp := types.NewStructType(types.NewStructField(types.TypeAny()))
+	mapTyp := types.NewMapType(types.TypeI32(), types.TypeAny())
+
+	containers := map[string]func(h *types.Heap) types.Value{
+		"array":  func(h *types.Heap) types.Value { return types.NewArray(h, arrayTyp, types.BoxRef(1)) },
+		"struct": func(h *types.Heap) types.Value { return types.NewStruct(h, structTyp, types.BoxRef(1)) },
+		"map": func(h *types.Heap) types.Value {
+			m := types.NewMap(h, mapTyp, 0)
+			m.Store(types.BoxI32(1), types.BoxRef(1))
+			return m
+		},
+	}
+	// release panics with ErrDetached exactly when the container is unbound.
+	releases := map[string]func(v types.Value){
+		"array":  func(v types.Value) { v.(*types.Array).SetIndex(0, types.BoxedNull) },
+		"struct": func(v types.Value) { v.(*types.Struct).SetField(0, types.BoxedNull) },
+		"map": func(v types.Value) {
+			v.(*types.Map).Store(types.BoxI32(1), types.BoxedNull)
+		},
+	}
+
+	for name, build := range containers {
+		t.Run(name+" binds an unbound container", func(t *testing.T) {
+			h := types.NewHeap(4, 0, types.Hooks{})
+			h.Add(types.Null)
+			h.Add(types.I32(1))
+			v := build(nil)
+			require.PanicsWithValue(t, types.ErrDetached, func() { releases[name](v) })
+
+			require.True(t, h.Adopt(v))
+			require.NotPanics(t, func() { releases[name](v) })
+		})
+
+		t.Run(name+" keeps its own heap", func(t *testing.T) {
+			h := types.NewHeap(4, 0, types.Hooks{})
+			require.True(t, h.Adopt(build(h)))
+		})
+
+		t.Run(name+" rejects a foreign container and leaves it bound", func(t *testing.T) {
+			h, other := types.NewHeap(4, 0, types.Hooks{}), types.NewHeap(4, 0, types.Hooks{})
+			v := build(other)
+			require.False(t, h.Adopt(v))
+			require.True(t, other.Adopt(v))
+		})
+	}
+
+	t.Run("accepts a value that is not a container", func(t *testing.T) {
+		require.True(t, types.NewHeap(4, 0, types.Hooks{}).Adopt(types.I32(1)))
+	})
+
+	t.Run("changes no count", func(t *testing.T) {
+		h := types.NewHeap(4, 0, types.Hooks{})
+		h.Add(types.Null)
+		addr := h.Add(types.I32(1))
+		h.Adopt(types.NewArray(nil, arrayTyp, types.BoxRef(addr)))
+		require.Equal(t, 1, h.Count(addr))
+		require.Equal(t, 1, h.Count(0))
 	})
 }
 

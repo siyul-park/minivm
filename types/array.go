@@ -13,6 +13,7 @@ type TypedArray[T Scalar] []T
 type Array struct {
 	Typ   *ArrayType
 	Elems []Boxed
+	binding
 }
 
 // ArrayLiteral is an unmaterialized recursive array constant.
@@ -85,11 +86,12 @@ func TypeF64Array() *ArrayType {
 }
 
 // MakeArray returns an array of type typ holding size zero elements. A non-nil
-// heap supplies a header and storage it kept for reuse.
+// heap binds it and supplies a header and storage it kept for reuse.
 func MakeArray(heap *Heap, typ *ArrayType, size int) *Array {
 	if heap != nil {
 		if a, ok := heap.arrays.get(); ok {
 			a.Typ = typ
+			a.heap = heap
 			if cap(a.Elems) < size {
 				a.Elems = make([]Boxed, size)
 			} else {
@@ -98,25 +100,129 @@ func MakeArray(heap *Heap, typ *ArrayType, size int) *Array {
 			return a
 		}
 	}
-	return &Array{Typ: typ, Elems: make([]Boxed, size)}
+	return &Array{Typ: typ, Elems: make([]Boxed, size), binding: binding{heap}}
 }
 
-// NewArray returns an array of type typ holding elems. A non-nil heap supplies
-// a header it kept for reuse, which holds elems in the storage it kept.
+// NewArray returns an array of type typ that takes elems. A non-nil heap binds
+// it and supplies a header it kept for reuse, which holds elems in the storage
+// it kept.
 func NewArray(heap *Heap, typ *ArrayType, elems ...Boxed) *Array {
 	if heap != nil {
 		if a, ok := heap.arrays.get(); ok {
 			a.Typ = typ
+			a.heap = heap
 			a.Elems = append(a.Elems[:0], elems...)
 			return a
 		}
 	}
-	return &Array{Typ: typ, Elems: elems}
+	return &Array{Typ: typ, Elems: elems, binding: binding{heap}}
 }
 
 // NewArrayType returns the array type with element type elem.
 func NewArrayType(elem Type) *ArrayType {
 	return &ArrayType{Elem: elem, ElemKind: elem.Kind()}
+}
+
+// Len returns the number of elements.
+func (a *Array) Len() int {
+	return len(a.Elems)
+}
+
+// Index returns element i, which a borrows.
+func (a *Array) Index(i int) Boxed {
+	return a.Elems[i]
+}
+
+// SetIndex takes v as element i and releases the word it replaces. It panics with
+// ErrDetached when it must release and a is unbound.
+func (a *Array) SetIndex(i int, v Boxed) {
+	old := a.Elems[i]
+	if !owns(old) {
+		a.Elems[i] = v
+		return
+	}
+	h := a.bound()
+	a.Elems[i] = v
+	h.Release(old)
+}
+
+// SwapIndex takes v as element i and returns the word it replaces, which the caller
+// now owns.
+func (a *Array) SwapIndex(i int, v Boxed) Boxed {
+	old := a.Elems[i]
+	a.Elems[i] = v
+	return old
+}
+
+// Fill takes one reference to v and stores it in n elements from index from,
+// adding the other n-1 references. It releases v when n is not positive, and
+// releases the replaced words once every store is done.
+func (a *Array) Fill(v Boxed, from, n int) {
+	if n <= 0 {
+		if owns(v) {
+			a.bound().Release(v)
+		}
+		return
+	}
+	var local [8]Boxed
+	old := a.replaced(local[:0], from, n)
+	var h *Heap
+	if v.Kind() == KindRef || len(old) > 0 {
+		h = a.bound()
+	}
+	if v.Kind() == KindRef {
+		h.Inc(v.Ref(), n-1)
+	}
+	for i := from; i < from+n; i++ {
+		a.Elems[i] = v
+	}
+	for _, w := range old {
+		h.Release(w)
+	}
+}
+
+// Copy copies n elements of src from index from to a at index at, which may be
+// the same array. It retains the copied words, and releases the replaced words
+// once the copy is done.
+func (a *Array) Copy(at int, src *Array, from, n int) {
+	if n <= 0 {
+		return
+	}
+	words := src.Elems[from : from+n]
+	var local [8]Boxed
+	old := a.replaced(local[:0], at, n)
+	var h *Heap
+	if len(old) > 0 {
+		h = a.bound()
+	}
+	for _, w := range words {
+		if w.Kind() == KindRef {
+			if h == nil {
+				h = a.bound()
+			}
+			h.Retain(w)
+		}
+	}
+	copy(a.Elems[at:at+n], words)
+	for _, w := range old {
+		h.Release(w)
+	}
+}
+
+// Append takes vs and adds them after the last element.
+func (a *Array) Append(vs ...Boxed) {
+	a.Elems = append(a.Elems, vs...)
+}
+
+// Delete removes element i, shifts the later elements left, and returns
+// the removed word, which the caller now owns. The vacated word becomes null.
+func (a *Array) Delete(i int) Boxed {
+	old := a.Elems[i]
+	n := len(a.Elems) - 1
+	copy(a.Elems[i:], a.Elems[i+1:])
+	a.Elems[n] = BoxedNull
+	a.Elems = a.Elems[:n]
+	return old
 }
 
 // Kind returns KindRef.
@@ -169,10 +275,17 @@ func (a *Array) Refs(dst []Ref) []Ref {
 	return dst
 }
 
-// Clone returns a copy of a with its own element slice. The elements are boxed
-// words, so the references they hold are shared, not copied.
+// Clone returns a copy of a with its own element slice. A bound copy retains
+// every reference it holds, null included, so both arrays own theirs. An
+// unbound copy shares its words.
 func (a *Array) Clone() *Array {
-	return &Array{Typ: a.Typ, Elems: slices.Clone(a.Elems)}
+	c := &Array{Typ: a.Typ, Elems: slices.Clone(a.Elems), binding: a.binding}
+	if a.heap != nil {
+		for _, e := range c.Elems {
+			a.heap.Retain(e)
+		}
+	}
+	return c
 }
 
 func (a *Array) String() string {
@@ -247,6 +360,23 @@ func formatSlice(typ Type, n int, elem func(int) string) string {
 
 func (a TypedArray[T]) clone() Value {
 	return a.Clone()
+}
+
+// replaced appends the words of a that owns a reference in [from, from+n) to
+// dst.
+func (a *Array) replaced(dst []Boxed, from, n int) []Boxed {
+	for _, w := range a.Elems[from : from+n] {
+		if owns(w) {
+			dst = append(dst, w)
+		}
+	}
+	return dst
+}
+
+// owns reports whether releasing w changes a count: w is a reference but not
+// null.
+func owns(w Boxed) bool {
+	return w.Kind() == KindRef && w.Ref() != 0
 }
 
 func (a *Array) clone() Value {

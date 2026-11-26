@@ -11852,7 +11852,7 @@ func TestInterpreter_Run(t *testing.T) {
 				for _, want := range tt.values {
 					got, err := i.Pop()
 					require.NoError(t, err, name)
-					require.Equal(t, want, got, name)
+					requireEqualValue(t, want, got, name)
 				}
 				require.Equal(t, len(tt.program.Locals), i.Len(), name)
 				require.NoError(t, i.Close(), name)
@@ -13008,6 +13008,28 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NoError(t, vm.Run(context.Background()))
 		require.Equal(t, 3, vm.Len())
 	})
+}
+
+// requireEqualValue compares want with got. An array or struct is compared by
+// type and words, since the interpreter binds the containers it builds to its
+// heap.
+func requireEqualValue(t *testing.T, want, got types.Value, msgAndArgs ...any) {
+	t.Helper()
+	if w, ok := want.(*types.Array); ok {
+		g, ok := got.(*types.Array)
+		require.True(t, ok, msgAndArgs...)
+		require.Equal(t, w.Typ, g.Typ, msgAndArgs...)
+		require.Equal(t, w.Elems, g.Elems, msgAndArgs...)
+		return
+	}
+	if w, ok := want.(*types.Struct); ok {
+		g, ok := got.(*types.Struct)
+		require.True(t, ok, msgAndArgs...)
+		require.Equal(t, w.Typ, g.Typ, msgAndArgs...)
+		require.Equal(t, w.Data, g.Data, msgAndArgs...)
+		return
+	}
+	require.Equal(t, want, got, msgAndArgs...)
 }
 
 func TestInterpreter_Context(t *testing.T) {

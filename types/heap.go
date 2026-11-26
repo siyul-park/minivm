@@ -133,6 +133,21 @@ func (h *Heap) Add(v Value) int {
 	return len(h.objects) - 1
 }
 
+// Adopt binds an unbound container v to h without changing any count and
+// reports whether v is bound to h. It reports false for a container bound to
+// another heap, and true for a value that is not a container.
+func (h *Heap) Adopt(v Value) bool {
+	switch v := v.(type) {
+	case *Array:
+		return v.adopt(h)
+	case *Struct:
+		return v.adopt(h)
+	case *Map:
+		return v.adopt(h)
+	}
+	return true
+}
+
 // Inc adds n references to addr, for the runtime that owns the heap.
 func (h *Heap) Inc(addr, n int) {
 	h.rc[addr] += n
@@ -362,11 +377,15 @@ func (h *Heap) reuse(v Value) (int, bool) {
 func (h *Heap) track(v Value) {
 	switch v := v.(type) {
 	case *Struct:
-		if len(v.Typ.Fields) <= 4 {
+		v.adopt(h)
+		if len(v.Typ.Fields) <= len(v.inline) {
 			h.structs.add()
 		}
 	case *Array:
+		v.adopt(h)
 		h.arrays.add()
+	case *Map:
+		v.adopt(h)
 	}
 }
 
@@ -498,7 +517,7 @@ func (h *Heap) reclaim(addr int, v Value) {
 func (h *Heap) recycle(v Value, escaped bool) {
 	switch v := v.(type) {
 	case *Struct:
-		if len(v.Typ.Fields) > 4 {
+		if len(v.Typ.Fields) > len(v.inline) {
 			return
 		}
 		h.structs.remove()
@@ -514,6 +533,7 @@ func (h *Heap) recycle(v Value, escaped bool) {
 			clear(v.Elems[:cap(v.Elems)])
 			v.Typ = nil
 			v.Elems = v.Elems[:0]
+			v.heap = nil
 			h.arrays.put(v)
 		}
 	}
