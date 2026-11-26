@@ -1368,9 +1368,11 @@ func (m *Machine) mapGet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 // tombstone on the probe, or the empty slot that ended it, and appends that
 // slot to the insertion order. An insert that would rehash changes nothing and
 // bridges, so the Go set owns growth. A map of references (or wide i64s) adopts
-// the value and releases the one it replaced. A String key borrowed from the
-// caller is retained when it is stored, and only then: a hit leaves the stored key
-// and the caller releases the incoming one, as Store does.
+// the value and releases the one it replaced. A reference key borrowed from
+// the caller (a String in a string map, any reference in an any map; retain
+// skips a scalar word at run time) is retained when it is stored, and only then:
+// a hit leaves the stored key and the caller releases the incoming one, as
+// Store does.
 func (m *Machine) mapSet(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	if !has(op, 3, 0) {
 		return false
@@ -1462,7 +1464,7 @@ func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 		target.STRBR(state, t.ctrl, index),
 		target.LDR(count, data, int16(jit.OffsetMapCount)), target.SUBI(count, count, 1), target.STR(count, data, int16(jit.OffsetMapCount)),
 	)
-	if shape.Key == types.KindRef || shape.Key == types.KindAny {
+	if shape.Key == types.KindRef || (shape.Key == types.KindAny && s.Type(op.Args[1]).Kind() == types.KindRef) {
 		stored := m.vreg()
 		a.Emit(target.LDR(stored, slot, 0))
 		m.release(a, stored, s)
@@ -1491,10 +1493,11 @@ func (m *Machine) mapOf(v ssa.Value) (ssa.Shape, bool) {
 // is the retagged word boxed derives. A constant String operand takes its hash
 // from the module (see literal). A NaN never hits, so it branches to nan,
 // which a lookup or delete ends and a set bridges through before the table is
-// touched. A reference key is a String's own word hashed by its bytes, and
-// anything else, a scalar word, null, or another reference, bridges through
-// exit, so the interpreter raises the type mismatch Map.Accepts does before the
-// table is touched.
+// touched. In a string map, a reference key is a String's own word hashed by
+// its bytes, and anything else, a scalar word, null, or another reference,
+// bridges through exit, so the interpreter raises the type mismatch Map.Accepts
+// does before the table is touched; an any map takes other references by
+// identity (see boxed and dispatch).
 func (m *Machine) key(a *asm.Assembler, s compile.Site, shape ssa.Shape, v ssa.Value, exit, nan asm.Label) key {
 	word := s.Reg(v)
 	switch shape.Key {
@@ -1604,10 +1607,10 @@ func (m *Machine) scalar(a *asm.Assembler, word asm.VReg, kind types.Kind, exit,
 // dispatch derives the key of a boxed word of unknown kind (see boxed). Its
 // tag, less that of an i32, is 0 or 1 for an i32 or i8, which zero-extend, 2 for
 // an i1, whose nonzero payload folds into 1, -1 for a reference, -2 for an inline
-// i64, and -3 for an f32; every other word is an f64, which includes +Inf and
-// BoxedNaN at -4. An f64 is tested for a NaN and for -0 on the word shifted
-// left once, without the sign. The size starts at -1 and only a String key
-// gives it a length.
+// i64, and -3 for an f32; every other word is an f64, which includes +Inf,
+// BoxedNaN at -4, and the reserved tag 111, which is never produced. An f64 is
+// tested for a NaN and for -0 on the word shifted left once, without the sign.
+// The size starts at -1 and only a String key gives it a length.
 func (m *Machine) dispatch(a *asm.Assembler, word asm.Reg, exit, nan asm.Label) key {
 	small, ref, same, other, done, flag := a.Label(), a.Label(), a.Label(), a.Label(), a.Label(), a.Label()
 	k := key{word: m.vreg(), base: m.vreg(), ptr: m.vreg(), size: m.vreg(), mixed: true}

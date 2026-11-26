@@ -3852,7 +3852,7 @@ func TestMachine_Lower(t *testing.T) {
 			rows: anyDelete(reg(ref, 2), reg(ref, 3)), lower: true,
 		},
 		{
-			name: "map.delete of a scalar key in an any map still releases the stored key",
+			name: "map.delete of a scalar key in an any map does not release the stored key",
 			regs: regs{1: ref, 2: ref, 3: i32}, guard: intMap(types.KindAny, types.KindI32),
 			op: ssa.Operation{Op: ssa.OpMapDelete, Args: []ssa.Value{2, 3}},
 			rows: func() []asm.Instruction {
@@ -3862,9 +3862,8 @@ func TestMachine_Lower(t *testing.T) {
 				rows = append(rows,
 					target.STRBR(vr(w.word+1), vr(w.ctrl), vr(w.index)),
 					target.LDR(vr(w.word+2), vr(w.data), offset(jit.OffsetMapCount)), target.SUBI(vr(w.word+2), vr(w.word+2), 1), target.STR(vr(w.word+2), vr(w.data), offset(jit.OffsetMapCount)),
-					target.LDR(vr(w.word+3), vr(w.slot), 0),
 				)
-				return append(rows, released(vr(w.word+3))...)
+				return rows
 			}(), lower: true,
 		},
 		{
@@ -4040,6 +4039,109 @@ func TestMachine_Lower(t *testing.T) {
 		})
 	})
 
+	t.Run("a typed key of an any map derives the word Map.Store keys by", func(t *testing.T) {
+		testenv.MustHaveArch(t, "arm64")
+
+		type key struct {
+			word   types.Boxed
+			twin   types.Boxed
+			bridge bool
+		}
+		denormal32 := math.Float32frombits(1)
+		tests := []struct {
+			name string
+			typ  types.Type
+			keys []key
+		}{
+			{"i8", types.TypeI8(), []key{
+				{types.BoxI8(-128), types.BoxI8(-128), false}, {types.BoxI8(-3), types.BoxI8(-3), false},
+				{types.BoxI8(0), types.BoxI8(0), false}, {types.BoxI8(127), types.BoxI8(127), false},
+			}},
+			{"i1", types.TypeI1(), []key{
+				{types.BoxI1(true), types.BoxI1(true), false}, {types.BoxI1(false), types.BoxI1(false), false},
+			}},
+			{"i32", types.TypeI32(), []key{
+				{types.BoxI32(-1), types.BoxI32(-1), false}, {types.BoxI32(math.MinInt32), types.BoxI32(math.MinInt32), false},
+			}},
+			{"i64", types.TypeI64(), []key{
+				{types.BoxI64(-5), types.BoxI64(-5), false}, {types.BoxI64(1 << 40), types.BoxI64(1 << 40), false},
+				{types.BoxI64(-(1 << 47)), types.BoxI64(-(1 << 47)), false},
+			}},
+			{"f32", types.TypeF32(), []key{
+				{types.BoxF32(0), types.BoxF32(0), false}, {types.BoxF32(math.Float32frombits(1 << 31)), types.BoxF32(math.Float32frombits(1 << 31)), false},
+				{types.BoxF32(-1.5), types.BoxF32(-1.5), false}, {types.BoxF32(float32(math.Inf(-1))), types.BoxF32(float32(math.Inf(-1))), false},
+				{types.BoxF32(denormal32), types.BoxF32(denormal32), false}, {types.BoxF32(float32(math.NaN())), types.BoxF32(float32(math.NaN())), true},
+			}},
+			{"f64", types.TypeF64(), []key{
+				{types.BoxF64(0), types.BoxF64(0), false}, {types.BoxF64(math.Copysign(0, -1)), types.BoxF64(math.Copysign(0, -1)), false},
+				{types.BoxF64(math.Inf(1)), types.BoxF64(math.Inf(1)), false}, {types.BoxF64(5e-324), types.BoxF64(5e-324), false},
+				{types.BoxF64(math.NaN()), types.BoxF64(math.NaN()), true},
+			}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				typ := types.NewMapType(types.TypeAny(), types.TypeI32())
+				run := func(emit func(*instr.Builder), returns ...types.Type) (uintptr, []jit.Exit) {
+					fn := function(t, []types.Type{typ, tt.typ, types.TypeI32()}, nil, emit)
+					fn.Typ.Returns = returns
+					return lower(t, arm64.New(), translate(t, fn), fn, nil, 0, false)
+				}
+				set, setExits := run(func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.MAP_SET).Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+				}, types.TypeI32())
+				lookup, lookupExits := run(func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_LOOKUP).Emit(instr.RETURN)
+				}, types.TypeI32(), types.TypeI1())
+
+				heap := types.NewHeap(16, 0, types.Hooks{})
+				heap.Add(nil)
+				heap.Add(types.TypedArray[int32]{1})
+				heap.Add(types.I64(1 << 60))
+				want := types.NewMap(heap, typ, 0)
+				got := want.Clone()
+				wantRef, gotRef := heap.Add(want), heap.Add(got)
+				heap.Inc(wantRef, 1<<20)
+				heap.Inc(gotRef, 1<<20)
+
+				call := func(code uintptr, exits []jit.Exit, op instr.Opcode, k types.Boxed, v int32, serve func(), results ...uint64) ([]types.Boxed, int) {
+					stack := []types.Boxed{types.BoxRef(gotRef), k, types.BoxI32(v), 0, 0}
+					ctx := enter(t, stack)
+					objects, rc := heap.Bases()
+					ctx.Heap, ctx.RC = objects, rc
+					bridges := 0
+					for trap := jit.Enter(code, ctx); trap != jit.TrapReturn; trap = jit.Resume(ctx) {
+						require.Equal(t, jit.TrapBridge, trap)
+						exit := exits[ctx.Exit()]
+						require.Equal(t, jit.ExitBridge, exit.Kind)
+						require.Equal(t, op, exit.Code)
+						serve()
+						copy(ctx.Results[:], results)
+						bridges++
+					}
+					return stack, bridges
+				}
+
+				for _, k := range tt.keys {
+					for _, v := range []int32{7, 8} {
+						want.Store(k.twin, types.BoxI32(v))
+						_, bridges := call(set, setExits, instr.MAP_SET, k.word, v, func() { got.Store(k.twin, types.BoxI32(v)) })
+						require.Equal(t, btoi(k.bridge), bridges, "set of %v", k.word)
+						require.Equal(t, snapshot(want), snapshot(got), "set of %v", k.word)
+					}
+					value, ok := want.Load(k.twin)
+					if !ok {
+						value = want.Zero
+					}
+					out, bridges := call(lookup, lookupExits, instr.MAP_LOOKUP, k.word, 0, func() {}, uint64(value), uint64(types.BoxI1(ok)))
+					wantBridges := btoi(k.bridge && k.twin.Kind() == types.KindRef)
+					require.Equal(t, wantBridges, bridges, "get of %v", k.word)
+					require.Equal(t, []types.Boxed{value, types.BoxI1(ok)}, out[:2], "get of %v", k.word)
+					require.Equal(t, snapshot(want), snapshot(got), "get of %v", k.word)
+				}
+			})
+		}
+	})
+
 	t.Run("the map guard admits exactly the declared key kind, element kind, and class", func(t *testing.T) {
 		testenv.MustHaveArch(t, "arm64")
 
@@ -4176,7 +4278,7 @@ func TestMachine_Lower(t *testing.T) {
 			{"an f32", types.BoxF32(1.5), true},
 			{"an i32", types.BoxI32(1), false},
 			{"an inline i64", types.BoxI64(1 << 40), false},
-			{"an f64", types.BoxF64(-0.0), false},
+			{"an f64", types.BoxF64(1.5), false},
 			{"an array", types.BoxRef(1), false},
 			{"a string", types.BoxRef(3), false},
 		}

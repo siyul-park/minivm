@@ -18,8 +18,9 @@ const (
 	KindI1              // 0b110
 
 	// KindAny is the verifier's top element over Kind: a required or produced
-	// operand whose concrete kind is not statically fixed. It is not a real value
-	// kind, so it sits outside the iota range. It prints as "any".
+	// operand whose concrete kind is not statically fixed; types also uses it as
+	// MapType.KeyKind for an any key. It is not a real value kind, so it sits
+	// outside the iota range. It prints as "any".
 	KindAny Kind = 0xFF
 )
 
