@@ -1437,8 +1437,8 @@ func (m *Machine) retain(a *asm.Assembler, ref asm.VReg) {
 // mapDelete removes a key from a guarded map, as Map.Delete does: the slot
 // becomes a tombstone the order passes over and the count drops, leaving the key
 // and value words in place. A map of references releases the removed value, and
-// a map of String keys the stored key before it. The operation adopts a String
-// key, so a hit or a miss ends releasing the incoming one.
+// a map of string or any keys the stored key before it. The operation adopts a
+// reference operand, so a hit or a miss ends releasing the incoming one.
 func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) bool {
 	if !has(op, 2, 0) {
 		return false
@@ -1486,45 +1486,25 @@ func (m *Machine) mapOf(v ssa.Value) (ssa.Shape, bool) {
 	return shape, ok && shape.Form == ssa.FormMap
 }
 
-// key derives the table word of operand v, as Map.resolve makes it: an i64 is
-// its own register, which bridges through exit when it is outside the inline
-// range, since the table holds such a key as a heap cell native code neither
-// compares nor creates; an i32 zero-extends, an i8 keeps its low byte, and an
-// i1 is 0 or 1 (a Boxed.Bool is any nonzero payload). A float is its bits, with
-// -0 folded into the word of +0 by zeroing a word whose bits below the sign are
-// clear; a NaN never hits, so it branches to nan, which a lookup or delete ends
-// and a set bridges through before the table is touched. A reference is a
-// String's own word hashed by its bytes, and anything else, a scalar word, null,
-// or another reference, bridges through exit, so the interpreter raises the
-// type mismatch Map.Accepts does before the table is touched.
+// key derives the table word of operand v, as Map.resolve makes it. A scalar
+// is its word in the typed map of its kind (see scalar), and in an any map it
+// is the retagged word boxed derives. A NaN never hits, so it branches to nan,
+// which a lookup or delete ends and a set bridges through before the table is
+// touched. A reference key is a String's own word hashed by its bytes, and
+// anything else, a scalar word, null, or another reference, bridges through
+// exit, so the interpreter raises the type mismatch Map.Accepts does before the
+// table is touched.
 func (m *Machine) key(a *asm.Assembler, s compile.Site, shape ssa.Shape, v ssa.Value, exit, nan asm.Label) key {
 	word := s.Reg(v)
 	switch shape.Key {
 	case types.KindAny:
 		return m.boxed(a, word, s.Type(v).Kind(), exit, nan)
-	case types.KindI64:
-		a.Emit(target.SBFX(target.X16, word, 0, types.VBits), target.CMP(target.X16, word), target.BCondLabel(target.OpBNE, exit))
-		return key{word: word, base: word}
 	case types.KindRef:
 		expectRef(a, word, exit)
 		ptr, size := m.text(a, word, exit)
 		return key{word: word, base: m.hash(a, ptr, size), ptr: ptr, size: size}
 	}
-	k := m.vreg()
-	switch shape.Key {
-	case types.KindI32:
-		a.Emit(target.UXTW(k, word))
-	case types.KindI8:
-		a.Emit(target.UXTB(k, word))
-	case types.KindF32:
-		a.Emit(target.FCMP(word, word), target.BCondLabel(target.OpBVS, nan), target.FMOV(target.W16, word))
-		a.Emit(target.TSTI(target.X16, 1<<31-1), target.CSEL(k, target.XZR, target.X16, target.CondEQ))
-	case types.KindF64:
-		a.Emit(target.FCMP(word, word), target.BCondLabel(target.OpBVS, nan), target.FMOV(target.X16, word))
-		a.Emit(target.TSTI(target.X16, 1<<63-1), target.CSEL(k, target.XZR, target.X16, target.CondEQ))
-	default:
-		a.Emit(target.CMPI(word, 0), target.CSET(k, target.CondNE))
-	}
+	k := m.scalar(a, word, shape.Key, exit, nan)
 	return key{word: k, base: k}
 }
 
@@ -1538,39 +1518,62 @@ func (m *Machine) key(a *asm.Assembler, s compile.Site, shape ssa.Shape, v ssa.V
 // i64 is itself, an f64 folds -0 and branches to nan on a NaN, a String is its
 // word hashed by its bytes, any other reference is its word by identity, and a
 // null reference, an I64 cell, or an f32 bridges through exit.
-func (m *Machine) boxed(a *asm.Assembler, word asm.Reg, kind types.Kind, exit, nan asm.Label) key {
+func (m *Machine) boxed(a *asm.Assembler, word asm.VReg, kind types.Kind, exit, nan asm.Label) key {
 	if kind == types.KindRef {
 		return m.dispatch(a, word, exit, nan)
 	}
-	k := m.vreg()
-	tag := func(kind types.Kind) {
+	tag := func(k asm.VReg, kind types.Kind) key {
 		a.Emit(target.LDI(target.X17, types.Tag(kind))...)
 		a.Emit(target.ORR(k, k, target.X17))
+		return key{word: k, base: k}
 	}
 	switch kind {
-	case types.KindI1:
-		a.Emit(target.CMPI(word, 0), target.CSET(k, target.CondNE))
-		tag(types.KindI32)
+	case types.KindI1, types.KindI32:
+		return tag(m.scalar(a, word, kind, exit, nan), types.KindI32)
 	case types.KindI8:
-		low := m.ivreg(asm.Width32)
+		k, low := m.vreg(), m.ivreg(asm.Width32)
 		a.Emit(target.SXTB(low, word), target.UXTW(k, low))
-		tag(types.KindI32)
+		return tag(k, types.KindI32)
+	case types.KindI64:
+		m.scalar(a, word, kind, exit, nan)
+		k := m.vreg()
+		a.Emit(target.ANDI(k, word, types.VMask))
+		return tag(k, types.KindI64)
+	case types.KindF32:
+		return tag(m.scalar(a, word, kind, exit, nan), types.KindF32)
+	}
+	k := m.scalar(a, word, kind, exit, nan)
+	return key{word: k, base: k}
+}
+
+// scalar derives the table word of scalar operand word of kind, as the typed map
+// of that kind stores it: an i64 is its own register, which bridges through exit
+// when it is outside the inline range, since the table holds such a key as a heap
+// cell native code neither compares nor creates; an i32 zero-extends, an i8 keeps
+// its low byte, and an i1 is 0 or 1 (a Boxed.Bool is any nonzero payload). A float
+// is its bits, with -0 folded into the word of +0 by zeroing a word whose bits
+// below the sign are clear; a NaN never hits, so it branches to nan.
+func (m *Machine) scalar(a *asm.Assembler, word asm.VReg, kind types.Kind, exit, nan asm.Label) asm.VReg {
+	if kind == types.KindI64 {
+		a.Emit(target.SBFX(target.X16, word, 0, types.VBits), target.CMP(target.X16, word), target.BCondLabel(target.OpBNE, exit))
+		return word
+	}
+	k := m.vreg()
+	switch kind {
 	case types.KindI32:
 		a.Emit(target.UXTW(k, word))
-		tag(types.KindI32)
-	case types.KindI64:
-		a.Emit(target.SBFX(target.X16, word, 0, types.VBits), target.CMP(target.X16, word), target.BCondLabel(target.OpBNE, exit))
-		a.Emit(target.ANDI(k, word, types.VMask))
-		tag(types.KindI64)
+	case types.KindI8:
+		a.Emit(target.UXTB(k, word))
 	case types.KindF32:
 		a.Emit(target.FCMP(word, word), target.BCondLabel(target.OpBVS, nan), target.FMOV(target.W16, word))
 		a.Emit(target.TSTI(target.X16, 1<<31-1), target.CSEL(k, target.XZR, target.X16, target.CondEQ))
-		tag(types.KindF32)
 	case types.KindF64:
 		a.Emit(target.FCMP(word, word), target.BCondLabel(target.OpBVS, nan), target.FMOV(target.X16, word))
 		a.Emit(target.TSTI(target.X16, 1<<63-1), target.CSEL(k, target.XZR, target.X16, target.CondEQ))
+	default:
+		a.Emit(target.CMPI(word, 0), target.CSET(k, target.CondNE))
 	}
-	return key{word: k, base: k}
+	return k
 }
 
 // dispatch derives the key of a boxed word of unknown kind (see boxed). Its
@@ -1749,7 +1752,8 @@ func (m *Machine) content(a *asm.Assembler, word asm.VReg, k key, hit, next asm.
 }
 
 // text loads the bytes of the String ref refers to: its data pointer and its
-// size. It branches to miss when ref refers to anything else, null included.
+// size. It branches to miss when ref refers to anything else, null included,
+// with the heap slot's itab in X16.
 func (m *Machine) text(a *asm.Assembler, ref asm.Reg, miss asm.Label) (ptr, size asm.VReg) {
 	addr := m.heap(a, ref)
 	a.Emit(target.LDR(target.X16, addr, 0))

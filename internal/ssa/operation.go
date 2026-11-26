@@ -475,10 +475,10 @@ func (c Cond) Invert() Cond {
 // given the kinds of its key and value operands (ignored by an operation without
 // them): the key kind is an integer, f32, f64, or reference held in its key
 // kind's register class (a reference key is a string's), or any, which takes an
-// operand of every kind, and an
-// element or value fits one register, which excludes an i64, whose boxed word
-// may be a reference to a heap-promoted value. Translation guards a map only for
-// an operation Serves accepts, and the lowering lowers exactly those.
+// operand of every kind, and an element or value fits one register, which
+// excludes an i64, whose boxed word may be a reference to a heap-promoted value.
+// Translation guards a map only for an operation Serves accepts, and the
+// lowering lowers exactly those.
 func (s Shape) Serves(op Op, key, value types.Kind) bool {
 	if s.Form != FormMap {
 		return false
