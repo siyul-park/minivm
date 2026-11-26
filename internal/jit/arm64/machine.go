@@ -1577,23 +1577,25 @@ func (m *Machine) scalar(a *asm.Assembler, word asm.VReg, kind types.Kind, exit,
 }
 
 // dispatch derives the key of a boxed word of unknown kind (see boxed). Its
-// tag, less that of an i32, is 0, 1, or 2 for an i32, i8, or i1, -1 for a
-// reference, -2 for an inline i64, and -3 for an f32; every other word is an f64,
-// which includes +Inf and BoxedNaN at -4. An f64 is tested for a NaN and for -0
-// on the word shifted left once, without the sign. The size starts at -1 and
-// only a String key gives it a length.
+// tag, less that of an i32, is 0 or 1 for an i32 or i8, which zero-extend, 2 for
+// an i1, whose nonzero payload folds into 1, -1 for a reference, -2 for an inline
+// i64, and -3 for an f32; every other word is an f64, which includes +Inf and
+// BoxedNaN at -4. An f64 is tested for a NaN and for -0 on the word shifted
+// left once, without the sign. The size starts at -1 and only a String key
+// gives it a length.
 func (m *Machine) dispatch(a *asm.Assembler, word asm.Reg, exit, nan asm.Label) key {
-	small, ref, same, other, done := a.Label(), a.Label(), a.Label(), a.Label(), a.Label()
+	small, ref, same, other, done, flag := a.Label(), a.Label(), a.Label(), a.Label(), a.Label(), a.Label()
 	k := key{word: m.vreg(), base: m.vreg(), ptr: m.vreg(), size: m.vreg(), mixed: true}
 	a.Emit(target.MOVN(k.size, 0, 0), target.MOVZ(k.ptr, 0, 0))
 	a.Emit(target.LSRI(target.X16, word, types.VBits))
 	a.Emit(target.LDI(target.X17, types.Tag(types.KindI32)>>types.VBits)...)
 	a.Emit(
 		target.SUB(target.X16, target.X16, target.X17),
-		target.CMPI(target.X16, 2), target.BCondLabel(target.OpBLS, small),
+		target.CMPI(target.X16, 1), target.BCondLabel(target.OpBLS, small),
 		target.CMNI(target.X16, 1), target.BCondLabel(target.OpBEQ, ref),
 		target.CMNI(target.X16, 2), target.BCondLabel(target.OpBEQ, same),
 		target.CMNI(target.X16, 3), target.BCondLabel(target.OpBEQ, exit),
+		target.CMPI(target.X16, 2), target.BCondLabel(target.OpBEQ, flag),
 		target.LSLI(target.X16, word, 1),
 	)
 	a.Emit(target.LDI(target.X17, 0xFFE0<<48)...)
@@ -1604,6 +1606,10 @@ func (m *Machine) dispatch(a *asm.Assembler, word asm.Reg, exit, nan asm.Label) 
 	)
 	a.Bind(small)
 	a.Emit(target.UXTW(k.word, word))
+	a.Emit(target.LDI(target.X17, types.Tag(types.KindI32))...)
+	a.Emit(target.ORR(k.word, k.word, target.X17), target.MOV(k.base, k.word), target.BLabel(done))
+	a.Bind(flag)
+	a.Emit(target.TSTI(word, types.VMask), target.CSET(k.word, target.CondNE))
 	a.Emit(target.LDI(target.X17, types.Tag(types.KindI32))...)
 	a.Emit(target.ORR(k.word, k.word, target.X17), target.MOV(k.base, k.word), target.BLabel(done))
 	a.Bind(same)

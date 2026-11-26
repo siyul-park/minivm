@@ -3479,10 +3479,10 @@ func TestMachine_Lower(t *testing.T) {
 	// boxed word of unknown kind: the registers from from on are the word, the
 	// base hash, the pointer, and the size (-1 for a key that is no String), then
 	// the String's heap slot, data, size, and pointer, and the eleven of its hash.
-	// The labels are the dispatch's, then the hash's five; nan is where a NaN goes.
-	anyKey := func(ref asm.Reg, from int, labels [5]asm.Label, hashLabels [5]asm.Label, nan asm.Label) []asm.Instruction {
+	// The labels are the dispatch's six (the i1 path's last), then the hash's five; nan is where a NaN goes.
+	anyKey := func(ref asm.Reg, from int, labels [6]asm.Label, hashLabels [5]asm.Label, nan asm.Label) []asm.Instruction {
 		word, base, ptr, size := vr(from), vr(from+1), vr(from+2), vr(from+3)
-		small, refer, same, other, done := labels[0], labels[1], labels[2], labels[3], labels[4]
+		small, refer, same, other, done, flag := labels[0], labels[1], labels[2], labels[3], labels[4], labels[5]
 		rows := []asm.Instruction{
 			target.MOVN(size, 0, 0), target.MOVZ(ptr, 0, 0),
 			target.LSRI(target.X16, ref, 49),
@@ -3490,10 +3490,11 @@ func TestMachine_Lower(t *testing.T) {
 		rows = append(rows, target.LDI(target.X17, types.Tag(types.KindI32)>>49)...)
 		rows = append(rows,
 			target.SUB(target.X16, target.X16, target.X17),
-			target.CMPI(target.X16, 2), target.BCondLabel(target.OpBLS, small),
+			target.CMPI(target.X16, 1), target.BCondLabel(target.OpBLS, small),
 			target.CMNI(target.X16, 1), target.BCondLabel(target.OpBEQ, refer),
 			target.CMNI(target.X16, 2), target.BCondLabel(target.OpBEQ, same),
 			target.CMNI(target.X16, 3), target.BCondLabel(target.OpBEQ, exit),
+			target.CMPI(target.X16, 2), target.BCondLabel(target.OpBEQ, flag),
 			target.LSLI(target.X16, ref, 1),
 		)
 		rows = append(rows, target.LDI(target.X17, 0xFFE0<<48)...)
@@ -3503,6 +3504,12 @@ func TestMachine_Lower(t *testing.T) {
 			target.MOV(base, word), target.BLabel(done),
 			// small
 			target.UXTW(word, ref),
+		)
+		rows = append(rows, target.LDI(target.X17, types.Tag(types.KindI32))...)
+		rows = append(rows,
+			target.ORR(word, word, target.X17), target.MOV(base, word), target.BLabel(done),
+			// i1
+			target.TSTI(ref, types.VMask), target.CSET(word, target.CondNE),
 		)
 		rows = append(rows, target.LDI(target.X17, types.Tag(types.KindI32))...)
 		rows = append(rows,
@@ -3528,27 +3535,27 @@ func TestMachine_Lower(t *testing.T) {
 		return append([]asm.Instruction{target.CMPI(size, 0), target.BCondLabel(target.OpBLT, next)}, content(word, from, ptr, size, next, hit, labels)...)
 	}
 	// anyGet is map.get of a reference operand in an any map: the key takes
-	// registers 3 to 21 and its labels 5 to 14, the table 22 to 24, the home slot
+	// registers 3 to 21 and its labels 5 to 15, the table 22 to 24, the home slot
 	// 25 and 26, and the probe 27 to 29, then the content check 30 to 35; the
-	// probe's labels are 15 and 16 and the string comparison's 17 to 21.
+	// probe's labels are 16 and 17 and the string comparison's 18 to 22.
 	anyGet := func(ref, dst asm.VReg, key asm.Reg) []asm.Instruction {
 		w := layout(2, 22, false)
-		rows := slices.Concat(tableOf(ref, 1), anyKey(key, 3, [5]asm.Label{5, 6, 7, 8, 9}, [5]asm.Label{10, 11, 12, 13, 14}, 3), words(w), home(w, vr(4)),
-			probe(w, vr(3), 15, 16, 2, 3, anyContent(vr(w.word), w.word+1, vr(5), vr(6), 16, 2, [5]asm.Label{17, 18, 19, 20, 21})...))
+		rows := slices.Concat(tableOf(ref, 1), anyKey(key, 3, [6]asm.Label{5, 6, 7, 8, 9, 10}, [5]asm.Label{11, 12, 13, 14, 15}, 3), words(w), home(w, vr(4)),
+			probe(w, vr(3), 16, 17, 2, 3, anyContent(vr(w.word), w.word+1, vr(5), vr(6), 17, 2, [5]asm.Label{18, 19, 20, 21, 22})...))
 		return append(rows, target.LDR(dst, vr(w.slot), 8), target.BLabel(4), target.LDR(dst, vr(2), offset(jit.OffsetMapZero)))
 	}
 	// anySet is map.set of a reference operand in an any map and an i32 value in
-	// vr(1): the key takes registers 4 to 22 and the labels 4 to 13, the table 23
-	// to 25, the probe's labels are 14 and 15, the string comparison's 16 to 20, the
-	// dead-slot step 21, and the retain's skip 22. A miss counts one more reference
+	// vr(1): the key takes registers 4 to 22 and the labels 4 to 14, the table 23
+	// to 25, the probe's labels are 15 and 16, the string comparison's 17 to 21, the
+	// dead-slot step 22, and the retain's skip 23. A miss counts one more reference
 	// to the key word.
 	anySet := func(ref asm.VReg, key asm.Reg, value asm.Reg) []asm.Instruction {
 		w := layout(3, 23, true)
-		w.step = 21
+		w.step = 22
 		used, want, limit, order, pos, count := w.word+7, w.word+8, w.word+9, w.word+10, w.word+11, w.word+12
-		rows := slices.Concat(box32(reg(i32, 4)), tableOf(ref, 2), anyKey(key, 4, [5]asm.Label{4, 5, 6, 7, 8}, [5]asm.Label{9, 10, 11, 12, 13}, exit), words(w), home(w, vr(5)),
+		rows := slices.Concat(box32(reg(i32, 4)), tableOf(ref, 2), anyKey(key, 4, [6]asm.Label{4, 5, 6, 7, 8, 9}, [5]asm.Label{10, 11, 12, 13, 14}, exit), words(w), home(w, vr(5)),
 			[]asm.Instruction{target.MOVN(vr(w.free), 0, 0)},
-			probe(w, vr(4), 14, 15, 2, 3, anyContent(vr(w.word), w.word+1, vr(6), vr(7), 15, 2, [5]asm.Label{16, 17, 18, 19, 20})...))
+			probe(w, vr(4), 15, 16, 2, 3, anyContent(vr(w.word), w.word+1, vr(6), vr(7), 16, 2, [5]asm.Label{17, 18, 19, 20, 21})...))
 		rows = append(rows,
 			target.LDR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)), target.ADDI(vr(want), vr(used), 1), target.LSLI(vr(want), vr(want), 2),
 			target.ADDI(vr(limit), vr(w.mask), 1), target.LSLI(target.X16, vr(limit), 1), target.ADD(vr(limit), vr(limit), target.X16),
@@ -3562,7 +3569,7 @@ func TestMachine_Lower(t *testing.T) {
 			target.ADDI(vr(used), vr(used), 1), target.STR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)),
 			target.LDR(vr(count), vr(w.data), offset(jit.OffsetMapCount)), target.ADDI(vr(count), vr(count), 1), target.STR(vr(count), vr(w.data), offset(jit.OffsetMapCount)),
 		)
-		rows = append(rows, retained(vr(4), 22)...)
+		rows = append(rows, retained(vr(4), 23)...)
 		return append(rows, target.BLabel(resume), target.STR(value, vr(w.slot), 8))
 	}
 	// anyDelete is map.delete of a reference operand in an any map: a hit releases
@@ -3570,8 +3577,8 @@ func TestMachine_Lower(t *testing.T) {
 	anyDelete := func(ref asm.VReg, key asm.VReg) []asm.Instruction {
 		w := layout(2, 22, false)
 		state, count, stored := w.word+7, w.word+8, w.word+9
-		rows := slices.Concat(tableOf(ref, 1), anyKey(key, 3, [5]asm.Label{4, 5, 6, 7, 8}, [5]asm.Label{9, 10, 11, 12, 13}, 3), words(w), home(w, vr(4)),
-			probe(w, vr(3), 14, 15, 2, 3, anyContent(vr(w.word), w.word+1, vr(5), vr(6), 15, 2, [5]asm.Label{16, 17, 18, 19, 20})...))
+		rows := slices.Concat(tableOf(ref, 1), anyKey(key, 3, [6]asm.Label{4, 5, 6, 7, 8, 9}, [5]asm.Label{10, 11, 12, 13, 14}, 3), words(w), home(w, vr(4)),
+			probe(w, vr(3), 15, 16, 2, 3, anyContent(vr(w.word), w.word+1, vr(5), vr(6), 16, 2, [5]asm.Label{17, 18, 19, 20, 21})...))
 		rows = append(rows, target.LDI(vr(state), jit.SlotDead)...)
 		rows = append(rows,
 			target.STRBR(vr(state), vr(w.ctrl), vr(w.index)),
@@ -3910,7 +3917,7 @@ func TestMachine_Lower(t *testing.T) {
 		})
 		t.Run("any keys of every dispatched kind", func(t *testing.T) {
 			mirror(t, types.TypeAny(), func(h *types.Heap, n int) []types.Boxed {
-				switch n % 6 {
+				switch n % 7 {
 				case 0:
 					return []types.Boxed{types.BoxI32(int32(n/6 - 3))}
 				case 1:
@@ -3922,8 +3929,13 @@ func TestMachine_Lower(t *testing.T) {
 					return []types.Boxed{types.BoxRef(h.Add(types.String(text))), types.BoxRef(h.Add(types.String(strings.Clone(text))))}
 				case 4:
 					return []types.Boxed{types.BoxRef(h.Add(types.TypedArray[int32]{int32(n)}))}
-				default:
+				case 5:
 					return []types.Boxed{types.BoxI64(int64(n) << 33)}
+				default:
+					if n/7%2 == 0 {
+						return []types.Boxed{types.BoxI1(true), types.Box(2, types.KindI1)}
+					}
+					return []types.Boxed{types.BoxI1(false), types.Box(0, types.KindI1)}
 				}
 			})
 		})

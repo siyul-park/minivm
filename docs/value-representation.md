@@ -98,7 +98,7 @@ A map key is one table word whose form depends on the map's key kind (`memory-mo
 | `i64` | all 64 bits when the value fits the inline range, else the `Boxed` ref of a map-owned `I64` cell |
 | `f32`, `f64` | the raw bits (`f32` in the low 32); `-0` is stored as `+0` |
 | `string`, other reference types | the `Boxed` word |
-| `any` (`KindAny`) | the `Boxed` word; `i1`, `i8`, and `i32` retag to `i32` and floats follow the float rule |
+| `any` (`KindAny`) | the `Boxed` word; `i8` and `i32` retag to `i32`, `i1` to `i32` 0 or 1 (any nonzero payload is 1), and floats follow the float rule |
 
 Keys compare as their Go values: a float `-0` equals `+0`, and a `NaN` key never matches, so each store adds an entry that only `map.clear` removes. The hash of a key is its base hash: the table word, except the content hash `String.Hash` (which mixes the process `Hashkey`) for a `String` and the value for a wide `I64` cell. A reference key compares by its value, in every map: a `String` by content, an `I64` cell by its integer, any other reference by identity.
 

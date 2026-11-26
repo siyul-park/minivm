@@ -526,6 +526,24 @@ func TestMap_Load(t *testing.T) {
 		require.False(t, ok)
 	})
 
+	t.Run("any folds every nonzero i1 payload into the i32 key 1", func(t *testing.T) {
+		m := types.NewMap(newHeap(), types.NewMapType(types.TypeAny(), types.TypeI32()), 0)
+		m.Store(types.BoxI1(true), types.BoxI32(1))
+		m.Store(types.BoxI32(0), types.BoxI32(2))
+		for _, key := range []types.Boxed{types.Box(2, types.KindI1), types.BoxI1(true), types.BoxI32(1)} {
+			v, ok := m.Load(key)
+			require.True(t, ok, key.String())
+			require.Equal(t, types.BoxI32(1), v)
+		}
+		for _, key := range []types.Boxed{types.Box(0, types.KindI1), types.BoxI1(false), types.BoxI32(0)} {
+			v, ok := m.Load(key)
+			require.True(t, ok, key.String())
+			require.Equal(t, types.BoxI32(2), v)
+		}
+		m.Store(types.Box(2, types.KindI1), types.BoxI32(3))
+		require.Equal(t, 2, m.Len())
+	})
+
 	t.Run("i64 cells", func(t *testing.T) {
 		for _, typ := range []types.Type{types.TypeI64(), types.TypeAny()} {
 			h := newHeap()

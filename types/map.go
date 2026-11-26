@@ -579,7 +579,10 @@ func (m *Map) resolve(key Boxed) (word, base uint64, match byte) {
 		return uint64(key), uint64(key), nanMatch(f)
 	}
 	switch key.Kind() {
-	case KindI1, KindI8, KindI32:
+	case KindI1:
+		word = uint64(BoxI32(int32(min(uint64(key)&VMask, 1))))
+		return word, word, matchWord
+	case KindI8, KindI32:
 		word = uint64(BoxI32(key.I32()))
 		return word, word, matchWord
 	case KindF32:
