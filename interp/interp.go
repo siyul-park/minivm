@@ -1517,10 +1517,7 @@ func (i *Interpreter) newArrayDefault(typ *types.ArrayType, size types.Boxed) ty
 		return make(types.TypedArray[float64], n)
 	default:
 		val := types.MakeArray(&i.heap, typ, int(n))
-		if n > 0 {
-			i.heap.Retain(types.BoxedNull)
-			val.Fill(types.BoxedNull, 0, int(n))
-		}
+		i.heap.Inc(0, int(n))
 		return val
 	}
 }

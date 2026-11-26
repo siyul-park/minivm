@@ -555,7 +555,7 @@ func TestHeap_Reset(t *testing.T) {
 
 		h.Reset()
 		require.Same(t, array, types.MakeArray(h, typ, 2))
-		require.Equal(t, make([]types.Boxed, 2), array.Elems)
+		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, array.Elems)
 	})
 }
 

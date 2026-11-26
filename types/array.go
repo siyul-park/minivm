@@ -85,11 +85,16 @@ func TypeF64Array() *ArrayType {
 	return typeF64Array
 }
 
-// MakeArray returns an array of type typ holding size zero elements. A non-nil
-// heap binds it and supplies a header and storage it kept for reuse.
+// MakeArray returns an array of type typ holding size zero values of its
+// element kind, as make does. A reference element, which any reports, is the
+// null word, uncounted: release skips null, so it is never released. Any other
+// kind keeps zero words, which the caller overwrites. A non-nil heap binds it
+// and supplies a header and storage it kept for reuse, cleared to zero words.
 func MakeArray(heap *Heap, typ *ArrayType, size int) *Array {
+	var a *Array
 	if heap != nil {
-		if a, ok := heap.arrays.get(); ok {
+		if kept, ok := heap.arrays.get(); ok {
+			a = kept
 			a.Typ = typ
 			a.heap = heap
 			if cap(a.Elems) < size {
@@ -97,10 +102,17 @@ func MakeArray(heap *Heap, typ *ArrayType, size int) *Array {
 			} else {
 				a.Elems = a.Elems[:size]
 			}
-			return a
 		}
 	}
-	return &Array{Typ: typ, Elems: make([]Boxed, size), binding: binding{heap}}
+	if a == nil {
+		a = &Array{Typ: typ, Elems: make([]Boxed, size), binding: binding{heap}}
+	}
+	if typ.ElemKind == KindRef {
+		for i := range a.Elems {
+			a.Elems[i] = BoxedNull
+		}
+	}
+	return a
 }
 
 // NewArray returns an array of type typ that takes elems. A non-nil heap binds

@@ -27,11 +27,32 @@ func TestArrayLiteral(t *testing.T) {
 
 func TestMakeArray(t *testing.T) {
 	typ := types.NewArrayType(types.TypeAny())
+	nulls := func(n int) []types.Boxed {
+		elems := make([]types.Boxed, n)
+		for i := range elems {
+			elems[i] = types.BoxedNull
+		}
+		return elems
+	}
 
-	t.Run("holds size zero elements", func(t *testing.T) {
+	t.Run("holds size null elements for a reference element", func(t *testing.T) {
 		array := types.MakeArray(nil, typ, 3)
 		require.Same(t, typ, array.Typ)
+		require.Equal(t, nulls(3), array.Elems)
+	})
+
+	t.Run("keeps zero words for a scalar element", func(t *testing.T) {
+		array := types.MakeArray(nil, types.NewArrayType(types.TypeI32()), 3)
 		require.Equal(t, make([]types.Boxed, 3), array.Elems)
+	})
+
+	t.Run("leaves the null count unchanged", func(t *testing.T) {
+		h := types.NewHeap(2, 0, types.Hooks{})
+		h.Add(types.Null)
+		before := h.Count(0)
+
+		types.MakeArray(h, typ, 3)
+		require.Equal(t, before, h.Count(0))
 	})
 
 	t.Run("reuses a header the heap kept with its cleared storage", func(t *testing.T) {
@@ -41,7 +62,7 @@ func TestMakeArray(t *testing.T) {
 
 		array := types.MakeArray(h, typ, 2)
 		require.Same(t, kept, array)
-		require.Equal(t, make([]types.Boxed, 2), array.Elems)
+		require.Equal(t, nulls(2), array.Elems)
 	})
 
 	t.Run("grows kept storage that is too small", func(t *testing.T) {
@@ -51,7 +72,7 @@ func TestMakeArray(t *testing.T) {
 
 		array := types.MakeArray(h, typ, 4)
 		require.Same(t, kept, array)
-		require.Equal(t, make([]types.Boxed, 4), array.Elems)
+		require.Equal(t, nulls(4), array.Elems)
 	})
 }
 
@@ -205,7 +226,7 @@ func TestArray_Fill(t *testing.T) {
 
 			array.Fill(v, 0, n)
 			require.False(t, h.Alive(v.Ref()))
-			require.Zero(t, array.Index(0))
+			require.Equal(t, types.BoxedNull, array.Index(0))
 		})
 	}
 
