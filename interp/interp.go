@@ -455,6 +455,9 @@ func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 	if !(scalar(old) && scalar(val)) && (reflect.TypeOf(old) != reflect.TypeOf(val) || !old.Type().Equals(val.Type())) {
 		return ErrTypeMismatch
 	}
+	if !i.heap.Adopt(val) {
+		return ErrTypeMismatch
+	}
 	i.heap.Set(addr, val)
 	i.own(addr, val)
 	i.heap.Dispose(addr, old)
@@ -489,7 +492,7 @@ func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 		i.heap.Inc(addr, 1)
 		return addr, nil
 	}
-	if i.owner(val) >= 0 {
+	if i.owner(val) >= 0 || !i.heap.Adopt(val) {
 		return 0, ErrTypeMismatch
 	}
 	addr = i.heap.Add(val)
@@ -558,7 +561,7 @@ func (i *Interpreter) Push(val types.Value) (err error) {
 	if i.sp == len(i.stack) {
 		return ErrStackOverflow
 	}
-	if i.owner(val) >= 0 {
+	if i.owner(val) >= 0 || !i.heap.Adopt(val) {
 		return ErrTypeMismatch
 	}
 	boxed := i.box(val)
@@ -1215,7 +1218,7 @@ func (i *Interpreter) load(constants []types.Value) {
 			}
 			boxed = types.BoxRef(int(ref))
 		case *types.ArrayLiteral:
-			array := types.NewArray(nil, value.Typ, make([]types.Boxed, len(value.Elems))...)
+			array := types.NewArray(&i.heap, value.Typ, make([]types.Boxed, len(value.Elems))...)
 			boxed = types.BoxRef(i.heap.Add(array))
 			for index, elem := range value.Elems {
 				queue = append(queue, elem)
@@ -1247,7 +1250,7 @@ func (i *Interpreter) load(constants []types.Value) {
 			})
 			boxed = types.BoxRef(i.heap.Add(m))
 		case *types.StructLiteral:
-			structure := types.NewStruct(nil, value.Typ)
+			structure := types.NewStruct(&i.heap, value.Typ)
 			boxed = types.BoxRef(i.heap.Add(structure))
 			for index, elem := range value.Fields {
 				queue = append(queue, elem)

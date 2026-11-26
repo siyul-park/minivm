@@ -60,6 +60,14 @@ func (c *sinkCloser) Close() error {
 	return nil
 }
 
+// hostContainer builds an array, struct, or map holding one reference, and
+// drops that reference through the container's own methods.
+type hostContainer struct {
+	name  string
+	build func(heap *types.Heap, child types.Boxed) types.Value
+	drop  func(v types.Value)
+}
+
 type structGetHostFields struct {
 	Count  int32
 	hidden int32
@@ -2528,6 +2536,34 @@ func (h *structGetHostFields) Bump(n int32) int32 {
 	h.Count += n
 	h.hidden++
 	return h.Count
+}
+
+// hostContainers returns one hostContainer per container kind.
+func hostContainers() []hostContainer {
+	array := types.NewArrayType(types.TypeAny())
+	structure := types.NewStructType(types.NewStructField(types.TypeAny()))
+	table := types.NewMapType(types.TypeI32(), types.TypeAny())
+	return []hostContainer{
+		{
+			name:  "array",
+			build: func(h *types.Heap, child types.Boxed) types.Value { return types.NewArray(h, array, child) },
+			drop:  func(v types.Value) { v.(*types.Array).SetIndex(0, types.BoxedNull) },
+		},
+		{
+			name:  "struct",
+			build: func(h *types.Heap, child types.Boxed) types.Value { return types.NewStruct(h, structure, child) },
+			drop:  func(v types.Value) { v.(*types.Struct).SetField(0, types.BoxedNull) },
+		},
+		{
+			name: "map",
+			build: func(h *types.Heap, child types.Boxed) types.Value {
+				m := types.NewMap(h, table, 0)
+				m.Store(types.BoxI32(1), child)
+				return m
+			},
+			drop: func(v types.Value) { v.(*types.Map).Store(types.BoxI32(1), types.BoxedNull) },
+		},
+	}
 }
 
 func (v *marshalBenchMethods) Bump(n int32) int32 {
@@ -13286,6 +13322,25 @@ func TestInterpreter_Load(t *testing.T) {
 	v, err := i.Load(addr)
 	require.NoError(t, err)
 	require.Equal(t, types.I32(5), v)
+
+	t.Run("a host holding a counted reference mutates a container through its methods", func(t *testing.T) {
+		for _, c := range hostContainers() {
+			i := interp.MustNew(program.New(nil))
+			child, err := i.Alloc(types.String("x"))
+			require.NoError(t, err, c.name)
+			value := c.build(nil, types.BoxRef(child))
+			addr, err := i.Alloc(value)
+			require.NoError(t, err, c.name)
+
+			loaded, err := i.Load(addr)
+			require.NoError(t, err, c.name)
+			c.drop(loaded)
+			_, err = i.RefCount(child)
+			require.ErrorIs(t, err, interp.ErrSegmentationFault, c.name)
+			require.NoError(t, i.Release(addr), c.name)
+			require.NoError(t, i.Close(), c.name)
+		}
+	})
 }
 
 func TestInterpreter_Store(t *testing.T) {
@@ -13481,6 +13536,44 @@ func TestInterpreter_Store(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.F64(1.5), v)
 	})
+
+	t.Run("adopts an unbound container", func(t *testing.T) {
+		for _, c := range hostContainers() {
+			i := interp.MustNew(program.New(nil))
+			addr, err := i.Alloc(c.build(i.Heap(), types.BoxedNull))
+			require.NoError(t, err, c.name)
+			child, err := i.Alloc(types.String("x"))
+			require.NoError(t, err, c.name)
+
+			value := c.build(nil, types.BoxRef(child))
+			require.NoError(t, i.Store(addr, value), c.name)
+			c.drop(value)
+			_, err = i.RefCount(child)
+			require.ErrorIs(t, err, interp.ErrSegmentationFault, c.name)
+			require.NoError(t, i.Close(), c.name)
+		}
+	})
+
+	t.Run("rejects a container bound to another heap and leaves the slot unchanged", func(t *testing.T) {
+		for _, c := range hostContainers() {
+			i, other := interp.MustNew(program.New(nil)), interp.MustNew(program.New(nil))
+			old := c.build(i.Heap(), types.BoxedNull)
+			addr, err := i.Alloc(old)
+			require.NoError(t, err, c.name)
+			nulls, err := i.RefCount(0)
+			require.NoError(t, err, c.name)
+
+			require.ErrorIs(t, i.Store(addr, c.build(other.Heap(), types.BoxedNull)), interp.ErrTypeMismatch, c.name)
+			loaded, err := i.Load(addr)
+			require.NoError(t, err, c.name)
+			require.Same(t, old, loaded, c.name)
+			count, err := i.RefCount(0)
+			require.NoError(t, err, c.name)
+			require.Equal(t, nulls, count, c.name)
+			require.NoError(t, i.Close(), c.name)
+			require.NoError(t, other.Close(), c.name)
+		}
+	})
 }
 
 func TestInterpreter_Alloc(t *testing.T) {
@@ -13571,6 +13664,45 @@ func TestInterpreter_Alloc(t *testing.T) {
 		reused, err := i.Alloc(value)
 		require.NoError(t, err)
 		require.NotEqual(t, 0, reused)
+	})
+
+	t.Run("adopts an unbound container", func(t *testing.T) {
+		for _, c := range hostContainers() {
+			i := interp.MustNew(program.New(nil))
+			child, err := i.Alloc(types.String("x"))
+			require.NoError(t, err, c.name)
+
+			value := c.build(nil, types.BoxRef(child))
+			addr, err := i.Alloc(value)
+			require.NoError(t, err, c.name)
+			c.drop(value)
+			_, err = i.RefCount(child)
+			require.ErrorIs(t, err, interp.ErrSegmentationFault, c.name)
+			require.NoError(t, i.Release(addr), c.name)
+			require.NoError(t, i.Close(), c.name)
+		}
+	})
+
+	t.Run("rejects a container bound to another heap", func(t *testing.T) {
+		for _, c := range hostContainers() {
+			i, other := interp.MustNew(program.New(nil)), interp.MustNew(program.New(nil))
+			value := c.build(other.Heap(), types.BoxedNull)
+			length := i.HeapLen()
+			nulls, err := i.RefCount(0)
+			require.NoError(t, err, c.name)
+
+			_, err = i.Alloc(value)
+			require.ErrorIs(t, err, interp.ErrTypeMismatch, c.name)
+			require.Equal(t, length, i.HeapLen(), c.name)
+			count, err := i.RefCount(0)
+			require.NoError(t, err, c.name)
+			require.Equal(t, nulls, count, c.name)
+
+			_, err = other.Alloc(value)
+			require.NoError(t, err, c.name)
+			require.NoError(t, i.Close(), c.name)
+			require.NoError(t, other.Close(), c.name)
+		}
 	})
 }
 
@@ -13744,6 +13876,40 @@ func TestInterpreter_Push(t *testing.T) {
 		require.ErrorIs(t, i.Push(value), interp.ErrTypeMismatch)
 		require.Equal(t, 0, i.Len())
 		require.Equal(t, 0, value.closed)
+	})
+
+	t.Run("adopts an unbound container", func(t *testing.T) {
+		for _, c := range hostContainers() {
+			i := interp.MustNew(program.New(nil))
+			child, err := i.Alloc(types.String("x"))
+			require.NoError(t, err, c.name)
+
+			value := c.build(nil, types.BoxRef(child))
+			require.NoError(t, i.Push(value), c.name)
+			c.drop(value)
+			_, err = i.RefCount(child)
+			require.ErrorIs(t, err, interp.ErrSegmentationFault, c.name)
+			require.NoError(t, i.Close(), c.name)
+		}
+	})
+
+	t.Run("rejects a container bound to another heap", func(t *testing.T) {
+		for _, c := range hostContainers() {
+			i, other := interp.MustNew(program.New(nil)), interp.MustNew(program.New(nil))
+			value := c.build(other.Heap(), types.BoxedNull)
+			length := i.HeapLen()
+			nulls, err := i.RefCount(0)
+			require.NoError(t, err, c.name)
+
+			require.ErrorIs(t, i.Push(value), interp.ErrTypeMismatch, c.name)
+			require.Equal(t, 0, i.Len(), c.name)
+			require.Equal(t, length, i.HeapLen(), c.name)
+			count, err := i.RefCount(0)
+			require.NoError(t, err, c.name)
+			require.Equal(t, nulls, count, c.name)
+			require.NoError(t, i.Close(), c.name)
+			require.NoError(t, other.Close(), c.name)
+		}
 	})
 }
 

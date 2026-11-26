@@ -296,6 +296,49 @@ func TestRegistry_Marshal(t *testing.T) {
 		require.Equal(t, baseCounts, counts)
 	})
 
+	t.Run("containers end bound to the VM heap", func(t *testing.T) {
+		live := func(i *interp.Interpreter) (refs int) {
+			for addr := 1; addr < i.HeapLen(); addr++ {
+				if n, err := i.RefCount(addr); err == nil && n > 0 {
+					refs++
+				}
+			}
+			return refs
+		}
+		r := interp.NewRegistry()
+		for _, tt := range []struct {
+			name  string
+			value any
+			drop  func(types.Value)
+		}{
+			{name: "array", value: [2]string{"a", "b"}, drop: func(v types.Value) {
+				v.(*types.Array).SetIndex(0, types.BoxedNull)
+				v.(*types.Array).SetIndex(1, types.BoxedNull)
+			}},
+			{name: "struct", value: codecStrings{A: "a", B: "b", C: "c"}, drop: func(v types.Value) {
+				for idx := range 3 {
+					v.(*types.Struct).SetField(idx, types.BoxedNull)
+				}
+			}},
+			{name: "complex", value: complex(1, 2)},
+		} {
+			i, other := interp.MustNew(program.New(nil)), interp.MustNew(program.New(nil))
+			base := live(i)
+
+			value, err := r.Marshal(i, tt.value)
+			require.NoError(t, err, tt.name)
+			require.False(t, other.Heap().Adopt(value), tt.name)
+			require.True(t, i.Heap().Adopt(value), tt.name)
+			if tt.drop != nil {
+				require.Greater(t, live(i), base, tt.name)
+				tt.drop(value)
+				require.Equal(t, base, live(i), tt.name)
+			}
+			require.NoError(t, i.Close(), tt.name)
+			require.NoError(t, other.Close(), tt.name)
+		}
+	})
+
 	t.Run("function receives active context", func(t *testing.T) {
 		var got context.Context
 		setup := interp.MustNew(program.New(nil))

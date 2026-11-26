@@ -187,7 +187,7 @@ func marshalFunc(t reflect.Type, typ *types.FunctionType) MarshalerFunc {
 // marshalStruct writes exported fields into a VM struct.
 func marshalStruct(vm *types.StructType, fields []field) MarshalerFunc {
 	return func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
-		out := types.NewStruct(nil, vm)
+		out := types.NewStruct(&e.interp.heap, vm)
 		for idx, f := range fields {
 			boxed, err := f.conversion.box(e, unsafe.Add(p, f.offset))
 			if err != nil {
@@ -281,7 +281,7 @@ func marshalArray(t reflect.Type, at *types.ArrayType, elem *conversion) Marshal
 			}
 			elems[idx] = boxed
 		}
-		return types.NewArray(nil, at, elems...), nil
+		return types.NewArray(&e.interp.heap, at, elems...), nil
 	}
 }
 
