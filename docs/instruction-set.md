@@ -314,9 +314,23 @@ Branch offsets are relative to instruction end. Function bodies `MUST` terminate
 
 `RETURN_CALL` transfers ownership to the new activation and releases the retiring activation exactly once.
 
+### Coroutines
+
+A coroutine is the activation of a function whose body holds `YIELD`. Calling such a function runs its body to the first `YIELD` and returns the coroutine's handle instead of its results.
+
+| Event | Effect |
+|---|---|
+| `YIELD v` | suspends the coroutine with `v` as its value and returns the handle to the resumer |
+| `RESUME` (`[coro, in]` → `[coro]`) | continues a suspended coroutine; `in` is the result of its pending `YIELD` |
+| `RETURN` | finishes the coroutine; its value is the last declared return, or null for none |
+| `RETURN_CALL` | keeps the coroutine: the tail-called activation continues it |
+| an exception no handler inside the coroutine covers | finishes the coroutine with a null value and propagates to the resumer's handlers |
+
+`RESUME` traps `ErrCoroutineDone` on a finished coroutine and `ErrCoroutineRunning` on one whose activation is live. `CORO_DONE` and `CORO_VALUE` read a coroutine's state without resuming it. Globals and heap contents `MAY` change while a coroutine is suspended. A coroutine cannot suspend across a host function (`host-integration.md`).
+
 ### References
 
-`any` is the dynamic VM value type. `REF_TEST`/`REF_CAST` recover dynamic types. `REF_SET` mutates scalar cells from `REF_NEW`; other targets trap. Coroutine tail calls preserve the coroutine; completion exposes the last declared return.
+`any` is the dynamic VM value type. `REF_TEST`/`REF_CAST` recover dynamic types. `REF_SET` mutates scalar cells from `REF_NEW`; other targets trap.
 
 ### Arrays
 
@@ -342,6 +356,8 @@ All string comparisons are by content and require string operands. Mismatches `M
 
 Handler tables own exception routing. `types.Error` is the structured payload. Code `0` is unclassified; VM traps use negative codes; source errors use `types.ErrorCodeUserBase` and above.
 
+A handler receives the thrown value unchanged; a trap or a host error arrives as an `Error` whose code is its `TrapCode`. `ERROR_CODE` and `ERROR_GET` trap `ErrTypeMismatch` on a value that is not an `Error`. A handler catches every exception in its range: a filter compares and rethrows with `THROW`. `guides/lower-exceptions.md` lowers source constructs onto these rules.
+
 A handler that receives an `Error` without frames first records the active ones on it, innermost first, as `RuntimeError.Frames` reports them had the error escaped: a trap, a host error, or a thrown `Error` alike, in both tiers. A rethrown `Error` keeps the frames of its first raise.
 
 ## Fusion
@@ -358,6 +374,7 @@ Threaded fusion rules are owned by `fusion.md`.
 ## Related
 
 - `docs/guides/add-opcode.md` — checklist for adding or changing an opcode
+- `docs/guides/lower-exceptions.md` — lowering exceptions and generators onto these opcodes
 - `docs/verification.md` — static validation and stack rules
 - `docs/value-representation.md` — kinds, boxed layout, and boolean representation
 - `docs/jit-internals.md` — native tier status, lowering, and runtime contracts

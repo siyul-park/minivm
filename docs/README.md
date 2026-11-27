@@ -31,6 +31,7 @@ Owns the topic-to-document map for contributors and agents looking for the owner
 
 - `guides/add-opcode.md` — opcode change procedure
 - `guides/add-architecture.md` — target-backend procedure
+- `guides/lower-exceptions.md` — exception and generator lowering for front ends
 - `guides/repl.md` — REPL usage
 
 ## Related

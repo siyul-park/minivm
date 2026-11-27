@@ -13586,6 +13586,290 @@ func TestInterpreter_Run(t *testing.T) {
 			require.ErrorIs(t, runProgramErr(t, prog), interp.ErrCoroutineRunning)
 		})
 	})
+
+	t.Run("lowers generator throw and close", func(t *testing.T) {
+		const (
+			pending = iota // global P: the exception being thrown into a generator
+			counter        // global: counts source code that ran
+			self           // global: the generator's own handle
+		)
+		const (
+			generator = iota // constants
+			throwFn
+			closeFn
+		)
+		const (
+			exit     = 1001
+			stop     = 1002
+			runtime  = 1003
+			sentinel = 777
+		)
+
+		// check is the guide's pending-throw check emitted after a YIELD.
+		check := func(b *types.FunctionBuilder) {
+			resume := b.Label()
+			b.Emit(instr.GLOBAL_GET, pending).Emit(instr.REF_IS_NULL).BrIf(resume).
+				Emit(instr.GLOBAL_GET, pending).Emit(instr.REF_NULL).Emit(instr.GLOBAL_SET, pending).Emit(instr.THROW).
+				Bind(resume)
+		}
+		// body builds a generator: the lazy-start prologue, then source.
+		body := func(source func(b *types.FunctionBuilder)) *types.Function {
+			b := types.NewFunctionBuilder(nil).Returns(types.TypeAny())
+			b.Emit(instr.REF_NULL).Emit(instr.YIELD)
+			check(b)
+			b.Emit(instr.DROP)
+			source(b)
+			return b.MustBuild()
+		}
+		yield := func(b *types.FunctionBuilder, code uint64) {
+			b.Emit(instr.I32_CONST, code).Emit(instr.YIELD)
+			check(b)
+			b.Emit(instr.DROP)
+		}
+		bump := func(b *types.FunctionBuilder) {
+			b.Emit(instr.GLOBAL_GET, counter).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.GLOBAL_SET, counter)
+		}
+		finish := func(b *types.FunctionBuilder) {
+			b.Emit(instr.REF_NULL).Emit(instr.RETURN)
+		}
+
+		// throw(g, exc) is the guide's Throw function.
+		throwBuilder := types.NewFunctionBuilder(nil).Params(types.TypeAny(), types.TypeError()).Returns(types.TypeAny())
+		tStart, tEnd, tCatch, tNext, tStop, tRaise := throwBuilder.Label(), throwBuilder.Label(), throwBuilder.Label(), throwBuilder.Label(), throwBuilder.Label(), throwBuilder.Label()
+		throwBuilder.Emit(instr.LOCAL_GET, 0).Emit(instr.CORO_DONE).BrIf(tRaise)
+		throwBuilder.Bind(tStart).Emit(instr.LOCAL_GET, 1).Emit(instr.GLOBAL_SET, pending).
+			Emit(instr.LOCAL_GET, 0).Emit(instr.REF_NULL).Emit(instr.RESUME).Emit(instr.DROP)
+		throwBuilder.Bind(tEnd).Br(tNext)
+		throwBuilder.Bind(tCatch).Emit(instr.REF_NULL).Emit(instr.GLOBAL_SET, pending).Emit(instr.THROW)
+		throwBuilder.Bind(tNext).Emit(instr.LOCAL_GET, 0).Emit(instr.CORO_DONE).BrIf(tStop).
+			Emit(instr.LOCAL_GET, 0).Emit(instr.CORO_VALUE).Emit(instr.RETURN)
+		throwBuilder.Bind(tStop).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, stop).Emit(instr.ERROR_NEW).Emit(instr.THROW)
+		throwBuilder.Bind(tRaise).Emit(instr.LOCAL_GET, 1).Emit(instr.THROW)
+		throwBuilder.Try(tStart, tEnd, tCatch, 2)
+		throwFunction := throwBuilder.MustBuild()
+
+		// close(g) is the guide's Close function.
+		closeBuilder := types.NewFunctionBuilder(nil).Params(types.TypeAny())
+		cStart, cEnd, cCatch, cError, cOK, cDone := closeBuilder.Label(), closeBuilder.Label(), closeBuilder.Label(), closeBuilder.Label(), closeBuilder.Label(), closeBuilder.Label()
+		closeBuilder.Emit(instr.LOCAL_GET, 0).Emit(instr.CORO_DONE).BrIf(cDone)
+		closeBuilder.Bind(cStart).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, exit).Emit(instr.ERROR_NEW).
+			Emit(instr.CONST_GET, throwFn).Emit(instr.CALL).Emit(instr.DROP)
+		closeBuilder.Bind(cEnd).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, runtime).Emit(instr.ERROR_NEW).Emit(instr.THROW)
+		closeBuilder.Bind(cCatch).Emit(instr.DUP).Emit(instr.REF_TEST, 0).BrIf(cError).Emit(instr.THROW)
+		closeBuilder.Bind(cError).Emit(instr.DUP).Emit(instr.ERROR_CODE).Emit(instr.I32_CONST, exit).Emit(instr.I32_EQ).BrIf(cOK).
+			Emit(instr.DUP).Emit(instr.ERROR_CODE).Emit(instr.I32_CONST, stop).Emit(instr.I32_EQ).BrIf(cOK).
+			Emit(instr.THROW)
+		closeBuilder.Bind(cOK).Emit(instr.DROP)
+		closeBuilder.Bind(cDone).Emit(instr.RETURN)
+		closeBuilder.Try(cStart, cEnd, cCatch, 1)
+		closeFunction := closeBuilder.MustBuild()
+
+		// run assembles main, which creates the generator into local 0, and
+		// returns the interpreter after main released every handle it held.
+		run := func(t *testing.T, gen *types.Function, main func(b *instr.Builder)) *interp.Interpreter {
+			t.Helper()
+			b := instr.NewBuilder()
+			b.Emit(instr.CONST_GET, generator).Emit(instr.CALL).Emit(instr.LOCAL_SET, 0)
+			main(b)
+			b.Emit(instr.REF_NULL).Emit(instr.LOCAL_SET, 0).
+				Emit(instr.REF_NULL).Emit(instr.GLOBAL_SET, pending).
+				Emit(instr.REF_NULL).Emit(instr.GLOBAL_SET, self)
+			code, err := b.Assemble()
+			require.NoError(t, err)
+			vm := interp.MustNew(program.New(code,
+				program.WithLocals(types.TypeAny()),
+				program.WithGlobals(types.TypeError(), types.TypeI32(), types.TypeAny()),
+				program.WithTypes(types.TypeError()),
+				program.WithConstants(gen, throwFunction, closeFunction),
+				program.WithHandlers(b.Handlers()...)))
+			t.Cleanup(func() { _ = vm.Close() })
+			require.NoError(t, vm.Run(context.Background()))
+			return vm
+		}
+		// balanced requires that only the three constants stay live.
+		balanced := func(t *testing.T, vm *interp.Interpreter) {
+			t.Helper()
+			live := 0
+			for addr := 1; addr < vm.HeapLen(); addr++ {
+				if _, err := vm.RefCount(addr); err == nil {
+					live++
+				}
+			}
+			require.Equal(t, 3, live)
+		}
+		pop := func(t *testing.T, vm *interp.Interpreter, want ...types.Value) {
+			t.Helper()
+			for j := len(want) - 1; j >= 0; j-- {
+				got, err := vm.Pop()
+				require.NoError(t, err)
+				require.Equal(t, want[j], got)
+			}
+			require.Equal(t, 1, vm.Len()) // main's local slot
+		}
+		advance := func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.REF_NULL).Emit(instr.RESUME).Emit(instr.DROP)
+		}
+		next := func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.REF_NULL).Emit(instr.RESUME).Emit(instr.CORO_VALUE)
+		}
+		raise := func(b *instr.Builder, code uint64) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, code).Emit(instr.ERROR_NEW).
+				Emit(instr.CONST_GET, throwFn).Emit(instr.CALL)
+		}
+		// try leaves the code of the Error block raises, or sentinel when it does not.
+		try := func(b *instr.Builder, block func()) {
+			start, end, catch, join := b.Label(), b.Label(), b.Label(), b.Label()
+			b.Bind(start)
+			block()
+			b.Emit(instr.I32_CONST, sentinel)
+			b.Bind(end).Br(join)
+			b.Bind(catch).Emit(instr.ERROR_CODE)
+			b.Bind(join)
+			b.Try(start, end, catch, 1)
+		}
+		state := func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.CORO_DONE).
+				Emit(instr.GLOBAL_GET, counter).
+				Emit(instr.GLOBAL_GET, pending).Emit(instr.REF_IS_NULL)
+		}
+		dropped := func(b *instr.Builder, block func()) {
+			try(b, func() { block(); b.Emit(instr.DROP) })
+		}
+
+		t.Run("caught inside", func(t *testing.T) {
+			gen := body(func(b *types.FunctionBuilder) {
+				start, end, catch, after := b.Label(), b.Label(), b.Label(), b.Label()
+				b.Bind(start)
+				yield(b, 1)
+				b.Bind(end).Br(after)
+				b.Bind(catch).Emit(instr.ERROR_CODE).Emit(instr.YIELD)
+				check(b)
+				b.Emit(instr.DROP)
+				b.Bind(after)
+				yield(b, 99)
+				finish(b)
+				b.Try(start, end, catch, 0)
+			})
+			vm := run(t, gen, func(b *instr.Builder) {
+				advance(b)
+				raise(b, 2001)
+				b.Emit(instr.GLOBAL_GET, pending).Emit(instr.REF_IS_NULL)
+				next(b)
+			})
+			pop(t, vm, types.I32(2001), types.I1(true), types.I32(99))
+			balanced(t, vm)
+		})
+
+		t.Run("uncaught", func(t *testing.T) {
+			gen := body(func(b *types.FunctionBuilder) { yield(b, 1); finish(b) })
+			vm := run(t, gen, func(b *instr.Builder) {
+				advance(b)
+				dropped(b, func() { raise(b, 2002) })
+				state(b)
+			})
+			pop(t, vm, types.I32(2002), types.I1(true), types.I32(0), types.I1(true))
+			balanced(t, vm)
+		})
+
+		t.Run("finished generator", func(t *testing.T) {
+			gen := body(func(b *types.FunctionBuilder) { yield(b, 1); finish(b) })
+			vm := run(t, gen, func(b *instr.Builder) {
+				advance(b)
+				advance(b)
+				dropped(b, func() { raise(b, 2003) })
+				state(b)
+			})
+			pop(t, vm, types.I32(2003), types.I1(true), types.I32(0), types.I1(true))
+			balanced(t, vm)
+		})
+
+		t.Run("unstarted generator", func(t *testing.T) {
+			gen := body(func(b *types.FunctionBuilder) { bump(b); yield(b, 1); finish(b) })
+			vm := run(t, gen, func(b *instr.Builder) {
+				dropped(b, func() { raise(b, 2004) })
+				state(b)
+			})
+			pop(t, vm, types.I32(2004), types.I1(true), types.I32(0), types.I1(true))
+			balanced(t, vm)
+		})
+
+		t.Run("close runs finally", func(t *testing.T) {
+			gen := body(func(b *types.FunctionBuilder) {
+				start, end, catch, after := b.Label(), b.Label(), b.Label(), b.Label()
+				b.Bind(start)
+				yield(b, 1)
+				b.Bind(end)
+				bump(b)
+				b.Br(after)
+				b.Bind(catch)
+				bump(b)
+				b.Emit(instr.THROW)
+				b.Bind(after)
+				finish(b)
+				b.Try(start, end, catch, 0)
+			})
+			vm := run(t, gen, func(b *instr.Builder) {
+				advance(b)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, closeFn).Emit(instr.CALL)
+				state(b)
+			})
+			pop(t, vm, types.I1(true), types.I32(1), types.I1(true))
+			balanced(t, vm)
+		})
+
+		t.Run("close of a generator that yields again", func(t *testing.T) {
+			gen := body(func(b *types.FunctionBuilder) {
+				start, end, catch, after := b.Label(), b.Label(), b.Label(), b.Label()
+				b.Bind(start)
+				yield(b, 1)
+				b.Bind(end).Br(after)
+				b.Bind(catch).Emit(instr.DROP)
+				yield(b, 5)
+				b.Bind(after)
+				finish(b)
+				b.Try(start, end, catch, 0)
+			})
+			vm := run(t, gen, func(b *instr.Builder) {
+				advance(b)
+				try(b, func() { b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, closeFn).Emit(instr.CALL) })
+				state(b)
+			})
+			pop(t, vm, types.I32(runtime), types.I1(false), types.I32(0), types.I1(true))
+			balanced(t, vm)
+		})
+
+		t.Run("filters a raw thrown value", func(t *testing.T) {
+			gen := body(func(b *types.FunctionBuilder) {
+				start, end, catch, isError, after := b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
+				b.Bind(start).Emit(instr.I32_CONST, 9).Emit(instr.THROW)
+				b.Bind(end)
+				b.Bind(catch).Emit(instr.DUP).Emit(instr.REF_TEST, 0).BrIf(isError).Emit(instr.DROP)
+				yield(b, 100)
+				b.Br(after)
+				b.Bind(isError).Emit(instr.THROW)
+				b.Bind(after)
+				finish(b)
+				b.Try(start, end, catch, 0)
+			})
+			vm := run(t, gen, func(b *instr.Builder) { next(b) })
+			pop(t, vm, types.I32(100))
+			balanced(t, vm)
+		})
+
+		t.Run("self close", func(t *testing.T) {
+			gen := body(func(b *types.FunctionBuilder) {
+				b.Emit(instr.GLOBAL_GET, self).Emit(instr.CONST_GET, closeFn).Emit(instr.CALL)
+				finish(b)
+			})
+			vm := run(t, gen, func(b *instr.Builder) {
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.GLOBAL_SET, self)
+				try(b, func() { advance(b) })
+				state(b)
+			})
+			pop(t, vm, types.I32(interp.TrapCodeCoroutineRunning), types.I1(true), types.I32(0), types.I1(true))
+			balanced(t, vm)
+		})
+	})
 }
 
 // requireEqualValue compares want with got. An array or struct is compared by
