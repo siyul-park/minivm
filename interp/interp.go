@@ -853,10 +853,7 @@ func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []type
 	defer func() {
 		if err != nil {
 			for i.fp > 1 {
-				f := &i.frames[i.fp-1]
-				if f.release {
-					i.heap.Dec(f.ref)
-				}
+				i.discard(&i.frames[i.fp-1])
 				i.fp--
 			}
 			for _, value := range i.stack[base:i.sp] {
@@ -1772,12 +1769,18 @@ func (i *Interpreter) land(fp int, h instr.Handler, exc types.Boxed) {
 }
 
 // discard releases an unwound frame's activation: its function reference and any
-// in-flight coroutine handle. Operand slots are released by land in one sweep.
+// in-flight coroutine handle, finishing that coroutine with a null value as a
+// return would. Operand slots are released by land in one sweep.
 func (i *Interpreter) discard(f *frame) {
 	if f.release {
 		i.heap.Dec(f.ref)
 	}
 	if f.coro != 0 {
+		if co, ok := i.heap.At(f.coro).(*coroutine); ok {
+			i.heap.Inc(0, 1)
+			co.value = types.BoxedNull
+			co.done = true
+		}
 		i.heap.Dec(f.coro)
 	}
 	f.code = nil

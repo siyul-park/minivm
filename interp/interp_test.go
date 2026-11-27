@@ -13480,6 +13480,45 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NoError(t, vm.Run(context.Background()))
 		require.Equal(t, 3, vm.Len())
 	})
+
+	t.Run("finishes a coroutine an exception escapes", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(nil).
+			Returns(types.TypeAny()).
+			Append(
+				instr.MustNew(instr.I32_CONST, 1),
+				instr.MustNew(instr.YIELD),
+				instr.MustNew(instr.DROP),
+				instr.MustNew(instr.I32_CONST, 7),
+				instr.MustNew(instr.THROW)).
+			MustBuild()
+		escape := func(t *testing.T, after ...instr.Instruction) *program.Program {
+			b := instr.NewBuilder()
+			start, end, catch, join := b.Label(), b.Label(), b.Label(), b.Label()
+			b.Append(instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.LOCAL_SET, 0))
+			b.Bind(start).Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME), instr.MustNew(instr.DROP))
+			b.Bind(end).Br(join)
+			b.Bind(catch).Append(instr.MustNew(instr.DROP))
+			b.Bind(join).Append(after...)
+			b.Try(start, end, catch, 1)
+			code, err := b.Assemble()
+			require.NoError(t, err)
+			return program.New(code, program.WithLocals(types.TypeAny()), program.WithConstants(fn), program.WithHandlers(b.Handlers()...))
+		}
+
+		t.Run("done", func(t *testing.T) {
+			vm := interp.MustNew(escape(t, instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CORO_DONE)))
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			value, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I1(true), value)
+		})
+
+		t.Run("resume", func(t *testing.T) {
+			err := runProgramErr(t, escape(t, instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME)))
+			require.ErrorIs(t, err, interp.ErrCoroutineDone)
+		})
+	})
 }
 
 // requireEqualValue compares want with got. An array or struct is compared by

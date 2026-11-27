@@ -1247,6 +1247,34 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		require.Zero(t, i.Len())
 	})
 
+	t.Run("VM function finishes a coroutine an exception escapes", func(t *testing.T) {
+		gen := types.NewFunctionBuilder(nil).Returns(types.TypeAny()).Append(
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.DROP),
+			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.THROW)).MustBuild()
+		i := interp.MustNew(program.New(nil, program.WithConstants(gen), program.WithGlobals(types.TypeAny())))
+		r := interp.NewRegistry()
+		defer i.Close()
+		vm := func(typ *types.FunctionType, body ...instr.Instruction) *types.Function {
+			return types.NewFunctionBuilder(typ).Append(body...).MustBuild()
+		}
+
+		var start, step func() error
+		var done func() (bool, error)
+		require.NoError(t, r.Unmarshal(i, vm(&types.FunctionType{},
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.GLOBAL_SET, 0), instr.MustNew(instr.RETURN)), &start))
+		require.NoError(t, r.Unmarshal(i, vm(&types.FunctionType{},
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME), instr.MustNew(instr.DROP), instr.MustNew(instr.RETURN)), &step))
+		require.NoError(t, r.Unmarshal(i, vm(&types.FunctionType{Returns: []types.Type{types.TypeI1()}},
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.CORO_DONE), instr.MustNew(instr.RETURN)), &done))
+
+		require.NoError(t, start())
+		require.Error(t, step())
+		finished, err := done()
+		require.NoError(t, err)
+		require.True(t, finished)
+		require.ErrorIs(t, step(), interp.ErrCoroutineDone)
+	})
+
 	t.Run("VM function canceled context", func(t *testing.T) {
 		i := interp.MustNew(program.New(nil), interp.WithTick(1))
 		r := interp.NewRegistry()
