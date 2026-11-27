@@ -1771,7 +1771,7 @@ func (i *Interpreter) land(fp int, h instr.Handler, exc types.Boxed) {
 
 // discard releases an unwound frame's activation: its function reference and any
 // in-flight coroutine handle, finishing that coroutine with a null value as a
-// return would. Operand slots are released by land in one sweep.
+// return without results would. Operand slots are released by land in one sweep.
 func (i *Interpreter) discard(f *frame) {
 	if f.release {
 		i.heap.Dec(f.ref)

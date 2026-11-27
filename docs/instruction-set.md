@@ -316,7 +316,7 @@ Branch offsets are relative to instruction end. Function bodies `MUST` terminate
 
 ### Coroutines
 
-A coroutine is the activation of a function whose body holds `YIELD`. Calling such a function runs its body to the first `YIELD` and returns the coroutine's handle instead of its results.
+A coroutine function is a function whose body holds `YIELD`; a coroutine is its activation. Calling a coroutine function runs its body to the first `YIELD` and returns the coroutine's handle instead of its results.
 
 | Event | Effect |
 |---|---|
@@ -324,13 +324,13 @@ A coroutine is the activation of a function whose body holds `YIELD`. Calling su
 | `RESUME` (`[coro, in]` → `[coro]`) | continues a suspended coroutine; `in` is the result of its pending `YIELD` |
 | `RETURN` | finishes the coroutine; its value is the last declared return, or null for none |
 | `RETURN_CALL` | keeps the coroutine: the tail-called activation continues it |
-| an exception no handler inside the coroutine covers | finishes the coroutine with a null value and propagates to the resumer's handlers |
+| an unwind of its activation: an exception no handler inside the coroutine covers, or a failed host call | finishes the coroutine with a null value; an exception propagates to the resumer's handlers |
 
-`RESUME` traps `ErrCoroutineDone` on a finished coroutine and `ErrCoroutineRunning` on one whose activation is live. `CORO_DONE` and `CORO_VALUE` read a coroutine's state without resuming it. Globals and heap contents `MAY` change while a coroutine is suspended. A coroutine cannot suspend across a host function (`host-integration.md`).
+`RESUME` traps `ErrCoroutineDone` on a finished coroutine and `ErrCoroutineRunning` on one whose activation is live. `CORO_DONE` and `CORO_VALUE` read a coroutine's state without resuming it. `RESUME`, `CORO_DONE`, and `CORO_VALUE` also accept an iterator from `MAP_ITER` or `STRING_ITER`: `RESUME` advances it and discards `in`. Globals and heap contents `MAY` change while a coroutine is suspended. A coroutine cannot suspend across a host function (`host-integration.md`).
 
 ### References
 
-`any` is the dynamic VM value type. `REF_TEST`/`REF_CAST` recover dynamic types. `REF_SET` mutates scalar cells from `REF_NEW`; other targets trap.
+`any` is the dynamic VM value type. `REF_TEST`/`REF_CAST` recover dynamic types. `REF_SET` mutates scalar cells from `REF_NEW`; other targets trap. `REF_IS_NULL` on an operand that is not a reference gives an unspecified result.
 
 ### Arrays
 
@@ -356,7 +356,9 @@ All string comparisons are by content and require string operands. Mismatches `M
 
 Handler tables own exception routing. `types.Error` is the structured payload. Code `0` is unclassified; VM traps use negative codes; source errors use `types.ErrorCodeUserBase` and above.
 
-A handler receives the thrown value unchanged; a trap or a host error arrives as an `Error` whose code is its `TrapCode`. `ERROR_CODE` and `ERROR_GET` trap `ErrTypeMismatch` on a value that is not an `Error`. A handler catches every exception in its range: a filter compares and rethrows with `THROW`. `guides/lower-exceptions.md` lowers source constructs onto these rules.
+A handler entry (`instr.Handler`) covers the byte range `[Start, End)` and catches every exception raised there; a filter compares and rethrows with `THROW`. Handler search walks frames innermost first and matches the top frame at its faulting instruction and each suspended frame at its call site (`CALL`, `RETURN_CALL`, or `RESUME`). On a match the frame's operand stack is cut to `Depth` slots above its base (parameters and locals included), the exception is pushed, and execution continues at `Catch`.
+
+A handler receives the thrown value unchanged; a trap or a host error arrives as an `Error` whose code is `interp.ErrorCode(err)`. `ERROR_CODE` and `ERROR_GET` trap `ErrTypeMismatch` on a value that is not an `Error`. `guides/lower-exceptions.md` lowers source constructs onto these rules.
 
 A handler that receives an `Error` without frames first records the active ones on it, innermost first, as `RuntimeError.Frames` reports them had the error escaped: a trap, a host error, or a thrown `Error` alike, in both tiers. A rethrown `Error` keeps the frames of its first raise.
 

@@ -2,11 +2,11 @@
 
 Lowers source-language exception and generator constructs (`try`/`except`, `finally`, generator `throw` and `close`) onto minivm opcodes, for front-end authors.
 
-`instruction-set.md` owns the semantics this guide relies on: Structured Errors for handlers and catch values, Coroutines for `YIELD`/`RESUME`. Every construct below uses existing opcodes; none needs VM support beyond them.
+`instruction-set.md` owns the semantics this guide relies on: Structured Errors for handler ranges, search, and catch values; Coroutines for `YIELD`/`RESUME`.
 
 ## Catch
 
-A handler covers `[Start, End)` and catches every exception raised there. Lower a typed `except` clause to a filter at the catch IP:
+Lower a typed `except` clause to a filter at the handler's `Catch`:
 
 ```text
 catch:                       ; stack: exc
@@ -25,8 +25,7 @@ matched:
   <clause body>
 ```
 
-- Test the kind before `error.code`: a thrown value need not be an `Error`, and `error.code` traps on anything else.
-- `Depth` counts the frame's slots (parameters and locals) plus the operands live at `Start`.
+Test the kind before `error.code`: a thrown value need not be an `Error`.
 
 ## Finally
 
@@ -48,10 +47,10 @@ A `return` or `break` that leaves the `try` body emits the `finally` body before
 
 ## Generators
 
-A generator is a coroutine (`instruction-set.md`, Coroutines). Two front-end conventions make it behave as Python and JavaScript generators do:
+A generator is a coroutine function (`instruction-set.md`, Coroutines). Two front-end conventions make it behave as Python and JavaScript generators do:
 
-- **Lazy start.** Calling a coroutine-function runs its body to the first `YIELD`. Emit a prologue `YIELD` before any source code, outside every protected range, so creating the generator runs nothing.
-- **Pending-throw slot.** The pending-throw slot is a global `P` that holds the exception a resumer is throwing into a suspended generator, or null. Declare it with the front end's exception root type or `error`. It `MUST NOT` be declared `any`: `ref.is_null` reads a zero scalar as null.
+- **Lazy start.** Emit a prologue `YIELD` before any source code, outside every protected range, so the call that creates the generator runs no source code.
+- **Pending-throw slot.** The pending-throw slot is a global `P` that holds the exception a resumer is throwing into a suspended generator, or null. Declare it with the front end's exception root type or `error`, never `any`: `ref.is_null` of a scalar is unspecified (`instruction-set.md`, References).
 
 After every `YIELD`, the prologue's included, emit the check:
 
@@ -68,11 +67,11 @@ check:
 resume:                      ; stack: the sent value
 ```
 
-A `try` that encloses a source `yield` `MUST` cover the whole check, through its `throw`: threaded code searches handlers at the `throw`, not at the `YIELD`. The fused `global.get`/`ref.is_null`/`br_if` makes the check one dispatch per resume.
+A `try` that encloses a source `yield` covers the whole check, through its `throw`: handler search matches the frame at the `throw` (`instruction-set.md`, Structured Errors). Its first three instructions fuse into one dispatch (`fusion.md`).
 
 ## Throw
 
-Write `throw(g, exc)` once, as a front-end runtime function, not inline at each call site. `exc` `MUST` be a reference; wrap a scalar with `error.new`.
+Write `throw(g, exc)` once, as a front-end runtime function, not inline at each call site. Pass a reference as `exc`; wrap a scalar with `error.new`.
 
 ```text
 throw(g, exc):
@@ -86,6 +85,8 @@ start:
   ref.null
   resume
   drop
+  ref.null
+  global.set P               ; an iterator never runs the check
 end:
   br next
 catch:                       ; RESUME trapped, or the generator did not catch exc
@@ -104,7 +105,7 @@ raise:
   throw
 ```
 
-The protected range is `[start, end)`. An exception the generator does not catch finishes it and reaches this handler; one it catches leaves it running to its next `YIELD`.
+The protected range is `[start, end)`. An exception the generator does not catch finishes it and reaches this handler; one it catches leaves it suspended at its next `YIELD`.
 
 ## Close
 
@@ -114,7 +115,7 @@ The protected range is `[start, end)`. An exception the generator does not catch
 2. Call `throw(g, error.new(EXIT))`, where `EXIT` is a code the front end reserves, inside a handler whose filter (Catch) returns on `EXIT`, or on the StopIteration `throw` raises when the generator finishes, and rethrows anything else.
 3. If `throw` returns, the generator yielded again: raise the source's runtime error.
 
-A `finally` or `with` around a `yield` lowers as Finally; `close` runs it through the pending-throw slot. A generator that calls `close` or `throw` on itself traps `ErrCoroutineRunning`.
+A `finally` or `with` around a `yield` lowers as Finally; `close` runs it through the pending-throw slot. A generator that calls `close` or `throw` on itself traps, as any resume of a running coroutine does (`instruction-set.md`, Coroutines).
 
 ## Related
 
