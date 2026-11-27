@@ -1,7 +1,10 @@
 package codegen
 
 import (
+	"fmt"
+
 	"github.com/dave/jennifer/jen"
+	"github.com/siyul-park/minivm/instr"
 )
 
 func yield() jen.Code {
@@ -95,33 +98,79 @@ func resume() jen.Code {
 			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))))))
 }
 
-func coroDone() jen.Code {
-	return handler(underflow(1),
-		jen.Id("ref").Op(":=").Add(top(1)),
-		reference(jen.Id("ref")),
-		jen.Id("done").Op(":=").Id("int32").Call(jen.Lit(0)),
-		jen.Switch(jen.Id("co").Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Id("ref").Dot("Ref").Call()).Assert(jen.Type())).Block(jen.Case(jen.Op("*").Id("coroutine")).Block(jen.If(jen.Id("co").Dot("done")).Block(jen.Id("done").Op("=").Lit(1))),
-			jen.Case(jen.Qual(typesPkg, "Iterator")).Block(jen.If(jen.Id("co").Dot("Done").Call()).Block(jen.Id("done").Op("=").Lit(1))),
-			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch")))),
-		jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("ref")),
-		top(1).Op("=").Qual(typesPkg, "BoxI1").Call(jen.Id("done").Op("!=").Lit(0)),
-		next())
+// coroutineOp lowers CORO_DONE and CORO_VALUE, which read the *coroutine or iterator the
+// operand ref names and release that ref.
+func coroutineOp(state *state, current step) (value, error) {
+	input, err := operand(state, current)
+	if err != nil {
+		return value{}, err
+	}
+	compile, body := append([]jen.Code(nil), input.compile...), append([]jen.Code(nil), input.check...)
+	var read []jen.Code
+	switch current.op {
+	case instr.CORO_DONE:
+		read = coroutineDone(input.boxed)
+	case instr.CORO_VALUE:
+		read = coroutineValue(input.boxed)
+	default:
+		return value{}, fmt.Errorf("unsupported coroutine opcode %s", instr.TypeOf(current.op).Mnemonic)
+	}
+	read = append(append([]jen.Code(nil), input.body...), read...)
+	if current.op == instr.CORO_DONE && feedsBranch(state, current) {
+		result := value{op: current.op, head: input.head, compile: compile, check: input.check, body: read, raw: jen.Id("done")}
+		state.stack = []value{result}
+		return result, nil
+	}
+	if !input.resident && input.room {
+		body = append(body, overflowAt(input.at))
+	}
+	body = append(body, read...)
+	if current.op == instr.CORO_DONE {
+		body = append(body, settle(state, input, jen.Qual(typesPkg, "BoxI1").Call(jen.Id("done")))...)
+	} else {
+		body = append(body, settle(state, input, jen.Id("val"))...)
+	}
+	return conclude(state, current, input, compile, body), nil
 }
 
-func coroValue() jen.Code {
-	return handler(underflow(1),
-		jen.Id("box").Op(":=").Add(top(1)),
-		reference(jen.Id("box")),
+// coroutineDone binds done to whether the coroutine or iterator ref names has finished.
+func coroutineDone(ref jen.Code) []jen.Code {
+	return []jen.Code{
+		reference(ref),
+		jen.Var().Id("done").Bool(),
+		jen.Switch(jen.Id("co").Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Add(ref).Dot("Ref").Call()).Assert(jen.Type())).Block(
+			jen.Case(jen.Op("*").Id("coroutine")).Block(jen.Id("done").Op("=").Id("co").Dot("done")),
+			jen.Case(jen.Qual(typesPkg, "Iterator")).Block(jen.Id("done").Op("=").Id("co").Dot("Done").Call()),
+			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+		),
+	}
+}
+
+// coroutineValue binds val to the retained value of the coroutine or iterator ref names,
+// retained before the caller releases ref because that release can free the coroutine.
+func coroutineValue(ref jen.Code) []jen.Code {
+	return []jen.Code{
+		reference(ref),
 		jen.Var().Id("val").Qual(typesPkg, "Boxed"),
-		jen.Switch(jen.Id("co").Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Id("box").Dot("Ref").Call()).Assert(jen.Type())).Block(jen.Case(jen.Op("*").Id("coroutine")).Block(jen.Id("val").Op("=").Id("co").Dot("value"),
-			jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("val"))),
-			jen.Case(jen.Qual(typesPkg, "Iterator")).Block(jen.Id("current").Op(":=").Id("co").Dot("Current").Call(),
-				jen.If(jen.Id("current").Op("==").Add(jen.Nil())).Block(jen.Id("i").Dot("heap").Dot("Inc").Call(jen.Lit(0), jen.Lit(1)),
-					jen.Id("val").Op("=").Qual(typesPkg, "BoxedNull")).Else().Block(jen.Id("val").Op("=").Id("i").Dot("box").Call(jen.Id("current")),
-					jen.Switch(jen.Id("current").Op(":=").Id("current").Assert(jen.Type())).Block(jen.Case(jen.Qual(typesPkg, "Boxed")).Block(jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("current"))),
-						jen.Case(jen.Qual(typesPkg, "Ref")).Block(jen.Id("i").Dot("heap").Dot("Inc").Call(jen.Id("int").Call(jen.Id("current")), jen.Lit(1)))))),
-			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch")))),
-		jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("box")),
-		top(1).Op("=").Id("val"),
-		next())
+		jen.Switch(jen.Id("co").Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Add(ref).Dot("Ref").Call()).Assert(jen.Type())).Block(
+			jen.Case(jen.Op("*").Id("coroutine")).Block(
+				jen.Id("val").Op("=").Id("co").Dot("value"),
+				jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("val")),
+			),
+			jen.Case(jen.Qual(typesPkg, "Iterator")).Block(
+				jen.Id("current").Op(":=").Id("co").Dot("Current").Call(),
+				jen.If(jen.Id("current").Op("==").Nil()).Block(
+					jen.Id("i").Dot("heap").Dot("Inc").Call(jen.Lit(0), jen.Lit(1)),
+					jen.Id("val").Op("=").Qual(typesPkg, "BoxedNull"),
+				).Else().Block(
+					jen.Id("val").Op("=").Id("i").Dot("box").Call(jen.Id("current")),
+					jen.Switch(jen.Id("current").Op(":=").Id("current").Assert(jen.Type())).Block(
+						jen.Case(jen.Qual(typesPkg, "Boxed")).Block(jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("current"))),
+						jen.Case(jen.Qual(typesPkg, "Ref")).Block(jen.Id("i").Dot("heap").Dot("Inc").Call(jen.Id("int").Call(jen.Id("current")), jen.Lit(1))),
+					),
+				),
+			),
+			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+		),
+	}
 }

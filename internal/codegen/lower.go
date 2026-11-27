@@ -76,8 +76,8 @@ var lowerers = [256]lowerer{
 	instr.CALL:                call,
 	instr.CLOSURE_NEW:         call,
 	instr.CONST_GET:           slotRead,
-	instr.CORO_DONE:           emit(coroDone()),
-	instr.CORO_VALUE:          emit(coroValue()),
+	instr.CORO_DONE:           coroutineOp,
+	instr.CORO_VALUE:          coroutineOp,
 	instr.DROP:                refOp,
 	instr.DUP:                 refOp,
 	instr.ERROR_CODE:          emit(errorCode()),
@@ -430,7 +430,7 @@ func resolve(pattern pattern) ([]step, error) {
 
 func operands(op instr.Opcode) (instr.Kind, int, bool) {
 	switch op {
-	case instr.DROP, instr.REF_IS_NULL:
+	case instr.DROP, instr.REF_IS_NULL, instr.CORO_DONE, instr.CORO_VALUE:
 		return instr.KindRef, 1, true
 	case instr.ARRAY_GET, instr.STRUCT_GET:
 		return instr.KindI32, 1, true

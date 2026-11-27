@@ -43,6 +43,7 @@ Current patterns include:
 - primitive constants/locals feeding primitive operations;
 - constant calls and closure creation;
 - slot reads, `ref.null`, `dup`, and non-string constants feeding `drop`, `ref.is_null`, or `ref.is_null` + `br_if`;
+- slot reads feeding `coro.done`, `coro.done` + `br_if`, or `coro.value`;
 - conditional branches and scalar comparisons;
 - constant aggregate indexes;
 - non-trapping arithmetic stored into typed locals;

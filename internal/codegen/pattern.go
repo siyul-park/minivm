@@ -87,6 +87,9 @@ func catalog() []pattern {
 		op(instr.DROP),
 		op(instr.REF_IS_NULL),
 		seq(op(instr.REF_IS_NULL), op(instr.BR_IF)),
+		op(instr.CORO_DONE),
+		seq(op(instr.CORO_DONE), op(instr.BR_IF)),
+		op(instr.CORO_VALUE),
 	)
 	patterns = append(patterns, cross(
 		[]pattern{except[types.String]()},

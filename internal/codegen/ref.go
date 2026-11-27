@@ -61,6 +61,39 @@ func produce(state *state, current step) (value, error) {
 }
 
 func consume(state *state, current step) (value, error) {
+	input, err := operand(state, current)
+	if err != nil {
+		return value{}, err
+	}
+	compile, body := append([]jen.Code(nil), input.compile...), append([]jen.Code(nil), input.check...)
+
+	switch current.op {
+	case instr.DROP:
+		if input.resident {
+			body = append(body, input.body...)
+			body = append(body, input.drop...)
+			body = append(body, jen.Id("i").Dot("sp").Op("--"))
+		}
+		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width))
+	case instr.REF_IS_NULL:
+		if !input.resident && input.room {
+			body = append(body, overflowAt(input.at))
+		}
+		body = append(body, input.body...)
+		condition := jen.Add(input.boxed).Dot("Ref").Call().Op("==").Lit(0)
+		if feedsBranch(state, current) {
+			result := value{op: current.op, head: input.head, compile: compile, check: input.check, body: input.body, raw: condition}
+			state.stack = []value{result}
+			return result, nil
+		}
+		body = append(body, settle(state, input, jen.Qual(typesPkg, "BoxI1").Call(condition))...)
+	}
+	return conclude(state, current, input, compile, body), nil
+}
+
+// operand takes the ref a consumer pops: the resident stack top when standalone, else the
+// fused source before it.
+func operand(state *state, current step) (value, error) {
 	if state.standalone {
 		state.stack = []value{{
 			op:       current.op,
@@ -81,53 +114,41 @@ func consume(state *state, current step) (value, error) {
 	if len(state.stack) == 0 {
 		return value{}, fmt.Errorf("%s needs one pending value", instr.TypeOf(current.op).Mnemonic)
 	}
-	input := state.stack[len(state.stack)-1]
-	compile := append([]jen.Code(nil), input.compile...)
-	body := append([]jen.Code(nil), input.check...)
+	return state.stack[len(state.stack)-1], nil
+}
 
-	switch current.op {
-	case instr.DROP:
-		if input.resident {
-			body = append(body, input.body...)
-			body = append(body, input.drop...)
-			body = append(body, jen.Id("i").Dot("sp").Op("--"))
-		}
-		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width))
-	case instr.REF_IS_NULL:
-		if !input.resident && input.room {
-			body = append(body, overflowAt(input.at))
-		}
-		body = append(body, input.body...)
-		condition := jen.Add(input.boxed).Dot("Ref").Call().Op("==").Lit(0)
-		if !state.standalone && state.offset+width(current.op) < state.width {
-			result := value{op: current.op, head: input.head, compile: compile, check: input.check, body: input.body, raw: condition}
-			state.stack = []value{result}
-			return result, nil
-		}
-		if input.resident {
-			body = append(body,
-				top(1).Op("=").Qual(typesPkg, "BoxI1").Call(condition),
-			)
-			body = append(body, input.drop...)
-		} else {
-			body = append(body,
-				jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Qual(typesPkg, "BoxI1").Call(condition),
-				jen.Id("i").Dot("sp").Op("++"),
-			)
-			body = append(body, input.drop...)
-		}
-		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width))
+// feedsBranch reports whether a br_if follows the fused consumer, so it hands that branch a raw condition.
+func feedsBranch(state *state, current step) bool {
+	return !state.standalone && state.offset+width(current.op) < state.width
+}
+
+// settle stores result where the consumer's value lives: over the resident operand, or pushed
+// above the borrowed source. It then releases the operand and advances past the pattern.
+func settle(state *state, input value, result jen.Code) []jen.Code {
+	var body []jen.Code
+	if input.resident {
+		body = append(body, top(1).Op("=").Add(result))
+	} else {
+		body = append(body,
+			jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Add(result),
+			jen.Id("i").Dot("sp").Op("++"),
+		)
 	}
+	body = append(body, input.drop...)
+	return append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width))
+}
 
+// conclude ends a ref consumer: standalone yields its handler, fused its compile steps.
+func conclude(state *state, current step, input value, compile, body []jen.Code) value {
 	state.stack = nil
 	if state.standalone {
-		return value{op: current.op, head: current.op, handler: standalone(current.op, compile, body)}, nil
+		return value{op: current.op, head: current.op, handler: standalone(current.op, compile, body)}
 	}
 	compile = append(compile,
 		jen.Id("c").Dot("ip").Op("+=").Lit(width(input.head)),
 		jen.Return(closure(body...)),
 	)
-	return value{op: current.op, head: input.head, compile: compile}, nil
+	return value{op: current.op, head: input.head, compile: compile}
 }
 
 func refNew() jen.Code {
