@@ -155,7 +155,8 @@ func (h *Heap) Inc(addr, n int) {
 }
 
 // Dec removes one reference from addr and reclaims the value with its last,
-// releasing what it references, for the runtime that owns the heap.
+// releasing what it references except null, for the runtime that owns the
+// heap.
 func (h *Heap) Dec(addr int) {
 	if h.rc[addr] > 1 {
 		h.rc[addr]--
@@ -172,7 +173,9 @@ func (h *Heap) Dec(addr int) {
 		if h.rc[next] == 0 {
 			v := h.objects[next]
 			for _, r := range h.refs(v) {
-				h.work = append(h.work, int(r))
+				if r != 0 {
+					h.work = append(h.work, int(r))
+				}
 			}
 			h.reclaim(next, v)
 		}
@@ -220,14 +223,16 @@ func (h *Heap) Live() int {
 	return len(h.objects) - len(h.free)
 }
 
-// Dispose releases what old references and finalizes it, leaving the slot at
-// addr allocated, so a replaced value keeps its address and count. It is for
-// the runtime that owns the heap.
+// Dispose releases what old references except null and finalizes it, leaving
+// the slot at addr allocated, so a replaced value keeps its address and count.
+// It is for the runtime that owns the heap.
 func (h *Heap) Dispose(addr int, old Value) {
 	var local [8]int
 	children := local[:0]
 	for _, ref := range h.refs(old) {
-		children = append(children, int(ref))
+		if ref != 0 {
+			children = append(children, int(ref))
+		}
 	}
 	for _, child := range children {
 		h.Dec(child)
@@ -309,13 +314,9 @@ func (h *Heap) Drain() {
 
 // Undo frees the value at addr that no one ever published, which holds the
 // only reference, without finalizing it or walking its references. It keeps
-// the value for reuse. A generic array holds only nulls, whose references go
-// with it. Undo is for the runtime that owns the heap.
+// the value for reuse. Undo is for the runtime that owns the heap.
 func (h *Heap) Undo(addr int) {
 	v := h.objects[addr]
-	if array, ok := v.(*Array); ok {
-		h.rc[0] -= len(array.elems)
-	}
 	h.recycle(v, false)
 	h.objects[addr] = nil
 	h.rc[addr] = 0

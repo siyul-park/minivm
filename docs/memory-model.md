@@ -63,11 +63,11 @@ Native code serves maps of every key kind (`i1`, `i8`, `i32`, `i64`, `f32`, `f64
 
 An `Array`, `Struct`, or `Map` owns the references its words hold and releases them through the heap it is bound to. A constructor binds the container to the heap it is given. A container built with a nil heap is unbound, and `Heap.Adopt` binds it without changing a count; `Interpreter.Alloc`, `Push`, and `Store` adopt through it, and `Heap.Add` takes only a container already bound to its heap. Those three return `ErrTypeMismatch` for a container bound to another heap. An unbound container panics with `ErrDetached` when it must reach a heap: to release a reference, or, for a map, to read a reference key.
 
-Every method finishes its structural change before it releases anything, so a finalizer (`io.Closer.Close`) that reaches the container sees it whole. `Heap.Retain` counts `null`; `Heap.Release` skips it.
+Every method finishes its structural change before it releases anything, so a finalizer (`io.Closer.Close`) that reaches the container sees it whole. `Heap.Retain` counts `null`; `Heap.Release`, and the release of a reclaimed or replaced value's references, skip it, so `null`'s count never falls and a `null` word is never owed a release.
 
 | `Array` method | Ownership |
 |---|---|
-| `MakeArray(heap, typ, size)` | `size` zero values: a reference element is the `null` word, uncounted |
+| `MakeArray(heap, typ, size)` | `size` zero values: a reference element is the `null` word |
 | `NewArray(heap, typ, elems...)` | takes `elems` |
 | `Index` | borrows |
 | `SetIndex` | takes the new word, releases the replaced one |

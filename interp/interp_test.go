@@ -11147,6 +11147,73 @@ func TestNew(t *testing.T) {
 }
 
 func TestInterpreter_Run(t *testing.T) {
+	t.Run("binds a constant container to its heap", func(t *testing.T) {
+		arr, rec := types.NewArrayType(types.TypeAny()), types.NewStructType(types.NewStructField(types.TypeAny()))
+		tests := []struct {
+			name     string
+			constant types.Value
+			build    func(b *instr.Builder)
+		}{
+			{name: "array", constant: types.NewArray(nil, arr, types.BoxedNull), build: func(b *instr.Builder) {
+				b.Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_FILL)
+			}},
+			{name: "struct", constant: types.NewStruct(nil, rec, types.BoxedNull), build: func(b *instr.Builder) {
+				b.Emit(instr.CONST_GET, 0).Emit(instr.DUP).Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 1).Emit(instr.STRUCT_SET)
+				b.Emit(instr.I32_CONST, 0).Emit(instr.REF_NULL).Emit(instr.STRUCT_SET)
+			}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				b := instr.NewBuilder()
+				tt.build(b)
+				code, err := b.Assemble()
+				require.NoError(t, err)
+				vm := interp.MustNew(program.New(code, program.WithConstants(tt.constant, types.String("s")), program.WithTypes(arr, rec)),
+					interp.WithThreshold(-1))
+				defer vm.Close()
+
+				require.NoError(t, vm.Run(context.Background()))
+			})
+		}
+	})
+
+	t.Run("leaves every operand with the stack when struct.new traps on a field", func(t *testing.T) {
+		tests := []struct {
+			name  string
+			typ   *types.StructType
+			first func(b *instr.Builder)
+		}{
+			{name: "after a reference field", typ: types.NewStructType(types.NewStructField(types.TypeAny()), types.NewStructField(types.TypeI64())),
+				first: func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0) }},
+			{name: "after a wide i64 field", typ: types.NewStructType(types.NewStructField(types.TypeI64()), types.NewStructField(types.TypeI64())),
+				first: func(b *instr.Builder) { b.Emit(instr.I64_CONST, uint64(math.MaxInt64)) }},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				b := instr.NewBuilder()
+				tt.first(b)
+				code, err := b.Emit(instr.CONST_GET, 0).Emit(instr.STRUCT_NEW, 0).Assemble()
+				require.NoError(t, err)
+				vm := interp.MustNew(program.New(code, program.WithConstants(types.String("s")), program.WithTypes(tt.typ)),
+					interp.WithThreshold(-1))
+				defer vm.Close()
+
+				require.ErrorIs(t, vm.Run(context.Background()), interp.ErrTypeMismatch)
+				for vm.Len() > 0 {
+					word, err := vm.PopBoxed()
+					require.NoError(t, err)
+					if word.Kind() == types.KindRef {
+						require.NoError(t, vm.Release(word.Ref()))
+					}
+				}
+				heap := vm.Heap()
+				for addr := 1; addr < heap.Len(); addr++ {
+					require.NotContains(t, []string{"*types.Struct", "types.I64"}, fmt.Sprintf("%T", heap.At(addr)), "slot %d leaks", addr)
+				}
+			})
+		}
+	})
+
 	t.Run("slices a host array without leaking its elements", func(t *testing.T) {
 		code, err := instr.NewBuilder().Emit(instr.GLOBAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SLICE).Emit(instr.DROP).Assemble()
 		require.NoError(t, err)
@@ -11248,11 +11315,8 @@ func TestInterpreter_Run(t *testing.T) {
 		tests := []struct {
 			name  string
 			build func(b *instr.Builder)
-			err   error
-			// null is how far the count of null ends above its starting 2: a
-			// release skips null, so overwriting a retained null leaves it counted.
 			// The constant string ends with its one reference and every other slot at zero.
-			null int
+			err error
 		}{
 			{name: "array.new", build: func(b *instr.Builder) { two(b) }},
 			{name: "array.new_default", build: func(b *instr.Builder) { b.Emit(instr.I32_CONST, 3).Emit(instr.ARRAY_NEW_DEFAULT, 0) }},
@@ -11261,7 +11325,7 @@ func TestInterpreter_Run(t *testing.T) {
 			{name: "array.set", build: func(b *instr.Builder) {
 				two(b).Emit(instr.DUP).Emit(instr.I32_CONST, 0).Emit(instr.REF_NULL).Emit(instr.ARRAY_SET)
 			}},
-			{name: "array.set overwrites null", null: 1, build: func(b *instr.Builder) {
+			{name: "array.set overwrites null", build: func(b *instr.Builder) {
 				b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.DUP).Emit(instr.I32_CONST, 0)
 				str(b).Emit(instr.ARRAY_SET)
 			}},
@@ -11338,9 +11402,6 @@ func TestInterpreter_Run(t *testing.T) {
 				got, err := vm.RefCount(text.Ref())
 				require.NoError(t, err)
 				require.Equal(t, 1, got)
-				null, err := vm.RefCount(0)
-				require.NoError(t, err)
-				require.Equal(t, 2+tt.null, null)
 				for addr := 1; addr < vm.HeapLen(); addr++ {
 					if addr == text.Ref() {
 						continue

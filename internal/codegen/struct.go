@@ -102,15 +102,20 @@ func boxField(kind instr.Kind, data jen.Code) jen.Code {
 func structNew() jen.Code {
 	return assertType("StructType",
 		jen.Id("size").Op(":=").Id("len").Call(jen.Id("typ").Dot("Fields")),
-		// The struct is in the heap before it takes the operands, so a trap while
-		// allocating leaves them with the stack.
+		jen.Var().Id("wide").Index().Int(),
+		jen.For(jen.List(jen.Id("j"), jen.Id("f")).Op(":=").Range().Id("typ").Dot("Fields")).Block(
+			jen.Switch(jen.Id("f").Dot("Kind")).Block(jen.Case(jen.Qual(typesPkg, "KindI32"), jen.Qual(typesPkg, "KindI8"), jen.Qual(typesPkg, "KindI1"), jen.Qual(typesPkg, "KindF32"), jen.Qual(typesPkg, "KindF64"), jen.Qual(typesPkg, "KindRef")),
+				jen.Case(jen.Qual(typesPkg, "KindI64")).Block(jen.Id("wide").Op("=").Append(jen.Id("wide"), jen.Id("j"))),
+				jen.Default().Block(jen.Return(closure(jen.Panic(jen.Id("ErrTypeMismatch"))))))),
+		// Every operand that can trap is checked before the struct is in the heap,
+		// and the struct is in the heap before it takes the operands, so a trap
+		// leaves them all with the stack.
 		jen.Return(closure(jen.If(jen.Id("i").Dot("sp").Op("<").Id("size")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
+			jen.For(jen.List(jen.Id("_"), jen.Id("j")).Op(":=").Range().Id("wide")).Block(jen.Id("i").Dot("borrowI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("size").Op("+").Id("j")))),
 			jen.Id("s").Op(":=").Qual(typesPkg, "NewStruct").Call(jen.Op("&").Id("i").Dot("heap"), jen.Id("typ")),
 			jen.Id("addr").Op(":=").Id("i").Dot("heap").Dot("Add").Call(jen.Id("s")),
 			jen.For(jen.List(jen.Id("j"), jen.Id("f")).Op(":=").Range().Id("typ").Dot("Fields")).Block(jen.Id("val").Op(":=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("size").Op("+").Id("j")),
-				jen.Switch(jen.Id("f").Dot("Kind")).Block(jen.Case(jen.Qual(typesPkg, "KindI32"), jen.Qual(typesPkg, "KindI8"), jen.Qual(typesPkg, "KindI1"), jen.Qual(typesPkg, "KindF32"), jen.Qual(typesPkg, "KindF64"), jen.Qual(typesPkg, "KindRef")).Block(jen.Id("s").Dot("SetField").Call(jen.Id("j"), jen.Id("val"))),
-					jen.Case(jen.Qual(typesPkg, "KindI64")).Block(jen.Id("s").Dot("SetRaw").Call(jen.Id("j"), jen.Id("uint64").Call(jen.Id("i").Dot("unboxI64").Call(jen.Id("val"))))),
-					jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))))),
+				jen.If(jen.Id("f").Dot("Kind").Op("==").Qual(typesPkg, "KindI64")).Block(jen.Id("s").Dot("SetRaw").Call(jen.Id("j"), jen.Id("uint64").Call(jen.Id("i").Dot("unboxI64").Call(jen.Id("val"))))).Else().Block(jen.Id("s").Dot("SetField").Call(jen.Id("j"), jen.Id("val")))),
 			jen.Id("i").Dot("sp").Op("-=").Id("size").Op("-").Lit(1),
 			top(1).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("addr")),
 			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(3))))

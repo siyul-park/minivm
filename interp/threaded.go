@@ -123953,25 +123953,37 @@ var (
 				}
 			}
 			v3 := len(v1.Fields)
+			var v4 []int
+			for v0, v2 := range v1.Fields {
+				switch v2.Kind {
+				case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64, types.KindRef:
+				case types.KindI64:
+					v4 = append(v4, v0)
+				default:
+					return func(i *Interpreter) {
+						panic(ErrTypeMismatch)
+					}
+				}
+			}
 			return func(i *Interpreter) {
 				if i.sp < v3 {
 					panic(ErrStackUnderflow)
 				}
-				v0 := types.NewStruct(&i.heap, v1)
-				v2 := i.heap.Add(v0)
-				for v2, v4 := range v1.Fields {
-					v1 := i.stack[i.sp-v3+v2]
-					switch v4.Kind {
-					case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64, types.KindRef:
-						v0.SetField(v2, v1)
-					case types.KindI64:
-						v0.SetRaw(v2, uint64(i.unboxI64(v1)))
-					default:
-						panic(ErrTypeMismatch)
+				for _, v0 := range v4 {
+					i.borrowI64(i.stack[i.sp-v3+v0])
+				}
+				v2 := types.NewStruct(&i.heap, v1)
+				v5 := i.heap.Add(v2)
+				for v0, v4 := range v1.Fields {
+					v1 := i.stack[i.sp-v3+v0]
+					if v4.Kind == types.KindI64 {
+						v2.SetRaw(v0, uint64(i.unboxI64(v1)))
+					} else {
+						v2.SetField(v0, v1)
 					}
 				}
 				i.sp -= v3 - 1
-				i.stack[i.sp-1] = types.BoxRef(v2)
+				i.stack[i.sp-1] = types.BoxRef(v5)
 				i.fr.ip += 3
 			}
 		},

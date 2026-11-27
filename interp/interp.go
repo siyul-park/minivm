@@ -1258,6 +1258,19 @@ func (i *Interpreter) load(constants []types.Value) {
 					structure.SetField(index, value)
 				})
 			}
+		case *types.Array:
+			// The words are copied uncounted; Recount counts them.
+			array := types.NewArray(&i.heap, value.Typ)
+			for index := range value.Len() {
+				array.Append(value.Index(index))
+			}
+			boxed = types.BoxRef(i.heap.Add(array))
+		case *types.Struct:
+			structure := types.NewStruct(&i.heap, value.Typ)
+			for index := range value.Typ.Fields {
+				structure.SetRaw(index, value.Raw(index))
+			}
+			boxed = types.BoxRef(i.heap.Add(structure))
 		default:
 			boxed = i.box(types.Clone(value))
 		}
@@ -1495,8 +1508,8 @@ func (i *Interpreter) newMapDefault(typ *types.MapType, capacity types.Boxed) *t
 	return types.NewMap(&i.heap, typ, int(n))
 }
 
-// newArrayDefault is a new array of typ's element kind holding size zero elements; a
-// []any's are null, each one more reference to null.
+// newArrayDefault is a new array of typ's element kind holding size zero
+// elements; a []any's are null.
 func (i *Interpreter) newArrayDefault(typ *types.ArrayType, size types.Boxed) types.Value {
 	n := size.I32()
 	if n < 0 {
@@ -1516,9 +1529,7 @@ func (i *Interpreter) newArrayDefault(typ *types.ArrayType, size types.Boxed) ty
 	case types.KindF64:
 		return make(types.TypedArray[float64], n)
 	default:
-		val := types.MakeArray(&i.heap, typ, int(n))
-		i.heap.Inc(0, int(n))
-		return val
+		return types.MakeArray(&i.heap, typ, int(n))
 	}
 }
 

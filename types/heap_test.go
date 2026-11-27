@@ -317,6 +317,7 @@ func TestHeap_Dec(t *testing.T) {
 
 	t.Run("releases what the last reference held", func(t *testing.T) {
 		h := types.NewHeap(4, 0, types.Hooks{})
+		h.Add(types.Null)
 		child := h.Add(types.I32(1))
 		grandchild := h.Add(types.NewArray(nil, types.NewArrayType(types.TypeAny())))
 		parent := h.Add(types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(child), types.BoxRef(grandchild)))
@@ -325,6 +326,14 @@ func TestHeap_Dec(t *testing.T) {
 		require.False(t, h.Alive(parent))
 		require.False(t, h.Alive(child))
 		require.False(t, h.Alive(grandchild))
+	})
+
+	t.Run("never releases null through a container", func(t *testing.T) {
+		h := types.NewHeap(4, 0, types.Hooks{})
+		h.Add(types.Null)
+		h.Dec(h.Add(types.MakeArray(h, types.NewArrayType(types.TypeAny()), 2)))
+		require.Equal(t, 1, h.Count(0))
+		require.True(t, h.Alive(0))
 	})
 
 	t.Run("does not reuse an array someone may still hold", func(t *testing.T) {
@@ -444,6 +453,7 @@ func TestHeap_Live(t *testing.T) {
 func TestHeap_Dispose(t *testing.T) {
 	var finalized []int
 	h := types.NewHeap(4, 0, types.Hooks{Finalize: func(addr int, _ types.Value) { finalized = append(finalized, addr) }})
+	h.Add(types.Null)
 	child := h.Add(types.I32(1))
 	holder := h.Add(types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(child)))
 	old := h.At(holder)
@@ -457,6 +467,11 @@ func TestHeap_Dispose(t *testing.T) {
 
 	h.Dispose(holder, h.At(holder))
 	require.Equal(t, []int{holder}, finalized)
+
+	nulls := types.MakeArray(h, types.NewArrayType(types.TypeAny()), 2)
+	holder = h.Add(nulls)
+	h.Dispose(holder, nulls)
+	require.Equal(t, 1, h.Count(0))
 }
 
 func TestHeap_Recount(t *testing.T) {
@@ -566,11 +581,10 @@ func TestHeap_Undo(t *testing.T) {
 		require.Zero(t, finalized)
 	})
 
-	t.Run("returns the nulls a generic array holds and keeps its storage", func(t *testing.T) {
+	t.Run("keeps the storage of a generic array without releasing its nulls", func(t *testing.T) {
 		typ := types.NewArrayType(types.TypeAny())
 		h := types.NewHeap(4, 0, types.Hooks{})
 		h.Add(types.Null)
-		h.Inc(0, 2)
 		array := types.NewArray(nil, typ, types.BoxedNull, types.BoxedNull)
 		addr := h.Add(array)
 
