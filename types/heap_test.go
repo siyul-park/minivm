@@ -215,24 +215,6 @@ func TestHeap_Add(t *testing.T) {
 		require.Equal(t, 257-h.Live(), h.Room())
 	})
 
-	t.Run("binds an unbound container without changing a count", func(t *testing.T) {
-		h := types.NewHeap(8, 0, types.Hooks{})
-		h.Add(types.Null)
-		old := h.Add(types.I32(1))
-		array := types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(old))
-		structure := types.NewStruct(nil, types.NewStructType(types.NewStructField(types.TypeAny())), types.BoxRef(old))
-		m := types.NewMap(nil, types.NewMapType(types.TypeI32(), types.TypeAny()), 0)
-
-		h.Add(array)
-		h.Add(structure)
-		h.Add(m)
-		require.Equal(t, 1, h.Count(old))
-		require.NotPanics(t, func() { array.SetIndex(0, types.BoxedNull) })
-		require.False(t, h.Alive(old))
-		require.NotPanics(t, func() { structure.SetField(0, types.BoxedNull) })
-		require.NotPanics(t, func() { m.Store(types.BoxI32(1), types.BoxRef(0)) })
-	})
-
 	t.Run("never rebinds a container of another heap", func(t *testing.T) {
 		h, other := types.NewHeap(8, 0, types.Hooks{}), types.NewHeap(8, 0, types.Hooks{})
 		other.Add(types.Null)

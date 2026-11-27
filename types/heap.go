@@ -84,8 +84,9 @@ func (h *Heap) Set(addr int, v Value) {
 }
 
 // Add stores v in a new slot with one reference and returns its address, for
-// the runtime that owns the heap. It collects when the heap reaches its pace,
-// and calls Hooks.Exhaust when the limit is reached.
+// the runtime that owns the heap. A container v must be bound to h: built on
+// h, or adopted through Adopt. It collects when the heap reaches its pace, and
+// calls Hooks.Exhaust when the limit is reached.
 func (h *Heap) Add(v Value) int {
 	collected := h.target > 0 && h.Live() >= h.target
 	if collected {
@@ -376,18 +377,16 @@ func (h *Heap) reuse(v Value) (int, bool) {
 }
 
 // track counts a newly allocated value the free lists may later keep.
+//
+//gcassert:inline
 func (h *Heap) track(v Value) {
 	switch v := v.(type) {
 	case *Struct:
-		v.adopt(h)
 		if len(v.Typ.Fields) <= len(v.inline) {
 			h.structs.add()
 		}
 	case *Array:
-		v.adopt(h)
 		h.arrays.add()
-	case *Map:
-		v.adopt(h)
 	}
 }
 
