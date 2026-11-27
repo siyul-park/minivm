@@ -1498,7 +1498,7 @@ var runTests = []struct {
 			[]instr.Instruction{instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0)},
 			program.WithTypes(types.NewArrayType(types.TypeAny())),
 		),
-		values: []types.Value{types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxedNull, types.BoxedNull)},
+		values: []types.Value{newArray(nil, types.NewArrayType(types.TypeAny()), types.BoxedNull, types.BoxedNull)},
 	},
 	{
 		program: program.New([]instr.Instruction{
@@ -2559,7 +2559,7 @@ func hostContainers() []hostContainer {
 	return []hostContainer{
 		{
 			name:  "array",
-			build: func(h *types.Heap, child types.Boxed) types.Value { return types.NewArray(h, array, child) },
+			build: func(h *types.Heap, child types.Boxed) types.Value { return newArray(h, array, child) },
 			drop:  func(v types.Value) { v.(*types.Array).SetIndex(0, types.BoxedNull) },
 		},
 		{
@@ -2995,6 +2995,13 @@ func words(a *types.Array) []types.Boxed {
 	return out
 }
 
+// newArray returns an array of type typ holding elems.
+func newArray(heap *types.Heap, typ *types.ArrayType, elems ...types.Boxed) *types.Array {
+	array := types.NewArray(heap, typ, 0)
+	array.Append(elems...)
+	return array
+}
+
 func TestWithHook(t *testing.T) {
 	tests := []struct {
 		name string
@@ -3333,8 +3340,8 @@ func TestWithHeapLimit(t *testing.T) {
 		const midAddr = 2
 
 		leaf := &trackedValue{}
-		mid := types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(leafAddr))
-		root := types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(midAddr), types.BoxRef(midAddr))
+		mid := newArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(leafAddr))
+		root := newArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(midAddr), types.BoxRef(midAddr))
 		prog := program.New(nil, program.WithConstants(leaf, mid, root))
 		i := interp.MustNew(prog, interp.WithHeap(4), interp.WithHeapLimit(4))
 		defer i.Close()
@@ -8131,7 +8138,7 @@ func TestWithThreshold(t *testing.T) {
 		sumFn := sum.MustBuild()
 		sumFn.Locals = []types.Type{types.TypeI32(), types.TypeI32()}
 
-		arr := types.NewArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(10), types.BoxI32(20), types.BoxI32(30), types.BoxI32(40))
+		arr := newArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(10), types.BoxI32(20), types.BoxI32(30), types.BoxI32(40))
 		b := instr.NewBuilder()
 		loop, loopDone := b.Label(), b.Label()
 		b.Bind(loop)
@@ -8305,7 +8312,7 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithTypes(arr, rec),
 			program.WithConstants(mix.MustBuild(), types.String("s"),
-				types.NewArray(nil, arr, types.BoxedNull, types.BoxedNull), types.NewStruct(nil, rec, types.BoxedNull)))
+				newArray(nil, arr, types.BoxedNull, types.BoxedNull), types.NewStruct(nil, rec, types.BoxedNull)))
 
 		compareNative(t, prog)
 	})
@@ -8348,7 +8355,7 @@ func TestWithThreshold(t *testing.T) {
 		})
 		at.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.RETURN))
 		atFn := at.MustBuild()
-		arr := types.NewArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
+		arr := newArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
 
 		b := instr.NewBuilder()
 		warmLoop, warmDone, start, end, catch := b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
@@ -8472,7 +8479,7 @@ func TestWithThreshold(t *testing.T) {
 		at.Bind(count).Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 8), instr.MustNew(instr.I32_GE_S)).BrIf(counted)
 		at.Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2)).Br(count)
 		at.Bind(counted).Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.RETURN))
-		arr := types.NewArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
+		arr := newArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
 
 		b := instr.NewBuilder()
 		loop, done, live, start, end, catch, next, null, picked := b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
@@ -11154,7 +11161,7 @@ func TestInterpreter_Run(t *testing.T) {
 			constant types.Value
 			build    func(b *instr.Builder)
 		}{
-			{name: "array", constant: types.NewArray(nil, arr, types.BoxedNull), build: func(b *instr.Builder) {
+			{name: "array", constant: newArray(nil, arr, types.BoxedNull), build: func(b *instr.Builder) {
 				b.Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_FILL)
 			}},
 			{name: "struct", constant: types.NewStruct(nil, rec, types.BoxedNull), build: func(b *instr.Builder) {
@@ -11260,7 +11267,7 @@ func TestInterpreter_Run(t *testing.T) {
 					b.Emit(instr.GLOBAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.GLOBAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_COPY)
 				},
 				build: func(vm *interp.Interpreter, closer types.Boxed) types.Value {
-					return types.NewArray(vm.Heap(), arr, closer)
+					return newArray(vm.Heap(), arr, closer)
 				},
 			},
 		}
@@ -11290,7 +11297,7 @@ func TestInterpreter_Run(t *testing.T) {
 				holder, err = vm.Alloc(tt.build(vm, types.BoxRef(closerAddr)))
 				require.NoError(t, err)
 				require.NoError(t, vm.SetGlobal(0, types.BoxRef(holder)))
-				source, err := vm.Alloc(types.NewArray(vm.Heap(), arr, types.BoxedNull))
+				source, err := vm.Alloc(newArray(vm.Heap(), arr, types.BoxedNull))
 				require.NoError(t, err)
 				require.NoError(t, vm.SetGlobal(1, types.BoxRef(source)))
 
@@ -11988,7 +11995,7 @@ func TestInterpreter_Run(t *testing.T) {
 		nested := types.NewFunctionBuilder(fnType).
 			Append(instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)).
 			MustBuild()
-		raw := types.NewArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(1))
+		raw := newArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(1))
 		lit := &types.ArrayLiteral{Typ: types.NewArrayType(fnType), Elems: []types.Value{nested}}
 
 		prog := program.New([]instr.Instruction{
@@ -12025,7 +12032,7 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("shares one mutable constant between its positions", func(t *testing.T) {
 		typ := types.NewArrayType(types.TypeI32())
-		shared := types.NewArray(nil, typ, types.BoxI32(1))
+		shared := newArray(nil, typ, types.BoxI32(1))
 		typed := types.TypedArray[int32]{1}
 
 		tests := []struct {

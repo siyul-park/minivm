@@ -253,7 +253,7 @@ func arrayNew() jen.Code {
 			jen.If(jen.Id("i").Dot("sp").Op("<").Id("size").Op("+").Lit(1)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 			// The array is in the heap before it takes the operands, so a trap while
 			// allocating leaves them with the stack.
-			jen.Id("val").Op(":=").Qual(typesPkg, "NewArray").Call(jen.Op("&").Id("i").Dot("heap"), jen.Id("typ")),
+			jen.Id("val").Op(":=").Qual(typesPkg, "NewArray").Call(jen.Op("&").Id("i").Dot("heap"), jen.Id("typ"), jen.Lit(0)),
 			jen.Id("addr").Op(":=").Id("i").Dot("heap").Dot("Add").Call(jen.Id("val")),
 			jen.Id("val").Dot("Append").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("size").Op("-").Lit(1).Op(":").Id("i").Dot("sp").Op("-").Lit(1)).Op("...")),
 			jen.Id("i").Dot("sp").Op("-=").Id("size"),

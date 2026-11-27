@@ -73,7 +73,7 @@ A value from `Marshal` owns the refs of its fields until the VM takes it. The ca
 
 ## Containers
 
-A host builds a VM container with the interpreter's heap: `types.NewArray(vm.Heap(), typ, elems...)`, `types.NewStruct(vm.Heap(), typ, fields...)`, or `types.NewMap(vm.Heap(), types.NewMapType(key, elem), capacity)`. A container owns the refs its words hold (`memory-model.md`, Container Ownership, owns the per-method contract). One built with a nil heap is unbound until `Alloc`, `Push`, or `Store` takes it; a container bound to another interpreter's heap is `ErrTypeMismatch` there. A host `MAY` change a container through its methods while it holds a counted ref to it. `HostMap.Map` returns a VM-owned copy of the Go map, which iterates in Go's order.
+A host builds a VM container with the interpreter's heap: `types.NewArray(vm.Heap(), typ, size)` and `Append`, `types.NewStruct(vm.Heap(), typ, fields...)`, or `types.NewMap(vm.Heap(), types.NewMapType(key, elem), capacity)`. A container owns the refs its words hold (`memory-model.md`, Container Ownership, owns the per-method contract). One built with a nil heap is unbound until `Alloc`, `Push`, or `Store` takes it; a container bound to another interpreter's heap is `ErrTypeMismatch` there. A host `MAY` change a container through its methods while it holds a counted ref to it. `HostMap.Map` returns a VM-owned copy of the Go map, which iterates in Go's order.
 
 ## Host Functions
 
@@ -119,7 +119,7 @@ Additional rules:
 - Storing another heap address returns `ErrTypeMismatch`; share it with `Alloc(ref)`.
 - Concrete pointers passed to `Alloc`, `Store`, or `Push` transfer unique ownership and `MUST NOT` already be VM-owned.
 - Owned refs `MUST` transfer or release; leaked host ownership keeps objects alive.
-- `vm.Heap()` returns the interpreter's `*types.Heap`, which a container binds to and takes its storage from (`types.MakeArray`, `types.NewArray`, `types.NewStruct`, `types.NewMap`). Its address methods are unchecked and serve the runtime: a host `MUST` use the checked `Interpreter` methods above to read, write, or count a slot.
+- `vm.Heap()` returns the interpreter's `*types.Heap`, which a container binds to and takes its storage from (`types.NewArray`, `types.NewStruct`, `types.NewMap`). Its address methods are unchecked and serve the runtime: a host `MUST` use the checked `Interpreter` methods above to read, write, or count a slot.
 
 `Store`/`Alloc` track crossed pointers to reject double ownership. Heap-stored dynamic functions receive callable dispatch slots and follow normal heap lifetime.
 

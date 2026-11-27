@@ -123342,7 +123342,7 @@ var (
 					if i.sp < v0+1 {
 						panic(ErrStackUnderflow)
 					}
-					v2 := types.NewArray(&i.heap, v1)
+					v2 := types.NewArray(&i.heap, v1, 0)
 					v3 := i.heap.Add(v2)
 					v2.Append(i.stack[i.sp-v0-1 : i.sp-1]...)
 					i.sp -= v0
@@ -124375,7 +124375,7 @@ var (
 				default:
 					panic(ErrTypeMismatch)
 				}
-				v6 := types.MakeArray(&i.heap, types.NewArrayType(v2.Typ.Key), v2.Len())
+				v6 := types.NewArray(&i.heap, types.NewArrayType(v2.Typ.Key), v2.Len())
 				v7 := types.BoxRef(i.heap.Add(v6))
 				v8 := 0
 				func() {

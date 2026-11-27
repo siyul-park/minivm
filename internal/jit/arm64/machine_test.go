@@ -851,7 +851,8 @@ func TestNew(t *testing.T) {
 			Code: instr.Marshal(insts),
 		}
 
-		array := types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(2))
+		array := types.NewArray(nil, types.NewArrayType(types.TypeAny()), 0)
+		array.Append(types.BoxRef(2))
 		heap := []types.Value{nil, array, nil}
 		rc := []int{0, 2, 1}
 		stack := []types.Boxed{types.BoxRef(1)}

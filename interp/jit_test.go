@@ -626,7 +626,7 @@ func refArrayProgram(t *testing.T, warm int) *program.Program {
 	)
 	rwFn := rw.MustBuild()
 
-	arr := types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxedNull, types.BoxedNull)
+	arr := types.NewArray(nil, types.NewArrayType(types.TypeAny()), 2)
 	b := instr.NewBuilder()
 	loop, done := b.Label(), b.Label()
 	b.Bind(loop)

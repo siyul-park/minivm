@@ -67,8 +67,7 @@ Every method finishes its structural change before it releases anything, so a fi
 
 | `Array` method | Ownership |
 |---|---|
-| `MakeArray(heap, typ, size)` | `size` zero values: a reference element is the `null` word |
-| `NewArray(heap, typ, elems...)` | takes `elems` |
+| `NewArray(heap, typ, size)` | `size` zero values: a reference element is the `null` word |
 | `Index` | borrows |
 | `SetIndex` | takes the new word, releases the replaced one |
 | `SwapIndex` | takes the new word; the replaced one moves to the caller |

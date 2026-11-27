@@ -1218,7 +1218,7 @@ func (i *Interpreter) load(constants []types.Value) {
 			}
 			boxed = types.BoxRef(int(ref))
 		case *types.ArrayLiteral:
-			array := types.NewArray(&i.heap, value.Typ, make([]types.Boxed, len(value.Elems))...)
+			array := types.NewArray(&i.heap, value.Typ, len(value.Elems))
 			boxed = types.BoxRef(i.heap.Add(array))
 			for index, elem := range value.Elems {
 				queue = append(queue, elem)
@@ -1260,7 +1260,7 @@ func (i *Interpreter) load(constants []types.Value) {
 			}
 		case *types.Array:
 			// The words are copied uncounted; Recount counts them.
-			array := types.NewArray(&i.heap, value.Typ)
+			array := types.NewArray(&i.heap, value.Typ, 0)
 			for index := range value.Len() {
 				array.Append(value.Index(index))
 			}
@@ -1439,7 +1439,7 @@ func (i *Interpreter) slice(array types.Boxed, start, end int) types.Value {
 			if start < 0 || end > view.Len() || start > end {
 				panic(ErrIndexOutOfRange)
 			}
-			return types.MakeArray(&i.heap, view.typ, 0)
+			return types.NewArray(&i.heap, view.typ, 0)
 		}
 	}
 	switch source := source.(type) {
@@ -1459,7 +1459,7 @@ func (i *Interpreter) slice(array types.Boxed, start, end int) types.Value {
 		if start < 0 || end > source.Len() || start > end {
 			panic(ErrIndexOutOfRange)
 		}
-		return types.MakeArray(&i.heap, source.Typ, end-start)
+		return types.NewArray(&i.heap, source.Typ, end-start)
 	default:
 		panic(ErrTypeMismatch)
 	}
@@ -1529,7 +1529,7 @@ func (i *Interpreter) newArrayDefault(typ *types.ArrayType, size types.Boxed) ty
 	case types.KindF64:
 		return make(types.TypedArray[float64], n)
 	default:
-		return types.MakeArray(&i.heap, typ, int(n))
+		return types.NewArray(&i.heap, typ, int(n))
 	}
 }
 

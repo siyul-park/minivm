@@ -18,7 +18,7 @@ func TestHeap(t *testing.T) {
 		h := types.NewHeap(8, 8, types.Hooks{})
 		h.Add(types.Null)
 		h.Recount(nil)
-		a, b := types.NewArray(nil, typ), types.NewArray(nil, typ)
+		a, b := types.NewArray(nil, typ, 0), types.NewArray(nil, typ, 0)
 		ra, rb := h.Add(a), h.Add(b)
 		a.Append(types.BoxRef(rb))
 		b.Append(types.BoxRef(ra))
@@ -37,7 +37,7 @@ func TestHeap(t *testing.T) {
 		h := types.NewHeap(8, 0, types.Hooks{})
 		h.Add(types.Null)
 		h.Recount(nil)
-		a, b := types.NewArray(nil, typ), types.NewArray(nil, typ)
+		a, b := types.NewArray(nil, typ, 0), types.NewArray(nil, typ, 0)
 		ra, rb := h.Add(a), h.Add(b)
 		a.Append(types.BoxRef(rb))
 		b.Append(types.BoxRef(ra))
@@ -94,14 +94,14 @@ func TestHooks(t *testing.T) {
 	t.Run("fault panics from a collection that finds corruption", func(t *testing.T) {
 		h := types.NewHeap(2, 2, types.Hooks{Fault: func() { panic("fault") }})
 		h.Add(types.Null)
-		h.Add(types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(9)))
+		h.Add(newArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(9)))
 		require.PanicsWithValue(t, "fault", func() { h.Add(types.I32(1)) })
 	})
 
 	t.Run("nil fault panics from a collection that finds corruption", func(t *testing.T) {
 		h := types.NewHeap(2, 2, types.Hooks{})
 		h.Add(types.Null)
-		h.Add(types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(9)))
+		h.Add(newArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(9)))
 		require.Panics(t, func() { h.Add(types.I32(1)) })
 	})
 
@@ -132,7 +132,7 @@ func TestHooks(t *testing.T) {
 		h.Add(types.Null)
 		h.Recount(nil)
 		for range 3 {
-			a, b := types.NewArray(nil, typ), types.NewArray(nil, typ)
+			a, b := types.NewArray(nil, typ, 0), types.NewArray(nil, typ, 0)
 			ra, rb := h.Add(a), h.Add(b)
 			a.Append(types.BoxRef(rb))
 			b.Append(types.BoxRef(ra))
@@ -219,7 +219,7 @@ func TestHeap_Add(t *testing.T) {
 		h, other := types.NewHeap(8, 0, types.Hooks{}), types.NewHeap(8, 0, types.Hooks{})
 		other.Add(types.Null)
 		old := other.Add(types.I32(1))
-		array := types.NewArray(other, types.NewArrayType(types.TypeAny()), types.BoxRef(old))
+		array := newArray(other, types.NewArrayType(types.TypeAny()), types.BoxRef(old))
 
 		h.Add(array)
 		array.SetIndex(0, types.BoxedNull)
@@ -242,7 +242,7 @@ func TestHeap_Adopt(t *testing.T) {
 	mapTyp := types.NewMapType(types.TypeI32(), types.TypeAny())
 
 	containers := map[string]func(h *types.Heap) types.Value{
-		"array":  func(h *types.Heap) types.Value { return types.NewArray(h, arrayTyp, types.BoxRef(1)) },
+		"array":  func(h *types.Heap) types.Value { return newArray(h, arrayTyp, types.BoxRef(1)) },
 		"struct": func(h *types.Heap) types.Value { return types.NewStruct(h, structTyp, types.BoxRef(1)) },
 		"map": func(h *types.Heap) types.Value {
 			m := types.NewMap(h, mapTyp, 0)
@@ -292,7 +292,7 @@ func TestHeap_Adopt(t *testing.T) {
 		h := types.NewHeap(4, 0, types.Hooks{})
 		h.Add(types.Null)
 		addr := h.Add(types.I32(1))
-		h.Adopt(types.NewArray(nil, arrayTyp, types.BoxRef(addr)))
+		h.Adopt(newArray(nil, arrayTyp, types.BoxRef(addr)))
 		require.Equal(t, 1, h.Count(addr))
 		require.Equal(t, 1, h.Count(0))
 	})
@@ -319,8 +319,8 @@ func TestHeap_Dec(t *testing.T) {
 		h := types.NewHeap(4, 0, types.Hooks{})
 		h.Add(types.Null)
 		child := h.Add(types.I32(1))
-		grandchild := h.Add(types.NewArray(nil, types.NewArrayType(types.TypeAny())))
-		parent := h.Add(types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(child), types.BoxRef(grandchild)))
+		grandchild := h.Add(types.NewArray(nil, types.NewArrayType(types.TypeAny()), 0))
+		parent := h.Add(newArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(child), types.BoxRef(grandchild)))
 
 		h.Dec(parent)
 		require.False(t, h.Alive(parent))
@@ -331,7 +331,7 @@ func TestHeap_Dec(t *testing.T) {
 	t.Run("never releases null through a container", func(t *testing.T) {
 		h := types.NewHeap(4, 0, types.Hooks{})
 		h.Add(types.Null)
-		h.Dec(h.Add(types.MakeArray(h, types.NewArrayType(types.TypeAny()), 2)))
+		h.Dec(h.Add(types.NewArray(h, types.NewArrayType(types.TypeAny()), 2)))
 		require.Equal(t, 1, h.Count(0))
 		require.True(t, h.Alive(0))
 	})
@@ -339,9 +339,9 @@ func TestHeap_Dec(t *testing.T) {
 	t.Run("does not reuse an array someone may still hold", func(t *testing.T) {
 		typ := types.NewArrayType(types.TypeAny())
 		h := types.NewHeap(4, 0, types.Hooks{})
-		array := types.NewArray(nil, typ)
+		array := types.NewArray(nil, typ, 0)
 		h.Dec(h.Add(array))
-		require.NotSame(t, array, types.MakeArray(h, typ, 0))
+		require.NotSame(t, array, types.NewArray(h, typ, 0))
 	})
 }
 
@@ -382,7 +382,7 @@ func TestHeap_Release(t *testing.T) {
 		h := types.NewHeap(4, 0, types.Hooks{})
 		h.Add(types.I32(0))
 		child := h.Add(types.I32(1))
-		parent := h.Add(types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(child)))
+		parent := h.Add(newArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(child)))
 		h.Release(types.BoxRef(parent))
 		require.False(t, h.Alive(parent))
 		require.False(t, h.Alive(child))
@@ -455,7 +455,7 @@ func TestHeap_Dispose(t *testing.T) {
 	h := types.NewHeap(4, 0, types.Hooks{Finalize: func(addr int, _ types.Value) { finalized = append(finalized, addr) }})
 	h.Add(types.Null)
 	child := h.Add(types.I32(1))
-	holder := h.Add(types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(child)))
+	holder := h.Add(newArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(child)))
 	old := h.At(holder)
 	h.Set(holder, &closer{})
 
@@ -468,7 +468,7 @@ func TestHeap_Dispose(t *testing.T) {
 	h.Dispose(holder, h.At(holder))
 	require.Equal(t, []int{holder}, finalized)
 
-	nulls := types.MakeArray(h, types.NewArrayType(types.TypeAny()), 2)
+	nulls := types.NewArray(h, types.NewArrayType(types.TypeAny()), 2)
 	holder = h.Add(nulls)
 	h.Dispose(holder, nulls)
 	require.Equal(t, 1, h.Count(0))
@@ -479,7 +479,7 @@ func TestHeap_Recount(t *testing.T) {
 		h := types.NewHeap(4, 0, types.Hooks{})
 		h.Add(types.Null)
 		leaf := h.Add(types.I32(1))
-		root := h.Add(types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(leaf)))
+		root := h.Add(newArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(leaf)))
 		h.Inc(leaf, 5)
 
 		h.Recount([]types.Boxed{types.BoxRef(root), types.BoxI32(1)})
@@ -550,11 +550,11 @@ func TestHeap_Reset(t *testing.T) {
 		h := types.NewHeap(4, 0, types.Hooks{})
 		h.Add(types.Null)
 		h.Recount(nil)
-		array := types.NewArray(nil, typ, types.BoxI32(1), types.BoxI32(2))
+		array := newArray(nil, typ, types.BoxI32(1), types.BoxI32(2))
 		h.Add(array)
 
 		h.Reset()
-		require.Same(t, array, types.MakeArray(h, typ, 2))
+		require.Same(t, array, types.NewArray(h, typ, 2))
 		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, words(array))
 	})
 }
@@ -585,12 +585,12 @@ func TestHeap_Undo(t *testing.T) {
 		typ := types.NewArrayType(types.TypeAny())
 		h := types.NewHeap(4, 0, types.Hooks{})
 		h.Add(types.Null)
-		array := types.NewArray(nil, typ, types.BoxedNull, types.BoxedNull)
+		array := newArray(nil, typ, types.BoxedNull, types.BoxedNull)
 		addr := h.Add(array)
 
 		h.Undo(addr)
 		require.Equal(t, 1, h.Count(0))
-		reused := types.NewArray(h, typ)
+		reused := types.NewArray(h, typ, 0)
 		require.Same(t, array, reused)
 		require.Zero(t, reused.Len())
 		require.Zero(t, testing.AllocsPerRun(1, func() {

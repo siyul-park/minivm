@@ -8,6 +8,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// newArray returns an array of type typ holding elems.
+func newArray(heap *types.Heap, typ *types.ArrayType, elems ...types.Boxed) *types.Array {
+	array := types.NewArray(heap, typ, 0)
+	array.Append(elems...)
+	return array
+}
+
 // arrayFixture returns a heap whose slot 0 is null and a function that
 // allocates a counted reference.
 func arrayFixture(hooks types.Hooks) (*types.Heap, func() types.Boxed) {
@@ -34,7 +41,7 @@ func TestArrayLiteral(t *testing.T) {
 	require.Len(t, value.Elems, 1)
 }
 
-func TestMakeArray(t *testing.T) {
+func TestNewArray(t *testing.T) {
 	typ := types.NewArrayType(types.TypeAny())
 	nulls := func(n int) []types.Boxed {
 		elems := make([]types.Boxed, n)
@@ -45,13 +52,13 @@ func TestMakeArray(t *testing.T) {
 	}
 
 	t.Run("holds size null elements for a reference element", func(t *testing.T) {
-		array := types.MakeArray(nil, typ, 3)
+		array := types.NewArray(nil, typ, 3)
 		require.Same(t, typ, array.Typ)
 		require.Equal(t, nulls(3), words(array))
 	})
 
 	t.Run("keeps zero words for a scalar element", func(t *testing.T) {
-		array := types.MakeArray(nil, types.NewArrayType(types.TypeI32()), 3)
+		array := types.NewArray(nil, types.NewArrayType(types.TypeI32()), 3)
 		require.Equal(t, make([]types.Boxed, 3), words(array))
 	})
 
@@ -60,48 +67,36 @@ func TestMakeArray(t *testing.T) {
 		h.Add(types.Null)
 		before := h.Count(0)
 
-		types.MakeArray(h, typ, 3)
+		types.NewArray(h, typ, 3)
 		require.Equal(t, before, h.Count(0))
 	})
 
 	t.Run("reuses a header the heap kept with its cleared storage", func(t *testing.T) {
 		h := types.NewHeap(2, 0, types.Hooks{})
-		kept := types.NewArray(nil, typ, types.BoxRef(1), types.BoxRef(2))
+		kept := newArray(nil, typ, types.BoxRef(1), types.BoxRef(2))
 		h.Undo(h.Add(kept))
 
-		array := types.MakeArray(h, typ, 2)
+		array := types.NewArray(h, typ, 2)
 		require.Same(t, kept, array)
 		require.Equal(t, nulls(2), words(array))
 	})
 
 	t.Run("grows kept storage that is too small", func(t *testing.T) {
 		h := types.NewHeap(2, 0, types.Hooks{})
-		kept := types.NewArray(nil, typ, types.BoxRef(1))
+		kept := newArray(nil, typ, types.BoxRef(1))
 		h.Undo(h.Add(kept))
 
-		array := types.MakeArray(h, typ, 4)
+		array := types.NewArray(h, typ, 4)
 		require.Same(t, kept, array)
 		require.Equal(t, nulls(4), words(array))
 	})
-}
 
-func TestNewArray(t *testing.T) {
-	typ := types.NewArrayType(types.TypeAny())
-
-	t.Run("holds elems", func(t *testing.T) {
-		elems := []types.Boxed{types.BoxRef(1), types.BoxRef(2)}
-		array := types.NewArray(nil, typ, elems...)
-
-		require.Same(t, typ, array.Typ)
-		require.Equal(t, elems, words(array))
-	})
-
-	t.Run("reuses a header the heap kept with its storage", func(t *testing.T) {
+	t.Run("reuses a header the heap kept with its storage at size zero", func(t *testing.T) {
 		h := types.NewHeap(2, 0, types.Hooks{})
-		kept := types.NewArray(nil, typ, types.BoxRef(1), types.BoxRef(2))
+		kept := newArray(nil, typ, types.BoxRef(1), types.BoxRef(2))
 		h.Undo(h.Add(kept))
 
-		array := types.NewArray(h, typ)
+		array := types.NewArray(h, typ, 0)
 		require.Same(t, kept, array)
 		require.Zero(t, array.Len())
 		require.Zero(t, testing.AllocsPerRun(1, func() {
@@ -113,10 +108,10 @@ func TestNewArray(t *testing.T) {
 
 	t.Run("builds a new header without a heap", func(t *testing.T) {
 		h := types.NewHeap(2, 0, types.Hooks{})
-		kept := types.NewArray(nil, typ)
+		kept := types.NewArray(nil, typ, 0)
 		h.Undo(h.Add(kept))
 
-		require.NotSame(t, kept, types.NewArray(nil, typ))
+		require.NotSame(t, kept, types.NewArray(nil, typ, 0))
 	})
 }
 
@@ -127,14 +122,14 @@ func TestNewArrayType(t *testing.T) {
 
 func TestArray_Len(t *testing.T) {
 	typ := types.NewArrayType(types.TypeAny())
-	require.Equal(t, 3, types.MakeArray(nil, typ, 3).Len())
-	require.Zero(t, types.NewArray(nil, typ).Len())
+	require.Equal(t, 3, types.NewArray(nil, typ, 3).Len())
+	require.Zero(t, types.NewArray(nil, typ, 0).Len())
 }
 
 func TestArray_Index(t *testing.T) {
 	h, ref := arrayFixture(types.Hooks{})
 	a0 := ref()
-	array := types.NewArray(h, types.NewArrayType(types.TypeAny()), a0, types.BoxedNull)
+	array := newArray(h, types.NewArrayType(types.TypeAny()), a0, types.BoxedNull)
 
 	require.Equal(t, a0, array.Index(0))
 	require.Equal(t, types.BoxedNull, array.Index(1))
@@ -147,7 +142,7 @@ func TestArray_SetIndex(t *testing.T) {
 	t.Run("takes the new word and releases the replaced one", func(t *testing.T) {
 		h, ref := arrayFixture(types.Hooks{})
 		old, v := ref(), ref()
-		array := types.NewArray(h, typ, old)
+		array := newArray(h, typ, old)
 
 		array.SetIndex(0, v)
 		require.Equal(t, v, array.Index(0))
@@ -158,7 +153,7 @@ func TestArray_SetIndex(t *testing.T) {
 	t.Run("null is counted by the caller and never released", func(t *testing.T) {
 		h, ref := arrayFixture(types.Hooks{})
 		old := ref()
-		array := types.NewArray(h, typ, old, types.BoxedNull)
+		array := newArray(h, typ, old, types.BoxedNull)
 		h.Retain(types.BoxedNull)
 		require.Equal(t, 2, h.Count(0))
 
@@ -181,7 +176,7 @@ func TestArray_SetIndex(t *testing.T) {
 		other = ref()
 		closer := types.BoxRef(h.Add(&closer{}))
 		v := ref()
-		array = types.NewArray(h, typ, closer, other)
+		array = newArray(h, typ, closer, other)
 
 		array.SetIndex(0, v)
 		require.Equal(t, []types.Boxed{v}, seen)
@@ -190,7 +185,7 @@ func TestArray_SetIndex(t *testing.T) {
 	})
 
 	t.Run("an unbound array panics only over a reference", func(t *testing.T) {
-		array := types.NewArray(nil, typ, types.BoxRef(5), types.BoxedNull, types.BoxI32(1))
+		array := newArray(nil, typ, types.BoxRef(5), types.BoxedNull, types.BoxI32(1))
 
 		require.NotPanics(t, func() { array.SetIndex(1, types.BoxRef(6)) })
 		require.NotPanics(t, func() { array.SetIndex(2, types.BoxRef(7)) })
@@ -202,7 +197,7 @@ func TestArray_SetIndex(t *testing.T) {
 func TestArray_SwapIndex(t *testing.T) {
 	h, ref := arrayFixture(types.Hooks{})
 	old, v := ref(), ref()
-	array := types.NewArray(h, types.NewArrayType(types.TypeAny()), old)
+	array := newArray(h, types.NewArrayType(types.TypeAny()), old)
 
 	require.Equal(t, old, array.SwapIndex(0, v))
 	require.Equal(t, v, array.Index(0))
@@ -216,7 +211,7 @@ func TestArray_Fill(t *testing.T) {
 		t.Run(fmt.Sprintf("n=%d takes one reference and adds the rest", n), func(t *testing.T) {
 			h, ref := arrayFixture(types.Hooks{})
 			v := ref()
-			array := types.MakeArray(h, typ, 3)
+			array := types.NewArray(h, typ, 3)
 			for i := range 3 {
 				array.SetIndex(i, types.BoxedNull)
 			}
@@ -235,7 +230,7 @@ func TestArray_Fill(t *testing.T) {
 		t.Run(fmt.Sprintf("n=%d releases the reference", n), func(t *testing.T) {
 			h, ref := arrayFixture(types.Hooks{})
 			v := ref()
-			array := types.MakeArray(h, typ, 2)
+			array := types.NewArray(h, typ, 2)
 
 			array.Fill(v, 0, n)
 			require.False(t, h.Alive(v.Ref()))
@@ -245,7 +240,7 @@ func TestArray_Fill(t *testing.T) {
 
 	t.Run("fills a null window with counted nulls", func(t *testing.T) {
 		h, _ := arrayFixture(types.Hooks{})
-		array := types.MakeArray(h, typ, 3)
+		array := types.NewArray(h, typ, 3)
 		before := h.Count(0)
 
 		array.Fill(types.BoxedNull, 1, 2)
@@ -261,7 +256,7 @@ func TestArray_Fill(t *testing.T) {
 			words = append(words, []types.Boxed{array.Index(0), array.Index(1), array.Index(2)})
 		}})
 		v := ref()
-		array = types.NewArray(h, typ,
+		array = newArray(h, typ,
 			types.BoxRef(h.Add(&closer{})), types.BoxRef(h.Add(&closer{})), types.BoxRef(h.Add(&closer{})))
 
 		array.Fill(v, 0, 3)
@@ -276,7 +271,7 @@ func TestArray_Fill(t *testing.T) {
 		var array *types.Array
 		h, ref := arrayFixture(types.Hooks{Finalize: func(int, types.Value) { array.Delete(0) }})
 		v := ref()
-		array = types.NewArray(h, typ,
+		array = newArray(h, typ,
 			types.BoxRef(h.Add(&closer{})), types.BoxRef(h.Add(&closer{})), types.BoxedNull, types.BoxedNull)
 
 		require.NotPanics(t, func() { array.Fill(v, 0, 4) })
@@ -289,8 +284,8 @@ func TestArray_Copy(t *testing.T) {
 	t.Run("retains the source words and releases the replaced ones", func(t *testing.T) {
 		h, ref := arrayFixture(types.Hooks{})
 		a, b, c, d := ref(), ref(), ref(), ref()
-		src := types.NewArray(h, typ, a, b)
-		dst := types.NewArray(h, typ, c, d)
+		src := newArray(h, typ, a, b)
+		dst := newArray(h, typ, c, d)
 
 		dst.Copy(0, src, 0, 2)
 		require.Equal(t, []types.Boxed{a, b}, []types.Boxed{dst.Index(0), dst.Index(1)})
@@ -302,8 +297,8 @@ func TestArray_Copy(t *testing.T) {
 
 	t.Run("counts null words", func(t *testing.T) {
 		h, _ := arrayFixture(types.Hooks{})
-		src := types.NewArray(h, typ, types.BoxedNull, types.BoxedNull)
-		dst := types.MakeArray(h, typ, 2)
+		src := newArray(h, typ, types.BoxedNull, types.BoxedNull)
+		dst := types.NewArray(h, typ, 2)
 		before := h.Count(0)
 
 		dst.Copy(0, src, 0, 2)
@@ -313,7 +308,7 @@ func TestArray_Copy(t *testing.T) {
 	t.Run("overlaps forward", func(t *testing.T) {
 		h, ref := arrayFixture(types.Hooks{})
 		a, b, c := ref(), ref(), ref()
-		array := types.NewArray(h, typ, a, b, c)
+		array := newArray(h, typ, a, b, c)
 
 		array.Copy(1, array, 0, 2)
 		require.Equal(t, []types.Boxed{a, a, b}, []types.Boxed{array.Index(0), array.Index(1), array.Index(2)})
@@ -325,7 +320,7 @@ func TestArray_Copy(t *testing.T) {
 	t.Run("overlaps backward", func(t *testing.T) {
 		h, ref := arrayFixture(types.Hooks{})
 		a, b, c := ref(), ref(), ref()
-		array := types.NewArray(h, typ, a, b, c)
+		array := newArray(h, typ, a, b, c)
 
 		array.Copy(0, array, 1, 2)
 		require.Equal(t, []types.Boxed{b, c, c}, []types.Boxed{array.Index(0), array.Index(1), array.Index(2)})
@@ -342,8 +337,8 @@ func TestArray_Copy(t *testing.T) {
 			src.SetIndex(1, types.BoxedNull)
 		}})
 		o0, o1 := ref(), ref()
-		src = types.NewArray(h, typ, o0, o1)
-		dst = types.NewArray(h, typ, types.BoxRef(h.Add(&closer{})), types.BoxedNull)
+		src = newArray(h, typ, o0, o1)
+		dst = newArray(h, typ, types.BoxRef(h.Add(&closer{})), types.BoxedNull)
 
 		dst.Copy(0, src, 0, 2)
 		require.Equal(t, []types.Boxed{o0, o1}, seen)
@@ -353,18 +348,18 @@ func TestArray_Copy(t *testing.T) {
 	})
 
 	t.Run("an unbound array copies scalars and panics over references", func(t *testing.T) {
-		src := types.NewArray(nil, typ, types.BoxI32(1))
-		dst := types.NewArray(nil, typ, types.BoxI32(2))
+		src := newArray(nil, typ, types.BoxI32(1))
+		dst := newArray(nil, typ, types.BoxI32(2))
 		require.NotPanics(t, func() { dst.Copy(0, src, 0, 1) })
 		require.Equal(t, types.BoxI32(1), dst.Index(0))
 
-		refs := types.NewArray(nil, typ, types.BoxRef(5))
+		refs := newArray(nil, typ, types.BoxRef(5))
 		require.PanicsWithValue(t, types.ErrDetached, func() { dst.Copy(0, refs, 0, 1) })
 	})
 }
 
 func TestArray_Append(t *testing.T) {
-	array := types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(1))
+	array := newArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(1))
 	array.Append(types.BoxRef(2), types.BoxRef(3))
 
 	require.Equal(t, 3, array.Len())
@@ -374,7 +369,7 @@ func TestArray_Append(t *testing.T) {
 func TestArray_Delete(t *testing.T) {
 	h, ref := arrayFixture(types.Hooks{})
 	a, b, c := ref(), ref(), ref()
-	array := types.NewArray(h, types.NewArrayType(types.TypeAny()), a, b, c)
+	array := newArray(h, types.NewArrayType(types.TypeAny()), a, b, c)
 
 	require.Equal(t, b, array.Delete(1))
 	require.Equal(t, 2, array.Len())
@@ -401,17 +396,17 @@ func TestTypedArray_Clone(t *testing.T) {
 }
 
 func TestArray_Kind(t *testing.T) {
-	require.Equal(t, types.KindRef, types.NewArray(nil, types.NewArrayType(types.TypeAny())).Kind())
+	require.Equal(t, types.KindRef, types.NewArray(nil, types.NewArrayType(types.TypeAny()), 0).Kind())
 }
 
 func TestArray_Type(t *testing.T) {
 	typ := types.NewArrayType(types.TypeAny())
-	require.Equal(t, typ, types.NewArray(nil, typ).Type())
+	require.Equal(t, typ, types.NewArray(nil, typ, 0).Type())
 }
 
 func TestArray_Refs(t *testing.T) {
 	t.Run("primitive elements", func(t *testing.T) {
-		a := types.NewArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2))
+		a := newArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2))
 
 		require.Equal(t, []types.Ref{9}, a.Refs([]types.Ref{9}))
 		var refs []types.Ref
@@ -423,7 +418,7 @@ func TestArray_Refs(t *testing.T) {
 	})
 
 	t.Run("reference elements", func(t *testing.T) {
-		a := types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(1), types.BoxI32(2), types.BoxRef(3))
+		a := newArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(1), types.BoxI32(2), types.BoxRef(3))
 
 		require.Equal(t, []types.Ref{9, 1, 3}, a.Refs([]types.Ref{9}))
 	})
@@ -431,7 +426,7 @@ func TestArray_Refs(t *testing.T) {
 
 func TestArray_Clone(t *testing.T) {
 	typ := types.NewArrayType(types.TypeAny())
-	src := types.NewArray(nil, typ, types.BoxRef(1), types.BoxRef(2))
+	src := newArray(nil, typ, types.BoxRef(1), types.BoxRef(2))
 	c := src.Clone()
 
 	require.Same(t, typ, c.Typ)
@@ -443,7 +438,7 @@ func TestArray_Clone(t *testing.T) {
 	t.Run("a bound copy retains every reference it holds", func(t *testing.T) {
 		h, ref := arrayFixture(types.Hooks{})
 		a := ref()
-		bound := types.NewArray(h, typ, a, types.BoxedNull, types.BoxI32(1))
+		bound := newArray(h, typ, a, types.BoxedNull, types.BoxI32(1))
 		nulls := h.Count(0)
 
 		c := bound.Clone()
@@ -456,7 +451,7 @@ func TestArray_Clone(t *testing.T) {
 	t.Run("an unbound copy shares its words", func(t *testing.T) {
 		h, ref := arrayFixture(types.Hooks{})
 		a := ref()
-		unbound := types.NewArray(nil, typ, a)
+		unbound := newArray(nil, typ, a)
 
 		unbound.Clone()
 		require.Equal(t, 1, h.Count(a.Ref()))
@@ -464,7 +459,7 @@ func TestArray_Clone(t *testing.T) {
 }
 
 func TestArray_String(t *testing.T) {
-	a := types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
+	a := newArray(nil, types.NewArrayType(types.TypeAny()), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
 	require.Equal(t, "[]any{1, 2, 3}", a.String())
 }
 
@@ -555,7 +550,7 @@ func TestArrayType_String(t *testing.T) {
 
 func BenchmarkArray_Refs(b *testing.B) {
 	b.Run("no refs", func(b *testing.B) {
-		a := types.NewArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2))
+		a := newArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2))
 		require.Empty(b, a.Refs(nil))
 
 		var refs []types.Ref
@@ -569,7 +564,7 @@ func BenchmarkArray_Refs(b *testing.B) {
 	})
 
 	b.Run("child refs", func(b *testing.B) {
-		a := types.NewArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(1), types.BoxRef(2))
+		a := newArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(1), types.BoxRef(2))
 		require.Equal(b, []types.Ref{1, 2}, a.Refs(nil))
 
 		refs := make([]types.Ref, 0, 2)

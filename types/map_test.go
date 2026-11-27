@@ -158,7 +158,7 @@ func TestMap(t *testing.T) {
 		out[len(out)-1].id, out[len(out)-1].disp = "ref:0", "ref:0"
 		out = append(out, strs(h)...)
 		for range 3 {
-			addr := h.Add(types.NewArray(nil, typ))
+			addr := h.Add(types.NewArray(nil, typ, 0))
 			arrays = append(arrays, addr)
 			id := fmt.Sprintf("ref:%d", addr)
 			out = append(out, item{id: id, disp: id, key: func() types.Boxed { h.Inc(addr, 1); return types.BoxRef(addr) }})
@@ -394,7 +394,7 @@ func TestNewMapIterator(t *testing.T) {
 func TestMap_Accepts(t *testing.T) {
 	h := newHeap()
 	str, wide := text(h, "a"), cell(h, 1<<50)
-	array := types.BoxRef(h.Add(types.NewArray(nil, types.NewArrayType(types.TypeI32()))))
+	array := types.BoxRef(h.Add(types.NewArray(nil, types.NewArrayType(types.TypeI32()), 0)))
 	structKey := types.NewStructType(types.NewStructField(types.TypeI32()))
 	tests := []struct {
 		name string

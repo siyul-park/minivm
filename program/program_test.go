@@ -142,7 +142,8 @@ func TestProgram_Clone(t *testing.T) {
 	})
 
 	t.Run("copies raw mutable constants in literals", func(t *testing.T) {
-		raw := types.NewArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(1))
+		raw := types.NewArray(nil, types.NewArrayType(types.TypeI32()), 1)
+		raw.SwapIndex(0, types.BoxI32(1))
 		lit := &types.StructLiteral{
 			Typ:    types.NewStructType(types.NewStructField(raw.Type())),
 			Fields: []types.Value{raw},
@@ -157,7 +158,8 @@ func TestProgram_Clone(t *testing.T) {
 
 	t.Run("keeps aliasing", func(t *testing.T) {
 		fn := types.NewFunction(nil, nil, []instr.Instruction{instr.MustNew(instr.NOP)})
-		raw := types.NewArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(1))
+		raw := types.NewArray(nil, types.NewArrayType(types.TypeI32()), 1)
+		raw.SwapIndex(0, types.BoxI32(1))
 		typed := types.TypedArray[int32]{1}
 		lit := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeAny()), Elems: []types.Value{fn, raw, typed}}
 		prog := program.New(nil, program.WithConstants(fn, raw, typed, lit, lit))

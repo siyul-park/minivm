@@ -273,15 +273,15 @@ func marshalArray(t reflect.Type, at *types.ArrayType, elem *conversion) Marshal
 			}
 			defer e.leave(base)
 		}
-		elems := make([]types.Boxed, n)
-		for idx := range elems {
+		array := types.NewArray(&e.interp.heap, at, n)
+		for idx := range n {
 			boxed, err := elem.box(e, unsafe.Add(base, uintptr(idx)*stride))
 			if err != nil {
 				return nil, fmt.Errorf("array element %d: %w", idx, err)
 			}
-			elems[idx] = boxed
+			array.SetIndex(idx, boxed)
 		}
-		return types.NewArray(&e.interp.heap, at, elems...), nil
+		return array, nil
 	}
 }
 

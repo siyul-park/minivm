@@ -173,7 +173,7 @@ func mapKeys() jen.Code {
 		),
 		// The result is in the heap before it is filled, so a trap while it fills frees it
 		// with the keys it already holds; the map reference stays on the stack for unwinding.
-		jen.Id("arr").Op(":=").Qual(typesPkg, "MakeArray").Call(jen.Op("&").Id("i").Dot("heap"), jen.Qual(typesPkg, "NewArrayType").Call(jen.Id("m").Dot("Typ").Dot("Key")), jen.Id("m").Dot("Len").Call()),
+		jen.Id("arr").Op(":=").Qual(typesPkg, "NewArray").Call(jen.Op("&").Id("i").Dot("heap"), jen.Qual(typesPkg, "NewArrayType").Call(jen.Id("m").Dot("Typ").Dot("Key")), jen.Id("m").Dot("Len").Call()),
 		jen.Id("out").Op(":=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("heap").Dot("Add").Call(jen.Id("arr"))),
 		jen.Id("n").Op(":=").Lit(0),
 		jen.Func().Params().Block(
