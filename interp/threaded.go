@@ -75597,6 +75597,7 @@ func fuseConstGet213(c *threader, start int) func(*Interpreter) {
 							v2.value = types.BoxedNull
 						}
 						v2.done = true
+						v2.running = false
 						v2.image = v2.image[:0]
 						v2.upvals = nil
 						if v0.release {
@@ -120036,7 +120037,10 @@ var (
 					v5.release = true
 					v5.coro = 0
 					if v0 < len(i.coros) && i.coros[v0] {
-						v5.coro = i.heap.Add(&coroutine{typ: v1.Typ})
+						v5.coro = i.heap.Add(&coroutine{
+							running: true,
+							typ:     v1.Typ,
+						})
 					}
 					i.sp = v5.bp + v2 + v4
 					i.fr.ip += 1
@@ -120079,7 +120083,10 @@ var (
 					v7.release = true
 					v7.coro = 0
 					if int(v1.Fn) < len(i.coros) && i.coros[int(v1.Fn)] {
-						v7.coro = i.heap.Add(&coroutine{typ: v1.Typ})
+						v7.coro = i.heap.Add(&coroutine{
+							running: true,
+							typ:     v1.Typ,
+						})
 					}
 					i.sp = v7.bp + v4 + v6
 					i.fr.ip += 1
@@ -120417,6 +120424,7 @@ var (
 								v2.value = types.BoxedNull
 							}
 							v2.done = true
+							v2.running = false
 							v2.image = v2.image[:0]
 							v2.upvals = nil
 							if v0.release {
@@ -120480,6 +120488,7 @@ var (
 					}
 					i.sp--
 					v2.value = i.stack[i.sp]
+					v2.running = false
 					v2.addr = v0.addr
 					v2.ref = v0.ref
 					v2.returns = v0.returns
@@ -120524,6 +120533,9 @@ var (
 							if v4.done {
 								panic(ErrCoroutineDone)
 							}
+							if v4.running {
+								panic(ErrCoroutineRunning)
+							}
 							i.sp -= 2
 							v6 := i.sp
 							if v6+len(v4.image)+1 > len(i.stack) {
@@ -120549,6 +120561,7 @@ var (
 							v4.upvals = nil
 							v4.ref = 0
 							v4.release = false
+							v4.running = true
 							i.fr.ip++
 							i.fp++
 							i.fr = v7

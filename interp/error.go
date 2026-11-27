@@ -50,6 +50,7 @@ const (
 	TrapCodeCoroutineDone       types.ErrorCode = -13
 	TrapCodeUncaughtException   types.ErrorCode = -14
 	TrapCodeHostError           types.ErrorCode = -15
+	TrapCodeCoroutineRunning    types.ErrorCode = -16
 )
 
 // Err sentinels are the semantic failures execution reports. ErrYield is not a
@@ -69,6 +70,7 @@ var (
 	ErrHeapExhausted       = errors.New("heap exhausted")
 	ErrYield               = errors.New("yield")
 	ErrCoroutineDone       = errors.New("coroutine done")
+	ErrCoroutineRunning    = errors.New("coroutine running")
 	// ErrInterpreterBusy is returned by a func Unmarshal bound to a VM function
 	// when Run is active and no host function is running, such as from another
 	// goroutine or a hook. Inside a host function the call runs nested instead.
@@ -102,6 +104,7 @@ var errorCodes = []struct {
 	{ErrFuelExhausted, TrapCodeFuelExhausted},
 	{ErrHeapExhausted, TrapCodeHeapExhausted},
 	{ErrCoroutineDone, TrapCodeCoroutineDone},
+	{ErrCoroutineRunning, TrapCodeCoroutineRunning},
 	{ErrUncaughtException, TrapCodeUncaughtException},
 }
 

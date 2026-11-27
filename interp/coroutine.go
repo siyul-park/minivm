@@ -8,6 +8,9 @@ import "github.com/siyul-park/minivm/types"
 // it, delivering a value back as the result of the pending YIELD. A coroutine
 // owns one reference to its callable, captured stack image, and last value.
 // upvals alias the callable closure's storage and are kept live through ref.
+// running is true while its frame is live on the frame stack, from the CALL that
+// starts it or the RESUME that restores it until the YIELD, return, or unwind
+// that stops it; RESUME traps a running coroutine, whose image is empty.
 type coroutine struct {
 	typ *types.FunctionType
 
@@ -23,6 +26,7 @@ type coroutine struct {
 
 	release bool
 	done    bool
+	running bool
 }
 
 var _ types.Traceable = (*coroutine)(nil)

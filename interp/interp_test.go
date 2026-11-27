@@ -13519,6 +13519,73 @@ func TestInterpreter_Run(t *testing.T) {
 			require.ErrorIs(t, err, interp.ErrCoroutineDone)
 		})
 	})
+
+	t.Run("traps a resume of a running coroutine", func(t *testing.T) {
+		// A coroutine runs to its first YIELD inside CALL, so the handle is
+		// stored in the global only after the body has suspended once.
+		resumeOwn := []instr.Instruction{
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME), instr.MustNew(instr.DROP),
+		}
+		suspend := []instr.Instruction{instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.YIELD), instr.MustNew(instr.DROP)}
+		selfResume := append(append([]instr.Instruction{}, suspend...), resumeOwn...)
+		spawn := []instr.Instruction{
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.GLOBAL_TEE, 0),
+			instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME),
+		}
+
+		t.Run("uncaught", func(t *testing.T) {
+			fn := types.NewFunctionBuilder(nil).
+				Returns(types.TypeAny()).
+				Append(selfResume...).
+				Append(instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RETURN)).
+				MustBuild()
+			prog := program.New(spawn, program.WithGlobals(types.TypeAny()), program.WithConstants(fn))
+			require.ErrorIs(t, runProgramErr(t, prog), interp.ErrCoroutineRunning)
+		})
+
+		t.Run("caught", func(t *testing.T) {
+			b := types.NewFunctionBuilder(nil).Returns(types.TypeAny())
+			start, end, catch, join := b.Label(), b.Label(), b.Label(), b.Label()
+			b.Bind(start).Append(selfResume...)
+			b.Bind(end).Br(join)
+			b.Bind(catch).Append(instr.MustNew(instr.ERROR_CODE), instr.MustNew(instr.YIELD), instr.MustNew(instr.DROP))
+			b.Bind(join).Append(instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RETURN))
+			fn := b.Try(start, end, catch, 0).MustBuild()
+			code := append(append([]instr.Instruction{}, spawn...),
+				instr.MustNew(instr.CORO_VALUE), instr.MustNew(instr.LOCAL_SET, 0),
+				instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME), instr.MustNew(instr.DROP),
+				instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.CORO_DONE),
+				instr.MustNew(instr.LOCAL_GET, 0))
+			vm := interp.MustNew(program.New(code, program.WithLocals(types.TypeAny()), program.WithGlobals(types.TypeAny()), program.WithConstants(fn)))
+			defer vm.Close()
+			require.NoError(t, vm.Run(context.Background()))
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(interp.TrapCodeCoroutineRunning), got)
+			done, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I1(true), done)
+		})
+
+		t.Run("tail call", func(t *testing.T) {
+			tail := types.NewFunctionBuilder(nil).
+				Returns(types.TypeAny()).
+				Append(resumeOwn...).
+				Append(instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RETURN)).
+				MustBuild()
+			fn := types.NewFunctionBuilder(nil).
+				Returns(types.TypeAny()).
+				Append(
+					instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.DROP),
+					instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.RETURN_CALL)).
+				MustBuild()
+			code := append(append([]instr.Instruction{}, spawn...),
+				instr.MustNew(instr.DROP),
+				instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME))
+			prog := program.New(code, program.WithGlobals(types.TypeAny()), program.WithConstants(fn, tail))
+			require.ErrorIs(t, runProgramErr(t, prog), interp.ErrCoroutineRunning)
+		})
+	})
 }
 
 // requireEqualValue compares want with got. An array or struct is compared by

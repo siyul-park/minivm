@@ -1104,6 +1104,7 @@ func (i *Interpreter) retire(sweep bool) {
 			co.value = types.BoxedNull
 		}
 		co.done = true
+		co.running = false
 		co.image = co.image[:0]
 		co.upvals = nil
 		co.ref = 0
@@ -1780,6 +1781,7 @@ func (i *Interpreter) discard(f *frame) {
 			i.heap.Inc(0, 1)
 			co.value = types.BoxedNull
 			co.done = true
+			co.running = false
 		}
 		i.heap.Dec(f.coro)
 	}

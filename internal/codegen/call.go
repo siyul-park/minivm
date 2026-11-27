@@ -217,7 +217,7 @@ func pushFrame(callee target, targetSlots int, releaseTarget, native bool, advan
 	)
 	if coroutine != nil {
 		body = append(body, jen.If(jen.Add(coroutine).Op("<").Len(jen.Id("i").Dot("coros")).Op("&&").Id("i").Dot("coros").Index(jen.Add(coroutine))).Block(
-			jen.Id("f").Dot("coro").Op("=").Id("i").Dot("heap").Dot("Add").Call(jen.Op("&").Id("coroutine").Values(jen.Dict{jen.Id("typ"): jen.Id("fn").Dot("Typ")})),
+			jen.Id("f").Dot("coro").Op("=").Id("i").Dot("heap").Dot("Add").Call(jen.Op("&").Id("coroutine").Values(jen.Dict{jen.Id("typ"): jen.Id("fn").Dot("Typ"), jen.Id("running"): jen.True()})),
 		))
 	}
 	body = append(body,
@@ -489,6 +489,7 @@ func retire(guard jen.Code) []jen.Code {
 				jen.Id("co").Dot("value").Op("=").Qual(typesPkg, "BoxedNull"),
 			),
 			jen.Id("co").Dot("done").Op("=").True(),
+			jen.Id("co").Dot("running").Op("=").False(),
 			jen.Id("co").Dot("image").Op("=").Id("co").Dot("image").Index(jen.Empty().Op(":").Lit(0)),
 			jen.Id("co").Dot("upvals").Op("=").Nil(),
 			jen.If(jen.Id("f").Dot("release")).Block(jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("f").Dot("ref"))),
