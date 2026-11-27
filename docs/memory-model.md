@@ -9,7 +9,7 @@ Heap storage, reference ownership, RC, cycle collection.
 | Heap / RC | `types/heap.go` |
 | Threaded ownership | `interp/threaded.go` |
 | Host heap API | `interp/host.go` |
-| Heap object types | `types/array.go`, `struct.go`, `map.go` |
+| Heap object types and their ownership | `types/array.go`, `struct.go`, `map.go` |
 | Boxed values | `types/boxed.go` |
 
 ## Model
@@ -37,6 +37,7 @@ While native code runs, the tcache (`jit-internals.md`, Reserve) owns the struct
 | `CLOSURE_NEW` | transfers function/capture ownership |
 | `RETURN` | releases frame-owned values |
 | native call to a borrowed parameter | caller keeps ownership; materialization restores it |
+| container opcode (`array.*`, `struct.*`, `map.*`) | as the container method it runs (Container Ownership) |
 
 Transfers `MUST` preserve counts exactly. Native execution `MAY` borrow backing storage, but deopt/exits `MUST` restore interpreter ownership.
 
@@ -58,11 +59,34 @@ An `i64` key outside the inline range is a map-owned `I64` heap cell: `Store` an
 
 Native code serves maps of every key kind (`i1`, `i8`, `i32`, `i64`, `f32`, `f64`, `string`, `any`); the rare keys bridge (`jit-internals.md`, Maps). A reference key takes the reference counts `Store` and `Delete` do: a miss holds one more reference to the key, a hit none, and a delete releases the stored key, then the value, then the incoming key. It reads and writes the table through `jit.OffsetMap*`, and `MUST` choose the same slot, write the same control byte, append the same `order` entry, write the same `pos` word, and make the same `count` and `used` updates as `Store`, `Delete`, and `Load`, and `MUST NOT` rehash: an insert past the load takes the Go `Store`. It `MUST NOT` write `gen`, `epoch`, a slice header, or `seed`.
 
-## Map Ownership
+## Container Ownership
 
-A `Map` owns the references its keys and values hold and releases them through its heap. A map built with a nil heap is unbound: the first reference it must read, retain, or release panics with `ErrDetached`.
+An `Array`, `Struct`, or `Map` owns the references its words hold and releases them through the heap it is bound to. A constructor binds the container to the heap it is given. A container built with a nil heap is unbound, and `Heap.Adopt` binds it without changing a count; `Interpreter.Alloc`, `Push`, and `Store` adopt through it, and `Heap.Add` takes only a container already bound to its heap. Those three return `ErrTypeMismatch` for a container bound to another heap. An unbound container panics with `ErrDetached` when it must reach a heap: to release a reference, or, for a map, to read a reference key.
 
-| Method | Key | Value |
+Every method finishes its structural change before it releases anything, so a finalizer (`io.Closer.Close`) that reaches the container sees it whole. `Heap.Retain` counts `null`; `Heap.Release` skips it.
+
+| `Array` method | Ownership |
+|---|---|
+| `MakeArray(heap, typ, size)` | `size` zero values: a reference element is the `null` word, uncounted |
+| `NewArray(heap, typ, elems...)` | takes `elems` |
+| `Index` | borrows |
+| `SetIndex` | takes the new word, releases the replaced one |
+| `SwapIndex` | takes the new word; the replaced one moves to the caller |
+| `Fill(v, from, n)` | takes one reference to `v` and adds `n-1`; `n` not positive releases `v`; releases the replaced words |
+| `Copy(at, src, from, n)` | retains the copied words, `null` included, and releases the replaced words; `src` may be the array itself |
+| `Append` | takes the words |
+| `Delete` | the removed word moves to the caller; the vacated word becomes `null` |
+| `Clone` | a bound copy retains every reference, `null` included; an unbound copy shares its words |
+
+| `Struct` method | Ownership |
+|---|---|
+| `Field`, `FieldByName` | borrows |
+| `SetField` | takes the new word; a reference field releases the replaced one |
+| `SwapField` | reference field: takes the new word; the replaced one moves to the caller |
+| `Raw`, `SetRaw` | the stored word, uncounted; `SetRaw` `MUST NOT` name a reference field |
+| `Clone` | as `Array.Clone` |
+
+| `Map` method | Key | Value |
 |---|---|---|
 | `Load` | borrowed | borrowed |
 | `Store` | taken; a hit keeps the first key and releases the incoming one | taken; a hit releases the replaced value |
@@ -72,15 +96,15 @@ A `Map` owns the references its keys and values hold and releases them through i
 | `Clear` | every key released once | every value released once |
 | `Clone` | a bound copy retains every ref, `null` included | same |
 
-`Heap.Retain` counts `null`; `Heap.Release` skips it.
+Indexes behave like Go indexing: an index out of range panics. The interpreter checks every index before it calls a method.
+
+## Map Iteration
 
 A walk over a map (`Range`, `map.keys`, `map.iter`) yields entries in insertion order for every map, constants and host-map copies included: an update keeps the entry's place, and a key deleted and stored again goes last. A host-map copy takes the order Go's map range gives. Under mutation, `map.iter` `MUST` produce every entry present for the whole walk exactly once and `MUST NOT` produce a key deleted before the walk reaches it. It also produces every entry inserted during the walk, once: a rehash ends the table's `epoch` with the order positions it dropped, and the walk follows the epochs to its place in the new order, so it never reads an entry the table gave up. A walk that inserts a new key at every step therefore never ends. A table has no epoch until its first walk; after that every rehash records one, and a walk left unfinished keeps the epochs after its own reachable. `map.clear` ends every walk.
 
-A map owns its refs; arrays and structs keep handler reference counting until `types.Heap` owns theirs too (#367).
-
 ## Representation
 
-A heap object keeps its Go representation type for its lifetime and, for a struct, array, or map, its declared type (`Type().Equals`). The one exception is a `REF_NEW` cell, whose scalar kind `REF_SET` may change. `Interpreter.Store` returns `ErrTypeMismatch` for a value that would change the slot's representation; a scalar replacing a scalar cell is allowed, as with `REF_SET`. Optimizer guards on a shape rely on this. A value borrowed by `Load` keeps it too: the host `MUST NOT` change its type or storage except through `Store`.
+A heap object keeps its Go representation type for its lifetime and, for a struct, array, or map, its declared type (`Type().Equals`). The one exception is a `REF_NEW` cell, whose scalar kind `REF_SET` may change. `Interpreter.Store` returns `ErrTypeMismatch` for a value that would change the slot's representation; a scalar replacing a scalar cell is allowed, as with `REF_SET`. Optimizer guards on a shape rely on this. A value borrowed by `Load` keeps it too: a host changes a container only through its methods, while it holds a counted reference.
 
 A finalizer (`io.Closer.Close`) runs as host code with the VM mid-instruction: it `MUST NOT` write a local or a global (`SetLocal`, `SetGlobal`, and a call of a VM function return `ErrHostCall`), since optimized code holds both across a release.
 
