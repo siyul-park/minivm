@@ -76,8 +76,8 @@ var lowerers = [256]lowerer{
 	instr.CALL:                call,
 	instr.CLOSURE_NEW:         call,
 	instr.CONST_GET:           slotRead,
-	instr.CORO_DONE:           coroutineOp,
-	instr.CORO_VALUE:          coroutineOp,
+	instr.CORO_DONE:           coroDone,
+	instr.CORO_VALUE:          coroValue,
 	instr.DROP:                refOp,
 	instr.DUP:                 refOp,
 	instr.ERROR_CODE:          emit(errorCode()),
@@ -303,6 +303,66 @@ func emit(code jen.Code) lowerer {
 	return func(_ *state, current step) (value, error) {
 		return value{op: current.op, head: current.op, handler: code}, nil
 	}
+}
+
+// operand takes the ref a consumer pops: the resident stack top when standalone, else the
+// fused source before it.
+func operand(state *state, current step) (value, error) {
+	if state.standalone {
+		state.stack = []value{{
+			op:       current.op,
+			head:     current.op,
+			boxed:    jen.Id("value"),
+			resident: true,
+			check: []jen.Code{
+				underflow(1),
+			},
+			body: []jen.Code{
+				jen.Id("value").Op(":=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)),
+			},
+			drop: []jen.Code{
+				jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("value")),
+			},
+		}}
+	}
+	if len(state.stack) == 0 {
+		return value{}, fmt.Errorf("%s needs one pending value", instr.TypeOf(current.op).Mnemonic)
+	}
+	return state.stack[len(state.stack)-1], nil
+}
+
+// feedsBranch reports whether a br_if follows the fused consumer, so it hands that branch a raw condition.
+func feedsBranch(state *state, current step) bool {
+	return !state.standalone && state.offset+width(current.op) < state.width
+}
+
+// settle stores result where the consumer's value lives: over the resident operand, or pushed
+// above the borrowed source. It then releases the operand and advances past the pattern.
+func settle(state *state, input value, result jen.Code) []jen.Code {
+	var body []jen.Code
+	if input.resident {
+		body = append(body, top(1).Op("=").Add(result))
+	} else {
+		body = append(body,
+			jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Add(result),
+			jen.Id("i").Dot("sp").Op("++"),
+		)
+	}
+	body = append(body, input.drop...)
+	return append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width))
+}
+
+// conclude ends a ref consumer: standalone yields its handler, fused its compile steps.
+func conclude(state *state, current step, input value, compile, body []jen.Code) value {
+	state.stack = nil
+	if state.standalone {
+		return value{op: current.op, head: current.op, handler: standalone(current.op, compile, body)}
+	}
+	compile = append(compile,
+		jen.Id("c").Dot("ip").Op("+=").Lit(width(input.head)),
+		jen.Return(closure(body...)),
+	)
+	return value{op: current.op, head: input.head, compile: compile}
 }
 
 func compose(pattern pattern, size int, label string) ([]jen.Code, int, error) {

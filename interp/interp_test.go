@@ -13909,115 +13909,117 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, int32(interp.TrapCodeCoroutineRunning), popI32(t, vm))
 	})
 
-	// A coroutine read places a subject in a local, global, or upvalue slot and reads it with
-	// the coroutine op the slot read feeds; WithTick(1) runs the same bytecode unfused.
-	gen := types.NewFunctionBuilder(nil).Returns(types.TypeAny()).Append(
-		instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.YIELD), instr.MustNew(instr.DROP),
-		instr.MustNew(instr.I32_CONST, 8), instr.MustNew(instr.RETURN)).MustBuild()
-	subjects := map[string][]instr.Instruction{
-		"suspended coroutine": {instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
-		"finished coroutine": {
-			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.DUP),
-			instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME), instr.MustNew(instr.DROP),
-		},
-		"string iterator": {instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.STRING_ITER)},
-		"map iterator": {
-			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10),
-			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0), instr.MustNew(instr.MAP_ITER),
-		},
-		"i32":    {instr.MustNew(instr.I32_CONST, 3)},
-		"string": {instr.MustNew(instr.CONST_GET, 2)},
-	}
-	sources := []struct {
-		name string
-		read instr.Instruction
-		bind func(reader *types.FunctionBuilder) *types.FunctionBuilder
-		call []instr.Instruction
-	}{
-		{"local", instr.MustNew(instr.LOCAL_GET, 0),
-			func(b *types.FunctionBuilder) *types.FunctionBuilder { return b.Params(types.TypeAny()) },
-			[]instr.Instruction{instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL)}},
-		{"global", instr.MustNew(instr.GLOBAL_GET, 0),
-			func(b *types.FunctionBuilder) *types.FunctionBuilder { return b },
-			[]instr.Instruction{instr.MustNew(instr.GLOBAL_SET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL)}},
-		{"upvalue", instr.MustNew(instr.UPVAL_GET, 0),
-			func(b *types.FunctionBuilder) *types.FunctionBuilder { return b.Captures(types.TypeAny()) },
-			[]instr.Instruction{instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CLOSURE_NEW), instr.MustNew(instr.CALL)}},
-	}
-	reads := []struct {
-		name    string
-		returns types.Type
-		emit    func(b *types.FunctionBuilder)
-	}{
-		{"coro.done", types.TypeI1(), func(b *types.FunctionBuilder) { b.Emit(instr.CORO_DONE).Emit(instr.RETURN) }},
-		{"coro.done and br_if", types.TypeI32(), func(b *types.FunctionBuilder) {
-			yes := b.Label()
-			b.Emit(instr.CORO_DONE).BrIf(yes).Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
-			b.Bind(yes).Emit(instr.I32_CONST, 1).Emit(instr.RETURN)
-		}},
-		{"coro.value", types.TypeAny(), func(b *types.FunctionBuilder) { b.Emit(instr.CORO_VALUE).Emit(instr.RETURN) }},
-	}
-	// execute runs read of subject through source and reports its results, error, and live heap values.
-	type outcome struct {
-		err    error
-		values []types.Value
-		live   int
-	}
-	execute := func(t *testing.T, subject []instr.Instruction, source int, read int, opts ...interp.Option) outcome {
-		t.Helper()
-		reader := sources[source].bind(types.NewFunctionBuilder(nil).Returns(reads[read].returns))
-		reader.Append(sources[source].read)
-		reads[read].emit(reader)
-		code := append(append([]instr.Instruction{}, subject...), sources[source].call...)
-		vm := interp.MustNew(program.New(code,
-			program.WithGlobals(types.TypeAny()),
-			program.WithTypes(types.NewMapType(types.TypeI32(), types.TypeI32())),
-			program.WithConstants(gen, reader.MustBuild(), types.String("Hi"))), opts...)
-		t.Cleanup(func() { _ = vm.Close() })
-		result := outcome{err: vm.Run(context.Background())}
-		for result.err == nil && vm.Len() > 0 {
-			value, err := vm.Pop()
-			require.NoError(t, err)
-			result.values = append(result.values, value)
+	// Both coroutine-read cases share these fixtures. A read places a subject in a local, global,
+	// or upvalue slot and reads it with the coroutine op the slot read feeds; WithTick(1) runs the
+	// same bytecode unfused.
+	{
+		gen := types.NewFunctionBuilder(nil).Returns(types.TypeAny()).Append(
+			instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.YIELD), instr.MustNew(instr.DROP),
+			instr.MustNew(instr.I32_CONST, 8), instr.MustNew(instr.RETURN)).MustBuild()
+		subjects := map[string][]instr.Instruction{
+			"suspended coroutine": {instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+			"finished coroutine": {
+				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.DUP),
+				instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME), instr.MustNew(instr.DROP),
+			},
+			"string iterator": {instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.STRING_ITER)},
+			"map iterator": {
+				instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10),
+				instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0), instr.MustNew(instr.MAP_ITER),
+			},
+			"i32":    {instr.MustNew(instr.I32_CONST, 3)},
+			"string": {instr.MustNew(instr.CONST_GET, 2)},
 		}
-		result.live = live(vm)
-		return result
-	}
+		sources := map[string]struct {
+			read instr.Instruction
+			bind func(reader *types.FunctionBuilder) *types.FunctionBuilder
+			call []instr.Instruction
+		}{
+			"local": {instr.MustNew(instr.LOCAL_GET, 0),
+				func(b *types.FunctionBuilder) *types.FunctionBuilder { return b.Params(types.TypeAny()) },
+				[]instr.Instruction{instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL)}},
+			"global": {instr.MustNew(instr.GLOBAL_GET, 0),
+				func(b *types.FunctionBuilder) *types.FunctionBuilder { return b },
+				[]instr.Instruction{instr.MustNew(instr.GLOBAL_SET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL)}},
+			"upvalue": {instr.MustNew(instr.UPVAL_GET, 0),
+				func(b *types.FunctionBuilder) *types.FunctionBuilder { return b.Captures(types.TypeAny()) },
+				[]instr.Instruction{instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CLOSURE_NEW), instr.MustNew(instr.CALL)}},
+		}
+		reads := map[string]struct {
+			returns types.Type
+			emit    func(b *types.FunctionBuilder)
+		}{
+			"coro.done": {types.TypeI1(), func(b *types.FunctionBuilder) { b.Emit(instr.CORO_DONE).Emit(instr.RETURN) }},
+			"coro.done and br_if": {types.TypeI32(), func(b *types.FunctionBuilder) {
+				yes := b.Label()
+				b.Emit(instr.CORO_DONE).BrIf(yes).Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+				b.Bind(yes).Emit(instr.I32_CONST, 1).Emit(instr.RETURN)
+			}},
+			"coro.value": {types.TypeAny(), func(b *types.FunctionBuilder) { b.Emit(instr.CORO_VALUE).Emit(instr.RETURN) }},
+		}
+		type outcome struct {
+			err    error
+			values []types.Value
+			live   int
+		}
+		// execute reads subject through source with read and reports the results, error, and live heap values.
+		execute := func(t *testing.T, subject, source, read string, opts ...interp.Option) outcome {
+			t.Helper()
+			reader := sources[source].bind(types.NewFunctionBuilder(nil).Returns(reads[read].returns))
+			reader.Append(sources[source].read)
+			reads[read].emit(reader)
+			code := append(append([]instr.Instruction{}, subjects[subject]...), sources[source].call...)
+			vm := interp.MustNew(program.New(code,
+				program.WithGlobals(types.TypeAny()),
+				program.WithTypes(types.NewMapType(types.TypeI32(), types.TypeI32())),
+				program.WithConstants(gen, reader.MustBuild(), types.String("Hi"))), opts...)
+			t.Cleanup(func() { _ = vm.Close() })
+			result := outcome{err: vm.Run(context.Background())}
+			for result.err == nil && vm.Len() > 0 {
+				value, err := vm.Pop()
+				require.NoError(t, err)
+				result.values = append(result.values, value)
+			}
+			result.live = live(vm)
+			return result
+		}
 
-	t.Run("reads a coroutine through a slot as exact execution does", func(t *testing.T) {
-		for _, subject := range []string{"suspended coroutine", "finished coroutine", "string iterator", "map iterator"} {
-			for source := range sources {
-				for read := range reads {
-					name := subject + " / " + sources[source].name + " / " + reads[read].name
-					fused := execute(t, subjects[subject], source, read)
-					exact := execute(t, subjects[subject], source, read, interp.WithTick(1))
-					require.NoError(t, exact.err, name)
-					require.Equal(t, exact, fused, name)
+		t.Run("reads a coroutine through a slot as exact execution does", func(t *testing.T) {
+			for _, subject := range []string{"suspended coroutine", "finished coroutine", "string iterator", "map iterator"} {
+				for source := range sources {
+					for read := range reads {
+						name := subject + " / " + source + " / " + read
+						fused := execute(t, subject, source, read)
+						exact := execute(t, subject, source, read, interp.WithTick(1))
+						require.NoError(t, exact.err, name)
+						require.Equal(t, exact, fused, name)
+					}
 				}
 			}
-		}
-		require.Equal(t, []types.Value{types.I32(5)}, execute(t, subjects["suspended coroutine"], 0, 2).values)
-		require.Equal(t, []types.Value{types.I1(true)}, execute(t, subjects["finished coroutine"], 1, 0).values)
-		require.Equal(t, []types.Value{types.I32(72)}, execute(t, subjects["string iterator"], 2, 2).values)
-	})
+			require.Equal(t, []types.Value{types.I32(5)}, execute(t, "suspended coroutine", "local", "coro.value").values)
+			require.Equal(t, []types.Value{types.I1(true)}, execute(t, "finished coroutine", "global", "coro.done").values)
+			require.Equal(t, []types.Value{types.I32(72)}, execute(t, "string iterator", "upvalue", "coro.value").values)
+		})
 
-	t.Run("traps a slot that is not a coroutine at the same instruction as exact execution", func(t *testing.T) {
-		for _, subject := range []string{"i32", "string"} {
-			for source := range sources {
-				for read := range reads {
-					name := subject + " / " + sources[source].name + " / " + reads[read].name
-					fused := execute(t, subjects[subject], source, read)
-					exact := execute(t, subjects[subject], source, read, interp.WithTick(1))
-					require.ErrorIs(t, exact.err, interp.ErrTypeMismatch, name)
-					var fusedErr, exactErr *interp.RuntimeError
-					require.ErrorAs(t, fused.err, &fusedErr, name)
-					require.ErrorAs(t, exact.err, &exactErr, name)
-					require.Equal(t, exactErr.Frames, fusedErr.Frames, name)
-					require.Equal(t, exact.live, fused.live, name)
+		t.Run("traps a slot that is not a coroutine at the same instruction as exact execution", func(t *testing.T) {
+			for _, subject := range []string{"i32", "string"} {
+				for source := range sources {
+					for read := range reads {
+						name := subject + " / " + source + " / " + read
+						fused := execute(t, subject, source, read)
+						exact := execute(t, subject, source, read, interp.WithTick(1))
+						require.ErrorIs(t, fused.err, interp.ErrTypeMismatch, name)
+						require.ErrorIs(t, exact.err, interp.ErrTypeMismatch, name)
+						var fusedErr, exactErr *interp.RuntimeError
+						require.ErrorAs(t, fused.err, &fusedErr, name)
+						require.ErrorAs(t, exact.err, &exactErr, name)
+						require.Equal(t, exactErr.Frames, fusedErr.Frames, name)
+						require.Equal(t, exact.live, fused.live, name)
+					}
 				}
 			}
-		}
-	})
+		})
+	}
 }
 
 // requireEqualValue compares want with got. An array or struct is compared by

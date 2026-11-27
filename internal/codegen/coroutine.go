@@ -1,10 +1,7 @@
 package codegen
 
 import (
-	"fmt"
-
 	"github.com/dave/jennifer/jen"
-	"github.com/siyul-park/minivm/instr"
 )
 
 func yield() jen.Code {
@@ -98,25 +95,24 @@ func resume() jen.Code {
 			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))))))
 }
 
-// coroutineOp lowers CORO_DONE and CORO_VALUE, which read the *coroutine or iterator the
-// operand ref names and release that ref.
-func coroutineOp(state *state, current step) (value, error) {
+// coroDone lowers CORO_DONE: whether the *coroutine or iterator the operand ref names has
+// finished. A resident operand is released; a fused slot source is borrowed.
+func coroDone(state *state, current step) (value, error) {
 	input, err := operand(state, current)
 	if err != nil {
 		return value{}, err
 	}
 	compile, body := append([]jen.Code(nil), input.compile...), append([]jen.Code(nil), input.check...)
-	var read []jen.Code
-	switch current.op {
-	case instr.CORO_DONE:
-		read = coroutineDone(input.boxed)
-	case instr.CORO_VALUE:
-		read = coroutineValue(input.boxed)
-	default:
-		return value{}, fmt.Errorf("unsupported coroutine opcode %s", instr.TypeOf(current.op).Mnemonic)
-	}
-	read = append(append([]jen.Code(nil), input.body...), read...)
-	if current.op == instr.CORO_DONE && feedsBranch(state, current) {
+	read := append(append([]jen.Code(nil), input.body...),
+		reference(input.boxed),
+		jen.Var().Id("done").Bool(),
+		jen.Switch(jen.Id("co").Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Add(input.boxed).Dot("Ref").Call()).Assert(jen.Type())).Block(
+			jen.Case(jen.Op("*").Id("coroutine")).Block(jen.Id("done").Op("=").Id("co").Dot("done")),
+			jen.Case(jen.Qual(typesPkg, "Iterator")).Block(jen.Id("done").Op("=").Id("co").Dot("Done").Call()),
+			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+		),
+	)
+	if feedsBranch(state, current) {
 		result := value{op: current.op, head: input.head, compile: compile, check: input.check, body: read, raw: jen.Id("done")}
 		state.stack = []value{result}
 		return result, nil
@@ -125,34 +121,27 @@ func coroutineOp(state *state, current step) (value, error) {
 		body = append(body, overflowAt(input.at))
 	}
 	body = append(body, read...)
-	if current.op == instr.CORO_DONE {
-		body = append(body, settle(state, input, jen.Qual(typesPkg, "BoxI1").Call(jen.Id("done")))...)
-	} else {
-		body = append(body, settle(state, input, jen.Id("val"))...)
-	}
+	body = append(body, settle(state, input, jen.Qual(typesPkg, "BoxI1").Call(jen.Id("done")))...)
 	return conclude(state, current, input, compile, body), nil
 }
 
-// coroutineDone binds done to whether the coroutine or iterator ref names has finished.
-func coroutineDone(ref jen.Code) []jen.Code {
-	return []jen.Code{
-		reference(ref),
-		jen.Var().Id("done").Bool(),
-		jen.Switch(jen.Id("co").Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Add(ref).Dot("Ref").Call()).Assert(jen.Type())).Block(
-			jen.Case(jen.Op("*").Id("coroutine")).Block(jen.Id("done").Op("=").Id("co").Dot("done")),
-			jen.Case(jen.Qual(typesPkg, "Iterator")).Block(jen.Id("done").Op("=").Id("co").Dot("Done").Call()),
-			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-		),
+// coroValue lowers CORO_VALUE: the value of the *coroutine or iterator the operand ref names,
+// retained before that ref is released because the release can free the coroutine. A resident
+// operand is released; a fused slot source is borrowed.
+func coroValue(state *state, current step) (value, error) {
+	input, err := operand(state, current)
+	if err != nil {
+		return value{}, err
 	}
-}
-
-// coroutineValue binds val to the retained value of the coroutine or iterator ref names,
-// retained before the caller releases ref because that release can free the coroutine.
-func coroutineValue(ref jen.Code) []jen.Code {
-	return []jen.Code{
-		reference(ref),
+	compile, body := append([]jen.Code(nil), input.compile...), append([]jen.Code(nil), input.check...)
+	if !input.resident && input.room {
+		body = append(body, overflowAt(input.at))
+	}
+	body = append(body, input.body...)
+	body = append(body,
+		reference(input.boxed),
 		jen.Var().Id("val").Qual(typesPkg, "Boxed"),
-		jen.Switch(jen.Id("co").Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Add(ref).Dot("Ref").Call()).Assert(jen.Type())).Block(
+		jen.Switch(jen.Id("co").Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Add(input.boxed).Dot("Ref").Call()).Assert(jen.Type())).Block(
 			jen.Case(jen.Op("*").Id("coroutine")).Block(
 				jen.Id("val").Op("=").Id("co").Dot("value"),
 				jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("val")),
@@ -172,5 +161,7 @@ func coroutineValue(ref jen.Code) []jen.Code {
 			),
 			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
 		),
-	}
+	)
+	body = append(body, settle(state, input, jen.Id("val"))...)
+	return conclude(state, current, input, compile, body), nil
 }
