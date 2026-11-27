@@ -135,7 +135,7 @@ Published strings are immutable. Concatenation `MAY` reuse interpreter-local app
 
 `Reset` invalidates runtime objects and may reuse cleared generic-array storage; reused headers `MUST` have no prior type or contents.
 
-Constants load through one path at construction and at `Reset`. Each interpreter `MUST` own a copy of every mutable constant (arrays, structs, maps, errors), so mutation never reaches the program or another interpreter, and `Reset` `MUST` reload them at unchanged heap addresses with initial contents and no ref into the dynamic region.
+Constants load through one path at construction and at `Reset`. A constant `Array`, `Struct`, or `Map` `MUST` hold no reference word except null, wide i64 keys and values included, because an address names a slot of some other heap; `program.Verify` rejects one with `ErrConstantRef`, and nested references go through `ArrayLiteral`, `StructLiteral`, and `MapLiteral`. Each interpreter `MUST` own a copy of every mutable constant (arrays, structs, maps, errors), so mutation never reaches the program or another interpreter, and `Reset` `MUST` reload them at unchanged heap addresses with initial contents and no ref into the dynamic region.
 
 Host-backed views (`HostArray`, `HostStruct`, `HostMap`) are the exception: they address Go memory and are not cloned, so a host view used as a constant stays shared with the host and with other interpreters, and `Reset` `MUST NOT` be expected to restore what writes through it changed.
 

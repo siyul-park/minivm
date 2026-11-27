@@ -3336,13 +3336,13 @@ func TestWithHeapLimit(t *testing.T) {
 	})
 
 	t.Run("preserves duplicate nested constant edges", func(t *testing.T) {
-		const leafAddr = 1
-		const midAddr = 2
+		const leafAddr = 3
 
 		leaf := &trackedValue{}
-		mid := newArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(leafAddr))
-		root := newArray(nil, types.NewArrayType(types.TypeAny()), types.BoxRef(midAddr), types.BoxRef(midAddr))
-		prog := program.New(nil, program.WithConstants(leaf, mid, root))
+		arrayType := types.NewArrayType(types.TypeAny())
+		mid := &types.ArrayLiteral{Typ: arrayType, Elems: []types.Value{leaf}}
+		root := &types.ArrayLiteral{Typ: arrayType, Elems: []types.Value{mid, mid}}
+		prog := program.New(nil, program.WithConstants(root))
 		i := interp.MustNew(prog, interp.WithHeap(4), interp.WithHeapLimit(4))
 		defer i.Close()
 
@@ -11068,6 +11068,36 @@ func TestNew(t *testing.T) {
 		require.Nil(t, i)
 	})
 
+	t.Run("rejects a container constant holding a reference", func(t *testing.T) {
+		other := interp.MustNew(program.New(nil))
+		defer other.Close()
+		mapType := types.NewMapType(types.TypeString(), types.TypeI32())
+		foreign := types.NewMap(other.Heap(), mapType, 0)
+		foreign.Store(types.BoxRef(other.Heap().Add(types.String("k"))), types.BoxI32(1))
+		structType := types.NewStructType(types.NewStructField(types.TypeAny()))
+		array := types.NewArray(nil, types.NewArrayType(types.TypeAny()), 0)
+		array.Append(types.BoxRef(3))
+
+		for name, constant := range map[string]types.Value{
+			"map":    foreign,
+			"array":  array,
+			"struct": types.NewStruct(nil, structType, types.BoxRef(3)),
+		} {
+			t.Run(name, func(t *testing.T) {
+				i, err := interp.New(program.New(nil, program.WithConstants(constant)))
+				require.ErrorIs(t, err, program.ErrConstantRef)
+				require.Nil(t, i)
+			})
+		}
+	})
+
+	t.Run("loads a container constant of nulls", func(t *testing.T) {
+		array := types.NewArray(nil, types.NewArrayType(types.TypeAny()), 2)
+		i, err := interp.New(program.New(nil, program.WithConstants(array)))
+		require.NoError(t, err)
+		require.NoError(t, i.Close())
+	})
+
 	t.Run("runs a program", func(t *testing.T) {
 		i := interp.MustNew(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 5)}))
 		defer i.Close()
@@ -13870,6 +13900,7 @@ func TestInterpreter_Store(t *testing.T) {
 			{"map type to map type", types.NewMap(nil, types.NewMapType(types.TypeString(), types.TypeI32()), 0), types.NewMap(nil, types.NewMapType(types.TypeString(), types.TypeF64()), 0)},
 			{"string to scalar", types.String("s"), types.I32(1)},
 			{"scalar to string", types.I32(1), types.String("s")},
+			{"string is immutable", types.String("a"), types.String("b")},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -13897,7 +13928,6 @@ func TestInterpreter_Store(t *testing.T) {
 			{"struct", types.NewStruct(nil, typ, types.BoxI32(1)), types.NewStruct(nil, typ, types.BoxI32(2))},
 			{"array", types.TypedArray[int32]{1}, types.TypedArray[int32]{2, 3}},
 			{"map", types.NewMap(nil, mapTyp, 0), types.NewMap(nil, mapTyp, 0)},
-			{"string", types.String("a"), types.String("b")},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {

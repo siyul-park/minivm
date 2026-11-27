@@ -425,6 +425,16 @@ func TestVerify(t *testing.T) {
 			wantSlot: 1,
 		},
 		{
+			name: "constants/array holding a non-null reference",
+			prog: program.New(nil, program.WithConstants(func() types.Value {
+				a := types.NewArray(nil, types.NewArrayType(types.TypeAny()), 0)
+				a.Append(types.BoxRef(1))
+				return a
+			}())),
+			wantErr:  program.ErrConstantRef,
+			wantSlot: 1,
+		},
+		{
 			name:    "nil program",
 			prog:    nil,
 			wantErr: program.ErrNil,

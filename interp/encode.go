@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"sync"
 	"unsafe"
 
@@ -347,7 +348,15 @@ func marshalMap(t reflect.Type, mt *types.MapType, key, elem *conversion) Marsha
 			if !out.Accepts(k) {
 				return nil, fmt.Errorf("map key: %w: target=%s", ErrTypeMismatch, mt.Key)
 			}
-			out.Store(k, value)
+			if previous, loaded := out.Swap(k, value); loaded {
+				if mt.TraceKeys {
+					e.disown(k)
+				}
+				if mt.TraceValues {
+					e.disown(previous)
+					e.interp.heap.Release(previous)
+				}
+			}
 		}
 		return out, nil
 	}
@@ -568,6 +577,17 @@ func (e *Encoder) discard() {
 		e.interp.heap.Dec(addr)
 	}
 	e.owned = nil
+}
+
+// disown forgets one reference to the address word names, because the map that
+// took it has already released it. A word that is not a reference is ignored.
+func (e *Encoder) disown(word types.Boxed) {
+	if word.Kind() != types.KindRef || word.Ref() == 0 {
+		return
+	}
+	if idx := slices.Index(e.owned, word.Ref()); idx >= 0 {
+		e.owned = slices.Delete(e.owned, idx, idx+1)
+	}
 }
 
 // enter records ptr as being converted and reports whether it already was, so a

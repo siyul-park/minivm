@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"unsafe"
 
@@ -4771,12 +4770,7 @@ func FuzzStringHashParity(f *testing.F) {
 // unreadable, so a load past the string faults.
 func edge(t testing.TB, s string) types.String {
 	t.Helper()
-	page := syscall.Getpagesize()
-	mem, err := syscall.Mmap(-1, 0, 2*page, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_ANON|syscall.MAP_PRIVATE)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, syscall.Munmap(mem)) })
-	require.NoError(t, syscall.Mprotect(mem[page:], syscall.PROT_NONE))
-	data := mem[page-len(s) : page]
+	data := testenv.Guarded(t, len(s))
 	copy(data, s)
 	return types.String(unsafe.String(unsafe.SliceData(data), len(s)))
 }

@@ -296,6 +296,36 @@ func TestRegistry_Marshal(t *testing.T) {
 		require.Equal(t, baseCounts, counts)
 	})
 
+	t.Run("a failed map conversion releases a duplicate key once", func(t *testing.T) {
+		type name string
+		type broken struct{ fail bool }
+		errBroken := errors.New("broken")
+		i := interp.MustNew(program.New(nil))
+		defer i.Close()
+		r := interp.NewRegistry(interp.WithMarshaler(
+			reflect.TypeFor[broken](), types.TypeString(),
+			interp.MarshalerFunc(func(_ *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
+				if (*broken)(p).fail {
+					return nil, errBroken
+				}
+				return types.String("ok"), nil
+			})))
+		base := i.HeapLen()
+
+		for range 50 {
+			view, err := r.Marshal(i, map[any]broken{"a": {}, name("a"): {}, "z": {fail: true}})
+			require.NoError(t, err)
+			_, err = view.(*interp.HostMap).Map(i)
+			require.ErrorIs(t, err, errBroken)
+			for addr := 1; addr < i.HeapLen(); addr++ {
+				require.GreaterOrEqual(t, i.Heap().Count(addr), 0, "slot %d", addr)
+				if addr >= base {
+					require.False(t, i.Heap().Alive(addr), "slot %d leaked", addr)
+				}
+			}
+		}
+	})
+
 	t.Run("containers end bound to the VM heap", func(t *testing.T) {
 		live := func(i *interp.Interpreter) (refs int) {
 			for addr := 1; addr < i.HeapLen(); addr++ {

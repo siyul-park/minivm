@@ -1374,9 +1374,12 @@ func BenchmarkMap_Refs(b *testing.B) {
 	})
 
 	b.Run("child refs", func(b *testing.B) {
-		m := types.NewMap(nil, types.NewMapType(types.TypeAny(), types.TypeAny()), 0)
-		m.Store(types.BoxRef(1), types.BoxRef(2))
-		require.Equal(b, []types.Ref{1, 2}, m.Refs(nil))
+		h := newHeap()
+		key, value := text(h, "k"), text(h, "v")
+		m := types.NewMap(h, types.NewMapType(types.TypeAny(), types.TypeAny()), 0)
+		m.Store(key, value)
+		want := []types.Ref{types.Ref(key.Ref()), types.Ref(value.Ref())}
+		require.Equal(b, want, m.Refs(nil))
 
 		refs := make([]types.Ref, 0, 2)
 		b.ReportAllocs()
@@ -1385,6 +1388,6 @@ func BenchmarkMap_Refs(b *testing.B) {
 			refs = m.Refs(refs[:0])
 		}
 		b.StopTimer()
-		require.Equal(b, []types.Ref{1, 2}, refs)
+		require.Equal(b, want, refs)
 	})
 }

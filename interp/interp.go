@@ -415,7 +415,8 @@ func (i *Interpreter) Load(addr int) (types.Value, error) {
 // it already names addr. A slot keeps its representation for its lifetime: val
 // must have the Go type and declared type of the value it replaces, else Store
 // returns ErrTypeMismatch. Only a scalar cell, which REF_SET also rewrites, may
-// change scalar kind.
+// change scalar kind. A String is immutable, so Store refuses to replace one: a
+// map keys a string by its cell.
 func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 	defer i.guard(&err)
 	if !i.heap.Alive(addr) {
@@ -449,7 +450,7 @@ func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 	}
 	old := i.heap.At(addr)
 	switch old.(type) {
-	case *types.Function, *types.Closure, *coroutine:
+	case *types.Function, *types.Closure, *coroutine, types.String:
 		return ErrTypeMismatch
 	}
 	if !(scalar(old) && scalar(val)) && (reflect.TypeOf(old) != reflect.TypeOf(val) || !old.Type().Equals(val.Type())) {

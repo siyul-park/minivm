@@ -60,7 +60,7 @@ An unmarshalled Go func returns a failed call as its trailing `error`. A func ty
 | `Retain` | adds one caller-owned ref |
 | `Release` | drops one caller-owned ref |
 | `Load` | borrows; the count is unchanged |
-| `Store` | transfers a concrete value of the slot's representation (Go type and declared type; a scalar cell may change scalar kind) to the slot and releases the replaced value; any other value is `ErrTypeMismatch` |
+| `Store` | transfers a concrete value of the slot's representation (Go type and declared type; a scalar cell may change scalar kind) to the slot and releases the replaced value; any other value is `ErrTypeMismatch`, and so is any value stored over a `String`, which is immutable because a map keys a string by its cell |
 | `Push` | transfers the value or its ref to the stack |
 | `Pop` | releases the stack ref and returns the detached value |
 | `PopBoxed` | transfers the stack ref to the caller |
@@ -106,9 +106,9 @@ A hook's `Local` and `SetLocal` are exact only on threaded code. On optimized co
 ## Heap API
 
 ```go
-addr, err := vm.Alloc(types.String("hello"))
+addr, err := vm.Alloc(types.I32(1))
 obj, err := vm.Load(addr)
-err = vm.Store(addr, types.String("world"))
+err = vm.Store(addr, types.I32(2))
 obj, err = vm.Retain(addr)
 err = vm.Release(addr)
 ```
