@@ -62,6 +62,18 @@ func TestProgram_Clone(t *testing.T) {
 		require.Nil(t, prog.Clone())
 	})
 
+	t.Run("leaves a container bound to a heap uncounted and uncopied", func(t *testing.T) {
+		heap := types.NewHeap(4, 0, types.Hooks{})
+		heap.Add(types.Null)
+		key := heap.Add(types.String("k"))
+		m := types.NewMap(heap, types.NewMapType(types.TypeString(), types.TypeI32()), 0)
+		m.Store(types.BoxRef(key), types.BoxI32(1))
+
+		clone := program.New(nil, program.WithConstants(m)).Clone()
+		require.Same(t, m, clone.Constants[0])
+		require.Equal(t, 1, heap.Count(key))
+	})
+
 	t.Run("copies program slices", func(t *testing.T) {
 		h := instr.Handler{Start: 0, End: 1, Catch: 2}
 		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)},

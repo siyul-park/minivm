@@ -184,6 +184,10 @@ func cloneConstant(v types.Value, copies map[any]types.Value) types.Value {
 		}
 	} else if fn, ok := v.(*types.Function); ok {
 		c = fn.Clone()
+	} else if heap(v) != nil {
+		// A container bound to a heap is not the program's to copy: a copy counts
+		// into that heap. Verify rejects it.
+		c = v
 	} else {
 		c = types.Clone(v)
 	}
@@ -213,4 +217,18 @@ func children(v types.Value) ([]types.Value, func([]types.Value) types.Value) {
 		}
 	}
 	return nil, nil
+}
+
+// heap returns the heap a container constant is bound to, or nil for an unbound
+// container and any other value.
+func heap(v types.Value) *types.Heap {
+	switch v := v.(type) {
+	case *types.Array:
+		return v.Heap()
+	case *types.Struct:
+		return v.Heap()
+	case *types.Map:
+		return v.Heap()
+	}
+	return nil
 }

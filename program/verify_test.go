@@ -435,6 +435,22 @@ func TestVerify(t *testing.T) {
 			wantSlot: 1,
 		},
 		{
+			name: "constants/array bound to a heap",
+			prog: program.New(nil, program.WithConstants(
+				types.NewArray(types.NewHeap(1, 0, types.Hooks{}), types.NewArrayType(types.TypeAny()), 1),
+			)),
+			wantErr:  program.ErrConstantRef,
+			wantSlot: 1,
+		},
+		{
+			name: "constants/struct i64 field with reference-like bits",
+			prog: program.New(nil, program.WithConstants(func() types.Value {
+				s := types.NewStruct(nil, types.NewStructType(types.NewStructField(types.TypeI64())))
+				s.SetRaw(0, uint64(types.BoxRef(1)))
+				return s
+			}())),
+		},
+		{
 			name:    "nil program",
 			prog:    nil,
 			wantErr: program.ErrNil,

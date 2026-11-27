@@ -7,6 +7,11 @@ type binding struct {
 	heap *Heap
 }
 
+// Heap returns the heap the container is bound to, or nil when it is unbound.
+func (b *binding) Heap() *Heap {
+	return b.heap
+}
+
 // bound returns the heap the container's references live in.
 func (b *binding) bound() *Heap {
 	if b.heap == nil {

@@ -11073,15 +11073,17 @@ func TestNew(t *testing.T) {
 		defer other.Close()
 		mapType := types.NewMapType(types.TypeString(), types.TypeI32())
 		foreign := types.NewMap(other.Heap(), mapType, 0)
-		foreign.Store(types.BoxRef(other.Heap().Add(types.String("k"))), types.BoxI32(1))
+		key := other.Heap().Add(types.String("k"))
+		foreign.Store(types.BoxRef(key), types.BoxI32(1))
 		structType := types.NewStructType(types.NewStructField(types.TypeAny()))
 		array := types.NewArray(nil, types.NewArrayType(types.TypeAny()), 0)
 		array.Append(types.BoxRef(3))
 
 		for name, constant := range map[string]types.Value{
-			"map":    foreign,
-			"array":  array,
-			"struct": types.NewStruct(nil, structType, types.BoxRef(3)),
+			"map":           foreign,
+			"array":         array,
+			"struct":        types.NewStruct(nil, structType, types.BoxRef(3)),
+			"bound to heap": types.NewArray(other.Heap(), types.NewArrayType(types.TypeAny()), 2),
 		} {
 			t.Run(name, func(t *testing.T) {
 				i, err := interp.New(program.New(nil, program.WithConstants(constant)))
@@ -11089,6 +11091,7 @@ func TestNew(t *testing.T) {
 				require.Nil(t, i)
 			})
 		}
+		require.Equal(t, 1, other.Heap().Count(key))
 	})
 
 	t.Run("loads a container constant of nulls", func(t *testing.T) {

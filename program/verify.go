@@ -88,9 +88,9 @@ var (
 	ErrHandlerTarget = errors.New("invalid exception handler target")
 	// ErrPosition reports a source position that is unsorted, off an instruction boundary, or past the code.
 	ErrPosition = errors.New("invalid source position")
-	// ErrConstantRef reports an Array, Struct, or Map constant holding a
-	// reference other than null: its address names a slot of some other heap,
-	// so nested references go through the literal forms.
+	// ErrConstantRef reports an Array, Struct, or Map constant bound to a heap
+	// or holding a reference other than null: either names slots of some other
+	// heap, so nested references go through the literal forms.
 	ErrConstantRef = errors.New("constant holds a reference")
 	// ErrNil reports a nil program.
 	ErrNil = errors.New("nil program")
@@ -147,7 +147,7 @@ func verifyConstant(prog *Program, slot int, v types.Value, seen map[any]bool) e
 	if fn, ok := v.(*types.Function); ok {
 		return newChecker(prog, slot, fn).run()
 	}
-	if !nullOnly(v) {
+	if heap(v) != nil || !nullOnly(v) {
 		return &VerifyError{Slot: slot, Err: ErrConstantRef}
 	}
 	elems, _ := children(v)
@@ -782,7 +782,7 @@ func nullOnly(v types.Value) bool {
 		}
 	case *types.Struct:
 		for i := range v.Typ.Fields {
-			if !null(types.Boxed(v.Raw(i))) {
+			if v.Typ.Fields[i].Kind == types.KindRef && !null(types.Boxed(v.Raw(i))) {
 				return false
 			}
 		}
