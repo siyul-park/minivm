@@ -167,8 +167,13 @@ test:
 coverage:
 	@go test -count=1 -race -timeout=20m --coverprofile=coverage.out --covermode=atomic -coverpkg=./... $(test-options) ./...
 
+# The baseline counts hand-written code only: generated files are left out of
+# the total, which their size would otherwise decide.
 coverage-check: coverage
-	@coverage="$$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%", "", $$3); print $$3}')"; \
+	@module="$$(go list -m)"; \
+	grep -rlE --include='*.go' '^// Code generated .* DO NOT EDIT\.$$' . | sed "s|^\.|$$module|; s|$$|:|" > coverage.generated; \
+	grep -v -F -f coverage.generated coverage.out > coverage.source.out; \
+	coverage="$$(go tool cover -func=coverage.source.out | awk '/^total:/ {gsub("%", "", $$3); print $$3}')"; \
 	awk -v coverage="$$coverage" -v minimum="$(coverage-min)" 'BEGIN { \
 		if (coverage + 0 < minimum + 0) { \
 			printf "coverage %.1f%% is below baseline %.1f%%\\n", coverage, minimum; \
