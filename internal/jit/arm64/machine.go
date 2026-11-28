@@ -1336,7 +1336,11 @@ func (m *Machine) mapGet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 		return false
 	}
 	dst := s.Reg(op.Results[0])
-	exit, resume := s.Bridge()
+	var exit, resume asm.Label
+	bridge := m.keyExits(s, shape, op.Args[1])
+	if bridge {
+		exit, resume = s.Bridge()
+	}
 	hit, miss, done := a.Label(), a.Label(), a.Label()
 	data := m.container(a, s.Reg(op.Args[0]))
 	k := m.key(a, s, shape, op.Args[1], exit, miss)
@@ -1359,7 +1363,9 @@ func (m *Machine) mapGet(a *asm.Assembler, op ssa.Operation, s compile.Site) boo
 	if shape.Elem == types.KindRef {
 		m.retain(a, dst)
 	}
-	a.Bind(resume)
+	if bridge {
+		a.Bind(resume)
+	}
 	return true
 }
 
@@ -1449,7 +1455,11 @@ func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 	if !ok || !shape.Serves(op.Op, s.Type(op.Args[1]).Kind(), 0) {
 		return false
 	}
-	exit, resume := s.Bridge()
+	var exit, resume asm.Label
+	bridge := m.keyExits(s, shape, op.Args[1])
+	if bridge {
+		exit, resume = s.Bridge()
+	}
 	hit, done := a.Label(), a.Label()
 	data := m.container(a, s.Reg(op.Args[0]))
 	k := m.key(a, s, shape, op.Args[1], exit, done)
@@ -1478,7 +1488,9 @@ func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 	if s.Type(op.Args[1]).Kind() == types.KindRef {
 		m.release(a, s.Reg(op.Args[1]), s)
 	}
-	a.Bind(resume)
+	if bridge {
+		a.Bind(resume)
+	}
 	return true
 }
 
@@ -1486,6 +1498,27 @@ func (m *Machine) mapDelete(a *asm.Assembler, op ssa.Operation, s compile.Site) 
 func (m *Machine) mapOf(v ssa.Value) (ssa.Shape, bool) {
 	shape, ok := m.guards[v]
 	return shape, ok && shape.Form == ssa.FormMap
+}
+
+// keyExits reports whether deriving the key of operand v can branch to the
+// bridge: a wide i64, a string map's non-constant reference, and an any map's
+// reference or wide i64 key. Every other key path only branches to nan.
+func (m *Machine) keyExits(s compile.Site, shape ssa.Shape, v ssa.Value) bool {
+	kind := s.Type(v).Kind()
+	if kind == types.KindRef {
+		if o, ok := s.Object(v); ok && o.String != nil {
+			return false
+		}
+	}
+	switch shape.Key {
+	case types.KindRef:
+		return true
+	case types.KindAny:
+		return kind == types.KindRef || kind == types.KindI64
+	case types.KindI64:
+		return true
+	}
+	return false
 }
 
 // key derives the table word of operand v, as Map.resolve makes it. A scalar

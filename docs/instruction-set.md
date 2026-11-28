@@ -334,8 +334,6 @@ All string comparisons are by content and require string operands. Mismatches `M
 
 ### Maps
 
-Primitive keys use value identity; `i1`/`i8` use their `i32` representation. Strings use content. Other refs use heap identity.
-
 `value-representation.md`, Map Key Words, owns the key rule. Missing keys return element zero values. `MAP_LOOKUP` also returns an `i1` presence flag.
 
 `MAP_KEYS` and `MAP_ITER` produce the keys of every map in insertion order, map constants and host-map copies included: an update keeps the key's place, and a key deleted and set again goes last. A host-map copy takes Go's map order. `memory-model.md` owns the guarantee under mutation during `MAP_ITER`.

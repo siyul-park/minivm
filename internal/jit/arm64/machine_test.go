@@ -3192,6 +3192,27 @@ func TestMachine_Lower(t *testing.T) {
 			target.LDR(vr(w.mask), vr(w.data), offset(jit.OffsetMapMask)),
 		}
 	}
+	// insert is the ordered insert every map.set shares once its probe misses,
+	// with registers from at: the order must have room, else the set bridges
+	// untouched; the first dead slot the probe passed, else the empty slot that
+	// ended it, takes the tag, the key, and the value, the slot is appended to
+	// the order and pointed back at its position, and used and count rise.
+	insert := func(w walk, at int, key, value asm.Reg) []asm.Instruction {
+		used, want, limit, order, pos, count := at, at+1, at+2, at+3, at+4, at+5
+		return []asm.Instruction{
+			target.LDR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)), target.ADDI(vr(want), vr(used), 1), target.LSLI(vr(want), vr(want), 2),
+			target.ADDI(vr(limit), vr(w.mask), 1), target.LSLI(target.X16, vr(limit), 1), target.ADD(vr(limit), vr(limit), target.X16),
+			target.CMP(vr(want), vr(limit)), target.BCondLabel(target.OpBGT, exit),
+			target.CMPI(vr(w.free), 0), target.CSEL(vr(w.index), vr(w.free), vr(w.index), target.CondGE),
+			target.STRBR(vr(w.tag), vr(w.ctrl), vr(w.index)),
+			target.LSLI(vr(w.slot), vr(w.index), 4), target.ADD(vr(w.slot), vr(w.slots), vr(w.slot)),
+			target.STR(key, vr(w.slot), 0), target.STR(value, vr(w.slot), 8),
+			target.LDR(vr(order), vr(w.data), offset(jit.OffsetMapOrder)), target.STRWR(vr(w.index), vr(order), vr(used)),
+			target.LDR(vr(pos), vr(w.data), offset(jit.OffsetMapPos)), target.STRWR(vr(used), vr(pos), vr(w.index)),
+			target.ADDI(vr(used), vr(used), 1), target.STR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)),
+			target.LDR(vr(count), vr(w.data), offset(jit.OffsetMapCount)), target.ADDI(vr(count), vr(count), 1), target.STR(vr(count), vr(w.data), offset(jit.OffsetMapCount)),
+		}
+	}
 	// home hashes the key into the home slot (w.index) and the control byte a full
 	// slot holding it carries (w.tag): the seven hash bits below the slot's.
 	home := func(w walk, key asm.Reg) []asm.Instruction {
@@ -3283,34 +3304,18 @@ func TestMachine_Lower(t *testing.T) {
 	}
 	// set is map.set. A value that boxes into a register (valueRows) is vr(1), so
 	// the heap slot follows it; labels hit and empty are 2 and 3, and the probe's
-	// loop, next, and the dead-slot check's step 4, 5, and 6. The table is only
-	// changed once the order has room for the insert, else the set bridges
-	// untouched; an insert fills the first dead slot the probe passed, else the
-	// empty slot that ended it, with the tag, the key, and the value, appends the
-	// slot to the order, and points the slot back at its position.
+	// loop, next, and the dead-slot check's step 4, 5, and 6; a miss inserts (see
+	// insert).
 	set := func(ref asm.VReg, key asm.Reg, keyRows, valueRows []asm.Instruction, value asm.Reg, release bool) []asm.Instruction {
 		first := 1 + min(len(valueRows), 1)
 		w := layout(first+1, first+2+keyRegs(keyRows), true)
-		used, want, limit, order, pos, count := w.word+1, w.word+2, w.word+3, w.word+4, w.word+5, w.word+6
 		rows := slices.Concat(valueRows, tableOf(ref, first), keyRows, words(w), home(w, key), []asm.Instruction{target.MOVN(vr(w.free), 0, 0)}, probe(w, key, 4, 5, 2, 3))
-		rows = append(rows,
-			target.LDR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)), target.ADDI(vr(want), vr(used), 1), target.LSLI(vr(want), vr(want), 2),
-			target.ADDI(vr(limit), vr(w.mask), 1), target.LSLI(target.X16, vr(limit), 1), target.ADD(vr(limit), vr(limit), target.X16),
-			target.CMP(vr(want), vr(limit)), target.BCondLabel(target.OpBGT, exit),
-			target.CMPI(vr(w.free), 0), target.CSEL(vr(w.index), vr(w.free), vr(w.index), target.CondGE),
-			target.STRBR(vr(w.tag), vr(w.ctrl), vr(w.index)),
-			target.LSLI(vr(w.slot), vr(w.index), 4), target.ADD(vr(w.slot), vr(w.slots), vr(w.slot)),
-			target.STR(key, vr(w.slot), 0), target.STR(value, vr(w.slot), 8),
-			target.LDR(vr(order), vr(w.data), offset(jit.OffsetMapOrder)), target.STRWR(vr(w.index), vr(order), vr(used)),
-			target.LDR(vr(pos), vr(w.data), offset(jit.OffsetMapPos)), target.STRWR(vr(used), vr(pos), vr(w.index)),
-			target.ADDI(vr(used), vr(used), 1), target.STR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)),
-			target.LDR(vr(count), vr(w.data), offset(jit.OffsetMapCount)), target.ADDI(vr(count), vr(count), 1), target.STR(vr(count), vr(w.data), offset(jit.OffsetMapCount)),
-			target.BLabel(resume),
-		)
+		rows = append(rows, insert(w, w.word+1, key, value)...)
+		rows = append(rows, target.BLabel(resume))
 		if !release {
 			return append(rows, target.STR(value, vr(w.slot), 8))
 		}
-		old := vr(count + 1)
+		old := vr(w.word + 7)
 		rows = append(rows, target.LDR(old, vr(w.slot), 8), target.STR(value, vr(w.slot), 8))
 		return append(rows, released(old)...)
 	}
@@ -3459,23 +3464,10 @@ func TestMachine_Lower(t *testing.T) {
 	stringSet := func(ref asm.VReg, key asm.Reg, value asm.Reg, keyRows []asm.Instruction, base, ctrl int, loop asm.Label) []asm.Instruction {
 		w := layout(3, ctrl, true)
 		w.step = loop + 7
-		used, want, limit, order, pos, count := w.word+7, w.word+8, w.word+9, w.word+10, w.word+11, w.word+12
 		rows := slices.Concat(box32(reg(i32, 4)), tableOf(ref, 2), keyRows, words(w), home(w, vr(base)),
 			[]asm.Instruction{target.MOVN(vr(w.free), 0, 0)},
 			probe(w, key, loop, loop+1, 2, 3, content(vr(w.word), w.word+1, vr(7), vr(6), loop+1, 2, [5]asm.Label{loop + 2, loop + 3, loop + 4, loop + 5, loop + 6})...))
-		rows = append(rows,
-			target.LDR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)), target.ADDI(vr(want), vr(used), 1), target.LSLI(vr(want), vr(want), 2),
-			target.ADDI(vr(limit), vr(w.mask), 1), target.LSLI(target.X16, vr(limit), 1), target.ADD(vr(limit), vr(limit), target.X16),
-			target.CMP(vr(want), vr(limit)), target.BCondLabel(target.OpBGT, exit),
-			target.CMPI(vr(w.free), 0), target.CSEL(vr(w.index), vr(w.free), vr(w.index), target.CondGE),
-			target.STRBR(vr(w.tag), vr(w.ctrl), vr(w.index)),
-			target.LSLI(vr(w.slot), vr(w.index), 4), target.ADD(vr(w.slot), vr(w.slots), vr(w.slot)),
-			target.STR(key, vr(w.slot), 0), target.STR(value, vr(w.slot), 8),
-			target.LDR(vr(order), vr(w.data), offset(jit.OffsetMapOrder)), target.STRWR(vr(w.index), vr(order), vr(used)),
-			target.LDR(vr(pos), vr(w.data), offset(jit.OffsetMapPos)), target.STRWR(vr(used), vr(pos), vr(w.index)),
-			target.ADDI(vr(used), vr(used), 1), target.STR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)),
-			target.LDR(vr(count), vr(w.data), offset(jit.OffsetMapCount)), target.ADDI(vr(count), vr(count), 1), target.STR(vr(count), vr(w.data), offset(jit.OffsetMapCount)),
-		)
+		rows = append(rows, insert(w, w.word+7, key, value)...)
 		rows = append(rows, retained(key.(asm.VReg), loop+8)...)
 		return append(rows, target.BLabel(resume), target.STR(value, vr(w.slot), 8))
 	}
@@ -3597,23 +3589,10 @@ func TestMachine_Lower(t *testing.T) {
 	anySet := func(ref asm.VReg, key asm.Reg, value asm.Reg) []asm.Instruction {
 		w := layout(3, 23, true)
 		w.step = 22
-		used, want, limit, order, pos, count := w.word+7, w.word+8, w.word+9, w.word+10, w.word+11, w.word+12
 		rows := slices.Concat(box32(reg(i32, 4)), tableOf(ref, 2), anyKey(key, 4, [6]asm.Label{4, 5, 6, 7, 8, 9}, [5]asm.Label{10, 11, 12, 13, 14}, exit), words(w), home(w, vr(5)),
 			[]asm.Instruction{target.MOVN(vr(w.free), 0, 0)},
 			probe(w, vr(4), 15, 16, 2, 3, anyContent(vr(w.word), w.word+1, vr(6), vr(7), 16, 2, [5]asm.Label{17, 18, 19, 20, 21})...))
-		rows = append(rows,
-			target.LDR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)), target.ADDI(vr(want), vr(used), 1), target.LSLI(vr(want), vr(want), 2),
-			target.ADDI(vr(limit), vr(w.mask), 1), target.LSLI(target.X16, vr(limit), 1), target.ADD(vr(limit), vr(limit), target.X16),
-			target.CMP(vr(want), vr(limit)), target.BCondLabel(target.OpBGT, exit),
-			target.CMPI(vr(w.free), 0), target.CSEL(vr(w.index), vr(w.free), vr(w.index), target.CondGE),
-			target.STRBR(vr(w.tag), vr(w.ctrl), vr(w.index)),
-			target.LSLI(vr(w.slot), vr(w.index), 4), target.ADD(vr(w.slot), vr(w.slots), vr(w.slot)),
-			target.STR(vr(4), vr(w.slot), 0), target.STR(value, vr(w.slot), 8),
-			target.LDR(vr(order), vr(w.data), offset(jit.OffsetMapOrder)), target.STRWR(vr(w.index), vr(order), vr(used)),
-			target.LDR(vr(pos), vr(w.data), offset(jit.OffsetMapPos)), target.STRWR(vr(used), vr(pos), vr(w.index)),
-			target.ADDI(vr(used), vr(used), 1), target.STR(vr(used), vr(w.data), offset(jit.OffsetMapUsed)),
-			target.LDR(vr(count), vr(w.data), offset(jit.OffsetMapCount)), target.ADDI(vr(count), vr(count), 1), target.STR(vr(count), vr(w.data), offset(jit.OffsetMapCount)),
-		)
+		rows = append(rows, insert(w, w.word+7, vr(4), value)...)
 		rows = append(rows, retained(vr(4), 23)...)
 		return append(rows, target.BLabel(resume), target.STR(value, vr(w.slot), 8))
 	}

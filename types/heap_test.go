@@ -2,6 +2,7 @@ package types_test
 
 import (
 	"math"
+	"runtime"
 	"testing"
 
 	types "github.com/siyul-park/minivm/types"
@@ -226,6 +227,23 @@ func TestHeap_Add(t *testing.T) {
 		require.False(t, other.Alive(old))
 	})
 
+	t.Run("reads the limit again after a collection changes it", func(t *testing.T) {
+		var h *types.Heap
+		exhausted := 0
+		h = types.NewHeap(2, 3, types.Hooks{
+			Collect: func(int, int) {
+				if exhausted == 0 {
+					h.SetLimit(2)
+				}
+			},
+			Exhaust: func() { exhausted++; h.SetLimit(0) },
+		})
+		h.Add(types.I32(1))
+		h.Add(types.I32(2))
+		h.Add(types.I32(3))
+		require.Equal(t, 1, exhausted)
+	})
+
 	t.Run("grows past its capacity", func(t *testing.T) {
 		h := types.NewHeap(0, 0, types.Hooks{})
 		for n := range 9 {
@@ -260,15 +278,21 @@ func TestHeap_Adopt(t *testing.T) {
 	}
 
 	for name, build := range containers {
+		t.Run(name+" cannot release while unbound", func(t *testing.T) {
+			v := build(nil)
+			require.PanicsWithValue(t, types.ErrDetached, func() { releases[name](v) })
+		})
+
 		t.Run(name+" binds an unbound container", func(t *testing.T) {
 			h := types.NewHeap(4, 0, types.Hooks{})
 			h.Add(types.Null)
 			h.Add(types.I32(1))
 			v := build(nil)
-			require.PanicsWithValue(t, types.ErrDetached, func() { releases[name](v) })
 
 			require.True(t, h.Adopt(v))
-			require.NotPanics(t, func() { releases[name](v) })
+			require.Equal(t, 1, h.Count(1))
+			releases[name](v)
+			require.False(t, h.Alive(1))
 		})
 
 		t.Run(name+" keeps its own heap", func(t *testing.T) {
@@ -593,11 +617,13 @@ func TestHeap_Undo(t *testing.T) {
 		reused := types.NewArray(h, typ, 0)
 		require.Same(t, array, reused)
 		require.Zero(t, reused.Len())
-		require.Zero(t, testing.AllocsPerRun(1, func() {
-			reused.Append(types.BoxedNull, types.BoxedNull)
-			reused.Delete(1)
-			reused.Delete(0)
-		}))
+		// AllocsPerRun warms up once, which would hide an allocation of the
+		// first append, so the first append is measured on its own.
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		reused.Append(types.BoxedNull, types.BoxedNull)
+		runtime.ReadMemStats(&after)
+		require.Equal(t, before.Mallocs, after.Mallocs)
 	})
 }
 

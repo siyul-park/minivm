@@ -11079,8 +11079,17 @@ func TestNew(t *testing.T) {
 		array := types.NewArray(nil, types.NewArrayType(types.TypeAny()), 0)
 		array.Append(types.BoxRef(3))
 
+		t.Run("map", func(t *testing.T) {
+			// A rejection must leave the source heap as it found it, so the
+			// same constant is refused every time without releasing its key.
+			for range 3 {
+				i, err := interp.New(program.New(nil, program.WithConstants(foreign)))
+				require.ErrorIs(t, err, program.ErrConstantRef)
+				require.Nil(t, i)
+				require.Equal(t, 1, other.Heap().Count(key))
+			}
+		})
 		for name, constant := range map[string]types.Value{
-			"map":           foreign,
 			"array":         array,
 			"struct":        types.NewStruct(nil, structType, types.BoxRef(3)),
 			"bound to heap": types.NewArray(other.Heap(), types.NewArrayType(types.TypeAny()), 2),
@@ -11091,7 +11100,6 @@ func TestNew(t *testing.T) {
 				require.Nil(t, i)
 			})
 		}
-		require.Equal(t, 1, other.Heap().Count(key))
 	})
 
 	t.Run("loads a container constant of nulls", func(t *testing.T) {
@@ -11757,7 +11765,10 @@ func TestInterpreter_Run(t *testing.T) {
 				if err := interp.NewRegistry().Unmarshal(vm, fn, &call); err != nil {
 					t.Skip("heap too small to bind the call")
 				}
-				_ = call()
+				if err := call(); err != nil {
+					t.Logf("limit %d: %v", limit, err)
+					require.ErrorIs(t, err, interp.ErrHeapExhausted)
+				}
 				_, counts := heapOf(vm)
 				require.Equal(t, 1, counts[0], "the constant a")
 				for addr, count := range counts[1:] {
@@ -11786,7 +11797,10 @@ func TestInterpreter_Run(t *testing.T) {
 				if err := interp.NewRegistry().Unmarshal(vm, fn, &call); err != nil {
 					t.Skip("heap too small to bind the call")
 				}
-				_ = call()
+				if err := call(); err != nil {
+					t.Logf("limit %d: %v", limit, err)
+					require.ErrorIs(t, err, interp.ErrHeapExhausted)
+				}
 				_, counts := heapOf(vm)
 				require.Equal(t, 1, counts[0], "the constant a")
 				for addr, count := range counts[1:] {
@@ -11817,7 +11831,10 @@ func TestInterpreter_Run(t *testing.T) {
 				if err := interp.NewRegistry().Unmarshal(vm, fn, &call); err != nil {
 					t.Skip("heap too small to bind the call")
 				}
-				_ = call()
+				if err := call(); err != nil {
+					t.Logf("limit %d: %v", limit, err)
+					require.ErrorIs(t, err, interp.ErrHeapExhausted)
+				}
 				count, err := vm.RefCount(addr)
 				require.NoError(t, err)
 				require.Equal(t, 1, count)

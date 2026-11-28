@@ -2,6 +2,7 @@ package types_test
 
 import (
 	"fmt"
+	"runtime"
 	"testing"
 
 	types "github.com/siyul-park/minivm/types"
@@ -99,11 +100,13 @@ func TestNewArray(t *testing.T) {
 		array := types.NewArray(h, typ, 0)
 		require.Same(t, kept, array)
 		require.Zero(t, array.Len())
-		require.Zero(t, testing.AllocsPerRun(1, func() {
-			array.Append(types.BoxedNull, types.BoxedNull)
-			array.Delete(1)
-			array.Delete(0)
-		}))
+		// AllocsPerRun warms up once, which would hide an allocation of the
+		// first append, so the first append is measured on its own.
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		array.Append(types.BoxedNull, types.BoxedNull)
+		runtime.ReadMemStats(&after)
+		require.Equal(t, before.Mallocs, after.Mallocs)
 	})
 
 	t.Run("builds a new header without a heap", func(t *testing.T) {
@@ -267,6 +270,26 @@ func TestArray_Fill(t *testing.T) {
 		require.Equal(t, 3, h.Count(v.Ref()))
 	})
 
+	t.Run("a detached array takes a single reference word", func(t *testing.T) {
+		array := types.NewArray(nil, typ, 2)
+
+		require.NotPanics(t, func() { array.Fill(types.BoxRef(1), 0, 1) })
+		require.Equal(t, types.BoxRef(1), array.Index(0))
+		require.PanicsWithValue(t, types.ErrDetached, func() { array.Fill(types.BoxRef(1), 0, 2) })
+	})
+
+	t.Run("rejects a window past the length before any count changes", func(t *testing.T) {
+		h, ref := arrayFixture(types.Hooks{})
+		v, old := ref(), ref()
+		array := newArray(h, typ, old, types.BoxedNull)
+		array.Delete(1)
+
+		require.Panics(t, func() { array.Fill(v, 0, 2) })
+		require.Equal(t, old, array.Index(0))
+		require.Equal(t, 1, h.Count(v.Ref()))
+		require.Equal(t, 1, h.Count(old.Ref()))
+	})
+
 	t.Run("a finalizer that deletes an element cannot shrink the fill", func(t *testing.T) {
 		var array *types.Array
 		h, ref := arrayFixture(types.Hooks{Finalize: func(int, types.Value) { array.Delete(0) }})
@@ -303,6 +326,37 @@ func TestArray_Copy(t *testing.T) {
 
 		dst.Copy(0, src, 0, 2)
 		require.Equal(t, before+2, h.Count(0))
+	})
+
+	t.Run("rejects a window past either length before any count changes", func(t *testing.T) {
+		h, ref := arrayFixture(types.Hooks{})
+		a, b, c := ref(), ref(), ref()
+		src := newArray(h, typ, a, types.BoxedNull)
+		src.Delete(1)
+		dst := newArray(h, typ, b, c)
+		dst.Delete(1)
+
+		require.Panics(t, func() { dst.Copy(1, src, 0, 1) })
+		require.Panics(t, func() { dst.Copy(0, src, 1, 1) })
+		require.Equal(t, 1, h.Count(a.Ref()))
+		require.Equal(t, 1, h.Count(b.Ref()))
+		dst.Copy(0, src, 0, 1)
+		require.Equal(t, a, dst.Index(0))
+	})
+
+	t.Run("rejects a reference from another heap and copies its scalars", func(t *testing.T) {
+		h, ref := arrayFixture(types.Hooks{})
+		other, ref2 := arrayFixture(types.Hooks{})
+		a, foreign := ref(), ref2()
+		dst := newArray(h, typ, a)
+
+		require.PanicsWithValue(t, types.ErrForeign, func() { dst.Copy(0, newArray(other, typ, foreign), 0, 1) })
+		require.Equal(t, a, dst.Index(0))
+		require.Equal(t, 1, h.Count(a.Ref()))
+		require.Equal(t, 1, other.Count(foreign.Ref()))
+
+		dst.Copy(0, newArray(other, typ, types.BoxI32(5)), 0, 1)
+		require.Equal(t, types.BoxI32(5), dst.Index(0))
 	})
 
 	t.Run("overlaps forward", func(t *testing.T) {

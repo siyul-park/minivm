@@ -242,6 +242,7 @@ func (m *Map) Clear() {
 	t := &m.table
 	old := *t
 	t.alloc(tableMinCapacity)
+	t.epoch = nil
 	t.gen++
 	if !m.Typ.TraceKeys && !m.Typ.TraceValues {
 		return
@@ -276,6 +277,7 @@ func (it *MapIterator) Next() bool {
 	t := &it.m.table
 	if it.gen != t.gen {
 		it.current = BoxedNull
+		it.epoch = nil
 		it.done = true
 		return false
 	}
@@ -295,6 +297,7 @@ func (it *MapIterator) Next() bool {
 		return true
 	}
 	it.current = BoxedNull
+	it.epoch = nil
 	it.done = true
 	return false
 }
@@ -576,7 +579,8 @@ func (m *Map) resolve(key Boxed) (word, base uint64, match byte) {
 		if f == 0 {
 			return 0, 0, matchWord
 		}
-		return uint64(key), uint64(key), nanMatch(f)
+		word = uint64(BoxF64(f))
+		return word, word, nanMatch(f)
 	}
 	switch key.Kind() {
 	case KindI1:

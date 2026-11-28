@@ -1351,6 +1351,15 @@ func TestMapIterator_Refs(t *testing.T) {
 	it := types.NewMapIterator(7, m)
 	require.True(t, it.Next())
 	require.Equal(t, []types.Ref{5, 7, types.Ref(key.Ref())}, it.Refs([]types.Ref{5}))
+
+	t.Run("an f64 NaN key that carries the reference tag yields no reference", func(t *testing.T) {
+		m := types.NewMap(nil, types.NewMapType(types.TypeF64(), types.TypeI32()), 0)
+		m.Store(types.Boxed(types.Tag(types.KindRef)|7), 0)
+		it := types.NewMapIterator(1, m)
+		require.True(t, it.Next())
+		require.NotEqual(t, types.KindRef, it.Current().Kind())
+		require.Equal(t, []types.Ref{1}, it.Refs(nil))
+	})
 }
 
 func TestMapIterator_String(t *testing.T) {

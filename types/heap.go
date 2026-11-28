@@ -56,6 +56,9 @@ var (
 	// ErrDetached is the panic of a container, such as a Map built with a nil heap,
 	// that must read, retain, or release a reference without a heap to do it in.
 	ErrDetached = errors.New("types: container is not bound to a heap")
+	// ErrForeign is the panic of a copy from a container bound to another heap,
+	// whose reference words name values in that heap.
+	ErrForeign = errors.New("types: container is bound to another heap")
 
 	errHook = errors.New("types: heap hook is not set")
 )
@@ -105,6 +108,10 @@ func (h *Heap) Add(v Value) int {
 			h.track(v)
 			return addr
 		}
+		// Collect may change the limit, so both tests are read again before
+		// either decides to refuse the value or to grow.
+		full = len(h.objects) == cap(h.objects)
+		limited = h.limit > 0 && len(h.objects) >= h.limit
 	}
 	if limited {
 		if h.hooks.Exhaust == nil {
@@ -243,7 +250,9 @@ func (h *Heap) Dispose(addr int, old Value) {
 // Recount takes the heap as the baseline every Reset returns to and rebuilds
 // its counts from roots, one reference each, and from the edges between
 // values, for the runtime that owns the heap. The heap MUST already hold the
-// null slot at address 0. It sets the collection pace: a
+// null slot at address 0, and every other slot MUST be reachable from roots or
+// from another slot's edge: Recount frees nothing, so a slot it leaves at zero
+// stays allocated and uncounted. It sets the collection pace: a
 // fresh heap first collects once its capacity is in use, a reloaded one once
 // the live set has grown by the pace's runway.
 func (h *Heap) Recount(roots []Boxed) {

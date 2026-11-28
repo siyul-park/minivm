@@ -52,7 +52,7 @@ An `i64` key outside the inline range is a map-owned `I64` heap cell: `Store` an
 | Part | Contract |
 |---|---|
 | Capacity | a power of two, at least 8 |
-| Hash | the key's base hash (its word, else the content hash of a `String`) xor a random per-table seed, times a fixed constant; the top bits pick the home slot and the seven bits below them the tag. The seed survives rehash and `Clone`, so keys crafted to collide for the bare constant spread out; it never affects iteration order |
+| Hash | the key's base hash (its word, the content hash of a `String`, or the integer in a wide `I64` cell) xor a random per-table seed, times a fixed constant; the top bits pick the home slot and the seven bits below them the tag. The seed survives rehash and `Clone`, so keys crafted to collide for the bare constant spread out; it never affects iteration order |
 | Slot | key word, then `Boxed` value word, in `slots`; control byte `empty` (0), `dead` (1, a tombstone), or `full` (`0x80` with the tag) in `ctrl`; probing is linear and passes every slot whose control byte is not the key's tag. An insert takes the first tombstone on its probe, else the empty slot that ended it |
 | Order | `order[:used]` lists the slot of every insert since the last rehash, the rehash's own re-inserts first, and `pos[slot]` is the position of the slot's latest insert; position `p` is live while slot `order[p]` is full and `pos[order[p]]` is `p` |
 | Load | `used`, which bounds live entries plus tombstones, stays at or below three quarters of capacity; an insert past that rehashes the live entries, in order, into fresh arrays, doubling them when live entries exceed three eighths and keeping the size otherwise |

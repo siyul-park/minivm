@@ -159,7 +159,9 @@ func (a *Array) SwapIndex(i int, v Boxed) Boxed {
 
 // Fill takes one reference to v and stores it in n elements from index from,
 // adding the other n-1 references. It releases v when n is not positive, and
-// releases the replaced words once every store is done.
+// releases the replaced words once every store is done. A detached array takes
+// a single reference word without a heap, since it neither adds a reference nor
+// releases one; any other fill needs the heap.
 func (a *Array) Fill(v Boxed, from, n int) {
 	if n <= 0 {
 		if owns(v) {
@@ -167,13 +169,14 @@ func (a *Array) Fill(v Boxed, from, n int) {
 		}
 		return
 	}
+	window := a.window(from, n)
 	var local [8]Boxed
-	old := a.replaced(local[:0], from, n)
+	old := replaced(local[:0], window)
 	var h *Heap
-	if v.Kind() == KindRef || len(old) > 0 {
+	if len(old) > 0 || (v.Kind() == KindRef && n > 1) {
 		h = a.bound()
 	}
-	if v.Kind() == KindRef {
+	if v.Kind() == KindRef && n > 1 {
 		h.Inc(v.Ref(), n-1)
 	}
 	for i := from; i < from+n; i++ {
@@ -186,14 +189,23 @@ func (a *Array) Fill(v Boxed, from, n int) {
 
 // Copy copies n elements of src from index from to a at index at, which may be
 // the same array. It retains the copied words, and releases the replaced words
-// once the copy is done.
+// once the copy is done. Both windows MUST lie inside their array's length, and
+// a src bound to another heap MUST hold no reference.
 func (a *Array) Copy(at int, src *Array, from, n int) {
 	if n <= 0 {
 		return
 	}
-	words := src.elems[from : from+n]
+	words := src.window(from, n)
+	dst := a.window(at, n)
+	if src.heap != nil && src.heap != a.heap {
+		for _, w := range words {
+			if owns(w) {
+				panic(ErrForeign)
+			}
+		}
+	}
 	var local [8]Boxed
-	old := a.replaced(local[:0], at, n)
+	old := replaced(local[:0], dst)
 	var h *Heap
 	if len(old) > 0 {
 		h = a.bound()
@@ -206,7 +218,7 @@ func (a *Array) Copy(at int, src *Array, from, n int) {
 			h.Retain(w)
 		}
 	}
-	copy(a.elems[at:at+n], words)
+	copy(dst, words)
 	for _, w := range old {
 		h.Release(w)
 	}
@@ -365,10 +377,16 @@ func (a TypedArray[T]) clone() Value {
 	return a.Clone()
 }
 
-// replaced appends the words of a that owns a reference in [from, from+n) to
-// dst.
-func (a *Array) replaced(dst []Boxed, from, n int) []Boxed {
-	for _, w := range a.elems[from : from+n] {
+// window returns the elements [from, from+n), panicking like Go when the range
+// leaves the array's length. Clamping the capacity first makes the slice bounds
+// the array's length rather than its backing storage.
+func (a *Array) window(from, n int) []Boxed {
+	return a.elems[:a.Len():a.Len()][from : from+n]
+}
+
+// replaced appends the words of window that a owns a reference in to dst.
+func replaced(dst []Boxed, window []Boxed) []Boxed {
+	for _, w := range window {
 		if owns(w) {
 			dst = append(dst, w)
 		}

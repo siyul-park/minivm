@@ -497,23 +497,23 @@ func TestHostMap_Map(t *testing.T) {
 		typ := types.NewMapType(types.TypeString(), types.TypeString())
 		for _, op := range []instr.Opcode{instr.MAP_KEYS, instr.MAP_ITER} {
 			t.Run(instr.TypeOf(op).Mnemonic, func(t *testing.T) {
-				live := func(rounds int) int {
+				for _, rounds := range []int{1, 8} {
 					b := program.NewBuilder()
 					b.Globals(typ)
 					for range rounds {
 						b.Emit(instr.GLOBAL_GET, 0).Emit(op).Emit(instr.DROP)
 					}
 					i := interp.MustNew(b.MustBuild(), interp.WithThreshold(-1))
-					defer i.Close()
 					value, err := interp.NewRegistry().Marshal(i, map[string]string{"a": "x", "b": "y"})
 					require.NoError(t, err)
 					addr, err := i.Alloc(value)
 					require.NoError(t, err)
 					require.NoError(t, i.SetGlobal(0, types.BoxRef(addr)))
+					before := liveOf(i)
 					require.NoError(t, i.Run(context.Background()))
-					return liveOf(i)
+					require.Equal(t, before, liveOf(i), "rounds %d", rounds)
+					require.NoError(t, i.Close())
 				}
-				require.Equal(t, live(1), live(8))
 			})
 		}
 	})

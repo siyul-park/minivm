@@ -19,7 +19,7 @@ import (
 
 // mapKey is the key expression a map program pushes for iteration i: i times mul,
 // modulo space, shifted by shift, converted to the map's key kind; a float key's
-// sign alternates with the iteration, so zero is both +0 and -0.
+// sign alternates with each run of space iterations, so zero is both +0 and -0.
 type mapKey struct {
 	kind  types.Type
 	shift uint64
@@ -1243,11 +1243,13 @@ func (k mapKey) emit(b *instr.Builder, mul, space uint64) {
 	}
 	switch k.kind.Kind() {
 	case types.KindF32:
-		// The sign flips with the iteration's parity, so a zero key is -0 half the time.
-		b.Emit(instr.I32_TO_F32_S).Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_AND)
+		// The sign flips with each run of space iterations. Each run meets every
+		// residue once when mul and space are coprime, so a zero key takes both
+		// signs whatever the iteration's parity.
+		b.Emit(instr.I32_TO_F32_S).Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, space).Emit(instr.I32_DIV_S).Emit(instr.I32_CONST, 1).Emit(instr.I32_AND)
 		b.Emit(instr.I32_CONST, 1).Emit(instr.I32_SHL).Emit(instr.I32_SUB).Emit(instr.I32_TO_F32_S).Emit(instr.F32_MUL)
 	case types.KindF64:
-		b.Emit(instr.I32_TO_F64_S).Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_AND)
+		b.Emit(instr.I32_TO_F64_S).Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, space).Emit(instr.I32_DIV_S).Emit(instr.I32_CONST, 1).Emit(instr.I32_AND)
 		b.Emit(instr.I32_CONST, 1).Emit(instr.I32_SHL).Emit(instr.I32_SUB).Emit(instr.I32_TO_F64_S).Emit(instr.F64_MUL)
 	}
 }

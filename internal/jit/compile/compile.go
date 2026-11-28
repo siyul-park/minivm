@@ -221,7 +221,7 @@ func (l *lowering) Const(v ssa.Value) (uint64, bool) {
 // Object reports what the module knows of the constant reference v.
 func (l *lowering) Object(v ssa.Value) (transform.Object, bool) {
 	word, ok := l.consts[v]
-	if !ok || types.Boxed(word).Kind() != types.KindRef {
+	if !ok || l.Type(v) != ssa.TypeRef || types.Boxed(word).Kind() != types.KindRef {
 		return transform.Object{}, false
 	}
 	o, ok := l.objects[types.Boxed(word).Ref()]
