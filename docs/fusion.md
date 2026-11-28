@@ -44,6 +44,7 @@ Current patterns include:
 - constant calls and closure creation;
 - slot reads, `ref.null`, `dup`, and non-string constants feeding `drop`, `ref.is_null`, or `ref.is_null` + `br_if`;
 - slot reads feeding `coro.done`, `coro.done` + `br_if`, or `coro.value`;
+- typed slot reads, typed scalar constants, scalar immediates, and non-trapping binary operations feeding `return`, which materializes the value as unfused code does and then retires the frame;
 - conditional branches and scalar comparisons;
 - constant aggregate indexes;
 - non-trapping arithmetic stored into typed locals;

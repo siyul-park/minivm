@@ -14020,6 +14020,87 @@ func TestInterpreter_Run(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("returns a fused producer as exact execution does", func(t *testing.T) {
+		i32, i64, f64, ref := types.TypeI32(), types.TypeI64(), types.TypeF64(), types.TypeAny()
+		fn := func(params, returns []types.Type, captures []types.Type, body ...instr.Instruction) *types.Function {
+			return types.NewFunctionBuilder(&types.FunctionType{Params: params, Returns: returns}).Captures(captures...).Append(body...).MustBuild()
+		}
+		ins := func(op instr.Opcode, operands ...uint64) instr.Instruction { return instr.MustNew(op, operands...) }
+		call := ins(instr.CALL)
+		wide := uint64(1) << 40
+		tests := []struct {
+			name    string
+			program *program.Program
+			trap    error
+		}{
+			{name: "local i32", program: program.New([]instr.Instruction{ins(instr.I32_CONST, 7), ins(instr.CONST_GET, 0), call},
+				program.WithConstants(fn([]types.Type{i32}, []types.Type{i32}, nil, ins(instr.LOCAL_GET, 0), ins(instr.RETURN))))},
+			{name: "local i64", program: program.New([]instr.Instruction{ins(instr.I64_CONST, wide), ins(instr.CONST_GET, 0), call},
+				program.WithConstants(fn([]types.Type{i64}, []types.Type{i64}, nil, ins(instr.LOCAL_GET, 0), ins(instr.RETURN))))},
+			{name: "local f64", program: program.New([]instr.Instruction{ins(instr.F64_CONST, math.Float64bits(2.5)), ins(instr.CONST_GET, 0), call},
+				program.WithConstants(fn([]types.Type{f64}, []types.Type{f64}, nil, ins(instr.LOCAL_GET, 0), ins(instr.RETURN))))},
+			{name: "local ref", program: program.New([]instr.Instruction{ins(instr.CONST_GET, 1), ins(instr.CONST_GET, 0), call},
+				program.WithConstants(fn([]types.Type{ref}, []types.Type{ref}, nil, ins(instr.LOCAL_GET, 0), ins(instr.RETURN)), types.String("ref")))},
+			{name: "global", program: program.New([]instr.Instruction{ins(instr.I32_CONST, 9), ins(instr.GLOBAL_SET, 0), ins(instr.CONST_GET, 0), call},
+				program.WithGlobals(i32), program.WithConstants(fn(nil, []types.Type{i32}, nil, ins(instr.GLOBAL_GET, 0), ins(instr.RETURN))))},
+			{name: "upvalue", program: program.New([]instr.Instruction{ins(instr.I32_CONST, 4), ins(instr.CONST_GET, 0), ins(instr.CLOSURE_NEW), call},
+				program.WithConstants(fn(nil, []types.Type{i32}, []types.Type{i32}, ins(instr.UPVAL_GET, 0), ins(instr.RETURN))))},
+			{name: "constant i32", program: program.New([]instr.Instruction{ins(instr.CONST_GET, 0), call},
+				program.WithConstants(fn(nil, []types.Type{i32}, nil, ins(instr.CONST_GET, 1), ins(instr.RETURN)), types.I32(5)))},
+			{name: "constant i64", program: program.New([]instr.Instruction{ins(instr.CONST_GET, 0), call},
+				program.WithConstants(fn(nil, []types.Type{i64}, nil, ins(instr.CONST_GET, 1), ins(instr.RETURN)), types.I64(1<<40)))},
+			{name: "immediate i32", program: program.New([]instr.Instruction{ins(instr.CONST_GET, 0), call},
+				program.WithConstants(fn(nil, []types.Type{i32}, nil, ins(instr.I32_CONST, 3), ins(instr.RETURN))))},
+			{name: "immediate i64", program: program.New([]instr.Instruction{ins(instr.CONST_GET, 0), call},
+				program.WithConstants(fn(nil, []types.Type{i64}, nil, ins(instr.I64_CONST, wide), ins(instr.RETURN))))},
+			{name: "binary i32", program: program.New([]instr.Instruction{ins(instr.I32_CONST, 6), ins(instr.CONST_GET, 0), call},
+				program.WithConstants(fn([]types.Type{i32}, []types.Type{i32}, nil, ins(instr.LOCAL_GET, 0), ins(instr.DUP), ins(instr.I32_ADD), ins(instr.RETURN))))},
+			{name: "binary i64", program: program.New([]instr.Instruction{ins(instr.I64_CONST, wide), ins(instr.CONST_GET, 0), call},
+				program.WithConstants(fn([]types.Type{i64}, []types.Type{i64}, nil, ins(instr.LOCAL_GET, 0), ins(instr.DUP), ins(instr.I64_ADD), ins(instr.RETURN))))},
+			{name: "binary f64", program: program.New([]instr.Instruction{ins(instr.F64_CONST, math.Float64bits(1.5)), ins(instr.CONST_GET, 0), call},
+				program.WithConstants(fn([]types.Type{f64}, []types.Type{f64}, nil, ins(instr.LOCAL_GET, 0), ins(instr.DUP), ins(instr.F64_MUL), ins(instr.RETURN))))},
+			{name: "two results", program: program.New([]instr.Instruction{ins(instr.I32_CONST, 2), ins(instr.CONST_GET, 0), call},
+				program.WithConstants(fn([]types.Type{i32}, []types.Type{i32, i32}, nil, ins(instr.LOCAL_GET, 0), ins(instr.LOCAL_GET, 0), ins(instr.RETURN))))},
+			{name: "coroutine", program: program.New([]instr.Instruction{
+				ins(instr.CONST_GET, 0), call, ins(instr.DUP), ins(instr.REF_NULL), ins(instr.RESUME), ins(instr.DROP), ins(instr.DUP), ins(instr.CORO_VALUE), ins(instr.SWAP), ins(instr.CORO_DONE),
+			}, program.WithConstants(fn(nil, []types.Type{ref}, nil, ins(instr.I32_CONST, 1), ins(instr.YIELD), ins(instr.DROP), ins(instr.I32_CONST, 8), ins(instr.RETURN))))},
+			{name: "module", trap: interp.ErrFrameUnderflow, program: program.New([]instr.Instruction{ins(instr.I32_CONST, 1), ins(instr.RETURN)})},
+			{name: "module local", trap: interp.ErrFrameUnderflow, program: program.New([]instr.Instruction{ins(instr.LOCAL_GET, 0), ins(instr.RETURN)}, program.WithLocals(i32))},
+		}
+		for _, tt := range tests {
+			var results [2]struct {
+				values []types.Value
+				err    error
+				live   int
+			}
+			for index, opts := range [][]interp.Option{nil, {interp.WithTick(1)}} {
+				vm := interp.MustNew(tt.program, opts...)
+				results[index].err = vm.Run(context.Background())
+				for results[index].err == nil && vm.Len() > 0 {
+					value, err := vm.Pop()
+					require.NoError(t, err, tt.name)
+					results[index].values = append(results[index].values, value)
+				}
+				results[index].live = live(vm)
+				require.NoError(t, vm.Close(), tt.name)
+			}
+			fused, exact := results[0], results[1]
+			if tt.trap == nil {
+				require.NoError(t, exact.err, tt.name)
+				require.NotEmpty(t, exact.values, tt.name)
+				require.Equal(t, exact, fused, tt.name)
+				continue
+			}
+			require.ErrorIs(t, exact.err, tt.trap, tt.name)
+			require.ErrorIs(t, fused.err, tt.trap, tt.name)
+			var fusedErr, exactErr *interp.RuntimeError
+			require.ErrorAs(t, fused.err, &fusedErr, tt.name)
+			require.ErrorAs(t, exact.err, &exactErr, tt.name)
+			require.Equal(t, exactErr.Frames, fusedErr.Frames, tt.name)
+			require.Equal(t, exact.live, fused.live, tt.name)
+		}
+	})
 }
 
 // requireEqualValue compares want with got. An array or struct is compared by

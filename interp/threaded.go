@@ -36045,6 +36045,208 @@ func fuseGlobalGet747(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
+func fuseGlobalGet748(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.global(start+1, types.KindF32)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 3
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			if v0 >= len(i.globals) {
+				panic(trapped{ErrSegmentationFault, 0})
+			}
+			v1 := i.globals[v0]
+			i.stack[i.sp] = v1
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v4 := i.fr
+			i.retire(v3 || i.sp != v4.bp+v2+v4.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseGlobalGet749(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.global(start+1, types.KindF64)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 3
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			if v0 >= len(i.globals) {
+				panic(trapped{ErrSegmentationFault, 0})
+			}
+			v1 := i.globals[v0]
+			i.stack[i.sp] = v1
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v4 := i.fr
+			i.retire(v3 || i.sp != v4.bp+v2+v4.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseGlobalGet750(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.global(start+1, types.KindI32)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 3
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			if v0 >= len(i.globals) {
+				panic(trapped{ErrSegmentationFault, 0})
+			}
+			v1 := i.globals[v0]
+			i.stack[i.sp] = v1
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v4 := i.fr
+			i.retire(v3 || i.sp != v4.bp+v2+v4.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseGlobalGet751(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.global(start+1, types.KindI64)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 3
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			if v0 >= len(i.globals) {
+				panic(trapped{ErrSegmentationFault, 0})
+			}
+			v1 := i.globals[v0]
+			i.heap.Retain(v1)
+			i.stack[i.sp] = v1
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v4 := i.fr
+			i.retire(v3 || i.sp != v4.bp+v2+v4.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseGlobalGet752(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.global(start+1, types.KindRef)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 3
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			if v0 >= len(i.globals) {
+				panic(trapped{ErrSegmentationFault, 0})
+			}
+			v1 := i.globals[v0]
+			i.heap.Retain(v1)
+			i.stack[i.sp] = v1
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v4 := i.fr
+			i.retire(v3 || i.sp != v4.bp+v2+v4.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
 func fuseLocalGet0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.F32_CONST && instr.Opcode(c.code[start+7]) == instr.F32_ADD && instr.Opcode(c.code[start+8]) == instr.LOCAL_SET) {
@@ -64682,6 +64884,213 @@ func fuseLocalGet591(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
+func fuseLocalGet592(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.local(start+1, types.KindF32)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 2
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			if i.fr.bp+v0 >= i.sp {
+				panic(trapped{ErrSegmentationFault, 0})
+			}
+			v1 := i.fr.bp + v0
+			v4 := i.stack[v1]
+			i.stack[i.sp] = v4
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v5 := i.fr
+			i.retire(v3 || i.sp != v5.bp+v2+v5.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseLocalGet593(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.local(start+1, types.KindF64)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 2
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			if i.fr.bp+v0 >= i.sp {
+				panic(trapped{ErrSegmentationFault, 0})
+			}
+			v1 := i.fr.bp + v0
+			v4 := i.stack[v1]
+			i.stack[i.sp] = v4
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v5 := i.fr
+			i.retire(v3 || i.sp != v5.bp+v2+v5.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseLocalGet594(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.local(start+1, types.KindI32)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 2
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			if i.fr.bp+v0 >= i.sp {
+				panic(trapped{ErrSegmentationFault, 0})
+			}
+			v1 := i.fr.bp + v0
+			v4 := i.stack[v1]
+			i.stack[i.sp] = v4
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v5 := i.fr
+			i.retire(v3 || i.sp != v5.bp+v2+v5.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseLocalGet595(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.local(start+1, types.KindI64)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 2
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			if i.fr.bp+v0 >= i.sp {
+				panic(trapped{ErrSegmentationFault, 0})
+			}
+			v1 := i.fr.bp + v0
+			v4 := i.stack[v1]
+			i.heap.Retain(v4)
+			i.stack[i.sp] = v4
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v5 := i.fr
+			i.retire(v3 || i.sp != v5.bp+v2+v5.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseLocalGet596(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.local(start+1, types.KindRef)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 2
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			if i.fr.bp+v0 >= i.sp {
+				panic(trapped{ErrSegmentationFault, 0})
+			}
+			v1 := i.fr.bp + v0
+			v4 := i.stack[v1]
+			i.heap.Retain(v4)
+			i.stack[i.sp] = v4
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v5 := i.fr
+			i.retire(v3 || i.sp != v5.bp+v2+v5.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
 func fuseConstGet0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+6]) == instr.GLOBAL_GET && instr.Opcode(c.code[start+9]) == instr.ARRAY_SET) {
@@ -76178,6 +76587,43 @@ func fuseConstGet215(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseConstGet216(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.constant(start+1, types.KindF32)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 3
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			i.heap.Retain(v0)
+			i.stack[i.sp] = v0
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v1 := i.fr
+			i.retire(v3 || i.sp != v1.bp+v2+v1.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseConstGet217(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_ADD) {
 			return nil
 		}
@@ -76200,7 +76646,7 @@ func fuseConstGet216(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet217(c *threader, start int) func(*Interpreter) {
+func fuseConstGet218(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_SUB) {
 			return nil
@@ -76224,7 +76670,7 @@ func fuseConstGet217(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet218(c *threader, start int) func(*Interpreter) {
+func fuseConstGet219(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_MUL) {
 			return nil
@@ -76248,7 +76694,7 @@ func fuseConstGet218(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet219(c *threader, start int) func(*Interpreter) {
+func fuseConstGet220(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_DIV) {
 			return nil
@@ -76284,7 +76730,7 @@ func fuseConstGet219(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet220(c *threader, start int) func(*Interpreter) {
+func fuseConstGet221(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_REM) {
 			return nil
@@ -76320,7 +76766,7 @@ func fuseConstGet220(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet221(c *threader, start int) func(*Interpreter) {
+func fuseConstGet222(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_MOD) {
 			return nil
@@ -76362,7 +76808,7 @@ func fuseConstGet221(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet222(c *threader, start int) func(*Interpreter) {
+func fuseConstGet223(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_MIN) {
 			return nil
@@ -76386,7 +76832,7 @@ func fuseConstGet222(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet223(c *threader, start int) func(*Interpreter) {
+func fuseConstGet224(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_MAX) {
 			return nil
@@ -76410,7 +76856,7 @@ func fuseConstGet223(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet224(c *threader, start int) func(*Interpreter) {
+func fuseConstGet225(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_COPYSIGN) {
 			return nil
@@ -76434,7 +76880,7 @@ func fuseConstGet224(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet225(c *threader, start int) func(*Interpreter) {
+func fuseConstGet226(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_EQ) {
 			return nil
@@ -76458,7 +76904,7 @@ func fuseConstGet225(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet226(c *threader, start int) func(*Interpreter) {
+func fuseConstGet227(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_NE) {
 			return nil
@@ -76482,7 +76928,7 @@ func fuseConstGet226(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet227(c *threader, start int) func(*Interpreter) {
+func fuseConstGet228(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_LT) {
 			return nil
@@ -76506,7 +76952,7 @@ func fuseConstGet227(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet228(c *threader, start int) func(*Interpreter) {
+func fuseConstGet229(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_GT) {
 			return nil
@@ -76530,7 +76976,7 @@ func fuseConstGet228(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet229(c *threader, start int) func(*Interpreter) {
+func fuseConstGet230(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_LE) {
 			return nil
@@ -76554,7 +77000,7 @@ func fuseConstGet229(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet230(c *threader, start int) func(*Interpreter) {
+func fuseConstGet231(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F32_GE) {
 			return nil
@@ -76578,7 +77024,44 @@ func fuseConstGet230(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet231(c *threader, start int) func(*Interpreter) {
+func fuseConstGet232(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.constant(start+1, types.KindF64)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 3
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			i.heap.Retain(v0)
+			i.stack[i.sp] = v0
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v1 := i.fr
+			i.retire(v3 || i.sp != v1.bp+v2+v1.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseConstGet233(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_ADD) {
 			return nil
@@ -76602,7 +77085,7 @@ func fuseConstGet231(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet232(c *threader, start int) func(*Interpreter) {
+func fuseConstGet234(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_SUB) {
 			return nil
@@ -76626,7 +77109,7 @@ func fuseConstGet232(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet233(c *threader, start int) func(*Interpreter) {
+func fuseConstGet235(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_MUL) {
 			return nil
@@ -76650,7 +77133,7 @@ func fuseConstGet233(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet234(c *threader, start int) func(*Interpreter) {
+func fuseConstGet236(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_DIV) {
 			return nil
@@ -76686,7 +77169,7 @@ func fuseConstGet234(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet235(c *threader, start int) func(*Interpreter) {
+func fuseConstGet237(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_REM) {
 			return nil
@@ -76722,7 +77205,7 @@ func fuseConstGet235(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet236(c *threader, start int) func(*Interpreter) {
+func fuseConstGet238(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_MOD) {
 			return nil
@@ -76764,7 +77247,7 @@ func fuseConstGet236(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet237(c *threader, start int) func(*Interpreter) {
+func fuseConstGet239(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_MIN) {
 			return nil
@@ -76788,7 +77271,7 @@ func fuseConstGet237(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet238(c *threader, start int) func(*Interpreter) {
+func fuseConstGet240(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_MAX) {
 			return nil
@@ -76812,7 +77295,7 @@ func fuseConstGet238(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet239(c *threader, start int) func(*Interpreter) {
+func fuseConstGet241(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_COPYSIGN) {
 			return nil
@@ -76836,7 +77319,7 @@ func fuseConstGet239(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet240(c *threader, start int) func(*Interpreter) {
+func fuseConstGet242(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_EQ) {
 			return nil
@@ -76860,7 +77343,7 @@ func fuseConstGet240(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet241(c *threader, start int) func(*Interpreter) {
+func fuseConstGet243(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_NE) {
 			return nil
@@ -76884,7 +77367,7 @@ func fuseConstGet241(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet242(c *threader, start int) func(*Interpreter) {
+func fuseConstGet244(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_LT) {
 			return nil
@@ -76908,7 +77391,7 @@ func fuseConstGet242(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet243(c *threader, start int) func(*Interpreter) {
+func fuseConstGet245(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_GT) {
 			return nil
@@ -76932,7 +77415,7 @@ func fuseConstGet243(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet244(c *threader, start int) func(*Interpreter) {
+func fuseConstGet246(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_LE) {
 			return nil
@@ -76956,7 +77439,7 @@ func fuseConstGet244(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet245(c *threader, start int) func(*Interpreter) {
+func fuseConstGet247(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.F64_GE) {
 			return nil
@@ -76980,7 +77463,44 @@ func fuseConstGet245(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet246(c *threader, start int) func(*Interpreter) {
+func fuseConstGet248(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.constant(start+1, types.KindI32)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 3
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			i.heap.Retain(v0)
+			i.stack[i.sp] = v0
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v1 := i.fr
+			i.retire(v3 || i.sp != v1.bp+v2+v1.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseConstGet249(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.ARRAY_GET) {
 			return nil
@@ -77012,7 +77532,7 @@ func fuseConstGet246(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet247(c *threader, start int) func(*Interpreter) {
+func fuseConstGet250(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.STRUCT_GET) {
 			return nil
@@ -77044,7 +77564,7 @@ func fuseConstGet247(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet248(c *threader, start int) func(*Interpreter) {
+func fuseConstGet251(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_ADD) {
 			return nil
@@ -77068,7 +77588,7 @@ func fuseConstGet248(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet249(c *threader, start int) func(*Interpreter) {
+func fuseConstGet252(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_SUB) {
 			return nil
@@ -77092,7 +77612,7 @@ func fuseConstGet249(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet250(c *threader, start int) func(*Interpreter) {
+func fuseConstGet253(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_MUL) {
 			return nil
@@ -77116,7 +77636,7 @@ func fuseConstGet250(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet251(c *threader, start int) func(*Interpreter) {
+func fuseConstGet254(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_DIV_S) {
 			return nil
@@ -77152,7 +77672,7 @@ func fuseConstGet251(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet252(c *threader, start int) func(*Interpreter) {
+func fuseConstGet255(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_DIV_U) {
 			return nil
@@ -77188,7 +77708,7 @@ func fuseConstGet252(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet253(c *threader, start int) func(*Interpreter) {
+func fuseConstGet256(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_REM_S) {
 			return nil
@@ -77224,7 +77744,7 @@ func fuseConstGet253(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet254(c *threader, start int) func(*Interpreter) {
+func fuseConstGet257(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_REM_U) {
 			return nil
@@ -77260,7 +77780,7 @@ func fuseConstGet254(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet255(c *threader, start int) func(*Interpreter) {
+func fuseConstGet258(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_SHL) {
 			return nil
@@ -77284,7 +77804,7 @@ func fuseConstGet255(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet256(c *threader, start int) func(*Interpreter) {
+func fuseConstGet259(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_SHR_S) {
 			return nil
@@ -77308,7 +77828,7 @@ func fuseConstGet256(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet257(c *threader, start int) func(*Interpreter) {
+func fuseConstGet260(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_SHR_U) {
 			return nil
@@ -77332,7 +77852,7 @@ func fuseConstGet257(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet258(c *threader, start int) func(*Interpreter) {
+func fuseConstGet261(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_XOR) {
 			return nil
@@ -77355,7 +77875,7 @@ func fuseConstGet258(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet259(c *threader, start int) func(*Interpreter) {
+func fuseConstGet262(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_AND) {
 			return nil
@@ -77378,7 +77898,7 @@ func fuseConstGet259(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet260(c *threader, start int) func(*Interpreter) {
+func fuseConstGet263(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_OR) {
 			return nil
@@ -77401,7 +77921,7 @@ func fuseConstGet260(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet261(c *threader, start int) func(*Interpreter) {
+func fuseConstGet264(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_ROTL) {
 			return nil
@@ -77425,7 +77945,7 @@ func fuseConstGet261(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet262(c *threader, start int) func(*Interpreter) {
+func fuseConstGet265(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_ROTR) {
 			return nil
@@ -77449,7 +77969,7 @@ func fuseConstGet262(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet263(c *threader, start int) func(*Interpreter) {
+func fuseConstGet266(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_EQ) {
 			return nil
@@ -77473,7 +77993,7 @@ func fuseConstGet263(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet264(c *threader, start int) func(*Interpreter) {
+func fuseConstGet267(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_NE) {
 			return nil
@@ -77497,7 +78017,7 @@ func fuseConstGet264(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet265(c *threader, start int) func(*Interpreter) {
+func fuseConstGet268(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_LT_S) {
 			return nil
@@ -77521,7 +78041,7 @@ func fuseConstGet265(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet266(c *threader, start int) func(*Interpreter) {
+func fuseConstGet269(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_LT_U) {
 			return nil
@@ -77545,7 +78065,7 @@ func fuseConstGet266(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet267(c *threader, start int) func(*Interpreter) {
+func fuseConstGet270(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_GT_S) {
 			return nil
@@ -77569,7 +78089,7 @@ func fuseConstGet267(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet268(c *threader, start int) func(*Interpreter) {
+func fuseConstGet271(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_GT_U) {
 			return nil
@@ -77593,7 +78113,7 @@ func fuseConstGet268(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet269(c *threader, start int) func(*Interpreter) {
+func fuseConstGet272(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_LE_S) {
 			return nil
@@ -77617,7 +78137,7 @@ func fuseConstGet269(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet270(c *threader, start int) func(*Interpreter) {
+func fuseConstGet273(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_LE_U) {
 			return nil
@@ -77641,7 +78161,7 @@ func fuseConstGet270(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet271(c *threader, start int) func(*Interpreter) {
+func fuseConstGet274(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_GE_S) {
 			return nil
@@ -77665,7 +78185,7 @@ func fuseConstGet271(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet272(c *threader, start int) func(*Interpreter) {
+func fuseConstGet275(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I32_GE_U) {
 			return nil
@@ -77689,7 +78209,44 @@ func fuseConstGet272(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet273(c *threader, start int) func(*Interpreter) {
+func fuseConstGet276(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.constant(start+1, types.KindI64)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 3
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			i.heap.Retain(v0)
+			i.stack[i.sp] = v0
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v1 := i.fr
+			i.retire(v3 || i.sp != v1.bp+v2+v1.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseConstGet277(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_ROTL) {
 			return nil
@@ -77713,7 +78270,7 @@ func fuseConstGet273(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet274(c *threader, start int) func(*Interpreter) {
+func fuseConstGet278(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_ROTR) {
 			return nil
@@ -77737,7 +78294,7 @@ func fuseConstGet274(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet275(c *threader, start int) func(*Interpreter) {
+func fuseConstGet279(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_EQ) {
 			return nil
@@ -77761,7 +78318,7 @@ func fuseConstGet275(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet276(c *threader, start int) func(*Interpreter) {
+func fuseConstGet280(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_NE) {
 			return nil
@@ -77785,7 +78342,7 @@ func fuseConstGet276(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet277(c *threader, start int) func(*Interpreter) {
+func fuseConstGet281(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_LT_S) {
 			return nil
@@ -77809,7 +78366,7 @@ func fuseConstGet277(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet278(c *threader, start int) func(*Interpreter) {
+func fuseConstGet282(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_LT_U) {
 			return nil
@@ -77833,7 +78390,7 @@ func fuseConstGet278(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet279(c *threader, start int) func(*Interpreter) {
+func fuseConstGet283(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_GT_S) {
 			return nil
@@ -77857,7 +78414,7 @@ func fuseConstGet279(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet280(c *threader, start int) func(*Interpreter) {
+func fuseConstGet284(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_GT_U) {
 			return nil
@@ -77881,7 +78438,7 @@ func fuseConstGet280(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet281(c *threader, start int) func(*Interpreter) {
+func fuseConstGet285(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_LE_S) {
 			return nil
@@ -77905,7 +78462,7 @@ func fuseConstGet281(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet282(c *threader, start int) func(*Interpreter) {
+func fuseConstGet286(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_LE_U) {
 			return nil
@@ -77929,7 +78486,7 @@ func fuseConstGet282(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet283(c *threader, start int) func(*Interpreter) {
+func fuseConstGet287(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_GE_S) {
 			return nil
@@ -77953,7 +78510,7 @@ func fuseConstGet283(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet284(c *threader, start int) func(*Interpreter) {
+func fuseConstGet288(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_GE_U) {
 			return nil
@@ -77977,7 +78534,7 @@ func fuseConstGet284(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet285(c *threader, start int) func(*Interpreter) {
+func fuseConstGet289(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_ADD) {
 			return nil
@@ -78001,7 +78558,7 @@ func fuseConstGet285(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet286(c *threader, start int) func(*Interpreter) {
+func fuseConstGet290(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_SUB) {
 			return nil
@@ -78025,7 +78582,7 @@ func fuseConstGet286(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet287(c *threader, start int) func(*Interpreter) {
+func fuseConstGet291(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_MUL) {
 			return nil
@@ -78049,7 +78606,7 @@ func fuseConstGet287(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet288(c *threader, start int) func(*Interpreter) {
+func fuseConstGet292(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_DIV_S) {
 			return nil
@@ -78085,7 +78642,7 @@ func fuseConstGet288(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet289(c *threader, start int) func(*Interpreter) {
+func fuseConstGet293(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_DIV_U) {
 			return nil
@@ -78121,7 +78678,7 @@ func fuseConstGet289(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet290(c *threader, start int) func(*Interpreter) {
+func fuseConstGet294(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_REM_S) {
 			return nil
@@ -78157,7 +78714,7 @@ func fuseConstGet290(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet291(c *threader, start int) func(*Interpreter) {
+func fuseConstGet295(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_REM_U) {
 			return nil
@@ -78193,7 +78750,7 @@ func fuseConstGet291(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet292(c *threader, start int) func(*Interpreter) {
+func fuseConstGet296(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_SHL) {
 			return nil
@@ -78217,7 +78774,7 @@ func fuseConstGet292(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet293(c *threader, start int) func(*Interpreter) {
+func fuseConstGet297(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_SHR_S) {
 			return nil
@@ -78241,7 +78798,7 @@ func fuseConstGet293(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet294(c *threader, start int) func(*Interpreter) {
+func fuseConstGet298(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_SHR_U) {
 			return nil
@@ -78265,7 +78822,7 @@ func fuseConstGet294(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet295(c *threader, start int) func(*Interpreter) {
+func fuseConstGet299(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_XOR) {
 			return nil
@@ -78289,7 +78846,7 @@ func fuseConstGet295(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet296(c *threader, start int) func(*Interpreter) {
+func fuseConstGet300(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_AND) {
 			return nil
@@ -78313,7 +78870,7 @@ func fuseConstGet296(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet297(c *threader, start int) func(*Interpreter) {
+func fuseConstGet301(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.I64_OR) {
 			return nil
@@ -78337,7 +78894,7 @@ func fuseConstGet297(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet298(c *threader, start int) func(*Interpreter) {
+func fuseConstGet302(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.DROP) {
 			return nil
@@ -78362,7 +78919,7 @@ func fuseConstGet298(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseConstGet299(c *threader, start int) func(*Interpreter) {
+func fuseConstGet303(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+4 <= len(c.code) && instr.Opcode(c.code[start+3]) == instr.REF_IS_NULL) {
 			return nil
@@ -114315,6 +114872,208 @@ func fuseUpvalGet747(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
+func fuseUpvalGet748(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.upval(start+1, types.KindF32)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 2
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			if v0 >= len(i.fr.upvals) {
+				panic(trapped{ErrSegmentationFault, 0})
+			}
+			v1 := i.fr.upvals[v0]
+			i.stack[i.sp] = v1
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v4 := i.fr
+			i.retire(v3 || i.sp != v4.bp+v2+v4.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseUpvalGet749(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.upval(start+1, types.KindF64)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 2
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			if v0 >= len(i.fr.upvals) {
+				panic(trapped{ErrSegmentationFault, 0})
+			}
+			v1 := i.fr.upvals[v0]
+			i.stack[i.sp] = v1
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v4 := i.fr
+			i.retire(v3 || i.sp != v4.bp+v2+v4.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseUpvalGet750(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.upval(start+1, types.KindI32)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 2
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			if v0 >= len(i.fr.upvals) {
+				panic(trapped{ErrSegmentationFault, 0})
+			}
+			v1 := i.fr.upvals[v0]
+			i.stack[i.sp] = v1
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v4 := i.fr
+			i.retire(v3 || i.sp != v4.bp+v2+v4.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseUpvalGet751(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.upval(start+1, types.KindI64)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 2
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			if v0 >= len(i.fr.upvals) {
+				panic(trapped{ErrSegmentationFault, 0})
+			}
+			v1 := i.fr.upvals[v0]
+			i.heap.Retain(v1)
+			i.stack[i.sp] = v1
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v4 := i.fr
+			i.retire(v3 || i.sp != v4.bp+v2+v4.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseUpvalGet752(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+2]) == instr.RETURN) {
+			return nil
+		}
+		v0, v1 := c.upval(start+1, types.KindRef)
+		if !v1 {
+			return nil
+		}
+		v2 := len(c.locals)
+		v3 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v3 = true
+			}
+		}
+		c.ip += 2
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			if v0 >= len(i.fr.upvals) {
+				panic(trapped{ErrSegmentationFault, 0})
+			}
+			v1 := i.fr.upvals[v0]
+			i.heap.Retain(v1)
+			i.stack[i.sp] = v1
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v4 := i.fr
+			i.retire(v3 || i.sp != v4.bp+v2+v4.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
 func fuseRefNull0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+5 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.REF_IS_NULL && instr.Opcode(c.code[start+2]) == instr.BR_IF) {
@@ -114865,6 +115624,39 @@ func fuseI32Const9(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseI32Const10(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.RETURN) {
+			return nil
+		}
+		v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
+		v1 := len(c.locals)
+		v2 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v2 = true
+			}
+		}
+		c.ip += 5
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			i.stack[i.sp] = types.BoxI32(v0)
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v2 || i.sp != v3.bp+v1+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI32Const11(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.ARRAY_GET) {
 			return nil
 		}
@@ -114891,7 +115683,7 @@ func fuseI32Const10(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const11(c *threader, start int) func(*Interpreter) {
+func fuseI32Const12(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.STRUCT_GET) {
 			return nil
@@ -114919,7 +115711,7 @@ func fuseI32Const11(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const12(c *threader, start int) func(*Interpreter) {
+func fuseI32Const13(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_ADD) {
 			return nil
@@ -114939,7 +115731,7 @@ func fuseI32Const12(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const13(c *threader, start int) func(*Interpreter) {
+func fuseI32Const14(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_SUB) {
 			return nil
@@ -114959,7 +115751,7 @@ func fuseI32Const13(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const14(c *threader, start int) func(*Interpreter) {
+func fuseI32Const15(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_MUL) {
 			return nil
@@ -114979,7 +115771,7 @@ func fuseI32Const14(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const15(c *threader, start int) func(*Interpreter) {
+func fuseI32Const16(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_DIV_S) {
 			return nil
@@ -115011,7 +115803,7 @@ func fuseI32Const15(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const16(c *threader, start int) func(*Interpreter) {
+func fuseI32Const17(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_DIV_U) {
 			return nil
@@ -115043,7 +115835,7 @@ func fuseI32Const16(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const17(c *threader, start int) func(*Interpreter) {
+func fuseI32Const18(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_REM_S) {
 			return nil
@@ -115075,7 +115867,7 @@ func fuseI32Const17(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const18(c *threader, start int) func(*Interpreter) {
+func fuseI32Const19(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_REM_U) {
 			return nil
@@ -115107,7 +115899,7 @@ func fuseI32Const18(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const19(c *threader, start int) func(*Interpreter) {
+func fuseI32Const20(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_SHL) {
 			return nil
@@ -115127,7 +115919,7 @@ func fuseI32Const19(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const20(c *threader, start int) func(*Interpreter) {
+func fuseI32Const21(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_SHR_S) {
 			return nil
@@ -115147,7 +115939,7 @@ func fuseI32Const20(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const21(c *threader, start int) func(*Interpreter) {
+func fuseI32Const22(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_SHR_U) {
 			return nil
@@ -115167,7 +115959,7 @@ func fuseI32Const21(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const22(c *threader, start int) func(*Interpreter) {
+func fuseI32Const23(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_XOR) {
 			return nil
@@ -115187,7 +115979,7 @@ func fuseI32Const22(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const23(c *threader, start int) func(*Interpreter) {
+func fuseI32Const24(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_AND) {
 			return nil
@@ -115207,7 +115999,7 @@ func fuseI32Const23(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const24(c *threader, start int) func(*Interpreter) {
+func fuseI32Const25(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_OR) {
 			return nil
@@ -115227,7 +116019,7 @@ func fuseI32Const24(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const25(c *threader, start int) func(*Interpreter) {
+func fuseI32Const26(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_ROTL) {
 			return nil
@@ -115247,7 +116039,7 @@ func fuseI32Const25(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const26(c *threader, start int) func(*Interpreter) {
+func fuseI32Const27(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_ROTR) {
 			return nil
@@ -115267,7 +116059,7 @@ func fuseI32Const26(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const27(c *threader, start int) func(*Interpreter) {
+func fuseI32Const28(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+8 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.BR_IF) {
 			return nil
@@ -115304,7 +116096,7 @@ func fuseI32Const27(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const28(c *threader, start int) func(*Interpreter) {
+func fuseI32Const29(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_EQ) {
 			return nil
@@ -115324,7 +116116,7 @@ func fuseI32Const28(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const29(c *threader, start int) func(*Interpreter) {
+func fuseI32Const30(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_NE) {
 			return nil
@@ -115344,7 +116136,7 @@ func fuseI32Const29(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const30(c *threader, start int) func(*Interpreter) {
+func fuseI32Const31(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_LT_S) {
 			return nil
@@ -115364,7 +116156,7 @@ func fuseI32Const30(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const31(c *threader, start int) func(*Interpreter) {
+func fuseI32Const32(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_LT_U) {
 			return nil
@@ -115384,7 +116176,7 @@ func fuseI32Const31(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const32(c *threader, start int) func(*Interpreter) {
+func fuseI32Const33(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_GT_S) {
 			return nil
@@ -115404,7 +116196,7 @@ func fuseI32Const32(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const33(c *threader, start int) func(*Interpreter) {
+func fuseI32Const34(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_GT_U) {
 			return nil
@@ -115424,7 +116216,7 @@ func fuseI32Const33(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const34(c *threader, start int) func(*Interpreter) {
+func fuseI32Const35(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_LE_S) {
 			return nil
@@ -115444,7 +116236,7 @@ func fuseI32Const34(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const35(c *threader, start int) func(*Interpreter) {
+func fuseI32Const36(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_LE_U) {
 			return nil
@@ -115464,7 +116256,7 @@ func fuseI32Const35(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const36(c *threader, start int) func(*Interpreter) {
+func fuseI32Const37(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_GE_S) {
 			return nil
@@ -115484,7 +116276,7 @@ func fuseI32Const36(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI32Const37(c *threader, start int) func(*Interpreter) {
+func fuseI32Const38(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.I32_GE_U) {
 			return nil
@@ -115505,6 +116297,39 @@ func fuseI32Const37(c *threader, start int) func(*Interpreter) {
 
 //go:noinline
 func fuseI32Add0(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxI32(i.stack[i.sp-2].I32() + i.stack[i.sp-1].I32())
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI32Add1(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
@@ -115534,6 +116359,39 @@ func fuseI32Add0(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseI32Sub0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxI32(i.stack[i.sp-2].I32() - i.stack[i.sp-1].I32())
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI32Sub1(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
 		}
@@ -115561,6 +116419,39 @@ func fuseI32Sub0(c *threader, start int) func(*Interpreter) {
 
 //go:noinline
 func fuseI32Mul0(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxI32(i.stack[i.sp-2].I32() * i.stack[i.sp-1].I32())
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI32Mul1(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
@@ -115590,6 +116481,39 @@ func fuseI32Mul0(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseI32Shl0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxI32(i.stack[i.sp-2].I32() << (i.stack[i.sp-1].I32() & 31))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI32Shl1(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
 		}
@@ -115617,6 +116541,39 @@ func fuseI32Shl0(c *threader, start int) func(*Interpreter) {
 
 //go:noinline
 func fuseI32ShrS0(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxI32(i.stack[i.sp-2].I32() >> (i.stack[i.sp-1].I32() & 31))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI32ShrS1(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
@@ -115646,6 +116603,39 @@ func fuseI32ShrS0(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseI32ShrU0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxI32(int32(uint32(i.stack[i.sp-2].I32()) >> (i.stack[i.sp-1].I32() & 31)))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI32ShrU1(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
 		}
@@ -115673,6 +116663,39 @@ func fuseI32ShrU0(c *threader, start int) func(*Interpreter) {
 
 //go:noinline
 func fuseI32Xor0(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.Boxed(uint64(i.stack[i.sp-2])&uint64(i.stack[i.sp-1]) & ^uint64(types.VMask) | (uint64(i.stack[i.sp-2]) ^ uint64(i.stack[i.sp-1])&types.VMask))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI32Xor1(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
@@ -115702,6 +116725,39 @@ func fuseI32Xor0(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseI32And0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.Boxed(uint64(i.stack[i.sp-2]) & uint64(i.stack[i.sp-1]))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI32And1(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
 		}
@@ -115729,6 +116785,39 @@ func fuseI32And0(c *threader, start int) func(*Interpreter) {
 
 //go:noinline
 func fuseI32Or0(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.Boxed(uint64(i.stack[i.sp-2]) | uint64(i.stack[i.sp-1]))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI32Or1(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
@@ -115758,6 +116847,39 @@ func fuseI32Or0(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseI32Rotl0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-2].I32()), int(i.stack[i.sp-1].I32()))))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI32Rotl1(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
 		}
@@ -115785,6 +116907,39 @@ func fuseI32Rotl0(c *threader, start int) func(*Interpreter) {
 
 //go:noinline
 func fuseI32Rotr0(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-2].I32()), -int(i.stack[i.sp-1].I32()))))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI32Rotr1(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
@@ -116790,6 +117945,39 @@ func fuseI64Const9(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseI64Const10(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.RETURN) {
+			return nil
+		}
+		v0 := int64(instr.Instruction(c.code[start:]).Operand(0))
+		v1 := len(c.locals)
+		v2 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v2 = true
+			}
+		}
+		c.ip += 9
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			i.stack[i.sp] = i.boxI64(v0)
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v2 || i.sp != v3.bp+v1+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI64Const11(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_ROTL) {
 			return nil
 		}
@@ -116808,7 +117996,7 @@ func fuseI64Const10(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const11(c *threader, start int) func(*Interpreter) {
+func fuseI64Const12(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_ROTR) {
 			return nil
@@ -116828,7 +118016,7 @@ func fuseI64Const11(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const12(c *threader, start int) func(*Interpreter) {
+func fuseI64Const13(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_EQ) {
 			return nil
@@ -116848,7 +118036,7 @@ func fuseI64Const12(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const13(c *threader, start int) func(*Interpreter) {
+func fuseI64Const14(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_NE) {
 			return nil
@@ -116868,7 +118056,7 @@ func fuseI64Const13(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const14(c *threader, start int) func(*Interpreter) {
+func fuseI64Const15(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_LT_S) {
 			return nil
@@ -116888,7 +118076,7 @@ func fuseI64Const14(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const15(c *threader, start int) func(*Interpreter) {
+func fuseI64Const16(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_LT_U) {
 			return nil
@@ -116908,7 +118096,7 @@ func fuseI64Const15(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const16(c *threader, start int) func(*Interpreter) {
+func fuseI64Const17(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_GT_S) {
 			return nil
@@ -116928,7 +118116,7 @@ func fuseI64Const16(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const17(c *threader, start int) func(*Interpreter) {
+func fuseI64Const18(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_GT_U) {
 			return nil
@@ -116948,7 +118136,7 @@ func fuseI64Const17(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const18(c *threader, start int) func(*Interpreter) {
+func fuseI64Const19(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_LE_S) {
 			return nil
@@ -116968,7 +118156,7 @@ func fuseI64Const18(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const19(c *threader, start int) func(*Interpreter) {
+func fuseI64Const20(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_LE_U) {
 			return nil
@@ -116988,7 +118176,7 @@ func fuseI64Const19(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const20(c *threader, start int) func(*Interpreter) {
+func fuseI64Const21(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_GE_S) {
 			return nil
@@ -117008,7 +118196,7 @@ func fuseI64Const20(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const21(c *threader, start int) func(*Interpreter) {
+func fuseI64Const22(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_GE_U) {
 			return nil
@@ -117028,7 +118216,7 @@ func fuseI64Const21(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const22(c *threader, start int) func(*Interpreter) {
+func fuseI64Const23(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_ADD) {
 			return nil
@@ -117048,7 +118236,7 @@ func fuseI64Const22(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const23(c *threader, start int) func(*Interpreter) {
+func fuseI64Const24(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_SUB) {
 			return nil
@@ -117068,7 +118256,7 @@ func fuseI64Const23(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const24(c *threader, start int) func(*Interpreter) {
+func fuseI64Const25(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_MUL) {
 			return nil
@@ -117088,7 +118276,7 @@ func fuseI64Const24(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const25(c *threader, start int) func(*Interpreter) {
+func fuseI64Const26(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_DIV_S) {
 			return nil
@@ -117120,7 +118308,7 @@ func fuseI64Const25(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const26(c *threader, start int) func(*Interpreter) {
+func fuseI64Const27(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_DIV_U) {
 			return nil
@@ -117152,7 +118340,7 @@ func fuseI64Const26(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const27(c *threader, start int) func(*Interpreter) {
+func fuseI64Const28(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_REM_S) {
 			return nil
@@ -117184,7 +118372,7 @@ func fuseI64Const27(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const28(c *threader, start int) func(*Interpreter) {
+func fuseI64Const29(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_REM_U) {
 			return nil
@@ -117216,7 +118404,7 @@ func fuseI64Const28(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const29(c *threader, start int) func(*Interpreter) {
+func fuseI64Const30(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_SHL) {
 			return nil
@@ -117236,7 +118424,7 @@ func fuseI64Const29(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const30(c *threader, start int) func(*Interpreter) {
+func fuseI64Const31(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_SHR_S) {
 			return nil
@@ -117256,7 +118444,7 @@ func fuseI64Const30(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const31(c *threader, start int) func(*Interpreter) {
+func fuseI64Const32(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_SHR_U) {
 			return nil
@@ -117276,7 +118464,7 @@ func fuseI64Const31(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const32(c *threader, start int) func(*Interpreter) {
+func fuseI64Const33(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_XOR) {
 			return nil
@@ -117296,7 +118484,7 @@ func fuseI64Const32(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const33(c *threader, start int) func(*Interpreter) {
+func fuseI64Const34(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_AND) {
 			return nil
@@ -117316,7 +118504,7 @@ func fuseI64Const33(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseI64Const34(c *threader, start int) func(*Interpreter) {
+func fuseI64Const35(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.I64_OR) {
 			return nil
@@ -117337,6 +118525,39 @@ func fuseI64Const34(c *threader, start int) func(*Interpreter) {
 
 //go:noinline
 func fuseI64Add0(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) + i.unboxI64(i.stack[i.sp-1]))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI64Add1(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
@@ -117370,6 +118591,39 @@ func fuseI64Add0(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseI64Sub0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) - i.unboxI64(i.stack[i.sp-1]))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI64Sub1(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
 		}
@@ -117401,6 +118655,39 @@ func fuseI64Sub0(c *threader, start int) func(*Interpreter) {
 
 //go:noinline
 func fuseI64Mul0(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) * i.unboxI64(i.stack[i.sp-1]))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI64Mul1(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
@@ -117434,6 +118721,39 @@ func fuseI64Mul0(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseI64Shl0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) << (i.unboxI64(i.stack[i.sp-1]) & 63))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI64Shl1(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
 		}
@@ -117465,6 +118785,39 @@ func fuseI64Shl0(c *threader, start int) func(*Interpreter) {
 
 //go:noinline
 func fuseI64ShrS0(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) >> (i.unboxI64(i.stack[i.sp-1]) & 63))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI64ShrS1(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
@@ -117498,6 +118851,39 @@ func fuseI64ShrS0(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseI64ShrU0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := i.boxI64(int64(uint64(i.unboxI64(i.stack[i.sp-2])) >> (i.unboxI64(i.stack[i.sp-1]) & 63)))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI64ShrU1(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
 		}
@@ -117529,6 +118915,39 @@ func fuseI64ShrU0(c *threader, start int) func(*Interpreter) {
 
 //go:noinline
 func fuseI64Xor0(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) ^ i.unboxI64(i.stack[i.sp-1]))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI64Xor1(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
@@ -117562,6 +118981,39 @@ func fuseI64Xor0(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseI64And0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) & i.unboxI64(i.stack[i.sp-1]))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI64And1(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
 		}
@@ -117593,6 +119045,39 @@ func fuseI64And0(c *threader, start int) func(*Interpreter) {
 
 //go:noinline
 func fuseI64Or0(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) | i.unboxI64(i.stack[i.sp-1]))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI64Or1(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
@@ -117626,6 +119111,39 @@ func fuseI64Or0(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseI64Rotl0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-2])), int(i.unboxI64(i.stack[i.sp-1])))))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI64Rotl1(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
 		}
@@ -117657,6 +119175,39 @@ func fuseI64Rotl0(c *threader, start int) func(*Interpreter) {
 
 //go:noinline
 func fuseI64Rotr0(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-2])), -int(i.unboxI64(i.stack[i.sp-1])))))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseI64Rotr1(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
@@ -118478,6 +120029,39 @@ func fuseF32Const5(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseF32Const6(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.RETURN) {
+			return nil
+		}
+		v0 := types.Box(uint64(uint32(instr.Instruction(c.code[start:]).Operand(0))), types.KindF32).F32()
+		v1 := len(c.locals)
+		v2 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v2 = true
+			}
+		}
+		c.ip += 5
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			i.stack[i.sp] = types.BoxF32(v0)
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v2 || i.sp != v3.bp+v1+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseF32Const7(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.F32_ADD) {
 			return nil
 		}
@@ -118496,7 +120080,7 @@ func fuseF32Const6(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF32Const7(c *threader, start int) func(*Interpreter) {
+func fuseF32Const8(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.F32_SUB) {
 			return nil
@@ -118516,7 +120100,7 @@ func fuseF32Const7(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF32Const8(c *threader, start int) func(*Interpreter) {
+func fuseF32Const9(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.F32_MUL) {
 			return nil
@@ -118536,7 +120120,7 @@ func fuseF32Const8(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF32Const9(c *threader, start int) func(*Interpreter) {
+func fuseF32Const10(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.F32_DIV) {
 			return nil
@@ -118568,7 +120152,7 @@ func fuseF32Const9(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF32Const10(c *threader, start int) func(*Interpreter) {
+func fuseF32Const11(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.F32_REM) {
 			return nil
@@ -118600,7 +120184,7 @@ func fuseF32Const10(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF32Const11(c *threader, start int) func(*Interpreter) {
+func fuseF32Const12(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.F32_MOD) {
 			return nil
@@ -118638,7 +120222,7 @@ func fuseF32Const11(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF32Const12(c *threader, start int) func(*Interpreter) {
+func fuseF32Const13(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.F32_MIN) {
 			return nil
@@ -118658,7 +120242,7 @@ func fuseF32Const12(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF32Const13(c *threader, start int) func(*Interpreter) {
+func fuseF32Const14(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.F32_MAX) {
 			return nil
@@ -118678,7 +120262,7 @@ func fuseF32Const13(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF32Const14(c *threader, start int) func(*Interpreter) {
+func fuseF32Const15(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.F32_COPYSIGN) {
 			return nil
@@ -118698,7 +120282,7 @@ func fuseF32Const14(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF32Const15(c *threader, start int) func(*Interpreter) {
+func fuseF32Const16(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.F32_EQ) {
 			return nil
@@ -118718,7 +120302,7 @@ func fuseF32Const15(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF32Const16(c *threader, start int) func(*Interpreter) {
+func fuseF32Const17(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.F32_NE) {
 			return nil
@@ -118738,7 +120322,7 @@ func fuseF32Const16(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF32Const17(c *threader, start int) func(*Interpreter) {
+func fuseF32Const18(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.F32_LT) {
 			return nil
@@ -118758,7 +120342,7 @@ func fuseF32Const17(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF32Const18(c *threader, start int) func(*Interpreter) {
+func fuseF32Const19(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.F32_GT) {
 			return nil
@@ -118778,7 +120362,7 @@ func fuseF32Const18(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF32Const19(c *threader, start int) func(*Interpreter) {
+func fuseF32Const20(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.F32_LE) {
 			return nil
@@ -118798,7 +120382,7 @@ func fuseF32Const19(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF32Const20(c *threader, start int) func(*Interpreter) {
+func fuseF32Const21(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+6 <= len(c.code) && instr.Opcode(c.code[start+5]) == instr.F32_GE) {
 			return nil
@@ -118819,6 +120403,39 @@ func fuseF32Const20(c *threader, start int) func(*Interpreter) {
 
 //go:noinline
 func fuseF32Add0(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxF32(i.stack[i.sp-2].F32() + i.stack[i.sp-1].F32())
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseF32Add1(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
@@ -118848,6 +120465,39 @@ func fuseF32Add0(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseF32Sub0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxF32(i.stack[i.sp-2].F32() - i.stack[i.sp-1].F32())
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseF32Sub1(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
 		}
@@ -118875,6 +120525,39 @@ func fuseF32Sub0(c *threader, start int) func(*Interpreter) {
 
 //go:noinline
 func fuseF32Mul0(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxF32(i.stack[i.sp-2].F32() * i.stack[i.sp-1].F32())
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseF32Mul1(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
@@ -118904,6 +120587,39 @@ func fuseF32Mul0(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseF32Min0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxF32(min(i.stack[i.sp-2].F32(), i.stack[i.sp-1].F32()))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseF32Min1(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
 		}
@@ -118932,6 +120648,39 @@ func fuseF32Min0(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseF32Max0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxF32(max(i.stack[i.sp-2].F32(), i.stack[i.sp-1].F32()))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseF32Max1(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
 		}
@@ -118959,6 +120708,39 @@ func fuseF32Max0(c *threader, start int) func(*Interpreter) {
 
 //go:noinline
 func fuseF32Copysign0(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxF32(float32(math.Copysign(float64(i.stack[i.sp-2].F32()), float64(i.stack[i.sp-1].F32()))))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseF32Copysign1(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
@@ -119546,6 +121328,39 @@ func fuseF64Const5(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseF64Const6(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.RETURN) {
+			return nil
+		}
+		v0 := types.Boxed(instr.Instruction(c.code[start:]).Operand(0)).F64()
+		v1 := len(c.locals)
+		v2 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v2 = true
+			}
+		}
+		c.ip += 9
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(trapped{ErrStackOverflow, 0})
+			}
+			i.stack[i.sp] = types.BoxF64(v0)
+			i.sp++
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v2 || i.sp != v3.bp+v1+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseF64Const7(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.F64_ADD) {
 			return nil
 		}
@@ -119564,7 +121379,7 @@ func fuseF64Const6(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF64Const7(c *threader, start int) func(*Interpreter) {
+func fuseF64Const8(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.F64_SUB) {
 			return nil
@@ -119584,7 +121399,7 @@ func fuseF64Const7(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF64Const8(c *threader, start int) func(*Interpreter) {
+func fuseF64Const9(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.F64_MUL) {
 			return nil
@@ -119604,7 +121419,7 @@ func fuseF64Const8(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF64Const9(c *threader, start int) func(*Interpreter) {
+func fuseF64Const10(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.F64_DIV) {
 			return nil
@@ -119636,7 +121451,7 @@ func fuseF64Const9(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF64Const10(c *threader, start int) func(*Interpreter) {
+func fuseF64Const11(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.F64_REM) {
 			return nil
@@ -119668,7 +121483,7 @@ func fuseF64Const10(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF64Const11(c *threader, start int) func(*Interpreter) {
+func fuseF64Const12(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.F64_MOD) {
 			return nil
@@ -119706,7 +121521,7 @@ func fuseF64Const11(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF64Const12(c *threader, start int) func(*Interpreter) {
+func fuseF64Const13(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.F64_MIN) {
 			return nil
@@ -119726,7 +121541,7 @@ func fuseF64Const12(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF64Const13(c *threader, start int) func(*Interpreter) {
+func fuseF64Const14(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.F64_MAX) {
 			return nil
@@ -119746,7 +121561,7 @@ func fuseF64Const13(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF64Const14(c *threader, start int) func(*Interpreter) {
+func fuseF64Const15(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.F64_COPYSIGN) {
 			return nil
@@ -119766,7 +121581,7 @@ func fuseF64Const14(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF64Const15(c *threader, start int) func(*Interpreter) {
+func fuseF64Const16(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.F64_EQ) {
 			return nil
@@ -119786,7 +121601,7 @@ func fuseF64Const15(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF64Const16(c *threader, start int) func(*Interpreter) {
+func fuseF64Const17(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.F64_NE) {
 			return nil
@@ -119806,7 +121621,7 @@ func fuseF64Const16(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF64Const17(c *threader, start int) func(*Interpreter) {
+func fuseF64Const18(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.F64_LT) {
 			return nil
@@ -119826,7 +121641,7 @@ func fuseF64Const17(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF64Const18(c *threader, start int) func(*Interpreter) {
+func fuseF64Const19(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.F64_GT) {
 			return nil
@@ -119846,7 +121661,7 @@ func fuseF64Const18(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF64Const19(c *threader, start int) func(*Interpreter) {
+func fuseF64Const20(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.F64_LE) {
 			return nil
@@ -119866,7 +121681,7 @@ func fuseF64Const19(c *threader, start int) func(*Interpreter) {
 }
 
 //go:noinline
-func fuseF64Const20(c *threader, start int) func(*Interpreter) {
+func fuseF64Const21(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+10 <= len(c.code) && instr.Opcode(c.code[start+9]) == instr.F64_GE) {
 			return nil
@@ -119887,6 +121702,39 @@ func fuseF64Const20(c *threader, start int) func(*Interpreter) {
 
 //go:noinline
 func fuseF64Add0(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxF64(i.stack[i.sp-2].F64() + i.stack[i.sp-1].F64())
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseF64Add1(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
@@ -119916,6 +121764,39 @@ func fuseF64Add0(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseF64Sub0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxF64(i.stack[i.sp-2].F64() - i.stack[i.sp-1].F64())
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseF64Sub1(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
 		}
@@ -119943,6 +121824,39 @@ func fuseF64Sub0(c *threader, start int) func(*Interpreter) {
 
 //go:noinline
 func fuseF64Mul0(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxF64(i.stack[i.sp-2].F64() * i.stack[i.sp-1].F64())
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseF64Mul1(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
@@ -119972,6 +121886,39 @@ func fuseF64Mul0(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseF64Min0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxF64(math.Min(i.stack[i.sp-2].F64(), i.stack[i.sp-1].F64()))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseF64Min1(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
 		}
@@ -120000,6 +121947,39 @@ func fuseF64Min0(c *threader, start int) func(*Interpreter) {
 //go:noinline
 func fuseF64Max0(c *threader, start int) func(*Interpreter) {
 	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxF64(math.Max(i.stack[i.sp-2].F64(), i.stack[i.sp-1].F64()))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseF64Max1(c *threader, start int) func(*Interpreter) {
+	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
 		}
@@ -120027,6 +122007,39 @@ func fuseF64Max0(c *threader, start int) func(*Interpreter) {
 
 //go:noinline
 func fuseF64Copysign0(c *threader, start int) func(*Interpreter) {
+	for range 1 {
+		if !(start+2 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.RETURN) {
+			return nil
+		}
+		v0 := len(c.locals)
+		v1 := false
+		for _, v0 := range c.locals {
+			switch v0.Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+			default:
+				v1 = true
+			}
+		}
+		c.ip += 1
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v2 := types.BoxF64(math.Copysign(i.stack[i.sp-2].F64(), i.stack[i.sp-1].F64()))
+			i.sp -= 1
+			i.stack[i.sp-1] = v2
+			if i.fp == 1 {
+				panic(ErrFrameUnderflow)
+			}
+			v3 := i.fr
+			i.retire(v1 || i.sp != v3.bp+v0+v3.returns)
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func fuseF64Copysign1(c *threader, start int) func(*Interpreter) {
 	for range 1 {
 		if !(start+3 <= len(c.code) && instr.Opcode(c.code[start+1]) == instr.LOCAL_SET) {
 			return nil
@@ -127323,6 +129336,21 @@ var (
 			if v1 := fuseGlobalGet747(c, v0); v1 != nil {
 				return v1, 3
 			}
+			if v1 := fuseGlobalGet748(c, v0); v1 != nil {
+				return v1, 3
+			}
+			if v1 := fuseGlobalGet749(c, v0); v1 != nil {
+				return v1, 3
+			}
+			if v1 := fuseGlobalGet750(c, v0); v1 != nil {
+				return v1, 3
+			}
+			if v1 := fuseGlobalGet751(c, v0); v1 != nil {
+				return v1, 3
+			}
+			if v1 := fuseGlobalGet752(c, v0); v1 != nil {
+				return v1, 3
+			}
 			return nil, 0
 		},
 		instr.LOCAL_GET: func(c *threader) (func(*Interpreter), uint8) {
@@ -129103,6 +131131,21 @@ var (
 			if v1 := fuseLocalGet591(c, v0); v1 != nil {
 				return v1, 2
 			}
+			if v1 := fuseLocalGet592(c, v0); v1 != nil {
+				return v1, 2
+			}
+			if v1 := fuseLocalGet593(c, v0); v1 != nil {
+				return v1, 2
+			}
+			if v1 := fuseLocalGet594(c, v0); v1 != nil {
+				return v1, 2
+			}
+			if v1 := fuseLocalGet595(c, v0); v1 != nil {
+				return v1, 2
+			}
+			if v1 := fuseLocalGet596(c, v0); v1 != nil {
+				return v1, 2
+			}
 			return nil, 0
 		},
 		instr.CONST_GET: func(c *threader) (func(*Interpreter), uint8) {
@@ -129765,7 +131808,7 @@ var (
 				return v1, 3
 			}
 			if v1 := fuseConstGet219(c, v0); v1 != nil {
-				return v1, 0
+				return v1, 3
 			}
 			if v1 := fuseConstGet220(c, v0); v1 != nil {
 				return v1, 0
@@ -129774,7 +131817,7 @@ var (
 				return v1, 0
 			}
 			if v1 := fuseConstGet222(c, v0); v1 != nil {
-				return v1, 3
+				return v1, 0
 			}
 			if v1 := fuseConstGet223(c, v0); v1 != nil {
 				return v1, 3
@@ -129810,19 +131853,19 @@ var (
 				return v1, 3
 			}
 			if v1 := fuseConstGet234(c, v0); v1 != nil {
-				return v1, 0
+				return v1, 3
 			}
 			if v1 := fuseConstGet235(c, v0); v1 != nil {
-				return v1, 0
+				return v1, 3
 			}
 			if v1 := fuseConstGet236(c, v0); v1 != nil {
 				return v1, 0
 			}
 			if v1 := fuseConstGet237(c, v0); v1 != nil {
-				return v1, 3
+				return v1, 0
 			}
 			if v1 := fuseConstGet238(c, v0); v1 != nil {
-				return v1, 3
+				return v1, 0
 			}
 			if v1 := fuseConstGet239(c, v0); v1 != nil {
 				return v1, 3
@@ -129861,25 +131904,25 @@ var (
 				return v1, 3
 			}
 			if v1 := fuseConstGet251(c, v0); v1 != nil {
-				return v1, 0
+				return v1, 3
 			}
 			if v1 := fuseConstGet252(c, v0); v1 != nil {
-				return v1, 0
+				return v1, 3
 			}
 			if v1 := fuseConstGet253(c, v0); v1 != nil {
-				return v1, 0
+				return v1, 3
 			}
 			if v1 := fuseConstGet254(c, v0); v1 != nil {
 				return v1, 0
 			}
 			if v1 := fuseConstGet255(c, v0); v1 != nil {
-				return v1, 3
+				return v1, 0
 			}
 			if v1 := fuseConstGet256(c, v0); v1 != nil {
-				return v1, 3
+				return v1, 0
 			}
 			if v1 := fuseConstGet257(c, v0); v1 != nil {
-				return v1, 3
+				return v1, 0
 			}
 			if v1 := fuseConstGet258(c, v0); v1 != nil {
 				return v1, 3
@@ -129972,28 +132015,28 @@ var (
 				return v1, 3
 			}
 			if v1 := fuseConstGet288(c, v0); v1 != nil {
-				return v1, 0
+				return v1, 3
 			}
 			if v1 := fuseConstGet289(c, v0); v1 != nil {
-				return v1, 0
+				return v1, 3
 			}
 			if v1 := fuseConstGet290(c, v0); v1 != nil {
-				return v1, 0
+				return v1, 3
 			}
 			if v1 := fuseConstGet291(c, v0); v1 != nil {
-				return v1, 0
+				return v1, 3
 			}
 			if v1 := fuseConstGet292(c, v0); v1 != nil {
-				return v1, 3
+				return v1, 0
 			}
 			if v1 := fuseConstGet293(c, v0); v1 != nil {
-				return v1, 3
+				return v1, 0
 			}
 			if v1 := fuseConstGet294(c, v0); v1 != nil {
-				return v1, 3
+				return v1, 0
 			}
 			if v1 := fuseConstGet295(c, v0); v1 != nil {
-				return v1, 3
+				return v1, 0
 			}
 			if v1 := fuseConstGet296(c, v0); v1 != nil {
 				return v1, 3
@@ -130005,6 +132048,18 @@ var (
 				return v1, 3
 			}
 			if v1 := fuseConstGet299(c, v0); v1 != nil {
+				return v1, 3
+			}
+			if v1 := fuseConstGet300(c, v0); v1 != nil {
+				return v1, 3
+			}
+			if v1 := fuseConstGet301(c, v0); v1 != nil {
+				return v1, 3
+			}
+			if v1 := fuseConstGet302(c, v0); v1 != nil {
+				return v1, 3
+			}
+			if v1 := fuseConstGet303(c, v0); v1 != nil {
 				return v1, 3
 			}
 			return nil, 0
@@ -132255,6 +134310,21 @@ var (
 			if v1 := fuseUpvalGet747(c, v0); v1 != nil {
 				return v1, 2
 			}
+			if v1 := fuseUpvalGet748(c, v0); v1 != nil {
+				return v1, 2
+			}
+			if v1 := fuseUpvalGet749(c, v0); v1 != nil {
+				return v1, 2
+			}
+			if v1 := fuseUpvalGet750(c, v0); v1 != nil {
+				return v1, 2
+			}
+			if v1 := fuseUpvalGet751(c, v0); v1 != nil {
+				return v1, 2
+			}
+			if v1 := fuseUpvalGet752(c, v0); v1 != nil {
+				return v1, 2
+			}
 			return nil, 0
 		},
 		instr.REF_NULL: func(c *threader) (func(*Interpreter), uint8) {
@@ -132318,7 +134388,7 @@ var (
 				return v1, 5
 			}
 			if v1 := fuseI32Const15(c, v0); v1 != nil {
-				return v1, 0
+				return v1, 5
 			}
 			if v1 := fuseI32Const16(c, v0); v1 != nil {
 				return v1, 0
@@ -132330,7 +134400,7 @@ var (
 				return v1, 0
 			}
 			if v1 := fuseI32Const19(c, v0); v1 != nil {
-				return v1, 5
+				return v1, 0
 			}
 			if v1 := fuseI32Const20(c, v0); v1 != nil {
 				return v1, 5
@@ -132354,10 +134424,10 @@ var (
 				return v1, 5
 			}
 			if v1 := fuseI32Const27(c, v0); v1 != nil {
-				return v1, 0
+				return v1, 5
 			}
 			if v1 := fuseI32Const28(c, v0); v1 != nil {
-				return v1, 5
+				return v1, 0
 			}
 			if v1 := fuseI32Const29(c, v0); v1 != nil {
 				return v1, 5
@@ -132386,11 +134456,17 @@ var (
 			if v1 := fuseI32Const37(c, v0); v1 != nil {
 				return v1, 5
 			}
+			if v1 := fuseI32Const38(c, v0); v1 != nil {
+				return v1, 5
+			}
 			return nil, 0
 		},
 		instr.I32_ADD: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI32Add0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI32Add1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132398,6 +134474,9 @@ var (
 		instr.I32_SUB: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI32Sub0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI32Sub1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132405,6 +134484,9 @@ var (
 		instr.I32_MUL: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI32Mul0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI32Mul1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132412,6 +134494,9 @@ var (
 		instr.I32_SHL: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI32Shl0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI32Shl1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132419,6 +134504,9 @@ var (
 		instr.I32_SHR_S: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI32ShrS0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI32ShrS1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132426,6 +134514,9 @@ var (
 		instr.I32_SHR_U: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI32ShrU0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI32ShrU1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132433,6 +134524,9 @@ var (
 		instr.I32_XOR: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI32Xor0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI32Xor1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132440,6 +134534,9 @@ var (
 		instr.I32_AND: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI32And0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI32And1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132447,6 +134544,9 @@ var (
 		instr.I32_OR: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI32Or0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI32Or1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132454,6 +134554,9 @@ var (
 		instr.I32_ROTL: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI32Rotl0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI32Rotl1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132461,6 +134564,9 @@ var (
 		instr.I32_ROTR: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI32Rotr0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI32Rotr1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132620,7 +134726,7 @@ var (
 				return v1, 9
 			}
 			if v1 := fuseI64Const25(c, v0); v1 != nil {
-				return v1, 0
+				return v1, 9
 			}
 			if v1 := fuseI64Const26(c, v0); v1 != nil {
 				return v1, 0
@@ -132632,7 +134738,7 @@ var (
 				return v1, 0
 			}
 			if v1 := fuseI64Const29(c, v0); v1 != nil {
-				return v1, 9
+				return v1, 0
 			}
 			if v1 := fuseI64Const30(c, v0); v1 != nil {
 				return v1, 9
@@ -132649,11 +134755,17 @@ var (
 			if v1 := fuseI64Const34(c, v0); v1 != nil {
 				return v1, 9
 			}
+			if v1 := fuseI64Const35(c, v0); v1 != nil {
+				return v1, 9
+			}
 			return nil, 0
 		},
 		instr.I64_ADD: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI64Add0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI64Add1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132661,6 +134773,9 @@ var (
 		instr.I64_SUB: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI64Sub0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI64Sub1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132668,6 +134783,9 @@ var (
 		instr.I64_MUL: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI64Mul0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI64Mul1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132675,6 +134793,9 @@ var (
 		instr.I64_SHL: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI64Shl0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI64Shl1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132682,6 +134803,9 @@ var (
 		instr.I64_SHR_S: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI64ShrS0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI64ShrS1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132689,6 +134813,9 @@ var (
 		instr.I64_SHR_U: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI64ShrU0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI64ShrU1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132696,6 +134823,9 @@ var (
 		instr.I64_XOR: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI64Xor0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI64Xor1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132703,6 +134833,9 @@ var (
 		instr.I64_AND: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI64And0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI64And1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132710,6 +134843,9 @@ var (
 		instr.I64_OR: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI64Or0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI64Or1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132717,6 +134853,9 @@ var (
 		instr.I64_ROTL: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI64Rotl0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI64Rotl1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132724,6 +134863,9 @@ var (
 		instr.I64_ROTR: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseI64Rotr0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseI64Rotr1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132835,7 +134977,7 @@ var (
 				return v1, 5
 			}
 			if v1 := fuseF32Const9(c, v0); v1 != nil {
-				return v1, 0
+				return v1, 5
 			}
 			if v1 := fuseF32Const10(c, v0); v1 != nil {
 				return v1, 0
@@ -132844,7 +134986,7 @@ var (
 				return v1, 0
 			}
 			if v1 := fuseF32Const12(c, v0); v1 != nil {
-				return v1, 5
+				return v1, 0
 			}
 			if v1 := fuseF32Const13(c, v0); v1 != nil {
 				return v1, 5
@@ -132870,11 +135012,17 @@ var (
 			if v1 := fuseF32Const20(c, v0); v1 != nil {
 				return v1, 5
 			}
+			if v1 := fuseF32Const21(c, v0); v1 != nil {
+				return v1, 5
+			}
 			return nil, 0
 		},
 		instr.F32_ADD: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseF32Add0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseF32Add1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132882,6 +135030,9 @@ var (
 		instr.F32_SUB: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseF32Sub0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseF32Sub1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132889,6 +135040,9 @@ var (
 		instr.F32_MUL: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseF32Mul0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseF32Mul1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132896,6 +135050,9 @@ var (
 		instr.F32_MIN: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseF32Min0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseF32Min1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132903,6 +135060,9 @@ var (
 		instr.F32_MAX: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseF32Max0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseF32Max1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132910,6 +135070,9 @@ var (
 		instr.F32_COPYSIGN: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseF32Copysign0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseF32Copysign1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -132986,7 +135149,7 @@ var (
 				return v1, 9
 			}
 			if v1 := fuseF64Const9(c, v0); v1 != nil {
-				return v1, 0
+				return v1, 9
 			}
 			if v1 := fuseF64Const10(c, v0); v1 != nil {
 				return v1, 0
@@ -132995,7 +135158,7 @@ var (
 				return v1, 0
 			}
 			if v1 := fuseF64Const12(c, v0); v1 != nil {
-				return v1, 9
+				return v1, 0
 			}
 			if v1 := fuseF64Const13(c, v0); v1 != nil {
 				return v1, 9
@@ -133021,11 +135184,17 @@ var (
 			if v1 := fuseF64Const20(c, v0); v1 != nil {
 				return v1, 9
 			}
+			if v1 := fuseF64Const21(c, v0); v1 != nil {
+				return v1, 9
+			}
 			return nil, 0
 		},
 		instr.F64_ADD: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseF64Add0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseF64Add1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -133033,6 +135202,9 @@ var (
 		instr.F64_SUB: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseF64Sub0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseF64Sub1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -133040,6 +135212,9 @@ var (
 		instr.F64_MUL: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseF64Mul0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseF64Mul1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -133047,6 +135222,9 @@ var (
 		instr.F64_MIN: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseF64Min0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseF64Min1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -133054,6 +135232,9 @@ var (
 		instr.F64_MAX: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseF64Max0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseF64Max1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0
@@ -133061,6 +135242,9 @@ var (
 		instr.F64_COPYSIGN: func(c *threader) (func(*Interpreter), uint8) {
 			v0 := c.ip
 			if v1 := fuseF64Copysign0(c, v0); v1 != nil {
+				return v1, 1
+			}
+			if v1 := fuseF64Copysign1(c, v0); v1 != nil {
 				return v1, 0
 			}
 			return nil, 0

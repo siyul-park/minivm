@@ -169,12 +169,12 @@ func (l loader) read(result *value, current step) error {
 		result.compile = append(result.compile, guard...)
 	}
 
-	if current.typ != nil {
-		if current.typ == reflect.TypeFor[types.Struct]() {
-			if err := l.structGuard(result, current); err != nil {
-				return err
-			}
-		} else if err := l.arrayGuard(result, current); err != nil {
+	if _, ok := arrayKind(current.typ); ok {
+		if err := l.arrayGuard(result, current); err != nil {
+			return err
+		}
+	} else if current.typ == reflect.TypeFor[types.Struct]() {
+		if err := l.structGuard(result, current); err != nil {
 			return err
 		}
 	}
@@ -363,9 +363,11 @@ func (l loader) finish(result value, current step, ok bool) (value, error) {
 
 	if ok {
 		retain := current.kind == instr.KindAny || current.kind.Repr() == instr.KindI64 || current.kind.Repr() == instr.KindRef
+		result.retain = retain
 		result.push = materialize(result, retain, l.width)
 		return result, nil
 	}
+	result.retain = current.op == instr.CONST_GET
 	if result.room {
 		result.push = append(result.push, overflowAt(l.at))
 	}
@@ -473,6 +475,11 @@ func constStandalone(current step, input value) jen.Code {
 }
 
 func materialize(input value, retain bool, advance int) []jen.Code {
+	return append(stage(input, retain), jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
+}
+
+// stage pushes input onto the operand stack, retaining it when the frame does not already own it.
+func stage(input value, retain bool) []jen.Code {
 	var body []jen.Code
 	if input.room {
 		body = append(body, overflowAt(input.at))
@@ -485,7 +492,6 @@ func materialize(input value, retain bool, advance int) []jen.Code {
 	return append(body,
 		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Add(input.boxed),
 		jen.Id("i").Dot("sp").Op("++"),
-		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
 	)
 }
 

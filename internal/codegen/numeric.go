@@ -8,11 +8,14 @@ import (
 	"github.com/siyul-park/minivm/instr"
 )
 
-// sink is the local.set a numeric operation stores into: its slot and its
-// offset from the handler's first instruction.
+// sink is where a fused numeric operation puts its result instead of the stack: a local.set's
+// slot with its offset from the handler's first instruction, or, with no slot, a trailing
+// opcode that runs compile at threading time and tail at run time once the result is pushed.
 type sink struct {
-	slot jen.Code
-	at   int
+	slot    jen.Code
+	at      int
+	compile []jen.Code
+	tail    []jen.Code
 }
 
 func arithmetic(state *state, current step) (value, error) {
@@ -56,7 +59,7 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 	var compile, body []jen.Code
 
 	delta := len(inputs) - arity + 1
-	if !conditional && local == nil && delta > 0 {
+	if !conditional && !local.stores() && delta > 0 {
 		body = append(body, overflowAt(0))
 	}
 	for _, source := range inputs {
@@ -98,7 +101,7 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 		compile = append(compile, jen.Id("c").Dot("ip").Op("+=").Lit(width(first)))
 		return append(compile, branchTail(jen.Id(result).Dot("Bool").Call(), missing, advance, body)...), nil
 	}
-	if local != nil {
+	if local.stores() {
 		body = append(body,
 			jen.Id("addr").Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Add(local.slot),
 			jen.If(jen.Id("addr").Op(">=").Id("i").Dot("sp")).Block(fail("ErrSegmentationFault", local.at)),
@@ -123,7 +126,12 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 			}
 			body = append(body, top(1).Op("=").Id(result))
 		}
-		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
+		if local != nil {
+			compile = append(compile, local.compile...)
+			body = append(body, local.tail...)
+		} else {
+			body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
+		}
 	}
 
 	compile = append(compile,
@@ -131,6 +139,11 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 		jen.Return(closure(body...)),
 	)
 	return compile, nil
+}
+
+// stores reports whether the sink writes a local slot rather than ending a handler.
+func (s *sink) stores() bool {
+	return s != nil && s.slot != nil
 }
 
 func trapping(consumer instr.Opcode, inputs []value, kind instr.Kind) ([]jen.Code, error) {

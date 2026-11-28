@@ -41,6 +41,7 @@ type value struct {
 	typ      reflect.Type
 	declared jen.Code // compile-time *types.StructType proven for a struct container (local, global, or upvalue)
 	resident bool
+	retain   bool // materializing the value takes a reference the frame does not already own
 	handler  jen.Code
 }
 
@@ -258,7 +259,7 @@ var lowerers = [256]lowerer{
 	instr.REF_SET:             emit(refSet()),
 	instr.REF_TEST:            emit(refTest()),
 	instr.RESUME:              emit(resume()),
-	instr.RETURN:              emit(returnOp()),
+	instr.RETURN:              returnOp,
 	instr.RETURN_CALL:         call,
 	instr.SELECT:              emit(selectOp()),
 	instr.STRING_CONCAT:       emit(stringConcat()),
@@ -383,7 +384,7 @@ func compose(pattern pattern, size int, label string) ([]jen.Code, int, error) {
 		if err != nil {
 			return nil, 0, err
 		}
-		if current.consumer {
+		if current.consumer || current.op == instr.RETURN {
 			trap = context.offset
 		}
 		if current.commit {
@@ -414,6 +415,10 @@ func resolve(pattern pattern) ([]step, error) {
 	}
 
 	consumerAt := len(steps) - 1
+	returned := steps[consumerAt].op == instr.RETURN
+	if returned {
+		consumerAt--
+	}
 	stored := steps[consumerAt].op == instr.LOCAL_SET
 	if stored {
 		consumerAt--
@@ -428,6 +433,9 @@ func resolve(pattern pattern) ([]step, error) {
 	steps[consumerAt].consumer = true
 	consumer := steps[consumerAt].op
 	if consumerAt == 0 {
+		if returned {
+			return steps, returnedSource(&steps[0])
+		}
 		if stored {
 			if _, ok := numericKind(consumer); !ok {
 				return nil, fmt.Errorf("%s cannot feed local.set", instr.TypeOf(consumer).Mnemonic)
@@ -486,6 +494,49 @@ func resolve(pattern pattern) ([]step, error) {
 		steps[index].commit = traps(consumer)
 	}
 	return steps, nil
+}
+
+// returnedSource resolves the lone step before a trailing RETURN: a non-trapping binary operation
+// that takes its operands from the stack, or a source whose kind its pattern names.
+func returnedSource(source *step) error {
+	if _, ok := arity(source.op); ok && !traps(source.op) {
+		return nil
+	}
+	kind, ok := sourceKind(*source)
+	if !ok {
+		return fmt.Errorf("%s cannot feed return", instr.TypeOf(source.op).Mnemonic)
+	}
+	source.kind = kind
+	source.boxed = source.typ != nil
+	return nil
+}
+
+// sourceKind is the kind a return source produces: its immediate's kind, or the one its pattern
+// types its slot or constant with.
+func sourceKind(source step) (instr.Kind, bool) {
+	switch source.op {
+	case instr.I32_CONST:
+		return instr.KindI32, true
+	case instr.I64_CONST:
+		return instr.KindI64, true
+	case instr.F32_CONST:
+		return instr.KindF32, true
+	case instr.F64_CONST:
+		return instr.KindF64, true
+	}
+	switch source.typ {
+	case reflect.TypeFor[types.I32]():
+		return instr.KindI32, true
+	case reflect.TypeFor[types.I64]():
+		return instr.KindI64, true
+	case reflect.TypeFor[types.F32]():
+		return instr.KindF32, true
+	case reflect.TypeFor[types.F64]():
+		return instr.KindF64, true
+	case reflect.TypeFor[types.Ref]():
+		return instr.KindRef, true
+	}
+	return instr.KindAny, false
 }
 
 func operands(op instr.Opcode) (instr.Kind, int, bool) {

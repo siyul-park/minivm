@@ -109,6 +109,7 @@ func catalog() []pattern {
 		seq(op(instr.CONST_GET), op(instr.CLOSURE_NEW)),
 	)
 	patterns = append(patterns, scalars()...)
+	patterns = append(patterns, returns()...)
 	sort.Slice(patterns, func(i, j int) bool {
 		if len(patterns[i]) != len(patterns[j]) {
 			return len(patterns[i]) > len(patterns[j])
@@ -227,6 +228,39 @@ func scalars() []pattern {
 		seq(op(instr.I64_EQZ), op(instr.BR_IF)),
 		seq(op(instr.I32_CONST), op(instr.BR_IF)),
 	)
+}
+
+// returns lists the patterns whose trailing RETURN the fused handler absorbs: a source of a
+// declared kind, or a non-trapping binary operation on the stack's operands.
+func returns() []pattern {
+	sources := slices.Concat(
+		returnSources[types.I32](instr.I32_CONST),
+		returnSources[types.I64](instr.I64_CONST),
+		returnSources[types.F32](instr.F32_CONST),
+		returnSources[types.F64](instr.F64_CONST),
+	)
+	for _, source := range slotSources {
+		sources = append(sources, typedContainer[types.Ref](source))
+	}
+	patterns := cross(sources, op(instr.RETURN))
+	for _, family := range families {
+		for _, binary := range family.binary {
+			if !traps(binary) {
+				patterns = append(patterns, seq(op(binary), op(instr.RETURN)))
+			}
+		}
+	}
+	return patterns
+}
+
+// returnSources lists the sources of kind T a RETURN can follow: typed slots, a typed constant,
+// and the immediate.
+func returnSources[T types.Value](immediate instr.Opcode) []pattern {
+	sources := []pattern{constant[T](), op(immediate)}
+	for _, source := range slotSources {
+		sources = append(sources, typedContainer[T](source))
+	}
+	return sources
 }
 
 func arrayProducers(kind instr.Kind) []pattern {

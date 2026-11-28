@@ -119,36 +119,73 @@ func selectOp() jen.Code {
 		next())
 }
 
-func returnOp() jen.Code {
-	return jen.Func().
-		Params(jen.Id("c").Op("*").Id("threader")).
-		Params(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter"))).
-		Block(
+// returnOp lowers RETURN. Standalone it is the handler that retires the frame. As the tail of a
+// fused pattern it first leaves the pending value on the stack exactly as unfused code does, then
+// retires; a trap in either step is reported at the RETURN.
+func returnOp(state *state, current step) (value, error) {
+	if state.standalone {
+		compile := []jen.Code{
 			jen.Id("c").Dot("ip").Op("++"),
 			jen.Comment("A frame whose every slot is a plain scalar can only be holding"),
 			jen.Comment("scalars when its operand stack is balanced, so the release sweep"),
 			jen.Comment("is skipped for it. The kinds that can carry a ref are the same ones"),
 			jen.Comment("LOCAL_GET retains for."),
-			jen.Id("slots").Op(":=").Len(jen.Id("c").Dot("locals")),
-			jen.Id("owned").Op(":=").False(),
-			jen.For(jen.List(jen.Id("_"), jen.Id("kind")).Op(":=").Range().Id("c").Dot("locals")).Block(
-				jen.Switch(jen.Id("kind").Dot("Repr").Call()).Block(
-					jen.Case(
-						jen.Qual(typesPkg, "KindI32"),
-						jen.Qual(typesPkg, "KindF32"),
-						jen.Qual(typesPkg, "KindF64"),
-					).Block(),
-					jen.Default().Block(jen.Id("owned").Op("=").True()),
-				),
+		}
+		compile = append(compile, returnCompile()...)
+		compile = append(compile, jen.Return(closure(returnRun()...)))
+		return value{op: current.op, head: current.op, handler: threaderFunc(compile...)}, nil
+	}
+	if len(state.stack) == 0 {
+		return value{}, fmt.Errorf("%s needs one pending value", instr.TypeOf(current.op).Mnemonic)
+	}
+	input := state.stack[len(state.stack)-1]
+	state.stack = state.stack[:len(state.stack)-1]
+	if _, ok := arity(input.op); ok {
+		exit := &sink{compile: returnCompile(), tail: returnRun()}
+		compile, err := numeric(input.op, state.stack, state.width, state.label, false, exit)
+		if err != nil {
+			return value{}, err
+		}
+		state.stack = nil
+		return value{op: current.op, head: input.head, compile: compile}, nil
+	}
+	body := stage(input, input.retain)
+	body = append(body, returnRun()...)
+	compile := append(append([]jen.Code(nil), input.compile...), returnCompile()...)
+	compile = append(compile,
+		jen.Id("c").Dot("ip").Op("+=").Lit(width(input.head)),
+		jen.Return(closure(body...)),
+	)
+	state.stack = nil
+	return value{op: current.op, head: input.head, compile: compile}, nil
+}
+
+// returnCompile is the threading-time half of RETURN: whether the frame can hold refs, which
+// decides if retire sweeps its operand stack.
+func returnCompile() []jen.Code {
+	return []jen.Code{
+		jen.Id("slots").Op(":=").Len(jen.Id("c").Dot("locals")),
+		jen.Id("owned").Op(":=").False(),
+		jen.For(jen.List(jen.Id("_"), jen.Id("kind")).Op(":=").Range().Id("c").Dot("locals")).Block(
+			jen.Switch(jen.Id("kind").Dot("Repr").Call()).Block(
+				jen.Case(
+					jen.Qual(typesPkg, "KindI32"),
+					jen.Qual(typesPkg, "KindF32"),
+					jen.Qual(typesPkg, "KindF64"),
+				).Block(),
+				jen.Default().Block(jen.Id("owned").Op("=").True()),
 			),
-			jen.Return(
-				jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(
-					jen.If(jen.Id("i").Dot("fp").Op("==").Lit(1)).Block(jen.Panic(jen.Id("ErrFrameUnderflow"))),
-					jen.Id("f").Op(":=").Id("i").Dot("fr"),
-					jen.Id("i").Dot("retire").Call(jen.Id("owned").Op("||").Id("i").Dot("sp").Op("!=").Id("f").Dot("bp").Op("+").Id("slots").Op("+").Id("f").Dot("returns")),
-				),
-			),
-		)
+		),
+	}
+}
+
+// returnRun is the run-time half of RETURN: it traps at the root frame, then retires the frame.
+func returnRun() []jen.Code {
+	return []jen.Code{
+		jen.If(jen.Id("i").Dot("fp").Op("==").Lit(1)).Block(jen.Panic(jen.Id("ErrFrameUnderflow"))),
+		jen.Id("f").Op(":=").Id("i").Dot("fr"),
+		jen.Id("i").Dot("retire").Call(jen.Id("owned").Op("||").Id("i").Dot("sp").Op("!=").Id("f").Dot("bp").Op("+").Id("slots").Op("+").Id("f").Dot("returns")),
+	}
 }
 
 func throw() jen.Code {
