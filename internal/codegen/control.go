@@ -141,7 +141,7 @@ func returnOp(state *state, current step) (value, error) {
 	input := state.stack[len(state.stack)-1]
 	state.stack = state.stack[:len(state.stack)-1]
 	if _, ok := arity(input.op); ok {
-		exit := &sink{compile: returnCompile(), tail: returnRun()}
+		exit := &sink{op: current.op, at: state.offset - width(input.op), compile: returnCompile(), tail: returnRun()}
 		compile, err := numeric(input.op, state.stack, state.width, state.label, false, exit)
 		if err != nil {
 			return value{}, err

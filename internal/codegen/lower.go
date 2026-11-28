@@ -507,7 +507,8 @@ func returnedSource(source *step) error {
 		return fmt.Errorf("%s cannot feed return", instr.TypeOf(source.op).Mnemonic)
 	}
 	source.kind = kind
-	source.boxed = source.typ != nil
+	// Slots and constants hand over their boxed value; an immediate's boxing is literal's own.
+	source.boxed = source.op == instr.CONST_GET || isContainerSource(source.op)
 	return nil
 }
 
@@ -524,7 +525,12 @@ func sourceKind(source step) (instr.Kind, bool) {
 	case instr.F64_CONST:
 		return instr.KindF64, true
 	}
-	switch source.typ {
+	return markerKind(source.typ)
+}
+
+// markerKind is the kind a slot or constant pattern's type marker names.
+func markerKind(typ reflect.Type) (instr.Kind, bool) {
+	switch typ {
 	case reflect.TypeFor[types.I32]():
 		return instr.KindI32, true
 	case reflect.TypeFor[types.I64]():

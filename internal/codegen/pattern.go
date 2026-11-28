@@ -240,7 +240,7 @@ func returns() []pattern {
 		returnSources[types.F64](instr.F64_CONST),
 	)
 	for _, source := range slotSources {
-		sources = append(sources, typedContainer[types.Ref](source))
+		sources = append(sources, typedSlot[types.Ref](source))
 	}
 	patterns := cross(sources, op(instr.RETURN))
 	for _, family := range families {
@@ -258,7 +258,7 @@ func returns() []pattern {
 func returnSources[T types.Value](immediate instr.Opcode) []pattern {
 	sources := []pattern{constant[T](), op(immediate)}
 	for _, source := range slotSources {
-		sources = append(sources, typedContainer[T](source))
+		sources = append(sources, typedSlot[T](source))
 	}
 	return sources
 }
@@ -319,6 +319,12 @@ func constant[T types.Value]() pattern {
 // prove the container's element kind at threading time instead of
 // re-deriving it from the runtime heap value.
 func typedContainer[T any](source instr.Opcode) pattern {
+	return pattern{{op: source, typ: reflect.TypeFor[T]()}}
+}
+
+// typedSlot matches source (LOCAL_GET, GLOBAL_GET, or UPVAL_GET) whose declared slot kind is the
+// kind of T, a scalar value type or types.Ref, so a fused consumer needs no run-time kind test.
+func typedSlot[T any](source instr.Opcode) pattern {
 	return pattern{{op: source, typ: reflect.TypeFor[T]()}}
 }
 

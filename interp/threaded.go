@@ -116313,7 +116313,7 @@ func fuseI32Add0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxI32(i.stack[i.sp-2].I32() + i.stack[i.sp-1].I32())
 			i.sp -= 1
@@ -116374,7 +116374,7 @@ func fuseI32Sub0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxI32(i.stack[i.sp-2].I32() - i.stack[i.sp-1].I32())
 			i.sp -= 1
@@ -116435,7 +116435,7 @@ func fuseI32Mul0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxI32(i.stack[i.sp-2].I32() * i.stack[i.sp-1].I32())
 			i.sp -= 1
@@ -116496,7 +116496,7 @@ func fuseI32Shl0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxI32(i.stack[i.sp-2].I32() << (i.stack[i.sp-1].I32() & 31))
 			i.sp -= 1
@@ -116557,7 +116557,7 @@ func fuseI32ShrS0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxI32(i.stack[i.sp-2].I32() >> (i.stack[i.sp-1].I32() & 31))
 			i.sp -= 1
@@ -116618,7 +116618,7 @@ func fuseI32ShrU0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxI32(int32(uint32(i.stack[i.sp-2].I32()) >> (i.stack[i.sp-1].I32() & 31)))
 			i.sp -= 1
@@ -116679,7 +116679,7 @@ func fuseI32Xor0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.Boxed(uint64(i.stack[i.sp-2])&uint64(i.stack[i.sp-1]) & ^uint64(types.VMask) | (uint64(i.stack[i.sp-2]) ^ uint64(i.stack[i.sp-1])&types.VMask))
 			i.sp -= 1
@@ -116740,7 +116740,7 @@ func fuseI32And0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.Boxed(uint64(i.stack[i.sp-2]) & uint64(i.stack[i.sp-1]))
 			i.sp -= 1
@@ -116801,7 +116801,7 @@ func fuseI32Or0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.Boxed(uint64(i.stack[i.sp-2]) | uint64(i.stack[i.sp-1]))
 			i.sp -= 1
@@ -116862,7 +116862,7 @@ func fuseI32Rotl0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-2].I32()), int(i.stack[i.sp-1].I32()))))
 			i.sp -= 1
@@ -116923,7 +116923,7 @@ func fuseI32Rotr0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-2].I32()), -int(i.stack[i.sp-1].I32()))))
 			i.sp -= 1
@@ -118541,7 +118541,7 @@ func fuseI64Add0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) + i.unboxI64(i.stack[i.sp-1]))
 			i.sp -= 1
@@ -118606,7 +118606,7 @@ func fuseI64Sub0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) - i.unboxI64(i.stack[i.sp-1]))
 			i.sp -= 1
@@ -118671,7 +118671,7 @@ func fuseI64Mul0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) * i.unboxI64(i.stack[i.sp-1]))
 			i.sp -= 1
@@ -118736,7 +118736,7 @@ func fuseI64Shl0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) << (i.unboxI64(i.stack[i.sp-1]) & 63))
 			i.sp -= 1
@@ -118801,7 +118801,7 @@ func fuseI64ShrS0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) >> (i.unboxI64(i.stack[i.sp-1]) & 63))
 			i.sp -= 1
@@ -118866,7 +118866,7 @@ func fuseI64ShrU0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := i.boxI64(int64(uint64(i.unboxI64(i.stack[i.sp-2])) >> (i.unboxI64(i.stack[i.sp-1]) & 63)))
 			i.sp -= 1
@@ -118931,7 +118931,7 @@ func fuseI64Xor0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) ^ i.unboxI64(i.stack[i.sp-1]))
 			i.sp -= 1
@@ -118996,7 +118996,7 @@ func fuseI64And0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) & i.unboxI64(i.stack[i.sp-1]))
 			i.sp -= 1
@@ -119061,7 +119061,7 @@ func fuseI64Or0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := i.boxI64(i.unboxI64(i.stack[i.sp-2]) | i.unboxI64(i.stack[i.sp-1]))
 			i.sp -= 1
@@ -119126,7 +119126,7 @@ func fuseI64Rotl0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-2])), int(i.unboxI64(i.stack[i.sp-1])))))
 			i.sp -= 1
@@ -119191,7 +119191,7 @@ func fuseI64Rotr0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := i.boxI64(int64(bits.RotateLeft64(uint64(i.unboxI64(i.stack[i.sp-2])), -int(i.unboxI64(i.stack[i.sp-1])))))
 			i.sp -= 1
@@ -120419,7 +120419,7 @@ func fuseF32Add0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxF32(i.stack[i.sp-2].F32() + i.stack[i.sp-1].F32())
 			i.sp -= 1
@@ -120480,7 +120480,7 @@ func fuseF32Sub0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxF32(i.stack[i.sp-2].F32() - i.stack[i.sp-1].F32())
 			i.sp -= 1
@@ -120541,7 +120541,7 @@ func fuseF32Mul0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxF32(i.stack[i.sp-2].F32() * i.stack[i.sp-1].F32())
 			i.sp -= 1
@@ -120602,7 +120602,7 @@ func fuseF32Min0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxF32(min(i.stack[i.sp-2].F32(), i.stack[i.sp-1].F32()))
 			i.sp -= 1
@@ -120663,7 +120663,7 @@ func fuseF32Max0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxF32(max(i.stack[i.sp-2].F32(), i.stack[i.sp-1].F32()))
 			i.sp -= 1
@@ -120724,7 +120724,7 @@ func fuseF32Copysign0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxF32(float32(math.Copysign(float64(i.stack[i.sp-2].F32()), float64(i.stack[i.sp-1].F32()))))
 			i.sp -= 1
@@ -121718,7 +121718,7 @@ func fuseF64Add0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxF64(i.stack[i.sp-2].F64() + i.stack[i.sp-1].F64())
 			i.sp -= 1
@@ -121779,7 +121779,7 @@ func fuseF64Sub0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxF64(i.stack[i.sp-2].F64() - i.stack[i.sp-1].F64())
 			i.sp -= 1
@@ -121840,7 +121840,7 @@ func fuseF64Mul0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxF64(i.stack[i.sp-2].F64() * i.stack[i.sp-1].F64())
 			i.sp -= 1
@@ -121901,7 +121901,7 @@ func fuseF64Min0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxF64(math.Min(i.stack[i.sp-2].F64(), i.stack[i.sp-1].F64()))
 			i.sp -= 1
@@ -121962,7 +121962,7 @@ func fuseF64Max0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxF64(math.Max(i.stack[i.sp-2].F64(), i.stack[i.sp-1].F64()))
 			i.sp -= 1
@@ -122023,7 +122023,7 @@ func fuseF64Copysign0(c *threader, start int) func(*Interpreter) {
 		c.ip += 1
 		return func(i *Interpreter) {
 			if i.sp < 2 {
-				panic(ErrStackUnderflow)
+				panic(trapped{ErrStackUnderflow, 0})
 			}
 			v2 := types.BoxF64(math.Copysign(i.stack[i.sp-2].F64(), i.stack[i.sp-1].F64()))
 			i.sp -= 1

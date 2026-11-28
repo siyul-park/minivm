@@ -14022,53 +14022,88 @@ func TestInterpreter_Run(t *testing.T) {
 	}
 
 	t.Run("returns a fused producer as exact execution does", func(t *testing.T) {
-		i32, i64, f64, ref := types.TypeI32(), types.TypeI64(), types.TypeF64(), types.TypeAny()
-		fn := func(params, returns []types.Type, captures []types.Type, body ...instr.Instruction) *types.Function {
-			return types.NewFunctionBuilder(&types.FunctionType{Params: params, Returns: returns}).Captures(captures...).Append(body...).MustBuild()
-		}
-		ins := func(op instr.Opcode, operands ...uint64) instr.Instruction { return instr.MustNew(op, operands...) }
-		call := ins(instr.CALL)
-		wide := uint64(1) << 40
+		wide := uint64(1) << 60 // outside the inline i64 range, so the value lives on the heap
+		half := uint64(1) << 47
+		ret := instr.MustNew(instr.RETURN)
+		call := instr.MustNew(instr.CALL)
+		// A row calls a function that returns what its body produces: via names how the body
+		// reaches arg, a parameter, a global set first, or a closure capture.
 		tests := []struct {
 			name    string
+			via     string
+			typ     types.Type
+			arg     instr.Instruction
+			body    []instr.Instruction
+			consts  []types.Value
+			returns []types.Type
+		}{
+			{name: "local i32", via: "param", typ: types.TypeI32(), arg: instr.MustNew(instr.I32_CONST, 7), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), ret}},
+			{name: "local i64", via: "param", typ: types.TypeI64(), arg: instr.MustNew(instr.I64_CONST, wide), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), ret}},
+			{name: "local f32", via: "param", typ: types.TypeF32(), arg: instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(1.5))), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), ret}},
+			{name: "local f64", via: "param", typ: types.TypeF64(), arg: instr.MustNew(instr.F64_CONST, math.Float64bits(2.5)), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), ret}},
+			{name: "local ref", via: "param", typ: types.TypeAny(), arg: instr.MustNew(instr.CONST_GET, 1), consts: []types.Value{types.String("ref")}, body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), ret}},
+			{name: "global i32", via: "global", typ: types.TypeI32(), arg: instr.MustNew(instr.I32_CONST, 9), body: []instr.Instruction{instr.MustNew(instr.GLOBAL_GET, 0), ret}},
+			{name: "global i64", via: "global", typ: types.TypeI64(), arg: instr.MustNew(instr.I64_CONST, wide), body: []instr.Instruction{instr.MustNew(instr.GLOBAL_GET, 0), ret}},
+			{name: "global ref", via: "global", typ: types.TypeAny(), arg: instr.MustNew(instr.CONST_GET, 1), consts: []types.Value{types.String("ref")}, body: []instr.Instruction{instr.MustNew(instr.GLOBAL_GET, 0), ret}},
+			{name: "upvalue i32", via: "capture", typ: types.TypeI32(), arg: instr.MustNew(instr.I32_CONST, 4), body: []instr.Instruction{instr.MustNew(instr.UPVAL_GET, 0), ret}},
+			{name: "upvalue i64", via: "capture", typ: types.TypeI64(), arg: instr.MustNew(instr.I64_CONST, wide), body: []instr.Instruction{instr.MustNew(instr.UPVAL_GET, 0), ret}},
+			{name: "upvalue ref", via: "capture", typ: types.TypeAny(), arg: instr.MustNew(instr.CONST_GET, 1), consts: []types.Value{types.String("ref")}, body: []instr.Instruction{instr.MustNew(instr.UPVAL_GET, 0), ret}},
+			{name: "constant i32", typ: types.TypeI32(), consts: []types.Value{types.I32(5)}, body: []instr.Instruction{instr.MustNew(instr.CONST_GET, 1), ret}},
+			{name: "constant i64", typ: types.TypeI64(), consts: []types.Value{types.I64(1 << 60)}, body: []instr.Instruction{instr.MustNew(instr.CONST_GET, 1), ret}},
+			{name: "constant f32", typ: types.TypeF32(), consts: []types.Value{types.F32(1.5)}, body: []instr.Instruction{instr.MustNew(instr.CONST_GET, 1), ret}},
+			{name: "constant f64", typ: types.TypeF64(), consts: []types.Value{types.F64(2.5)}, body: []instr.Instruction{instr.MustNew(instr.CONST_GET, 1), ret}},
+			{name: "immediate i32", typ: types.TypeI32(), body: []instr.Instruction{instr.MustNew(instr.I32_CONST, 3), ret}},
+			{name: "immediate i64", typ: types.TypeI64(), body: []instr.Instruction{instr.MustNew(instr.I64_CONST, wide), ret}},
+			{name: "immediate f32", typ: types.TypeF32(), body: []instr.Instruction{instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(1.5))), ret}},
+			{name: "immediate f64", typ: types.TypeF64(), body: []instr.Instruction{instr.MustNew(instr.F64_CONST, math.Float64bits(2.5)), ret}},
+			{name: "i32.add", via: "param", typ: types.TypeI32(), arg: instr.MustNew(instr.I32_CONST, 6), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.DUP), instr.MustNew(instr.I32_ADD), ret}},
+			{name: "i32.and", via: "param", typ: types.TypeI32(), arg: instr.MustNew(instr.I32_CONST, 6), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.DUP), instr.MustNew(instr.I32_AND), ret}},
+			{name: "i64.add on the heap", via: "param", typ: types.TypeI64(), arg: instr.MustNew(instr.I64_CONST, wide), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.DUP), instr.MustNew(instr.I64_ADD), ret}},
+			{name: "i64.add overflowing the inline range", via: "param", typ: types.TypeI64(), arg: instr.MustNew(instr.I64_CONST, half), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.DUP), instr.MustNew(instr.I64_ADD), ret}},
+			{name: "f32.add", via: "param", typ: types.TypeF32(), arg: instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(1.5))), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.DUP), instr.MustNew(instr.F32_ADD), ret}},
+			{name: "f64.mul", via: "param", typ: types.TypeF64(), arg: instr.MustNew(instr.F64_CONST, math.Float64bits(1.5)), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.DUP), instr.MustNew(instr.F64_MUL), ret}},
+			{name: "two results", via: "param", typ: types.TypeI32(), returns: []types.Type{types.TypeI32(), types.TypeI32()}, arg: instr.MustNew(instr.I32_CONST, 2), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 0), ret}},
+		}
+		programs := map[string]struct {
 			program *program.Program
 			trap    error
 		}{
-			{name: "local i32", program: program.New([]instr.Instruction{ins(instr.I32_CONST, 7), ins(instr.CONST_GET, 0), call},
-				program.WithConstants(fn([]types.Type{i32}, []types.Type{i32}, nil, ins(instr.LOCAL_GET, 0), ins(instr.RETURN))))},
-			{name: "local i64", program: program.New([]instr.Instruction{ins(instr.I64_CONST, wide), ins(instr.CONST_GET, 0), call},
-				program.WithConstants(fn([]types.Type{i64}, []types.Type{i64}, nil, ins(instr.LOCAL_GET, 0), ins(instr.RETURN))))},
-			{name: "local f64", program: program.New([]instr.Instruction{ins(instr.F64_CONST, math.Float64bits(2.5)), ins(instr.CONST_GET, 0), call},
-				program.WithConstants(fn([]types.Type{f64}, []types.Type{f64}, nil, ins(instr.LOCAL_GET, 0), ins(instr.RETURN))))},
-			{name: "local ref", program: program.New([]instr.Instruction{ins(instr.CONST_GET, 1), ins(instr.CONST_GET, 0), call},
-				program.WithConstants(fn([]types.Type{ref}, []types.Type{ref}, nil, ins(instr.LOCAL_GET, 0), ins(instr.RETURN)), types.String("ref")))},
-			{name: "global", program: program.New([]instr.Instruction{ins(instr.I32_CONST, 9), ins(instr.GLOBAL_SET, 0), ins(instr.CONST_GET, 0), call},
-				program.WithGlobals(i32), program.WithConstants(fn(nil, []types.Type{i32}, nil, ins(instr.GLOBAL_GET, 0), ins(instr.RETURN))))},
-			{name: "upvalue", program: program.New([]instr.Instruction{ins(instr.I32_CONST, 4), ins(instr.CONST_GET, 0), ins(instr.CLOSURE_NEW), call},
-				program.WithConstants(fn(nil, []types.Type{i32}, []types.Type{i32}, ins(instr.UPVAL_GET, 0), ins(instr.RETURN))))},
-			{name: "constant i32", program: program.New([]instr.Instruction{ins(instr.CONST_GET, 0), call},
-				program.WithConstants(fn(nil, []types.Type{i32}, nil, ins(instr.CONST_GET, 1), ins(instr.RETURN)), types.I32(5)))},
-			{name: "constant i64", program: program.New([]instr.Instruction{ins(instr.CONST_GET, 0), call},
-				program.WithConstants(fn(nil, []types.Type{i64}, nil, ins(instr.CONST_GET, 1), ins(instr.RETURN)), types.I64(1<<40)))},
-			{name: "immediate i32", program: program.New([]instr.Instruction{ins(instr.CONST_GET, 0), call},
-				program.WithConstants(fn(nil, []types.Type{i32}, nil, ins(instr.I32_CONST, 3), ins(instr.RETURN))))},
-			{name: "immediate i64", program: program.New([]instr.Instruction{ins(instr.CONST_GET, 0), call},
-				program.WithConstants(fn(nil, []types.Type{i64}, nil, ins(instr.I64_CONST, wide), ins(instr.RETURN))))},
-			{name: "binary i32", program: program.New([]instr.Instruction{ins(instr.I32_CONST, 6), ins(instr.CONST_GET, 0), call},
-				program.WithConstants(fn([]types.Type{i32}, []types.Type{i32}, nil, ins(instr.LOCAL_GET, 0), ins(instr.DUP), ins(instr.I32_ADD), ins(instr.RETURN))))},
-			{name: "binary i64", program: program.New([]instr.Instruction{ins(instr.I64_CONST, wide), ins(instr.CONST_GET, 0), call},
-				program.WithConstants(fn([]types.Type{i64}, []types.Type{i64}, nil, ins(instr.LOCAL_GET, 0), ins(instr.DUP), ins(instr.I64_ADD), ins(instr.RETURN))))},
-			{name: "binary f64", program: program.New([]instr.Instruction{ins(instr.F64_CONST, math.Float64bits(1.5)), ins(instr.CONST_GET, 0), call},
-				program.WithConstants(fn([]types.Type{f64}, []types.Type{f64}, nil, ins(instr.LOCAL_GET, 0), ins(instr.DUP), ins(instr.F64_MUL), ins(instr.RETURN))))},
-			{name: "two results", program: program.New([]instr.Instruction{ins(instr.I32_CONST, 2), ins(instr.CONST_GET, 0), call},
-				program.WithConstants(fn([]types.Type{i32}, []types.Type{i32, i32}, nil, ins(instr.LOCAL_GET, 0), ins(instr.LOCAL_GET, 0), ins(instr.RETURN))))},
-			{name: "coroutine", program: program.New([]instr.Instruction{
-				ins(instr.CONST_GET, 0), call, ins(instr.DUP), ins(instr.REF_NULL), ins(instr.RESUME), ins(instr.DROP), ins(instr.DUP), ins(instr.CORO_VALUE), ins(instr.SWAP), ins(instr.CORO_DONE),
-			}, program.WithConstants(fn(nil, []types.Type{ref}, nil, ins(instr.I32_CONST, 1), ins(instr.YIELD), ins(instr.DROP), ins(instr.I32_CONST, 8), ins(instr.RETURN))))},
-			{name: "module", trap: interp.ErrFrameUnderflow, program: program.New([]instr.Instruction{ins(instr.I32_CONST, 1), ins(instr.RETURN)})},
-			{name: "module local", trap: interp.ErrFrameUnderflow, program: program.New([]instr.Instruction{ins(instr.LOCAL_GET, 0), ins(instr.RETURN)}, program.WithLocals(i32))},
+			"coroutine": {program: program.New([]instr.Instruction{
+				instr.MustNew(instr.CONST_GET, 0), call, instr.MustNew(instr.DUP), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME), instr.MustNew(instr.DROP),
+				instr.MustNew(instr.DUP), instr.MustNew(instr.CORO_VALUE), instr.MustNew(instr.SWAP), instr.MustNew(instr.CORO_DONE),
+			}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny()}}).Append(
+				instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.DROP), instr.MustNew(instr.I32_CONST, 8), ret).MustBuild()))},
+			"module":       {trap: interp.ErrFrameUnderflow, program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), ret})},
+			"module local": {trap: interp.ErrFrameUnderflow, program: program.New([]instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), ret}, program.WithLocals(types.TypeI32()))},
 		}
 		for _, tt := range tests {
+			sig := &types.FunctionType{Returns: []types.Type{tt.typ}}
+			if tt.returns != nil {
+				sig.Returns = tt.returns
+			}
+			builder := types.NewFunctionBuilder(sig)
+			code := []instr.Instruction{}
+			opts := []func(*program.Program){}
+			switch tt.via {
+			case "param":
+				sig.Params = []types.Type{tt.typ}
+				code = append(code, tt.arg, instr.MustNew(instr.CONST_GET, 0), call)
+			case "global":
+				opts = append(opts, program.WithGlobals(tt.typ))
+				code = append(code, tt.arg, instr.MustNew(instr.GLOBAL_SET, 0), instr.MustNew(instr.CONST_GET, 0), call)
+			case "capture":
+				builder.Captures(tt.typ)
+				code = append(code, tt.arg, instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CLOSURE_NEW), call)
+			default:
+				code = append(code, instr.MustNew(instr.CONST_GET, 0), call)
+			}
+			consts := append([]types.Value{builder.Append(tt.body...).MustBuild()}, tt.consts...)
+			programs[tt.name] = struct {
+				program *program.Program
+				trap    error
+			}{program: program.New(code, append(opts, program.WithConstants(consts...))...)}
+		}
+		for name, tt := range programs {
 			var results [2]struct {
 				values []types.Value
 				err    error
@@ -14079,26 +14114,26 @@ func TestInterpreter_Run(t *testing.T) {
 				results[index].err = vm.Run(context.Background())
 				for results[index].err == nil && vm.Len() > 0 {
 					value, err := vm.Pop()
-					require.NoError(t, err, tt.name)
+					require.NoError(t, err, name)
 					results[index].values = append(results[index].values, value)
 				}
 				results[index].live = live(vm)
-				require.NoError(t, vm.Close(), tt.name)
+				require.NoError(t, vm.Close(), name)
 			}
 			fused, exact := results[0], results[1]
 			if tt.trap == nil {
-				require.NoError(t, exact.err, tt.name)
-				require.NotEmpty(t, exact.values, tt.name)
-				require.Equal(t, exact, fused, tt.name)
+				require.NoError(t, exact.err, name)
+				require.NotEmpty(t, exact.values, name)
+				require.Equal(t, exact, fused, name)
 				continue
 			}
-			require.ErrorIs(t, exact.err, tt.trap, tt.name)
-			require.ErrorIs(t, fused.err, tt.trap, tt.name)
+			require.ErrorIs(t, exact.err, tt.trap, name)
+			require.ErrorIs(t, fused.err, tt.trap, name)
 			var fusedErr, exactErr *interp.RuntimeError
-			require.ErrorAs(t, fused.err, &fusedErr, tt.name)
-			require.ErrorAs(t, exact.err, &exactErr, tt.name)
-			require.Equal(t, exactErr.Frames, fusedErr.Frames, tt.name)
-			require.Equal(t, exact.live, fused.live, tt.name)
+			require.ErrorAs(t, fused.err, &fusedErr, name)
+			require.ErrorAs(t, exact.err, &exactErr, name)
+			require.Equal(t, exactErr.Frames, fusedErr.Frames, name)
+			require.Equal(t, exact.live, fused.live, name)
 		}
 	})
 }

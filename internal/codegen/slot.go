@@ -169,14 +169,8 @@ func (l loader) read(result *value, current step) error {
 		result.compile = append(result.compile, guard...)
 	}
 
-	if _, ok := arrayKind(current.typ); ok {
-		if err := l.arrayGuard(result, current); err != nil {
-			return err
-		}
-	} else if current.typ == reflect.TypeFor[types.Struct]() {
-		if err := l.structGuard(result, current); err != nil {
-			return err
-		}
+	if err := l.declaredGuard(result, current); err != nil {
+		return err
 	}
 	switch current.op {
 	case instr.LOCAL_GET:
@@ -204,6 +198,24 @@ func (l loader) read(result *value, current step) error {
 		result.body = append(result.body, jen.Id(l.boxed).Op(":=").Id("i").Dot("fr").Dot("upvals").Index(jen.Id(l.index)))
 	}
 	return nil
+}
+
+// declaredGuard proves the declared type a slot pattern names: a typed array's element kind, a
+// concrete struct, or nothing for a kind marker, which the slot's kind guard already proves.
+func (l loader) declaredGuard(result *value, current step) error {
+	if current.typ == nil {
+		return nil
+	}
+	if _, ok := arrayKind(current.typ); ok {
+		return l.arrayGuard(result, current)
+	}
+	if current.typ == reflect.TypeFor[types.Struct]() {
+		return l.structGuard(result, current)
+	}
+	if _, ok := markerKind(current.typ); ok {
+		return nil
+	}
+	return fmt.Errorf("unsupported slot type %s", current.typ)
 }
 
 func (l loader) slotBounds(current step, field string) ([]jen.Code, error) {
@@ -514,7 +526,7 @@ func localStore(state *state, current step) (value, error) {
 		),
 		jen.If(jen.Op("!").Id("dstOK")).Block(reject(state.label)),
 	}
-	body, err := numeric(consumer.op, state.stack[:len(state.stack)-1], state.width, state.label, false, &sink{slot: jen.Id("dst"), at: state.offset})
+	body, err := numeric(consumer.op, state.stack[:len(state.stack)-1], state.width, state.label, false, &sink{op: current.op, slot: jen.Id("dst"), at: state.offset})
 	if err != nil {
 		return value{}, err
 	}

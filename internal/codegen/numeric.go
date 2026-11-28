@@ -9,9 +9,11 @@ import (
 )
 
 // sink is where a fused numeric operation puts its result instead of the stack: a local.set's
-// slot with its offset from the handler's first instruction, or, with no slot, a trailing
-// opcode that runs compile at threading time and tail at run time once the result is pushed.
+// slot, or, with no slot, a trailing opcode that runs compile at threading time and tail at run
+// time once the result is pushed. at is the offset from the handler's first instruction of the
+// local.set, or of the operation whose own traps the tail must not claim. op names the trailer.
 type sink struct {
+	op      instr.Opcode
 	slot    jen.Code
 	at      int
 	compile []jen.Code
@@ -53,7 +55,7 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 		return trapping(consumer, inputs, kind)
 	}
 	if traps(consumer) {
-		return nil, fmt.Errorf("%s cannot fuse with local.set", instr.TypeOf(consumer).Mnemonic)
+		return nil, fmt.Errorf("%s cannot fuse with %s", instr.TypeOf(consumer).Mnemonic, instr.TypeOf(local.op).Mnemonic)
 	}
 
 	var compile, body []jen.Code
@@ -71,7 +73,12 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 	operands := make([]jen.Code, 0, arity)
 	missing := arity - len(inputs)
 	if missing > 0 {
-		body = append(body, jen.If(jen.Id("i").Dot("sp").Op("<").Lit(missing)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))))
+		var trap jen.Code = jen.Panic(jen.Id("ErrStackUnderflow"))
+		if local != nil && !local.stores() {
+			// The tail's own trap offset is the trailer's; underflow belongs to this operation.
+			trap = fail("ErrStackUnderflow", local.at)
+		}
+		body = append(body, jen.If(jen.Id("i").Dot("sp").Op("<").Lit(missing)).Block(trap))
 		for index := missing; index > 0; index-- {
 			operands = append(operands, unbox(kind, jen.Id("i").Dot("sp").Op("-").Lit(index)))
 		}
