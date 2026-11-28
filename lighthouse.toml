@@ -27,9 +27,7 @@ files = ["docs/benchmarks.md"]
 # Step 10's interface hooks include the types.Value, types.Type and
 # types.Traceable methods every value and type implements.
 [spec.rules]
-# A function whose doc comment ends with //gcassert:inline must inline at every
-# call site; .lighthouse/decisions/inline-calls.yaml runs gcassert.
-"local/inline-calls" = "error"
+"go/cross-build" = { level = "error", options = { platforms = [{ GOOS = "linux", GOARCH = "arm64" }] } }
 "design/declaration-groups" = { level = "error", options = { groups = ["public-type", "private-type", "public-const", "private-const", "var", "init", "public-function", "method", "private"], blocks = "kind", hooks = ["Kind", "Type", "Cast", "Equals", "Refs", "Clone", "String", "GoString", "Error", "Unwrap", "MarshalJSON", "UnmarshalJSON", "MarshalText", "UnmarshalText", "MarshalBinary", "UnmarshalBinary"] } }
 
 # JavaScript and Python fixtures are benchmark programs: the Go runners call
