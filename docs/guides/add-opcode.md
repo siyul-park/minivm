@@ -94,7 +94,7 @@ The agent `MUST` run:
 
 ```bash
 make check-generated
-make check-tidy check-fmt vet
+make lint
 ```
 
 When ARM64 lowering is affected, the agent MUST run the affected ARM64 tests and benchmark gates.

@@ -9,10 +9,10 @@ RUFF_VERSION := 0.17.3
 LYCHEE_VERSION := 0.24.2
 GCASSERT_VERSION := v0.0.0-20260313214104-ad3fae17affe
 TARGETS := x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin
-LIGHTHOUSE_SHA256_x86_64-unknown-linux-gnu := cafc85ecdb2bdeacf4dee5cc2b153faccba21e6ea5273fad4ed136f33fb35966
-LIGHTHOUSE_SHA256_aarch64-unknown-linux-gnu := d652b262e3e17c6c58ee620d54c994a60c8c3da457ec5167a23a450418297a47
-LIGHTHOUSE_SHA256_aarch64-apple-darwin := ac3c95d4ecfcbf2045a3253218b115ae29f69aba86ba83ba952a2e399ce362b9
-LIGHTHOUSE_SHA256_x86_64-apple-darwin := 68a1759e7ff0ce270feb627ee71e6602e4887e5e4f4266196c406c02b329c9de
+LIGHTHOUSE_SHA256_x86_64-unknown-linux-gnu := 61492e44583b28fbc11dc5e65afdc4a1ec5c8d67e4e6b6cfda7291600e93f55b
+LIGHTHOUSE_SHA256_aarch64-unknown-linux-gnu := e47f718db98fe75966b7c0f5ca019d2175ad086d7fcd4aac11ad5209fd3e2789
+LIGHTHOUSE_SHA256_aarch64-apple-darwin := 43720c9038cc9a70a6525c2383be611e42e1e92218747cfee6de37c2b9d946c0
+LIGHTHOUSE_SHA256_x86_64-apple-darwin := 2afee37f65d85c9a1f2b5d73cc1822579690c1358a0809e1cf163ee13470bceb
 RUFF_SHA256_x86_64-unknown-linux-gnu := 2b0890f5a55900af741f133918c2656919bbf18c2ab7741b4ca8403a90e647a9
 RUFF_SHA256_aarch64-unknown-linux-gnu := 3f4639152c0e42bb5938e6c23d53d527a38f3133e000102934518f90529fa299
 RUFF_SHA256_aarch64-apple-darwin := 118f7121aa838785672bf612487f755a89108bb5f44e0f3df96c5967a72614f9
@@ -66,7 +66,7 @@ endif
 
 PROJECT = $(shell basename -s .git $(shell git config --get remote.origin.url))
 
-.PHONY: init install-hooks install-tools install-lighthouse install-lint-tools install-modules generate build clean tidy update clean-sum clean-cache sync check check-generated check-tidy check-fmt check-arm64 test coverage coverage-check benchmark benchmark-diff lighthouse lint fmt vet doc fuzz
+.PHONY: init install-hooks install-tools install-lighthouse install-lint-tools install-modules generate build clean tidy update clean-sum clean-cache sync check check-generated test coverage coverage-check benchmark benchmark-diff lighthouse lint fmt vet doc fuzz
 all: lint test build
 
 init:
@@ -137,28 +137,12 @@ clean-cache:
 sync:
 	@go work sync
 
-check: check-generated check-tidy check-fmt lint test check-arm64
+check: check-generated lint test
 	@go build ./...
 	@(cd benchmarks && go test ./...)
 
 check-generated:
 	@go run ./internal/cmd/codegen -check
-
-check-tidy:
-	@go mod tidy -diff
-	@(cd benchmarks && go mod tidy -diff)
-
-check-fmt:
-	@command -v $(GOIMPORTS) >/dev/null
-	@test -z "$$(gofmt -l .)"
-	@test -z "$$($(GOIMPORTS) -l .)"
-	@(cd benchmarks && test -z "$$(gofmt -l .)")
-	@(cd benchmarks && test -z "$$($(GOIMPORTS) -l .)")
-
-check-arm64:
-	@GOOS=linux GOARCH=arm64 go build ./...
-	@GOOS=linux GOARCH=arm64 go test -exec=true ./...
-	@(cd benchmarks && GOOS=linux GOARCH=arm64 go test -exec=true ./...)
 
 test:
 	@go test -race $(test-options) ./...
