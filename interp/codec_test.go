@@ -1247,6 +1247,39 @@ func TestRegistry_Unmarshal(t *testing.T) {
 		require.Zero(t, i.Len())
 	})
 
+	t.Run("VM function finishes a coroutine an exception escapes", func(t *testing.T) {
+		gen := types.NewFunctionBuilder(nil).Returns(types.TypeAny()).Append(
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.DROP),
+			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.THROW)).MustBuild()
+		i := interp.MustNew(program.New(nil, program.WithConstants(gen), program.WithGlobals(types.TypeAny())))
+		r := interp.NewRegistry()
+		defer i.Close()
+		vm := func(typ *types.FunctionType, body ...instr.Instruction) *types.Function {
+			return types.NewFunctionBuilder(typ).Append(body...).MustBuild()
+		}
+
+		var start, step func() error
+		var done func() (bool, error)
+		require.NoError(t, r.Unmarshal(i, vm(&types.FunctionType{},
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.GLOBAL_SET, 0), instr.MustNew(instr.RETURN)), &start))
+		require.NoError(t, r.Unmarshal(i, vm(&types.FunctionType{},
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME), instr.MustNew(instr.DROP), instr.MustNew(instr.RETURN)), &step))
+		require.NoError(t, r.Unmarshal(i, vm(&types.FunctionType{Returns: []types.Type{types.TypeI1()}},
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.CORO_DONE), instr.MustNew(instr.RETURN)), &done))
+
+		require.NoError(t, start())
+		require.ErrorIs(t, step(), interp.ErrUncaughtException)
+		handle, err := i.Global(0)
+		require.NoError(t, err)
+		count, err := i.RefCount(handle.Ref())
+		require.NoError(t, err)
+		require.Equal(t, 1, count, "only the global holds the coroutine once its frame unwinds")
+		finished, err := done()
+		require.NoError(t, err)
+		require.True(t, finished)
+		require.ErrorIs(t, step(), interp.ErrCoroutineDone)
+	})
+
 	t.Run("VM function canceled context", func(t *testing.T) {
 		i := interp.MustNew(program.New(nil), interp.WithTick(1))
 		r := interp.NewRegistry()
@@ -1381,6 +1414,49 @@ func TestRegistry_Unmarshal(t *testing.T) {
 			require.Equal(t, before, live(), tt.name)
 			require.NoError(t, i.Close(), tt.name)
 		}
+	})
+
+	t.Run("VM function resuming a coroutine an exception escapes inside a host function", func(t *testing.T) {
+		gen := types.NewFunctionBuilder(nil).Returns(types.TypeAny()).Append(
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.DROP),
+			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.THROW)).MustBuild()
+		step := types.NewFunctionBuilder(&types.FunctionType{}).Append(
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME), instr.MustNew(instr.DROP), instr.MustNew(instr.RETURN)).MustBuild()
+		done := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI1()}}).Append(
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.CORO_DONE), instr.MustNew(instr.RETURN)).MustBuild()
+
+		r := interp.NewRegistry()
+		var stepErr error
+		var finished bool
+		host := interp.NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeAny(), types.TypeAny()}},
+			func(vm *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error) {
+				var stepCall func() error
+				var doneCall func() (bool, error)
+				if err := r.Unmarshal(vm, params[0], &stepCall); err != nil {
+					return nil, err
+				}
+				if err := r.Unmarshal(vm, params[1], &doneCall); err != nil {
+					return nil, err
+				}
+				stepErr = stepCall()
+				var err error
+				finished, err = doneCall()
+				return nil, err
+			})
+		i := interp.MustNew(program.New([]instr.Instruction{
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.GLOBAL_SET, 0),
+			instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.CONST_GET, 3), instr.MustNew(instr.CALL),
+		}, program.WithGlobals(types.TypeAny()), program.WithConstants(gen, step, done, host)))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		require.ErrorIs(t, stepErr, interp.ErrUncaughtException)
+		require.True(t, finished)
+		handle, err := i.Global(0)
+		require.NoError(t, err)
+		count, err := i.RefCount(handle.Ref())
+		require.NoError(t, err)
+		require.Equal(t, 1, count, "only the global holds the coroutine")
 	})
 
 	t.Run("VM function trap inside a host function reaches the host and the guest", func(t *testing.T) {

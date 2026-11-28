@@ -14,6 +14,7 @@ func yield() jen.Code {
 			jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
 			jen.Id("i").Dot("sp").Op("--"),
 			jen.Id("co").Dot("value").Op("=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")),
+			jen.Id("co").Dot("running").Op("=").False(),
 			jen.Id("co").Dot("addr").Op("=").Id("f").Dot("addr"),
 			jen.Id("co").Dot("ref").Op("=").Id("f").Dot("ref"),
 			jen.Id("co").Dot("returns").Op("=").Id("f").Dot("returns"),
@@ -43,6 +44,7 @@ func resume() jen.Code {
 			jen.Id("co").Op(":=").Id("co"),
 			jen.Id("in").Op(":=").Id("in"),
 			jen.If(jen.Id("co").Dot("done")).Block(jen.Panic(jen.Id("ErrCoroutineDone"))),
+			jen.If(jen.Id("co").Dot("running")).Block(jen.Panic(jen.Id("ErrCoroutineRunning"))),
 			jen.Id("i").Dot("sp").Op("-=").Lit(2),
 			jen.Id("base").Op(":=").Id("i").Dot("sp"),
 			jen.If(jen.Id("base").Op("+").Id("len").Call(jen.Id("co").Dot("image")).Op("+").Lit(1).Op(">").Id("len").Call(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
@@ -66,6 +68,7 @@ func resume() jen.Code {
 			jen.Id("co").Dot("upvals").Op("=").Add(jen.Nil()),
 			jen.Id("co").Dot("ref").Op("=").Lit(0),
 			jen.Id("co").Dot("release").Op("=").Id("false"),
+			jen.Id("co").Dot("running").Op("=").True(),
 			next(),
 			jen.Id("i").Dot("fp").Op("++"),
 			jen.Id("i").Dot("fr").Op("=").Id("f"),
@@ -92,33 +95,73 @@ func resume() jen.Code {
 			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))))))
 }
 
-func coroDone() jen.Code {
-	return handler(underflow(1),
-		jen.Id("ref").Op(":=").Add(top(1)),
-		reference(jen.Id("ref")),
-		jen.Id("done").Op(":=").Id("int32").Call(jen.Lit(0)),
-		jen.Switch(jen.Id("co").Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Id("ref").Dot("Ref").Call()).Assert(jen.Type())).Block(jen.Case(jen.Op("*").Id("coroutine")).Block(jen.If(jen.Id("co").Dot("done")).Block(jen.Id("done").Op("=").Lit(1))),
-			jen.Case(jen.Qual(typesPkg, "Iterator")).Block(jen.If(jen.Id("co").Dot("Done").Call()).Block(jen.Id("done").Op("=").Lit(1))),
-			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch")))),
-		jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("ref")),
-		top(1).Op("=").Qual(typesPkg, "BoxI1").Call(jen.Id("done").Op("!=").Lit(0)),
-		next())
+// coroDone lowers CORO_DONE: whether the *coroutine or iterator the operand ref names has
+// finished. A resident operand is released; a fused slot source is borrowed.
+func coroDone(state *state, current step) (value, error) {
+	input, err := operand(state, current)
+	if err != nil {
+		return value{}, err
+	}
+	compile, body := append([]jen.Code(nil), input.compile...), append([]jen.Code(nil), input.check...)
+	read := append(append([]jen.Code(nil), input.body...),
+		reference(input.boxed),
+		jen.Var().Id("done").Bool(),
+		jen.Switch(jen.Id("co").Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Add(input.boxed).Dot("Ref").Call()).Assert(jen.Type())).Block(
+			jen.Case(jen.Op("*").Id("coroutine")).Block(jen.Id("done").Op("=").Id("co").Dot("done")),
+			jen.Case(jen.Qual(typesPkg, "Iterator")).Block(jen.Id("done").Op("=").Id("co").Dot("Done").Call()),
+			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+		),
+	)
+	if feedsBranch(state, current) {
+		result := value{op: current.op, head: input.head, compile: compile, check: input.check, body: read, raw: jen.Id("done")}
+		state.stack = []value{result}
+		return result, nil
+	}
+	if !input.resident && input.room {
+		body = append(body, overflowAt(input.at))
+	}
+	body = append(body, read...)
+	body = append(body, settle(state, input, jen.Qual(typesPkg, "BoxI1").Call(jen.Id("done")))...)
+	return conclude(state, current, input, compile, body), nil
 }
 
-func coroValue() jen.Code {
-	return handler(underflow(1),
-		jen.Id("box").Op(":=").Add(top(1)),
-		reference(jen.Id("box")),
+// coroValue lowers CORO_VALUE: the value of the *coroutine or iterator the operand ref names,
+// retained before that ref is released because the release can free the coroutine. A resident
+// operand is released; a fused slot source is borrowed.
+func coroValue(state *state, current step) (value, error) {
+	input, err := operand(state, current)
+	if err != nil {
+		return value{}, err
+	}
+	compile, body := append([]jen.Code(nil), input.compile...), append([]jen.Code(nil), input.check...)
+	if !input.resident && input.room {
+		body = append(body, overflowAt(input.at))
+	}
+	body = append(body, input.body...)
+	body = append(body,
+		reference(input.boxed),
 		jen.Var().Id("val").Qual(typesPkg, "Boxed"),
-		jen.Switch(jen.Id("co").Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Id("box").Dot("Ref").Call()).Assert(jen.Type())).Block(jen.Case(jen.Op("*").Id("coroutine")).Block(jen.Id("val").Op("=").Id("co").Dot("value"),
-			jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("val"))),
-			jen.Case(jen.Qual(typesPkg, "Iterator")).Block(jen.Id("current").Op(":=").Id("co").Dot("Current").Call(),
-				jen.If(jen.Id("current").Op("==").Add(jen.Nil())).Block(jen.Id("i").Dot("heap").Dot("Inc").Call(jen.Lit(0), jen.Lit(1)),
-					jen.Id("val").Op("=").Qual(typesPkg, "BoxedNull")).Else().Block(jen.Id("val").Op("=").Id("i").Dot("box").Call(jen.Id("current")),
-					jen.Switch(jen.Id("current").Op(":=").Id("current").Assert(jen.Type())).Block(jen.Case(jen.Qual(typesPkg, "Boxed")).Block(jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("current"))),
-						jen.Case(jen.Qual(typesPkg, "Ref")).Block(jen.Id("i").Dot("heap").Dot("Inc").Call(jen.Id("int").Call(jen.Id("current")), jen.Lit(1)))))),
-			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch")))),
-		jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("box")),
-		top(1).Op("=").Id("val"),
-		next())
+		jen.Switch(jen.Id("co").Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Add(input.boxed).Dot("Ref").Call()).Assert(jen.Type())).Block(
+			jen.Case(jen.Op("*").Id("coroutine")).Block(
+				jen.Id("val").Op("=").Id("co").Dot("value"),
+				jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("val")),
+			),
+			jen.Case(jen.Qual(typesPkg, "Iterator")).Block(
+				jen.Id("current").Op(":=").Id("co").Dot("Current").Call(),
+				jen.If(jen.Id("current").Op("==").Nil()).Block(
+					jen.Id("i").Dot("heap").Dot("Inc").Call(jen.Lit(0), jen.Lit(1)),
+					jen.Id("val").Op("=").Qual(typesPkg, "BoxedNull"),
+				).Else().Block(
+					jen.Id("val").Op("=").Id("i").Dot("box").Call(jen.Id("current")),
+					jen.Switch(jen.Id("current").Op(":=").Id("current").Assert(jen.Type())).Block(
+						jen.Case(jen.Qual(typesPkg, "Boxed")).Block(jen.Id("i").Dot("heap").Dot("Retain").Call(jen.Id("current"))),
+						jen.Case(jen.Qual(typesPkg, "Ref")).Block(jen.Id("i").Dot("heap").Dot("Inc").Call(jen.Id("int").Call(jen.Id("current")), jen.Lit(1))),
+					),
+				),
+			),
+			jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+		),
+	)
+	body = append(body, settle(state, input, jen.Id("val"))...)
+	return conclude(state, current, input, compile, body), nil
 }

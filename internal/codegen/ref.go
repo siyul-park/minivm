@@ -61,29 +61,11 @@ func produce(state *state, current step) (value, error) {
 }
 
 func consume(state *state, current step) (value, error) {
-	if state.standalone {
-		state.stack = []value{{
-			op:       current.op,
-			head:     current.op,
-			boxed:    jen.Id("value"),
-			resident: true,
-			check: []jen.Code{
-				underflow(1),
-			},
-			body: []jen.Code{
-				jen.Id("value").Op(":=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)),
-			},
-			drop: []jen.Code{
-				jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("value")),
-			},
-		}}
+	input, err := operand(state, current)
+	if err != nil {
+		return value{}, err
 	}
-	if len(state.stack) == 0 {
-		return value{}, fmt.Errorf("%s needs one pending value", instr.TypeOf(current.op).Mnemonic)
-	}
-	input := state.stack[len(state.stack)-1]
-	compile := append([]jen.Code(nil), input.compile...)
-	body := append([]jen.Code(nil), input.check...)
+	compile, body := append([]jen.Code(nil), input.compile...), append([]jen.Code(nil), input.check...)
 
 	switch current.op {
 	case instr.DROP:
@@ -99,35 +81,14 @@ func consume(state *state, current step) (value, error) {
 		}
 		body = append(body, input.body...)
 		condition := jen.Add(input.boxed).Dot("Ref").Call().Op("==").Lit(0)
-		if !state.standalone && state.offset+width(current.op) < state.width {
+		if feedsBranch(state, current) {
 			result := value{op: current.op, head: input.head, compile: compile, check: input.check, body: input.body, raw: condition}
 			state.stack = []value{result}
 			return result, nil
 		}
-		if input.resident {
-			body = append(body,
-				top(1).Op("=").Qual(typesPkg, "BoxI1").Call(condition),
-			)
-			body = append(body, input.drop...)
-		} else {
-			body = append(body,
-				jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Qual(typesPkg, "BoxI1").Call(condition),
-				jen.Id("i").Dot("sp").Op("++"),
-			)
-			body = append(body, input.drop...)
-		}
-		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.width))
+		body = append(body, settle(state, input, jen.Qual(typesPkg, "BoxI1").Call(condition))...)
 	}
-
-	state.stack = nil
-	if state.standalone {
-		return value{op: current.op, head: current.op, handler: standalone(current.op, compile, body)}, nil
-	}
-	compile = append(compile,
-		jen.Id("c").Dot("ip").Op("+=").Lit(width(input.head)),
-		jen.Return(closure(body...)),
-	)
-	return value{op: current.op, head: input.head, compile: compile}, nil
+	return conclude(state, current, input, compile, body), nil
 }
 
 func refNew() jen.Code {

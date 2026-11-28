@@ -31,6 +31,7 @@ func TestErrorCode(t *testing.T) {
 		{err: interp.ErrFuelExhausted, want: interp.TrapCodeFuelExhausted},
 		{err: interp.ErrHeapExhausted, want: interp.TrapCodeHeapExhausted},
 		{err: interp.ErrCoroutineDone, want: interp.TrapCodeCoroutineDone},
+		{err: interp.ErrCoroutineRunning, want: interp.TrapCodeCoroutineRunning},
 		{err: interp.ErrUncaughtException, want: interp.TrapCodeUncaughtException},
 		{err: errors.New("host"), want: interp.TrapCodeHostError}}
 	for _, tt := range tests {
