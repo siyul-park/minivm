@@ -13480,6 +13480,662 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NoError(t, vm.Run(context.Background()))
 		require.Equal(t, 3, vm.Len())
 	})
+
+	escape := func(t *testing.T, gen *types.Function, after []instr.Instruction, consts ...types.Value) *program.Program {
+		b := instr.NewBuilder()
+		start, end, catch, join := b.Label(), b.Label(), b.Label(), b.Label()
+		b.Append(instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.LOCAL_SET, 0))
+		b.Bind(start).Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME), instr.MustNew(instr.DROP))
+		b.Bind(end).Br(join)
+		b.Bind(catch).Append(instr.MustNew(instr.DROP))
+		b.Bind(join).Append(after...)
+		b.Try(start, end, catch, 1)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		return program.New(code, program.WithLocals(types.TypeAny()), program.WithConstants(append([]types.Value{gen}, consts...)...), program.WithHandlers(b.Handlers()...))
+	}
+	throwsAfterYield := types.NewFunctionBuilder(nil).
+		Returns(types.TypeAny()).
+		Append(
+			instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.YIELD),
+			instr.MustNew(instr.DROP),
+			instr.MustNew(instr.I32_CONST, 7),
+			instr.MustNew(instr.THROW)).
+		MustBuild()
+	// live counts the heap values still referenced.
+	live := func(vm *interp.Interpreter) int {
+		n := 0
+		for addr := 1; addr < vm.HeapLen(); addr++ {
+			if count, err := vm.RefCount(addr); err == nil && count > 0 {
+				n++
+			}
+		}
+		return n
+	}
+
+	t.Run("an escaping exception finishes the coroutine", func(t *testing.T) {
+		after := []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CORO_DONE), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.LOCAL_SET, 0)}
+		returns := types.NewFunctionBuilder(nil).Returns(types.TypeAny()).Append(
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.DROP),
+			instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RETURN)).MustBuild()
+		// nulls runs a coroutine to its end and returns how many references to the
+		// null object the run added once the handle's release frees the coroutine.
+		nulls := func(gen *types.Function) (int, types.Value) {
+			vm := interp.MustNew(escape(t, gen, after))
+			defer vm.Close()
+			before, err := vm.RefCount(0)
+			require.NoError(t, err)
+			require.NoError(t, vm.Run(context.Background()))
+			done, err := vm.Pop()
+			require.NoError(t, err)
+			end, err := vm.RefCount(0)
+			require.NoError(t, err)
+			require.Equal(t, 1, live(vm), "only the generator function stays alive")
+			return end - before, done
+		}
+
+		added, done := nulls(throwsAfterYield)
+		require.Equal(t, types.I1(true), done)
+		want, _ := nulls(returns)
+		require.Equal(t, want, added, "the unwound coroutine holds its null value as a return does")
+	})
+
+	t.Run("resuming a coroutine an exception finished traps", func(t *testing.T) {
+		err := runProgramErr(t, escape(t, throwsAfterYield, []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME)}))
+		require.ErrorIs(t, err, interp.ErrCoroutineDone)
+	})
+
+	t.Run("an exception thrown by a native callee finishes the coroutine", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		thrower := types.NewFunctionBuilder(nil).Returns(types.TypeI32()).
+			Append(instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.THROW)).MustBuild()
+		gen := types.NewFunctionBuilder(nil).Returns(types.TypeAny()).Append(
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.DROP),
+			instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL), instr.MustNew(instr.DROP),
+			instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RETURN)).MustBuild()
+		prog := escape(t, gen, []instr.Instruction{
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CORO_DONE),
+			instr.MustNew(instr.REF_NULL), instr.MustNew(instr.LOCAL_SET, 0),
+		}, thrower)
+
+		profiler := prof.New()
+		vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+		defer vm.Close()
+		var runErr error
+		poll(t, func() bool {
+			vm.Reset()
+			runErr = vm.Run(context.Background())
+			vm.Flush()
+			return runErr != nil || nativeEntries(profiler) > 0
+		})
+		require.NoError(t, runErr)
+		done, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I1(true), done)
+		require.Equal(t, 2, live(vm), "only the two functions stay alive")
+	})
+
+	selfResume := []instr.Instruction{
+		instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.YIELD), instr.MustNew(instr.DROP),
+		instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME), instr.MustNew(instr.DROP),
+	}
+	// A coroutine runs to its first YIELD inside CALL, so its handle reaches
+	// the global only after the body has suspended once.
+	storeAndResume := []instr.Instruction{
+		instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.GLOBAL_TEE, 0),
+		instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME),
+	}
+
+	t.Run("traps a coroutine resuming itself", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(nil).Returns(types.TypeAny()).
+			Append(selfResume...).
+			Append(instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RETURN)).
+			MustBuild()
+		prog := program.New(storeAndResume, program.WithGlobals(types.TypeAny()), program.WithConstants(fn))
+		require.ErrorIs(t, runProgramErr(t, prog), interp.ErrCoroutineRunning)
+	})
+
+	t.Run("catches a coroutine resuming itself and keeps it usable", func(t *testing.T) {
+		b := types.NewFunctionBuilder(nil).Returns(types.TypeAny())
+		start, end, catch, join := b.Label(), b.Label(), b.Label(), b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.YIELD).Emit(instr.DROP)
+		b.Bind(start).Emit(instr.GLOBAL_GET, 0).Emit(instr.REF_NULL).Emit(instr.RESUME).Emit(instr.DROP)
+		b.Bind(end).Br(join)
+		b.Bind(catch).Emit(instr.ERROR_CODE).Emit(instr.YIELD).Emit(instr.DROP)
+		b.Bind(join).Emit(instr.REF_NULL).Emit(instr.RETURN)
+		fn := b.Try(start, end, catch, 0).MustBuild()
+		code := append(append([]instr.Instruction{}, storeAndResume...),
+			instr.MustNew(instr.CORO_VALUE), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME), instr.MustNew(instr.DROP),
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.CORO_DONE),
+			instr.MustNew(instr.LOCAL_GET, 0))
+		vm := interp.MustNew(program.New(code, program.WithLocals(types.TypeAny()), program.WithGlobals(types.TypeAny()), program.WithConstants(fn)))
+		defer vm.Close()
+		require.NoError(t, vm.Run(context.Background()))
+		caught, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(interp.TrapCodeCoroutineRunning), caught)
+		done, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I1(true), done)
+	})
+
+	t.Run("traps a coroutine resuming itself after a tail call", func(t *testing.T) {
+		tail := types.NewFunctionBuilder(nil).Returns(types.TypeAny()).
+			Append(instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME), instr.MustNew(instr.DROP),
+				instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RETURN)).
+			MustBuild()
+		fn := types.NewFunctionBuilder(nil).Returns(types.TypeAny()).Append(
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.DROP),
+			instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.RETURN_CALL)).MustBuild()
+		code := append(append([]instr.Instruction{}, storeAndResume...),
+			instr.MustNew(instr.DROP),
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME))
+		prog := program.New(code, program.WithGlobals(types.TypeAny()), program.WithConstants(fn, tail))
+		require.ErrorIs(t, runProgramErr(t, prog), interp.ErrCoroutineRunning)
+	})
+
+	// The guide cases build docs/guides/lower-exceptions.md literally. P is the
+	// pending-throw global, counter counts source code that ran, and self holds
+	// a generator's own handle.
+	const (
+		pending = iota
+		counter
+		self
+	)
+	const (
+		generator = iota // constant 0 is the generator, the rest are the guide's runtime
+		throwFn
+		closeFn
+	)
+	const (
+		exit    = 1001 // the code close throws into a generator
+		stop    = 1002 // the StopIteration throw raises when a generator finishes
+		runtime = 1003 // the error close raises when a generator yields again
+	)
+
+	// check is the guide's pending-throw check, emitted after every YIELD.
+	check := func(b *types.FunctionBuilder) {
+		resume := b.Label()
+		b.Emit(instr.GLOBAL_GET, pending).Emit(instr.REF_IS_NULL).BrIf(resume).
+			Emit(instr.GLOBAL_GET, pending).Emit(instr.REF_NULL).Emit(instr.GLOBAL_SET, pending).Emit(instr.THROW).
+			Bind(resume)
+	}
+	// generate builds a generator: the lazy-start prologue, the source, then a null return.
+	generate := func(source func(b *types.FunctionBuilder)) *types.Function {
+		b := types.NewFunctionBuilder(nil).Returns(types.TypeAny())
+		b.Emit(instr.REF_NULL).Emit(instr.YIELD)
+		check(b)
+		b.Emit(instr.DROP)
+		source(b)
+		return b.Emit(instr.REF_NULL).Emit(instr.RETURN).MustBuild()
+	}
+	yield := func(b *types.FunctionBuilder, code uint64) {
+		b.Emit(instr.I32_CONST, code).Emit(instr.YIELD)
+		check(b)
+		b.Emit(instr.DROP)
+	}
+	bump := func(b *types.FunctionBuilder) {
+		b.Emit(instr.GLOBAL_GET, counter).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.GLOBAL_SET, counter)
+	}
+
+	// The guide's throw(g, exc).
+	tb := types.NewFunctionBuilder(nil).Params(types.TypeAny(), types.TypeError()).Returns(types.TypeAny())
+	tStart, tEnd, tCatch, tNext, tStop, tRaise := tb.Label(), tb.Label(), tb.Label(), tb.Label(), tb.Label(), tb.Label()
+	tb.Emit(instr.LOCAL_GET, 0).Emit(instr.CORO_DONE).BrIf(tRaise)
+	tb.Bind(tStart).Emit(instr.LOCAL_GET, 1).Emit(instr.GLOBAL_SET, pending).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.REF_NULL).Emit(instr.RESUME).Emit(instr.DROP).
+		Emit(instr.REF_NULL).Emit(instr.GLOBAL_SET, pending)
+	tb.Bind(tEnd).Br(tNext)
+	tb.Bind(tCatch).Emit(instr.REF_NULL).Emit(instr.GLOBAL_SET, pending).Emit(instr.THROW)
+	tb.Bind(tNext).Emit(instr.LOCAL_GET, 0).Emit(instr.CORO_DONE).BrIf(tStop).
+		Emit(instr.LOCAL_GET, 0).Emit(instr.CORO_VALUE).Emit(instr.RETURN)
+	tb.Bind(tStop).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, stop).Emit(instr.ERROR_NEW).Emit(instr.THROW)
+	tb.Bind(tRaise).Emit(instr.LOCAL_GET, 1).Emit(instr.THROW)
+	throwFunction := tb.Try(tStart, tEnd, tCatch, 2).MustBuild()
+
+	// The guide's close(g).
+	cb := types.NewFunctionBuilder(nil).Params(types.TypeAny())
+	cStart, cEnd, cCatch, cError, cOK, cDone := cb.Label(), cb.Label(), cb.Label(), cb.Label(), cb.Label(), cb.Label()
+	cb.Emit(instr.LOCAL_GET, 0).Emit(instr.CORO_DONE).BrIf(cDone)
+	cb.Bind(cStart).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, exit).Emit(instr.ERROR_NEW).
+		Emit(instr.CONST_GET, throwFn).Emit(instr.CALL).Emit(instr.DROP)
+	cb.Bind(cEnd).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, runtime).Emit(instr.ERROR_NEW).Emit(instr.THROW)
+	cb.Bind(cCatch).Emit(instr.DUP).Emit(instr.REF_TEST, 0).BrIf(cError).Emit(instr.THROW)
+	cb.Bind(cError).Emit(instr.DUP).Emit(instr.ERROR_CODE).Emit(instr.I32_CONST, exit).Emit(instr.I32_EQ).BrIf(cOK).
+		Emit(instr.DUP).Emit(instr.ERROR_CODE).Emit(instr.I32_CONST, stop).Emit(instr.I32_EQ).BrIf(cOK).
+		Emit(instr.THROW)
+	cb.Bind(cOK).Emit(instr.DROP)
+	closeFunction := cb.Bind(cDone).Emit(instr.RETURN).Try(cStart, cEnd, cCatch, 1).MustBuild()
+
+	// guided runs main after creating the generator into local 0 and releases
+	// the handles main holds. It asserts the invariant of every guide case: the
+	// run leaves only the guide's three functions alive.
+	guided := func(t *testing.T, gen *types.Function, main func(b *instr.Builder)) *interp.Interpreter {
+		t.Helper()
+		b := instr.NewBuilder()
+		b.Emit(instr.CONST_GET, generator).Emit(instr.CALL).Emit(instr.LOCAL_SET, 0)
+		main(b)
+		b.Emit(instr.REF_NULL).Emit(instr.LOCAL_SET, 0).Emit(instr.REF_NULL).Emit(instr.GLOBAL_SET, self)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		vm := interp.MustNew(program.New(code,
+			program.WithLocals(types.TypeAny()),
+			program.WithGlobals(types.TypeError(), types.TypeI32(), types.TypeAny()),
+			program.WithTypes(types.TypeError()),
+			program.WithConstants(gen, throwFunction, closeFunction),
+			program.WithHandlers(b.Handlers()...)))
+		t.Cleanup(func() { _ = vm.Close() })
+		require.NoError(t, vm.Run(context.Background()))
+		require.Equal(t, 3, live(vm), "only the three functions stay alive")
+		return vm
+	}
+	// caught leaves the code of the Error block raises on the stack.
+	caught := func(b *instr.Builder, block func()) {
+		start, end, catch, join := b.Label(), b.Label(), b.Label(), b.Label()
+		b.Bind(start)
+		block()
+		b.Emit(instr.I32_CONST, 0)
+		b.Bind(end).Br(join)
+		b.Bind(catch).Emit(instr.ERROR_CODE)
+		b.Bind(join)
+		b.Try(start, end, catch, 1)
+	}
+	resumeG := func(b *instr.Builder) {
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.REF_NULL).Emit(instr.RESUME)
+	}
+	throwInto := func(b *instr.Builder, code uint64) {
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, code).Emit(instr.ERROR_NEW).
+			Emit(instr.CONST_GET, throwFn).Emit(instr.CALL)
+	}
+	popI32 := func(t *testing.T, vm *interp.Interpreter) int32 {
+		t.Helper()
+		value, err := vm.Pop()
+		require.NoError(t, err)
+		return int32(value.(types.I32))
+	}
+	popI1 := func(t *testing.T, vm *interp.Interpreter) bool {
+		t.Helper()
+		value, err := vm.Pop()
+		require.NoError(t, err)
+		return bool(value.(types.I1))
+	}
+	global := func(t *testing.T, vm *interp.Interpreter, idx int) types.Boxed {
+		t.Helper()
+		value, err := vm.Global(idx)
+		require.NoError(t, err)
+		return value
+	}
+
+	t.Run("guide: throw is caught by a try around the yield and its check", func(t *testing.T) {
+		gen := generate(func(b *types.FunctionBuilder) {
+			start, end, catch, after := b.Label(), b.Label(), b.Label(), b.Label()
+			b.Bind(start)
+			yield(b, 1)
+			b.Bind(end).Br(after)
+			b.Bind(catch).Emit(instr.ERROR_CODE).Emit(instr.YIELD)
+			check(b)
+			b.Emit(instr.DROP)
+			b.Bind(after)
+			yield(b, 99)
+			b.Try(start, end, catch, 0)
+		})
+		vm := guided(t, gen, func(b *instr.Builder) {
+			resumeG(b)
+			b.Emit(instr.DROP)
+			throwInto(b, 2001)
+			resumeG(b)
+			b.Emit(instr.CORO_VALUE)
+		})
+		require.Equal(t, int32(99), popI32(t, vm), "the generator continues")
+		require.Equal(t, int32(2001), popI32(t, vm), "throw returns the value the catch yielded")
+		require.Zero(t, global(t, vm, pending).Ref(), "P is cleared")
+	})
+
+	t.Run("guide: throw into a generator without a try raises in the caller", func(t *testing.T) {
+		gen := generate(func(b *types.FunctionBuilder) { yield(b, 1) })
+		vm := guided(t, gen, func(b *instr.Builder) {
+			resumeG(b)
+			b.Emit(instr.DROP)
+			caught(b, func() { throwInto(b, 2002); b.Emit(instr.DROP) })
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.CORO_DONE)
+		})
+		require.True(t, popI1(t, vm), "the generator is finished")
+		require.Equal(t, int32(2002), popI32(t, vm))
+		require.Zero(t, global(t, vm, pending).Ref(), "P is cleared")
+	})
+
+	t.Run("guide: throw into a finished generator raises without resuming", func(t *testing.T) {
+		gen := generate(func(b *types.FunctionBuilder) { yield(b, 1) })
+		vm := guided(t, gen, func(b *instr.Builder) {
+			resumeG(b)
+			b.Emit(instr.DROP)
+			resumeG(b)
+			b.Emit(instr.DROP)
+			caught(b, func() { throwInto(b, 2003); b.Emit(instr.DROP) })
+		})
+		require.Equal(t, int32(2003), popI32(t, vm))
+		require.Zero(t, global(t, vm, pending).Ref(), "P was never set")
+	})
+
+	t.Run("guide: throw into an unstarted generator finishes it without running the source", func(t *testing.T) {
+		gen := generate(func(b *types.FunctionBuilder) { bump(b); yield(b, 1) })
+		vm := guided(t, gen, func(b *instr.Builder) {
+			caught(b, func() { throwInto(b, 2004); b.Emit(instr.DROP) })
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.CORO_DONE)
+		})
+		require.True(t, popI1(t, vm), "the generator is finished")
+		require.Equal(t, int32(2004), popI32(t, vm))
+		require.Zero(t, global(t, vm, counter).I32(), "no source code ran")
+		require.Zero(t, global(t, vm, pending).Ref(), "P is cleared")
+	})
+
+	t.Run("guide: close runs the finally of a suspended generator", func(t *testing.T) {
+		gen := generate(func(b *types.FunctionBuilder) {
+			start, end, catch, after := b.Label(), b.Label(), b.Label(), b.Label()
+			b.Bind(start)
+			yield(b, 1)
+			b.Bind(end)
+			bump(b)
+			b.Br(after)
+			b.Bind(catch)
+			bump(b)
+			b.Emit(instr.THROW)
+			b.Bind(after)
+			b.Try(start, end, catch, 0)
+		})
+		vm := guided(t, gen, func(b *instr.Builder) {
+			resumeG(b)
+			b.Emit(instr.DROP)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, closeFn).Emit(instr.CALL)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.CORO_DONE)
+		})
+		require.True(t, popI1(t, vm), "the generator is finished")
+		require.Equal(t, int32(1), global(t, vm, counter).I32(), "the finally ran once")
+	})
+
+	t.Run("guide: close raises when the generator yields again", func(t *testing.T) {
+		gen := generate(func(b *types.FunctionBuilder) {
+			start, end, catch, after := b.Label(), b.Label(), b.Label(), b.Label()
+			b.Bind(start)
+			yield(b, 1)
+			b.Bind(end).Br(after)
+			b.Bind(catch).Emit(instr.DROP)
+			yield(b, 5)
+			b.Bind(after)
+			b.Try(start, end, catch, 0)
+		})
+		vm := guided(t, gen, func(b *instr.Builder) {
+			resumeG(b)
+			b.Emit(instr.DROP)
+			caught(b, func() { b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, closeFn).Emit(instr.CALL) })
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.CORO_DONE)
+		})
+		require.False(t, popI1(t, vm), "the generator is still suspended")
+		require.Equal(t, int32(runtime), popI32(t, vm))
+	})
+
+	t.Run("guide: a filter takes the non-Error branch for a raw thrown value", func(t *testing.T) {
+		gen := generate(func(b *types.FunctionBuilder) {
+			start, end, catch, isError, after := b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
+			b.Bind(start).Emit(instr.I32_CONST, 9).Emit(instr.THROW)
+			b.Bind(end)
+			b.Bind(catch).Emit(instr.DUP).Emit(instr.REF_TEST, 0).BrIf(isError).Emit(instr.DROP)
+			yield(b, 100)
+			b.Br(after)
+			b.Bind(isError).Emit(instr.THROW)
+			b.Bind(after)
+			b.Try(start, end, catch, 0)
+		})
+		vm := guided(t, gen, func(b *instr.Builder) {
+			resumeG(b)
+			b.Emit(instr.CORO_VALUE)
+		})
+		require.Equal(t, int32(100), popI32(t, vm), "the catch matched the raw value")
+	})
+
+	t.Run("guide: a generator closing itself traps as running", func(t *testing.T) {
+		gen := generate(func(b *types.FunctionBuilder) {
+			b.Emit(instr.GLOBAL_GET, self).Emit(instr.CONST_GET, closeFn).Emit(instr.CALL)
+		})
+		vm := guided(t, gen, func(b *instr.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.GLOBAL_SET, self)
+			caught(b, func() { resumeG(b); b.Emit(instr.DROP) })
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.CORO_DONE)
+		})
+		require.True(t, popI1(t, vm), "the exception finished the generator")
+		require.Equal(t, int32(interp.TrapCodeCoroutineRunning), popI32(t, vm))
+	})
+
+	// Both coroutine-read cases share these fixtures. A read places a subject in a local, global,
+	// or upvalue slot and reads it with the coroutine op the slot read feeds; WithTick(1) runs the
+	// same bytecode unfused.
+	{
+		gen := types.NewFunctionBuilder(nil).Returns(types.TypeAny()).Append(
+			instr.MustNew(instr.I32_CONST, 5), instr.MustNew(instr.YIELD), instr.MustNew(instr.DROP),
+			instr.MustNew(instr.I32_CONST, 8), instr.MustNew(instr.RETURN)).MustBuild()
+		subjects := map[string][]instr.Instruction{
+			"suspended coroutine": {instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL)},
+			"finished coroutine": {
+				instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CALL), instr.MustNew(instr.DUP),
+				instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME), instr.MustNew(instr.DROP),
+			},
+			"string iterator": {instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.STRING_ITER)},
+			"map iterator": {
+				instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10),
+				instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0), instr.MustNew(instr.MAP_ITER),
+			},
+			"i32":    {instr.MustNew(instr.I32_CONST, 3)},
+			"string": {instr.MustNew(instr.CONST_GET, 2)},
+		}
+		sources := map[string]struct {
+			read instr.Instruction
+			bind func(reader *types.FunctionBuilder) *types.FunctionBuilder
+			call []instr.Instruction
+		}{
+			"local": {instr.MustNew(instr.LOCAL_GET, 0),
+				func(b *types.FunctionBuilder) *types.FunctionBuilder { return b.Params(types.TypeAny()) },
+				[]instr.Instruction{instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL)}},
+			"global": {instr.MustNew(instr.GLOBAL_GET, 0),
+				func(b *types.FunctionBuilder) *types.FunctionBuilder { return b },
+				[]instr.Instruction{instr.MustNew(instr.GLOBAL_SET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CALL)}},
+			"upvalue": {instr.MustNew(instr.UPVAL_GET, 0),
+				func(b *types.FunctionBuilder) *types.FunctionBuilder { return b.Captures(types.TypeAny()) },
+				[]instr.Instruction{instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.CLOSURE_NEW), instr.MustNew(instr.CALL)}},
+		}
+		reads := map[string]struct {
+			returns types.Type
+			emit    func(b *types.FunctionBuilder)
+		}{
+			"coro.done": {types.TypeI1(), func(b *types.FunctionBuilder) { b.Emit(instr.CORO_DONE).Emit(instr.RETURN) }},
+			"coro.done and br_if": {types.TypeI32(), func(b *types.FunctionBuilder) {
+				yes := b.Label()
+				b.Emit(instr.CORO_DONE).BrIf(yes).Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+				b.Bind(yes).Emit(instr.I32_CONST, 1).Emit(instr.RETURN)
+			}},
+			"coro.value": {types.TypeAny(), func(b *types.FunctionBuilder) { b.Emit(instr.CORO_VALUE).Emit(instr.RETURN) }},
+		}
+		type outcome struct {
+			err    error
+			values []types.Value
+			live   int
+		}
+		// execute reads subject through source with read and reports the results, error, and live heap values.
+		execute := func(t *testing.T, subject, source, read string, opts ...interp.Option) outcome {
+			t.Helper()
+			reader := sources[source].bind(types.NewFunctionBuilder(nil).Returns(reads[read].returns))
+			reader.Append(sources[source].read)
+			reads[read].emit(reader)
+			code := append(append([]instr.Instruction{}, subjects[subject]...), sources[source].call...)
+			vm := interp.MustNew(program.New(code,
+				program.WithGlobals(types.TypeAny()),
+				program.WithTypes(types.NewMapType(types.TypeI32(), types.TypeI32())),
+				program.WithConstants(gen, reader.MustBuild(), types.String("Hi"))), opts...)
+			t.Cleanup(func() { _ = vm.Close() })
+			result := outcome{err: vm.Run(context.Background())}
+			for result.err == nil && vm.Len() > 0 {
+				value, err := vm.Pop()
+				require.NoError(t, err)
+				result.values = append(result.values, value)
+			}
+			result.live = live(vm)
+			return result
+		}
+
+		t.Run("reads a coroutine through a slot as exact execution does", func(t *testing.T) {
+			for _, subject := range []string{"suspended coroutine", "finished coroutine", "string iterator", "map iterator"} {
+				for source := range sources {
+					for read := range reads {
+						name := subject + " / " + source + " / " + read
+						fused := execute(t, subject, source, read)
+						exact := execute(t, subject, source, read, interp.WithTick(1))
+						require.NoError(t, exact.err, name)
+						require.Equal(t, exact, fused, name)
+					}
+				}
+			}
+			require.Equal(t, []types.Value{types.I32(5)}, execute(t, "suspended coroutine", "local", "coro.value").values)
+			require.Equal(t, []types.Value{types.I1(true)}, execute(t, "finished coroutine", "global", "coro.done").values)
+			require.Equal(t, []types.Value{types.I32(72)}, execute(t, "string iterator", "upvalue", "coro.value").values)
+		})
+
+		t.Run("traps a slot that is not a coroutine at the same instruction as exact execution", func(t *testing.T) {
+			for _, subject := range []string{"i32", "string"} {
+				for source := range sources {
+					for read := range reads {
+						name := subject + " / " + source + " / " + read
+						fused := execute(t, subject, source, read)
+						exact := execute(t, subject, source, read, interp.WithTick(1))
+						require.ErrorIs(t, fused.err, interp.ErrTypeMismatch, name)
+						require.ErrorIs(t, exact.err, interp.ErrTypeMismatch, name)
+						var fusedErr, exactErr *interp.RuntimeError
+						require.ErrorAs(t, fused.err, &fusedErr, name)
+						require.ErrorAs(t, exact.err, &exactErr, name)
+						require.Equal(t, exactErr.Frames, fusedErr.Frames, name)
+						require.Equal(t, exact.live, fused.live, name)
+					}
+				}
+			}
+		})
+	}
+
+	t.Run("returns a fused producer as exact execution does", func(t *testing.T) {
+		wide := uint64(1) << 60 // outside the inline i64 range, so the value lives on the heap
+		half := uint64(1) << 47
+		ret := instr.MustNew(instr.RETURN)
+		call := instr.MustNew(instr.CALL)
+		// A row calls a function that returns what its body produces: via names how the body
+		// reaches arg, a parameter, a global set first, or a closure capture.
+		tests := []struct {
+			name    string
+			via     string
+			typ     types.Type
+			arg     instr.Instruction
+			body    []instr.Instruction
+			consts  []types.Value
+			returns []types.Type
+		}{
+			{name: "local i32", via: "param", typ: types.TypeI32(), arg: instr.MustNew(instr.I32_CONST, 7), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), ret}},
+			{name: "local i64", via: "param", typ: types.TypeI64(), arg: instr.MustNew(instr.I64_CONST, wide), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), ret}},
+			{name: "local f32", via: "param", typ: types.TypeF32(), arg: instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(1.5))), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), ret}},
+			{name: "local f64", via: "param", typ: types.TypeF64(), arg: instr.MustNew(instr.F64_CONST, math.Float64bits(2.5)), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), ret}},
+			{name: "local ref", via: "param", typ: types.TypeAny(), arg: instr.MustNew(instr.CONST_GET, 1), consts: []types.Value{types.String("ref")}, body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), ret}},
+			{name: "global i32", via: "global", typ: types.TypeI32(), arg: instr.MustNew(instr.I32_CONST, 9), body: []instr.Instruction{instr.MustNew(instr.GLOBAL_GET, 0), ret}},
+			{name: "global i64", via: "global", typ: types.TypeI64(), arg: instr.MustNew(instr.I64_CONST, wide), body: []instr.Instruction{instr.MustNew(instr.GLOBAL_GET, 0), ret}},
+			{name: "global ref", via: "global", typ: types.TypeAny(), arg: instr.MustNew(instr.CONST_GET, 1), consts: []types.Value{types.String("ref")}, body: []instr.Instruction{instr.MustNew(instr.GLOBAL_GET, 0), ret}},
+			{name: "upvalue i32", via: "capture", typ: types.TypeI32(), arg: instr.MustNew(instr.I32_CONST, 4), body: []instr.Instruction{instr.MustNew(instr.UPVAL_GET, 0), ret}},
+			{name: "upvalue i64", via: "capture", typ: types.TypeI64(), arg: instr.MustNew(instr.I64_CONST, wide), body: []instr.Instruction{instr.MustNew(instr.UPVAL_GET, 0), ret}},
+			{name: "upvalue ref", via: "capture", typ: types.TypeAny(), arg: instr.MustNew(instr.CONST_GET, 1), consts: []types.Value{types.String("ref")}, body: []instr.Instruction{instr.MustNew(instr.UPVAL_GET, 0), ret}},
+			{name: "constant i32", typ: types.TypeI32(), consts: []types.Value{types.I32(5)}, body: []instr.Instruction{instr.MustNew(instr.CONST_GET, 1), ret}},
+			{name: "constant i64", typ: types.TypeI64(), consts: []types.Value{types.I64(1 << 60)}, body: []instr.Instruction{instr.MustNew(instr.CONST_GET, 1), ret}},
+			{name: "constant f32", typ: types.TypeF32(), consts: []types.Value{types.F32(1.5)}, body: []instr.Instruction{instr.MustNew(instr.CONST_GET, 1), ret}},
+			{name: "constant f64", typ: types.TypeF64(), consts: []types.Value{types.F64(2.5)}, body: []instr.Instruction{instr.MustNew(instr.CONST_GET, 1), ret}},
+			{name: "immediate i32", typ: types.TypeI32(), body: []instr.Instruction{instr.MustNew(instr.I32_CONST, 3), ret}},
+			{name: "immediate i64", typ: types.TypeI64(), body: []instr.Instruction{instr.MustNew(instr.I64_CONST, wide), ret}},
+			{name: "immediate f32", typ: types.TypeF32(), body: []instr.Instruction{instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(1.5))), ret}},
+			{name: "immediate f64", typ: types.TypeF64(), body: []instr.Instruction{instr.MustNew(instr.F64_CONST, math.Float64bits(2.5)), ret}},
+			{name: "i32.add", via: "param", typ: types.TypeI32(), arg: instr.MustNew(instr.I32_CONST, 6), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.DUP), instr.MustNew(instr.I32_ADD), ret}},
+			{name: "i32.and", via: "param", typ: types.TypeI32(), arg: instr.MustNew(instr.I32_CONST, 6), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.DUP), instr.MustNew(instr.I32_AND), ret}},
+			{name: "i64.add on the heap", via: "param", typ: types.TypeI64(), arg: instr.MustNew(instr.I64_CONST, wide), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.DUP), instr.MustNew(instr.I64_ADD), ret}},
+			{name: "i64.add overflowing the inline range", via: "param", typ: types.TypeI64(), arg: instr.MustNew(instr.I64_CONST, half), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.DUP), instr.MustNew(instr.I64_ADD), ret}},
+			{name: "f32.add", via: "param", typ: types.TypeF32(), arg: instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(1.5))), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.DUP), instr.MustNew(instr.F32_ADD), ret}},
+			{name: "f64.mul", via: "param", typ: types.TypeF64(), arg: instr.MustNew(instr.F64_CONST, math.Float64bits(1.5)), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.DUP), instr.MustNew(instr.F64_MUL), ret}},
+			{name: "two results", via: "param", typ: types.TypeI32(), returns: []types.Type{types.TypeI32(), types.TypeI32()}, arg: instr.MustNew(instr.I32_CONST, 2), body: []instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 0), ret}},
+		}
+		programs := map[string]struct {
+			program *program.Program
+			trap    error
+		}{
+			"coroutine": {program: program.New([]instr.Instruction{
+				instr.MustNew(instr.CONST_GET, 0), call, instr.MustNew(instr.DUP), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.RESUME), instr.MustNew(instr.DROP),
+				instr.MustNew(instr.DUP), instr.MustNew(instr.CORO_VALUE), instr.MustNew(instr.SWAP), instr.MustNew(instr.CORO_DONE),
+			}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeAny()}}).Append(
+				instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.YIELD), instr.MustNew(instr.DROP), instr.MustNew(instr.I32_CONST, 8), ret).MustBuild()))},
+			"module":       {trap: interp.ErrFrameUnderflow, program: program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), ret})},
+			"module local": {trap: interp.ErrFrameUnderflow, program: program.New([]instr.Instruction{instr.MustNew(instr.LOCAL_GET, 0), ret}, program.WithLocals(types.TypeI32()))},
+		}
+		for _, tt := range tests {
+			sig := &types.FunctionType{Returns: []types.Type{tt.typ}}
+			if tt.returns != nil {
+				sig.Returns = tt.returns
+			}
+			builder := types.NewFunctionBuilder(sig)
+			code := []instr.Instruction{}
+			opts := []func(*program.Program){}
+			switch tt.via {
+			case "param":
+				sig.Params = []types.Type{tt.typ}
+				code = append(code, tt.arg, instr.MustNew(instr.CONST_GET, 0), call)
+			case "global":
+				opts = append(opts, program.WithGlobals(tt.typ))
+				code = append(code, tt.arg, instr.MustNew(instr.GLOBAL_SET, 0), instr.MustNew(instr.CONST_GET, 0), call)
+			case "capture":
+				builder.Captures(tt.typ)
+				code = append(code, tt.arg, instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CLOSURE_NEW), call)
+			default:
+				code = append(code, instr.MustNew(instr.CONST_GET, 0), call)
+			}
+			consts := append([]types.Value{builder.Append(tt.body...).MustBuild()}, tt.consts...)
+			programs[tt.name] = struct {
+				program *program.Program
+				trap    error
+			}{program: program.New(code, append(opts, program.WithConstants(consts...))...)}
+		}
+		for name, tt := range programs {
+			var results [2]struct {
+				values []types.Value
+				err    error
+				live   int
+			}
+			for index, opts := range [][]interp.Option{nil, {interp.WithTick(1)}} {
+				vm := interp.MustNew(tt.program, opts...)
+				results[index].err = vm.Run(context.Background())
+				for results[index].err == nil && vm.Len() > 0 {
+					value, err := vm.Pop()
+					require.NoError(t, err, name)
+					results[index].values = append(results[index].values, value)
+				}
+				results[index].live = live(vm)
+				require.NoError(t, vm.Close(), name)
+			}
+			fused, exact := results[0], results[1]
+			if tt.trap == nil {
+				require.NoError(t, exact.err, name)
+				require.NotEmpty(t, exact.values, name)
+				require.Equal(t, exact, fused, name)
+				continue
+			}
+			require.ErrorIs(t, exact.err, tt.trap, name)
+			require.ErrorIs(t, fused.err, tt.trap, name)
+			var fusedErr, exactErr *interp.RuntimeError
+			require.ErrorAs(t, fused.err, &fusedErr, name)
+			require.ErrorAs(t, exact.err, &exactErr, name)
+			require.Equal(t, exactErr.Frames, fusedErr.Frames, name)
+			require.Equal(t, exact.live, fused.live, name)
+		}
+	})
 }
 
 // requireEqualValue compares want with got. An array or struct is compared by

@@ -87,6 +87,9 @@ func catalog() []pattern {
 		op(instr.DROP),
 		op(instr.REF_IS_NULL),
 		seq(op(instr.REF_IS_NULL), op(instr.BR_IF)),
+		op(instr.CORO_DONE),
+		seq(op(instr.CORO_DONE), op(instr.BR_IF)),
+		op(instr.CORO_VALUE),
 	)
 	patterns = append(patterns, cross(
 		[]pattern{except[types.String]()},
@@ -106,6 +109,7 @@ func catalog() []pattern {
 		seq(op(instr.CONST_GET), op(instr.CLOSURE_NEW)),
 	)
 	patterns = append(patterns, scalars()...)
+	patterns = append(patterns, returns()...)
 	sort.Slice(patterns, func(i, j int) bool {
 		if len(patterns[i]) != len(patterns[j]) {
 			return len(patterns[i]) > len(patterns[j])
@@ -226,6 +230,39 @@ func scalars() []pattern {
 	)
 }
 
+// returns lists the patterns whose trailing RETURN the fused handler absorbs: a source of a
+// declared kind, or a non-trapping binary operation on the stack's operands.
+func returns() []pattern {
+	sources := slices.Concat(
+		returnSources[types.I32](instr.I32_CONST),
+		returnSources[types.I64](instr.I64_CONST),
+		returnSources[types.F32](instr.F32_CONST),
+		returnSources[types.F64](instr.F64_CONST),
+	)
+	for _, source := range slotSources {
+		sources = append(sources, typedSlot[types.Ref](source))
+	}
+	patterns := cross(sources, op(instr.RETURN))
+	for _, family := range families {
+		for _, binary := range family.binary {
+			if !traps(binary) {
+				patterns = append(patterns, seq(op(binary), op(instr.RETURN)))
+			}
+		}
+	}
+	return patterns
+}
+
+// returnSources lists the sources of kind T a RETURN can follow: typed slots, a typed constant,
+// and the immediate.
+func returnSources[T types.Value](immediate instr.Opcode) []pattern {
+	sources := []pattern{constant[T](), op(immediate)}
+	for _, source := range slotSources {
+		sources = append(sources, typedSlot[T](source))
+	}
+	return sources
+}
+
 func arrayProducers(kind instr.Kind) []pattern {
 	switch kind.Repr() {
 	case instr.KindI1, instr.KindI8, instr.KindI32:
@@ -282,6 +319,12 @@ func constant[T types.Value]() pattern {
 // prove the container's element kind at threading time instead of
 // re-deriving it from the runtime heap value.
 func typedContainer[T any](source instr.Opcode) pattern {
+	return pattern{{op: source, typ: reflect.TypeFor[T]()}}
+}
+
+// typedSlot matches source (LOCAL_GET, GLOBAL_GET, or UPVAL_GET) whose declared slot kind is the
+// kind of T, a scalar value type or types.Ref, so a fused consumer needs no run-time kind test.
+func typedSlot[T any](source instr.Opcode) pattern {
 	return pattern{{op: source, typ: reflect.TypeFor[T]()}}
 }
 

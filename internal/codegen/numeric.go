@@ -8,11 +8,16 @@ import (
 	"github.com/siyul-park/minivm/instr"
 )
 
-// sink is the local.set a numeric operation stores into: its slot and its
-// offset from the handler's first instruction.
+// sink is where a fused numeric operation puts its result instead of the stack: a local.set's
+// slot, or, with no slot, a trailing opcode that runs compile at threading time and tail at run
+// time once the result is pushed. at is the offset from the handler's first instruction of the
+// local.set, or of the operation whose own traps the tail must not claim. op names the trailer.
 type sink struct {
-	slot jen.Code
-	at   int
+	op      instr.Opcode
+	slot    jen.Code
+	at      int
+	compile []jen.Code
+	tail    []jen.Code
 }
 
 func arithmetic(state *state, current step) (value, error) {
@@ -50,13 +55,13 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 		return trapping(consumer, inputs, kind)
 	}
 	if traps(consumer) {
-		return nil, fmt.Errorf("%s cannot fuse with local.set", instr.TypeOf(consumer).Mnemonic)
+		return nil, fmt.Errorf("%s cannot fuse with %s", instr.TypeOf(consumer).Mnemonic, instr.TypeOf(local.op).Mnemonic)
 	}
 
 	var compile, body []jen.Code
 
 	delta := len(inputs) - arity + 1
-	if !conditional && local == nil && delta > 0 {
+	if !conditional && !local.stores() && delta > 0 {
 		body = append(body, overflowAt(0))
 	}
 	for _, source := range inputs {
@@ -68,7 +73,12 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 	operands := make([]jen.Code, 0, arity)
 	missing := arity - len(inputs)
 	if missing > 0 {
-		body = append(body, jen.If(jen.Id("i").Dot("sp").Op("<").Lit(missing)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))))
+		var trap jen.Code = jen.Panic(jen.Id("ErrStackUnderflow"))
+		if local != nil && !local.stores() {
+			// The tail's own trap offset is the trailer's; underflow belongs to this operation.
+			trap = fail("ErrStackUnderflow", local.at)
+		}
+		body = append(body, jen.If(jen.Id("i").Dot("sp").Op("<").Lit(missing)).Block(trap))
 		for index := missing; index > 0; index-- {
 			operands = append(operands, unbox(kind, jen.Id("i").Dot("sp").Op("-").Lit(index)))
 		}
@@ -98,7 +108,7 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 		compile = append(compile, jen.Id("c").Dot("ip").Op("+=").Lit(width(first)))
 		return append(compile, branchTail(jen.Id(result).Dot("Bool").Call(), missing, advance, body)...), nil
 	}
-	if local != nil {
+	if local.stores() {
 		body = append(body,
 			jen.Id("addr").Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Add(local.slot),
 			jen.If(jen.Id("addr").Op(">=").Id("i").Dot("sp")).Block(fail("ErrSegmentationFault", local.at)),
@@ -123,7 +133,12 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 			}
 			body = append(body, top(1).Op("=").Id(result))
 		}
-		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
+		if local != nil {
+			compile = append(compile, local.compile...)
+			body = append(body, local.tail...)
+		} else {
+			body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
+		}
 	}
 
 	compile = append(compile,
@@ -131,6 +146,11 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 		jen.Return(closure(body...)),
 	)
 	return compile, nil
+}
+
+// stores reports whether the sink writes a local slot rather than ending a handler.
+func (s *sink) stores() bool {
+	return s != nil && s.slot != nil
 }
 
 func trapping(consumer instr.Opcode, inputs []value, kind instr.Kind) ([]jen.Code, error) {
