@@ -86,7 +86,7 @@ type Slot struct {
 // container allocation names. Form selects which fields apply: FormArray an
 // array whose elements are of Elem in its canonical representation
 // (types.TypedArray[T] for a scalar kind, *types.Array for KindRef);
-// FormMap a *types.TypedMap of key kind Key and element kind Elem;
+// FormMap a *types.Map of key kind Key and element kind Elem;
 // FormStruct a *types.Struct of struct type Type; FormClosure a
 // *types.Closure over Function of function type Type holding at least
 // Captures upvals. An array.new_default or struct.new_default names the
@@ -473,28 +473,34 @@ func (c Cond) Invert() Cond {
 
 // Serves reports whether native code lowers op on a map this shape admits,
 // given the kinds of its key and value operands (ignored by an operation without
-// them): the key is an integer held in its key kind's register class, and an
-// element or value fits one register, which excludes an i64, whose boxed word
-// may be a reference to a heap-promoted value. Translation guards a map only for
-// an operation Serves accepts, and the lowering lowers exactly those.
+// them): the key kind is an integer, f32, f64, or reference held in its key
+// kind's register class (a reference key is a string's), or any, which takes an
+// operand of every kind, and an element or value fits one register, which
+// excludes an i64, whose boxed word may be a reference to a heap-promoted value.
+// Translation guards a map only for an operation Serves accepts, and the
+// lowering lowers exactly those.
 func (s Shape) Serves(op Op, key, value types.Kind) bool {
 	if s.Form != FormMap {
 		return false
 	}
 	switch s.Key {
-	case types.KindI1, types.KindI8, types.KindI32, types.KindI64:
+	case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64, types.KindRef, types.KindAny:
 	default:
 		return false
 	}
 	if op == OpMapLen {
 		return true
 	}
-	if s.Key == types.KindI64 {
-		if key != types.KindI64 {
+	switch s.Key {
+	case types.KindAny:
+	case types.KindI1, types.KindI8, types.KindI32:
+		if key != types.KindI1 && key != types.KindI8 && key != types.KindI32 {
 			return false
 		}
-	} else if key != types.KindI1 && key != types.KindI8 && key != types.KindI32 {
-		return false
+	default:
+		if key != s.Key {
+			return false
+		}
 	}
 	var held types.Kind
 	switch op {

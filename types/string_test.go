@@ -1,12 +1,18 @@
 package types_test
 
 import (
+	"math/bits"
+	"strings"
 	"testing"
 	"unicode/utf8"
 
 	types "github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestHashkey(t *testing.T) {
+	require.Equal(t, types.Hashkey(), types.Hashkey())
+}
 
 func TestNewStringIterator(t *testing.T) {
 	it := types.NewStringIterator(3, types.String("a"))
@@ -53,6 +59,57 @@ func TestStringIterator_Done(t *testing.T) {
 	require.False(t, it.Done())
 	require.False(t, it.Next())
 	require.True(t, it.Done())
+}
+
+func TestString_Hash(t *testing.T) {
+	mix := func(a, b uint64) uint64 {
+		hi, lo := bits.Mul64(a, b)
+		return hi ^ lo
+	}
+	le := func(s string, i, n int) uint64 {
+		var v uint64
+		for j := n - 1; j >= 0; j-- {
+			v = v<<8 | uint64(s[i+j])
+		}
+		return v
+	}
+	want := func(s string) uint64 {
+		const m0, m1 = 0xa0761d6478bd642f, 0xe7037ed1a0b428db
+		n := len(s)
+		h := types.Hashkey() ^ uint64(n)
+		var a, b uint64
+		switch {
+		case n >= 8:
+			for i := 0; i+8 < n; i += 8 {
+				h = mix(le(s, i, 8)^m1, h^m0)
+			}
+			a = le(s, n-8, 8)
+		case n >= 4:
+			a, b = le(s, 0, 4), le(s, n-4, 4)
+		case n > 0:
+			a = uint64(s[0])<<16 | uint64(s[n>>1])<<8 | uint64(s[n-1])
+		}
+		return mix(a^m1, b^h^m0)
+	}
+
+	t.Run("bits", func(t *testing.T) {
+		for _, n := range []int{0, 1, 2, 3, 4, 7, 8, 9, 15, 16, 17, 31, 64, 100} {
+			s := strings.Repeat("abcdefgh", 13)[:n]
+			require.Equal(t, want(s), types.String(s).Hash(), n)
+		}
+	})
+
+	t.Run("equal content", func(t *testing.T) {
+		a := types.String(strings.Repeat("x", 20) + "y")
+		b := types.String(strings.Clone(string(a)))
+		require.Equal(t, a.Hash(), b.Hash())
+		require.Equal(t, a.Hash(), a.Hash())
+	})
+
+	t.Run("different content", func(t *testing.T) {
+		require.NotEqual(t, types.String("a").Hash(), types.String("b").Hash())
+		require.NotEqual(t, types.String("").Hash(), types.String("a").Hash())
+	})
 }
 
 func TestStringIterator_Kind(t *testing.T) {

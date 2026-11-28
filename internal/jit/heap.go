@@ -22,16 +22,14 @@ const (
 	// pointer to a heap-boxed slice header for a TypedArray[T].
 	OffsetData = unsafe.Sizeof(uintptr(0))
 	// OffsetSliceLen is a Go slice header's length word, whether boxed
-	// (a TypedArray[T]'s data word points at one) or inline (Array.Elems,
-	// Struct.Data).
+	// (a TypedArray[T]'s data word points at one) or inline (an Array's
+	// elements).
 	OffsetSliceLen = unsafe.Sizeof(uintptr(0))
 	// OffsetStringLen is a Go string header's length word: a types.String
 	// slot's data word points at a heap-boxed header.
 	OffsetStringLen = unsafe.Sizeof(uintptr(0))
 
-	OffsetArrayElems       = unsafe.Offsetof(types.Array{}.Elems)
 	OffsetStructTyp        = unsafe.Offsetof(types.Struct{}.Typ)
-	OffsetStructData       = unsafe.Offsetof(types.Struct{}.Data)
 	OffsetStructTypeFields = unsafe.Offsetof(types.StructType{}.Fields)
 	SizeofStructField      = unsafe.Sizeof(types.StructField{})
 	OffsetStructFieldKind  = unsafe.Offsetof(types.StructField{}.Kind)
@@ -39,42 +37,57 @@ const (
 	OffsetClosureFn        = unsafe.Offsetof(types.Closure{}.Fn)
 	OffsetClosureUpvals    = unsafe.Offsetof(types.Closure{}.Upvals)
 
-	// OffsetMapTyp is a TypedMap's declared *types.MapType, whose element kind
-	// the map guard compares at OffsetMapTypeElemKind. A key kind alone does
-	// not fix the element: one TypedMap[int32] serves map[i32]string and
-	// map[i32]i32 alike.
-	OffsetMapTyp          = unsafe.Offsetof(types.TypedMap[int64]{}.Typ)
-	OffsetMapTypeElemKind = unsafe.Offsetof(types.MapType{}.ElemKind)
+	// OffsetMapTyp is a Map's declared *types.MapType, whose KeyKind and
+	// ElemKind bytes the map guard reads as one 16-bit word at
+	// OffsetMapTypeKinds. A key kind alone does not fix the element: one Map
+	// layout serves map[i32]string and map[i32]i32 alike.
+	OffsetMapTyp       = unsafe.Offsetof(types.Map{}.Typ)
+	OffsetMapTypeKinds = unsafe.Offsetof(types.MapType{}.KeyKind)
 	// OffsetMapZero is the Boxed word MAP_GET returns for an absent key.
-	OffsetMapZero = unsafe.Offsetof(types.TypedMap[int64]{}.Zero)
+	OffsetMapZero = unsafe.Offsetof(types.Map{}.Zero)
 )
 
-// Slot states a table's control byte holds, and the home slot's multiplier.
+// Control bytes of a table slot, and the hash multiplier. An empty slot is 0, a
+// dead one SlotDead; a full one is SlotFull with the key's seven tag bits
+// below it.
 const (
-	SlotFull = 1
-	SlotDead = 2
+	SlotFull = 0x80
+	SlotDead = 1
 	MapHash  = 0x9E3779B97F4A7C15
 )
 
-// Offsets native code reads and writes in a numeric-keyed *types.TypedMap: the
-// words of its pointer-free table (types/map.go owns the layout). They are
-// taken from reflection, since the table is unexported, and TestHeap_Layout pins
-// every value. Every key kind shares one layout: only the methods differ.
+// Offsets of unexported storage, taken from reflection; TestHeap_Layout pins
+// every value.
 var (
-	// OffsetMapCtrl and OffsetMapSlots are the data words of the control bytes
-	// and of the key and value words: slot i has its state at ctrl[i], its key
-	// word at slots[2i], and its value word at slots[2i+1].
-	OffsetMapCtrl  = mapField("ctrl")
-	OffsetMapSlots = mapField("slots")
-	// OffsetMapMask, OffsetMapShift, and OffsetMapSeed are the home slot's
-	// words: ((key ^ seed) * MapHash >> shift) & mask.
-	OffsetMapMask  = mapField("mask")
-	OffsetMapShift = mapField("shift")
-	OffsetMapSeed  = mapField("seed")
-	// OffsetMapCount is the live entry count, OffsetMapUsed the slots that
-	// are not empty, tombstones included.
-	OffsetMapCount = mapField("count")
-	OffsetMapUsed  = mapField("used")
+	// OffsetArrayElems is an Array's element slice header.
+	OffsetArrayElems = offset[types.Array]("elems")
+	// OffsetStructData is a Struct's pointer to its first field word; the
+	// fields of its type fix how many follow.
+	OffsetStructData = offset[types.Struct]("data")
+
+	// The words of a Map's pointer-free table (types/map.go owns the layout),
+	// which native code reads and writes. Every key kind shares one layout.
+	//
+	// OffsetMapCtrl, OffsetMapSlots, OffsetMapOrder, and OffsetMapPos are the
+	// data words of the control bytes, of the key and value words, of the
+	// insertion order, and of its back-pointers: slot i has its state at
+	// ctrl[i], its key word at slots[2i], and its value word at slots[2i+1];
+	// order[p] is the slot of the p-th insert, and pos[i] the position of slot
+	// i's latest insert.
+	OffsetMapCtrl  = offset[types.Map]("table", "ctrl")
+	OffsetMapSlots = offset[types.Map]("table", "slots")
+	OffsetMapOrder = offset[types.Map]("table", "order")
+	OffsetMapPos   = offset[types.Map]("table", "pos")
+	// OffsetMapMask, OffsetMapShift, and OffsetMapSeed are the hash words: the
+	// hash is (key ^ seed) * MapHash, the home slot is hash >> shift & mask,
+	// and the tag is hash >> (shift-7) & 0x7F.
+	OffsetMapMask  = offset[types.Map]("table", "mask")
+	OffsetMapShift = offset[types.Map]("table", "shift")
+	OffsetMapSeed  = offset[types.Map]("table", "seed")
+	// OffsetMapCount is the live entry count, OffsetMapUsed the order
+	// positions in use, which bounds the slots that are not empty.
+	OffsetMapCount = offset[types.Map]("table", "count")
+	OffsetMapUsed  = offset[types.Map]("table", "used")
 )
 
 // Itab returns the first word of the interface v holds: the runtime
@@ -87,16 +100,16 @@ func Itab(v types.Value) uintptr {
 	return (*face)(unsafe.Pointer(&v)).tab
 }
 
-// mapField is the offset of the named table field in a TypedMap. A renamed
-// field fails at start, not as a wrong read.
-func mapField(name string) uintptr {
-	table, ok := reflect.TypeFor[types.TypedMap[int64]]().FieldByName("table")
-	if !ok {
-		panic("jit: types.TypedMap has no table field")
+// offset is the offset in T of the field path names, each name a field of the
+// one before it. A renamed field fails at start, not as a wrong read.
+func offset[T any](path ...string) uintptr {
+	typ, at := reflect.TypeFor[T](), uintptr(0)
+	for _, name := range path {
+		field, ok := typ.FieldByName(name)
+		if !ok {
+			panic("jit: " + typ.String() + " has no " + name + " field")
+		}
+		typ, at = field.Type, at+field.Offset
 	}
-	field, ok := table.Type.FieldByName(name)
-	if !ok {
-		panic("jit: types table has no " + name + " field")
-	}
-	return table.Offset + field.Offset
+	return at
 }

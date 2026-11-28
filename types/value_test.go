@@ -37,11 +37,12 @@ func TestClone(t *testing.T) {
 
 	t.Run("mutable", func(t *testing.T) {
 		mapTyp := types.NewMapType(types.TypeI32(), types.TypeAny())
+		array := types.NewArray(nil, types.NewArrayType(types.TypeAny()), 0)
+		array.Append(types.BoxRef(1))
 		values := []types.Value{
-			types.NewArray(types.NewArrayType(types.TypeAny()), types.BoxRef(1)),
-			types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32())), types.BoxI32(1)),
-			types.NewMap(mapTyp),
-			types.NewTypedMap[int32](mapTyp, 0),
+			array,
+			types.NewStruct(nil, types.NewStructType(types.NewStructField(types.TypeI32())), types.BoxI32(1)),
+			types.NewMap(nil, mapTyp, 0),
 			types.TypedArray[int32]{1},
 			types.TypedArray[float64]{1},
 		}
@@ -70,7 +71,7 @@ func TestClone(t *testing.T) {
 }
 
 func TestIdentity(t *testing.T) {
-	arr := types.NewArray(types.NewArrayType(types.TypeI32()))
+	arr := types.NewArray(nil, types.NewArrayType(types.TypeI32()), 0)
 	typed := types.TypedArray[int32]{1, 2}
 
 	t.Run("pointer", func(t *testing.T) {
@@ -78,7 +79,7 @@ func TestIdentity(t *testing.T) {
 		require.True(t, ok)
 		b, _ := types.Identity(arr)
 		require.True(t, a == b)
-		c, _ := types.Identity(types.NewArray(types.NewArrayType(types.TypeI32())))
+		c, _ := types.Identity(types.NewArray(nil, types.NewArrayType(types.TypeI32()), 0))
 		require.False(t, a == c)
 	})
 

@@ -3,13 +3,18 @@ package types
 import (
 	"math"
 	"strings"
+	"unsafe"
 )
 
 // Struct is a heap record whose fields are laid out by its StructType.
 type Struct struct {
-	Typ    *StructType
-	Data   []uint64
+	Typ *StructType
+	// data is the first of the words of the fields of Typ, one per field: inline
+	// for up to four fields. A pointer instead of a slice keeps the header in the
+	// 64-byte size class.
+	data   *uint64
 	inline [4]uint64
+	binding
 }
 
 // StructLiteral is an unmaterialized struct constant.
@@ -43,10 +48,19 @@ func FieldWithName(name string) func(*StructField) {
 	}
 }
 
-// NewStruct returns a struct of type typ with fields assigned in order.
-func NewStruct(typ *StructType, fields ...Boxed) *Struct {
-	s := &Struct{}
-	s.Reset(typ)
+// NewStruct returns a struct of type typ with fields assigned in order. A
+// non-nil heap binds it and supplies a struct of up to four fields it kept for
+// reuse.
+func NewStruct(heap *Heap, typ *StructType, fields ...Boxed) *Struct {
+	s, ok := (*Struct)(nil), false
+	if heap != nil && len(typ.Fields) <= len(Struct{}.inline) {
+		s, ok = heap.structs.get()
+	}
+	if !ok {
+		s = &Struct{}
+	}
+	s.reset(typ)
+	s.heap = heap
 	for i, field := range fields {
 		s.SetField(i, field)
 	}
@@ -70,74 +84,66 @@ func NewStructField(typ Type, opts ...func(field *StructField)) StructField {
 	return s
 }
 
-// Reset prepares s for reuse by an interpreter-owned struct pool. Small structs
-// keep their data inline, so reinitialization does not allocate.
-func (s *Struct) Reset(typ *StructType) {
-	s.Typ = typ
-	if len(typ.Fields) <= len(s.inline) {
-		s.Data = s.inline[:len(typ.Fields)]
-		clear(s.Data)
-		return
-	}
-	s.Data = make([]uint64, len(typ.Fields))
-}
-
 // FieldByName returns the named field, or 0 when it does not exist.
 func (s *Struct) FieldByName(name string) Boxed {
-	return s.Field(s.Typ.FieldIndex(name))
-}
-
-// Field returns field i, or 0 when out of range.
-func (s *Struct) Field(i int) Boxed {
-	if i < 0 || i >= len(s.Typ.Fields) {
+	i := s.Typ.FieldIndex(name)
+	if i < 0 {
 		return 0
 	}
+	return s.Field(i)
+}
+
+// Field returns field i, which s borrows. A wide i64 truncates. It indexes like
+// a slice.
+func (s *Struct) Field(i int) Boxed {
 	return s.field(i, s.Typ.Fields[i])
 }
 
-// SetField stores val into field i, ignoring an index out of range.
+// SetField takes val as field i, encoded by the field's kind. A reference field
+// releases the word it replaces after the store, and panics with ErrDetached
+// when it must and s is unbound. It indexes like a slice.
 func (s *Struct) SetField(i int, val Boxed) {
-	if i < 0 || i >= len(s.Typ.Fields) {
+	kind := s.Typ.Fields[i].Kind
+	words := s.words()
+	if kind != KindRef {
+		words[i] = encode(kind, val, words[i])
 		return
 	}
-	switch s.Typ.Fields[i].Kind {
-	case KindI32:
-		s.Data[i] = uint64(uint32(val.I32()))
-	case KindI8:
-		s.Data[i] = uint64(uint32(int32(val.I8())))
-	case KindI1:
-		if val.Bool() {
-			s.Data[i] = 1
-		} else {
-			s.Data[i] = 0
-		}
-	case KindI64:
-		s.Data[i] = uint64(val.I64())
-	case KindF32:
-		s.Data[i] = uint64(math.Float32bits(val.F32()))
-	case KindF64:
-		s.Data[i] = math.Float64bits(val.F64())
-	case KindRef:
-		s.Data[i] = uint64(val)
+	old := Boxed(words[i])
+	if !owns(old) {
+		words[i] = uint64(val)
+		return
 	}
+	h := s.bound()
+	words[i] = uint64(val)
+	h.Release(old)
 }
 
-// Raw returns the raw 64-bit slot for field i without per-kind decoding.
-// Used by the interpreter when it needs the underlying bits (e.g. to box
-// an i64 through its sidetable, or to inspect a ref slot for retain/release).
+// SwapField takes val as reference field i and returns the word it replaces, which
+// the caller now owns.
+//
+//gcassert:inline
+func (s *Struct) SwapField(i int, val Boxed) Boxed {
+	words := s.words()
+	old := Boxed(words[i])
+	words[i] = uint64(val)
+	return old
+}
+
+// Raw returns the stored word of field i without per-kind decoding. It
+// indexes like a slice.
+//
+//gcassert:inline
 func (s *Struct) Raw(i int) uint64 {
-	if i < 0 || i >= len(s.Data) {
-		return 0
-	}
-	return s.Data[i]
+	return s.words()[i]
 }
 
-// SetRaw writes raw 64-bit bits into slot i without per-kind encoding.
-func (s *Struct) SetRaw(i int, bits uint64) {
-	if i < 0 || i >= len(s.Data) {
-		return
-	}
-	s.Data[i] = bits
+// SetRaw stores w as field i without per-kind encoding or counting. It MUST
+// NOT name a reference field.
+//
+//gcassert:inline
+func (s *Struct) SetRaw(i int, w uint64) {
+	s.words()[i] = w
 }
 
 // FieldByName returns the field with the given name.
@@ -169,11 +175,12 @@ func (s *Struct) Type() Type {
 }
 
 func (s *Struct) Refs(dst []Ref) []Ref {
+	words := s.words()
 	for i, f := range s.Typ.Fields {
 		if f.Kind != KindRef {
 			continue
 		}
-		val := Boxed(s.Data[i])
+		val := Boxed(words[i])
 		if val.Kind() == KindRef {
 			dst = append(dst, Ref(val.Ref()))
 		}
@@ -181,11 +188,20 @@ func (s *Struct) Refs(dst []Ref) []Ref {
 	return dst
 }
 
-// Clone returns a copy of s with its own field storage. The fields are boxed
-// words, so the references they hold are shared, not copied.
+// Clone returns a copy of s with its own field storage. A bound copy retains
+// every reference field, null included, so both structs own theirs. An unbound
+// copy shares its words.
 func (s *Struct) Clone() *Struct {
-	c := NewStruct(s.Typ)
-	copy(c.Data, s.Data)
+	c := NewStruct(s.heap, s.Typ)
+	words := s.words()
+	copy(c.words(), words)
+	if s.heap != nil {
+		for i, f := range s.Typ.Fields {
+			if f.Kind == KindRef {
+				s.heap.Retain(Boxed(words[i]))
+			}
+		}
+	}
 	return c
 }
 
@@ -271,10 +287,52 @@ func (t *StructType) String() string {
 	return sb.String()
 }
 
+// reset gives s the type typ with every field word zero. Up to four fields
+// keep their words inline, so reuse does not allocate.
+func (s *Struct) reset(typ *StructType) {
+	s.Typ = typ
+	if len(typ.Fields) <= len(s.inline) {
+		s.inline = [4]uint64{}
+		s.data = &s.inline[0]
+		return
+	}
+	s.data = unsafe.SliceData(make([]uint64, len(typ.Fields)))
+}
+
 func (s *Struct) field(i int, f StructField) Boxed {
-	return BoxWord(f.Kind, s.Data[i])
+	return BoxWord(f.Kind, s.words()[i])
+}
+
+// words returns the field words of s, one per field of its type.
+func (s *Struct) words() []uint64 {
+	return unsafe.Slice(s.data, len(s.Typ.Fields))
 }
 
 func (s *Struct) clone() Value {
 	return s.Clone()
+}
+
+// encode returns the stored word of val for a field of the given kind, or old
+// for a kind with no encoding.
+func encode(kind Kind, val Boxed, old uint64) uint64 {
+	switch kind {
+	case KindI32:
+		return uint64(uint32(val.I32()))
+	case KindI8:
+		return uint64(uint32(int32(val.I8())))
+	case KindI1:
+		if val.Bool() {
+			return 1
+		}
+		return 0
+	case KindI64:
+		return uint64(val.I64())
+	case KindF32:
+		return uint64(math.Float32bits(val.F32()))
+	case KindF64:
+		return math.Float64bits(val.F64())
+	case KindRef:
+		return uint64(val)
+	}
+	return old
 }

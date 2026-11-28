@@ -154,13 +154,13 @@ var callouts = [256]callout{
 		return i.newArrayDefault(i.types[index(code)].(*types.ArrayType), args[0])
 	},
 	instr.STRUCT_NEW_DEFAULT: func(i *Interpreter, code []byte, _ [3]types.Boxed) types.Value {
-		return i.newStruct(i.types[index(code)].(*types.StructType))
+		return types.NewStruct(&i.heap, i.types[index(code)].(*types.StructType))
 	},
 	instr.MAP_NEW_DEFAULT: func(i *Interpreter, code []byte, args [3]types.Boxed) types.Value {
 		return i.newMapDefault(i.types[index(code)].(*types.MapType), args[0])
 	},
 	instr.ARRAY_SLICE: func(i *Interpreter, _ []byte, args [3]types.Boxed) types.Value {
-		if hosted(i.heap[args[0].Ref()]) {
+		if hosted(i.heap.At(args[0].Ref())) {
 			panic(ErrTypeMismatch)
 		}
 		return i.slice(args[0], int(args[1].I32()), int(args[2].I32()))
@@ -231,6 +231,8 @@ func (e *engine) join(r *shared) error {
 // release and advance mirror the call site's own releaseTarget and ip
 // advance, since native completion must apply them exactly as pushFrame
 // would.
+//
+//gcassert:inline
 func (e *engine) call(i *Interpreter, addr int, fn *types.Function, release bool, advance int) bool {
 
 	if addr >= len(e.policy.gates) || e.policy.gates[addr] {
@@ -318,11 +320,11 @@ func (e *engine) run(i *Interpreter, addr int, fn *types.Function, code *jit.Cod
 	// Native execution finished; any fault during return cleanup belongs to CALL.
 	i.fr.ip -= advance
 	for _, v := range owned {
-		i.releaseBox(v)
+		i.heap.Release(v)
 	}
 	boxRegisters(i, code, bp)
 	if release {
-		i.release(addr)
+		i.heap.Dec(addr)
 	}
 	i.sp = bp + returns
 	i.fr.ip += advance
@@ -409,16 +411,16 @@ func (e *engine) materialize(i *Interpreter, exit *jit.Exit, start, ref int, rel
 	// Materialization must not fail: threaded code would already have paid for
 	// these values, so their boxes may pass the heap limit. The next allocation
 	// that needs a new entry trips it.
-	limit := i.limit
-	i.limit = 0
-	defer func() { i.limit = limit }()
+	limit := i.heap.Limit()
+	i.heap.SetLimit(0)
+	defer func() { i.heap.SetLimit(limit) }()
 	for j := range maps {
 		e.frame(i, start+j, floor+j, maps[j], refs[j], owns[j])
 	}
 	for j := 1; j < len(maps); j++ {
 		bp := i.frames[start+j].bp
 		for _, p := range lent[j] {
-			i.retainBox(i.stack[bp+p])
+			i.heap.Retain(i.stack[bp+p])
 		}
 	}
 	i.fp = start + len(maps)
@@ -459,7 +461,7 @@ func (e *engine) frame(i *Interpreter, at, k int, m jit.Frame, ref int, release 
 		// translation: threaded released ref there and the frame runs addr through
 		// no reference of its own.
 		if release {
-			i.release(ref)
+			i.heap.Dec(ref)
 		}
 		ref, release = m.Address, false
 	}
@@ -479,7 +481,7 @@ func (e *engine) frame(i *Interpreter, at, k int, m jit.Frame, ref int, release 
 		boxed := fromWord(i, o.Value.Kind, ctx.Read(k, o.Value))
 
 		if !o.Owned && o.Value.Kind == types.KindRef {
-			i.retainBox(boxed)
+			i.heap.Retain(boxed)
 		}
 		i.stack[sp+j] = boxed
 	}
@@ -488,7 +490,7 @@ func (e *engine) frame(i *Interpreter, at, k int, m jit.Frame, ref int, release 
 	for _, l := range m.Locals {
 		boxed := fromWord(i, l.Value.Kind, ctx.Read(k, l.Value))
 		addr := f.bp + l.Index
-		i.releaseBox(i.stack[addr])
+		i.heap.Release(i.stack[addr])
 		i.stack[addr] = boxed
 	}
 
@@ -503,8 +505,8 @@ func (e *engine) frame(i *Interpreter, at, k int, m jit.Frame, ref int, release 
 // entered is the function a call through ref runs: ref itself, or the
 // function of the closure it names.
 func entered(i *Interpreter, ref int) int {
-	if ref > 0 && ref < len(i.heap) {
-		if cl, ok := i.heap[ref].(*types.Closure); ok {
+	if ref > 0 && ref < i.heap.Len() {
+		if cl, ok := i.heap.At(ref).(*types.Closure); ok {
 			return int(cl.Fn)
 		}
 	}
@@ -574,7 +576,7 @@ func (e *engine) settle(i *Interpreter, code *jit.Code, trap jit.Trap, ledger *j
 
 			ledger.Charge(jit.ClassRelease)
 			if ref := types.Boxed(ctx.Read(ctx.Level()-1, exit.Word)).Ref(); ref != 0 {
-				i.release(ref)
+				i.heap.Dec(ref)
 			}
 			e.sync(i)
 			trap = jit.Resume(ctx)
@@ -687,8 +689,7 @@ func (e *engine) load(i *Interpreter, bp, spare int) {
 // sync points the native context at i's heap and counts, which a bridge or a
 // call may have moved.
 func (e *engine) sync(i *Interpreter) {
-	e.ctx.Heap = base(i.heap)
-	e.ctx.RC = base(i.rc)
+	e.ctx.Heap, e.ctx.RC = i.heap.Bases()
 }
 
 // box heap-boxes exit.Word, a wide i64, into Context.Results[0] as
@@ -751,17 +752,17 @@ func (e *engine) bridge(i *Interpreter, exit *jit.Exit) jit.Class {
 
 		count := 0
 		if o.Value.Kind == types.KindRef {
-			if hosted(i.heap[v.Ref()]) {
+			if hosted(i.heap.At(v.Ref())) {
 				rollback(i, holds)
 				return jit.ClassGuard
 			}
-			count = i.rc[v.Ref()]
+			count = i.heap.Count(v.Ref())
 		}
 		holds = append(holds, hold{ref: v.Ref(), count: count})
 	}
 	for j, o := range tail {
 		if o.Value.Kind == types.KindRef {
-			i.retainBox(i.stack[sp+j])
+			i.heap.Retain(i.stack[sp+j])
 		}
 	}
 
@@ -779,7 +780,7 @@ func (e *engine) bridge(i *Interpreter, exit *jit.Exit) jit.Class {
 
 		for _, o := range tail[len(tail)-exit.Adopts:] {
 			if o.Value.Kind == types.KindRef {
-				i.releaseBox(types.Boxed(ctx.Read(k, o.Value)))
+				i.heap.Release(types.Boxed(ctx.Read(k, o.Value)))
 			}
 		}
 	} else {
@@ -813,14 +814,15 @@ func (e *engine) callout(i *Interpreter, exit *jit.Exit, serve callout) (ok bool
 	}
 	code := i.function(m.Address).Code[m.IP:]
 	v := serve(i, code, args)
-	ctx.Results[0] = toWord(i, exit.Results[0], types.BoxRef(i.alloc(v)))
+	addr := i.heap.Add(v)
+	ctx.Results[0] = toWord(i, exit.Results[0], types.BoxRef(addr))
 	switch exit.Code {
 	case instr.STRUCT_NEW_DEFAULT:
 		e.tcache.fill(i, index(code), 0)
 	case instr.ARRAY_NEW_DEFAULT:
 		e.tcache.fill(i, index(code), int(args[0].I32()))
 	case instr.ARRAY_SLICE:
-		i.share(v)
+		i.window(addr, args[0], int(args[1].I32()), int(args[2].I32()))
 	}
 	return true
 }
@@ -864,7 +866,7 @@ func (e *engine) reenter(i *Interpreter, exit *jit.Exit, ref, start int, deopt f
 	i.sp = args
 	e.replay(i, exit, ref)
 	for _, p := range exit.Kept {
-		i.retainBox(i.stack[args+p])
+		i.heap.Retain(i.stack[args+p])
 	}
 	e.depth, i.floor = uint64(k+1), at+1
 	e.spans = append(e.spans, span{start: start, at: at, depth: int(depth)})
@@ -883,7 +885,7 @@ func (e *engine) reenter(i *Interpreter, exit *jit.Exit, ref, start int, deopt f
 	}
 
 	for _, p := range exit.Kept {
-		i.releaseBox(i.stack[args+p])
+		i.heap.Release(i.stack[args+p])
 	}
 
 	ip, live := i.frames[at].ip, [...]int{i.fp, i.sp}
@@ -923,12 +925,12 @@ func (e *engine) frameBase(i *Interpreter, k int) int {
 // since the CALL adopts both. The policy counts the callee (reached).
 func (e *engine) replay(i *Interpreter, exit *jit.Exit, ref int) {
 	for _, p := range exit.Lent {
-		i.retainBox(i.stack[i.sp+p])
+		i.heap.Retain(i.stack[i.sp+p])
 	}
 	i.sp += exit.Args
 	boxed := types.BoxRef(ref)
 	if !exit.Owned {
-		i.retainBox(boxed)
+		i.heap.Retain(boxed)
 	}
 	i.stack[i.sp] = boxed
 	i.sp++
@@ -1048,8 +1050,8 @@ func (r *shared) sweep(visit func(addr int) (live bool)) {
 // rollback releases each held operand back down to its saved count.
 func rollback(i *Interpreter, holds []hold) {
 	for _, h := range holds {
-		for i.rc[h.ref] > h.count {
-			i.release(h.ref)
+		for i.heap.Count(h.ref) > h.count {
+			i.heap.Dec(h.ref)
 		}
 	}
 }
@@ -1154,11 +1156,11 @@ func target(i *Interpreter, exit *jit.Exit, ref int) (addr int, ok bool) {
 	if exit.Callee != 0 {
 		return exit.Callee, true
 	}
-	if ref <= 0 || ref >= len(i.heap) {
+	if ref <= 0 || ref >= i.heap.Len() {
 		return 0, false
 	}
 	var typ *types.FunctionType
-	switch callee := i.heap[ref].(type) {
+	switch callee := i.heap.At(ref).(type) {
 	case *types.Function:
 		addr, typ = ref, callee.Typ
 	case *types.Closure:
@@ -1208,13 +1210,15 @@ func newModule(i *Interpreter) transform.Module {
 			continue
 		}
 		addr := c.Ref()
-		switch v := i.heap[addr].(type) {
+		switch v := i.heap.At(addr).(type) {
 		case *types.Function:
 			objects[addr] = transform.Object{Function: v}
 		case *types.Struct:
 			objects[addr] = transform.Object{Struct: v.Typ}
 		case types.I64:
 			objects[addr] = transform.Object{I64: &v}
+		case types.String:
+			objects[addr] = transform.Object{String: &v}
 		default:
 			if at, ok := v.Type().(*types.ArrayType); ok {
 				objects[addr] = transform.Object{Array: at}

@@ -106,7 +106,7 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 		if instr.TypeOf(consumer).Push[0].Repr() == instr.KindI64 {
 			body = append(body,
 				jen.Id("old").Op(":=").Id("i").Dot("stack").Index(jen.Id("addr")),
-				jen.If(jen.Id("old").Op("!=").Id(result)).Block(jen.Id("i").Dot("releaseBox").Call(jen.Id("old"))),
+				jen.If(jen.Id("old").Op("!=").Id(result)).Block(jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("old"))),
 			)
 		}
 		body = append(body,

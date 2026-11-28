@@ -164,7 +164,7 @@ func (p *policy) wake(i *Interpreter) bool {
 			if c.Kind() != types.KindRef {
 				continue
 			}
-			if _, ok := i.heap[c.Ref()].(*types.Function); ok {
+			if _, ok := i.heap.At(c.Ref()).(*types.Function); ok {
 				trivial[c.Ref()] = p.length(i, c.Ref(), lengths) < short
 				all = all && trivial[c.Ref()]
 			}
@@ -218,7 +218,7 @@ func (p *policy) length(i *Interpreter, addr int, lengths map[int]int) int {
 		callee = -1
 		if inst.Opcode() == instr.CONST_GET {
 			if c := i.constants[inst.Operand(0)]; c.Kind() == types.KindRef {
-				if _, ok := i.heap[c.Ref()].(*types.Function); ok {
+				if _, ok := i.heap.At(c.Ref()).(*types.Function); ok {
 					callee = c.Ref()
 				}
 			}
@@ -293,10 +293,10 @@ func (p *policy) admit(i *Interpreter, addr int, fn *types.Function, release, fu
 // callee is recorded and counted, since the threaded closure CALL has no
 // native hook; so is trivial code, whose hook is gated.
 func (p *policy) reached(i *Interpreter, ref int) {
-	if ref <= 0 || ref >= len(i.heap) {
+	if ref <= 0 || ref >= i.heap.Len() {
 		return
 	}
-	switch callee := i.heap[ref].(type) {
+	switch callee := i.heap.At(ref).(type) {
 	case *types.Closure:
 		addr := int(callee.Fn)
 		p.feedback.see(i, transform.Callee{Function: addr, Closure: true})

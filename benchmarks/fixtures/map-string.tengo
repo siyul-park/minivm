@@ -1,0 +1,33 @@
+token := func(index) {
+    return string((index * 7919) % 65521) + "-" + string(index)
+}
+
+words := []
+probes := []
+absent := []
+for i := 0; i < 256; i = i + 1 {
+    words = append(words, token(i))
+    probes = append(probes, token(i))
+    absent = append(absent, token(i + 256))
+}
+
+counts := {}
+for i := 0; i < 256; i = i + 1 {
+    counts[words[i]] = i
+}
+counts["total"] = 0
+
+sum := 0
+for r := 0; r < 16384; r = r + 1 {
+    probe := probes[(r * 7919) % 256]
+    counts[probe] = counts[probe] + 1
+    counts["total"] = counts["total"] + 1
+    if !is_undefined(counts[absent[r % 256]]) {
+        sum = sum + 1000
+    }
+}
+for i := 0; i < 256; i = i + 1 {
+    sum = sum + counts[words[i]]
+}
+
+result := sum + counts["total"] * 3 + len(counts)

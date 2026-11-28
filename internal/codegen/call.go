@@ -22,7 +22,7 @@ func call(state *state, current step) (value, error) {
 	compile := append([]jen.Code(nil), callee.compile...)
 	compile = append(compile,
 		jen.Id("addr").Op(":=").Add(callee.boxed).Dot("Ref").Call(),
-		jen.If(jen.Id("addr").Op("<").Lit(0).Op("||").Id("addr").Op(">=").Len(jen.Id("c").Dot("heap"))).Block(reject(state.label)),
+		jen.If(jen.Id("addr").Op("<").Lit(0).Op("||").Id("addr").Op(">=").Id("c").Dot("heap").Dot("Len").Call()).Block(reject(state.label)),
 	)
 	switch current.op {
 	case instr.CALL:
@@ -45,7 +45,7 @@ func dynamicCall(op instr.Opcode) ([]jen.Code, error) {
 	}
 	if op == instr.CLOSURE_NEW {
 		body := append(prefix,
-			jen.List(jen.Id("fn"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(jen.Id("addr")).Assert(jen.Op("*").Qual(typesPkg, "Function")),
+			jen.List(jen.Id("fn"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Id("addr")).Assert(jen.Op("*").Qual(typesPkg, "Function")),
 			jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
 			jen.Id("captures").Op(":=").Len(jen.Id("fn").Dot("Captures")),
 		)
@@ -88,7 +88,7 @@ func dynamicCall(op instr.Opcode) ([]jen.Code, error) {
 			1, true, 1,
 		)...)
 		closure = []jen.Code{
-			jen.List(jen.Id("tmpl"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(jen.Id("fn").Dot("Fn")).Assert(jen.Op("*").Qual(typesPkg, "Function")),
+			jen.List(jen.Id("tmpl"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Id("int").Call(jen.Id("fn").Dot("Fn"))).Assert(jen.Op("*").Qual(typesPkg, "Function")),
 			jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
 			jen.Block(closureBody...),
 		}
@@ -102,7 +102,7 @@ func dynamicCall(op instr.Opcode) ([]jen.Code, error) {
 		function = append(function, pushFrame(functionTarget, 1, true, true, 1, jen.Id("addr"))...)
 		closure = []jen.Code{
 			frameOverflow(),
-			jen.List(jen.Id("tmpl"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(jen.Id("fn").Dot("Fn")).Assert(jen.Op("*").Qual(typesPkg, "Function")),
+			jen.List(jen.Id("tmpl"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Id("int").Call(jen.Id("fn").Dot("Fn"))).Assert(jen.Op("*").Qual(typesPkg, "Function")),
 			jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
 			jen.Id("params").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Params")),
 			jen.Id("returns").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Returns")),
@@ -121,7 +121,7 @@ func dynamicCall(op instr.Opcode) ([]jen.Code, error) {
 	if tail {
 		host = append(host, jen.If(jen.Id("i").Dot("fp").Op(">").Lit(1)).Block(retire(nil)...))
 	}
-	body := append(prefix, jen.Switch(jen.Id("fn").Op(":=").Id("i").Dot("heap").Index(jen.Id("addr")).Assert(jen.Type())).Block(
+	body := append(prefix, jen.Switch(jen.Id("fn").Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Id("addr")).Assert(jen.Type())).Block(
 		jen.Case(jen.Op("*").Qual(typesPkg, "Function")).Block(function...),
 		jen.Case(jen.Op("*").Qual(typesPkg, "Closure")).Block(closure...),
 		jen.Case(jen.Op("*").Id("HostFunction")).Block(host...),
@@ -131,7 +131,7 @@ func dynamicCall(op instr.Opcode) ([]jen.Code, error) {
 }
 
 func dispatch(tail bool, label string, advance int) jen.Code {
-	return jen.Switch(jen.Id("fn").Op(":=").Id("c").Dot("heap").Index(jen.Id("addr")).Assert(jen.Type())).Block(
+	return jen.Switch(jen.Id("fn").Op(":=").Id("c").Dot("heap").Dot("At").Call(jen.Id("addr")).Assert(jen.Type())).Block(
 		jen.Case(jen.Op("*").Qual(typesPkg, "Function")).Block(callDirect(tail, label, advance)...),
 		jen.Case(jen.Op("*").Qual(typesPkg, "Closure")).Block(callClosure(tail, label, advance)...),
 		jen.Case(jen.Op("*").Id("HostFunction")).Block(callHost(tail, advance)...),
@@ -150,7 +150,7 @@ func callDirect(tail bool, label string, advance int) []jen.Code {
 
 func callClosure(tail bool, label string, advance int) []jen.Code {
 	preflight := []jen.Code{
-		jen.Id("tmpl").Op(",").Id("ok").Op(":=").Id("c").Dot("heap").Index(jen.Id("fn").Dot("Fn")).Assert(jen.Op("*").Qual(typesPkg, "Function")),
+		jen.Id("tmpl").Op(",").Id("ok").Op(":=").Id("c").Dot("heap").Dot("At").Call(jen.Id("int").Call(jen.Id("fn").Dot("Fn"))).Assert(jen.Op("*").Qual(typesPkg, "Function")),
 		jen.If(jen.Op("!").Id("ok")).Block(reject(label)),
 		jen.If(jen.Int().Parens(jen.Id("fn").Dot("Fn")).Op("<").Len(jen.Id("c").Dot("coros")).Op("&&").Id("c").Dot("coros").Index(jen.Id("fn").Dot("Fn"))).Block(reject(label)),
 	}
@@ -217,7 +217,7 @@ func pushFrame(callee target, targetSlots int, releaseTarget, native bool, advan
 	)
 	if coroutine != nil {
 		body = append(body, jen.If(jen.Add(coroutine).Op("<").Len(jen.Id("i").Dot("coros")).Op("&&").Id("i").Dot("coros").Index(jen.Add(coroutine))).Block(
-			jen.Id("f").Dot("coro").Op("=").Id("i").Dot("alloc").Call(jen.Op("&").Id("coroutine").Values(jen.Dict{jen.Id("typ"): jen.Id("fn").Dot("Typ")})),
+			jen.Id("f").Dot("coro").Op("=").Id("i").Dot("heap").Dot("Add").Call(jen.Op("&").Id("coroutine").Values(jen.Dict{jen.Id("typ"): jen.Id("fn").Dot("Typ")})),
 		))
 	}
 	body = append(body,
@@ -274,10 +274,10 @@ func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance in
 				jen.Id("f").Dot("bp").Op(":").Id("i").Dot("sp").Op("-").Id("params").Op("-").Lit(1),
 			)).Block(
 				jen.If(jen.Id("value").Dot("Kind").Call().Op("!=").Qual(typesPkg, "KindRef")).Block(jen.Continue()),
-				jen.Id("i").Dot("releaseBox").Call(jen.Id("value")),
+				jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("value")),
 			),
 			jen.Copy(jen.Id("i").Dot("stack").Index(jen.Id("base").Op(":").Id("base").Op("+").Id("params")), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("params").Op("-").Lit(1).Op(":").Id("i").Dot("sp").Op("-").Lit(1))),
-			jen.If(jen.Id("f").Dot("release")).Block(jen.Id("i").Dot("release").Call(jen.Id("f").Dot("ref"))),
+			jen.If(jen.Id("f").Dot("release")).Block(jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("f").Dot("ref"))),
 			jen.If(jen.Id("locals").Op(">").Lit(0)).Block(zeroLocals(callee.addr, jen.Id("base").Op("+").Id("params"), jen.Id("base").Op("+").Id("params").Op("+").Id("locals"))),
 			jen.Id("f").Dot("code").Op("=").Id("i").Dot("code").Index(jen.Add(callee.code)),
 			jen.Id("f").Dot("upvals").Op("=").Add(callee.upvals),
@@ -324,10 +324,10 @@ func replaceFrame(callee target, targetSlots int, releaseTarget bool, advance in
 			jen.Id("f").Dot("bp").Op(":").Id("i").Dot("sp").Op("-").Id("params"),
 		)).Block(
 			jen.If(jen.Id("value").Dot("Kind").Call().Op("!=").Qual(typesPkg, "KindRef")).Block(jen.Continue()),
-			jen.Id("i").Dot("releaseBox").Call(jen.Id("value")),
+			jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("value")),
 		),
 		jen.Copy(jen.Id("i").Dot("stack").Index(jen.Id("base").Op(":").Id("base").Op("+").Id("params")), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("params").Op(":").Id("i").Dot("sp"))),
-		jen.If(jen.Id("f").Dot("release")).Block(jen.Id("i").Dot("release").Call(jen.Id("f").Dot("ref"))),
+		jen.If(jen.Id("f").Dot("release")).Block(jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("f").Dot("ref"))),
 		jen.If(jen.Id("locals").Op(">").Lit(0)).Block(zeroLocals(callee.addr, jen.Id("base").Op("+").Id("params"), jen.Id("base").Op("+").Id("params").Op("+").Id("locals"))),
 		jen.Id("f").Dot("code").Op("=").Id("i").Dot("code").Index(jen.Add(callee.code)),
 		jen.Id("f").Dot("upvals").Op("=").Add(callee.upvals),
@@ -392,7 +392,7 @@ func invoke(targetSlots, advance int, tail bool) []jen.Code {
 }
 
 func closureNew(label string, advance int) jen.Code {
-	return jen.Switch(jen.Id("fn").Op(":=").Id("c").Dot("heap").Index(jen.Id("addr")).Assert(jen.Type())).Block(
+	return jen.Switch(jen.Id("fn").Op(":=").Id("c").Dot("heap").Dot("At").Call(jen.Id("addr")).Assert(jen.Type())).Block(
 		jen.Case(jen.Op("*").Qual(typesPkg, "Function")).Block(
 			jen.Id("captures").Op(":=").Len(jen.Id("fn").Dot("Captures")),
 			jen.Id("c").Dot("ip").Op("+=").Lit(3),
@@ -413,12 +413,12 @@ func allocClosure(targetSlots int, borrowed bool, advance int) []jen.Code {
 		jen.Id("upvals").Op(":=").Append(jen.Index().Qual(typesPkg, "Boxed").Values(), jen.Id("i").Dot("stack").Index(jen.Id("base").Op(":").Id("base").Op("+").Id("captures")).Op("...")),
 	)
 	if borrowed {
-		body = append(body, jen.Id("i").Dot("retain").Call(jen.Id("addr")))
+		body = append(body, jen.Id("i").Dot("heap").Dot("Inc").Call(jen.Id("addr"), jen.Lit(1)))
 	}
 	body = append(body,
 		jen.Id("closure").Op(":=").Qual(typesPkg, "NewClosure").Call(jen.Id("fn").Dot("Typ"), jen.Qual(typesPkg, "Ref").Parens(jen.Id("addr")), jen.Id("upvals")),
 		jen.Id("i").Dot("sp").Op("=").Id("base"),
-		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("closure"))),
+		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Qual(typesPkg, "BoxRef").Call(jen.Id("i").Dot("heap").Dot("Add").Call(jen.Id("closure"))),
 		jen.Id("i").Dot("sp").Op("++"),
 		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
 	)
@@ -455,7 +455,7 @@ func releaseArgs(args, returns jen.Code) jen.Code {
 				jen.Break(),
 			),
 		),
-		jen.If(jen.Op("!").Id("kept")).Block(jen.Id("i").Dot("release").Call(jen.Id("value").Dot("Ref").Call())),
+		jen.If(jen.Op("!").Id("kept")).Block(jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("value").Dot("Ref").Call())),
 	)
 }
 
@@ -464,7 +464,7 @@ func releaseArgs(args, returns jen.Code) jen.Code {
 func retire(guard jen.Code) []jen.Code {
 	sweep := jen.For(jen.List(jen.Id("_"), jen.Id("value")).Op(":=").Range().Id("i").Dot("stack").Index(
 		jen.Id("f").Dot("bp").Op(":").Id("i").Dot("sp").Op("-").Id("f").Dot("returns"),
-	)).Block(jen.Id("i").Dot("releaseBox").Call(jen.Id("value")))
+	)).Block(jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("value")))
 	var discard jen.Code = sweep
 	if guard != nil {
 		discard = jen.If(guard).Block(sweep)
@@ -474,24 +474,24 @@ func retire(guard jen.Code) []jen.Code {
 		jen.If(jen.Id("i").Dot("sp").Op("<").Id("f").Dot("returns")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 		jen.If(jen.Id("f").Dot("coro").Op("!=").Lit(0)).Block(
 			jen.Id("coAddr").Op(":=").Id("f").Dot("coro"),
-			jen.List(jen.Id("co"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(jen.Id("coAddr")).Assert(jen.Op("*").Id("coroutine")),
+			jen.List(jen.Id("co"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Dot("At").Call(jen.Id("coAddr")).Assert(jen.Op("*").Id("coroutine")),
 			jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
 			jen.If(jen.Id("f").Dot("returns").Op(">").Lit(0)).Block(
 				jen.For(jen.List(jen.Id("_"), jen.Id("value")).Op(":=").Range().Id("i").Dot("stack").Index(
 					jen.Id("f").Dot("bp").Op(":").Id("i").Dot("sp").Op("-").Lit(1),
-				)).Block(jen.Id("i").Dot("releaseBox").Call(jen.Id("value"))),
+				)).Block(jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("value"))),
 				jen.Id("co").Dot("value").Op("=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)),
 			).Else().Block(
 				jen.For(jen.List(jen.Id("_"), jen.Id("value")).Op(":=").Range().Id("i").Dot("stack").Index(
 					jen.Id("f").Dot("bp").Op(":").Id("i").Dot("sp"),
-				)).Block(jen.Id("i").Dot("releaseBox").Call(jen.Id("value"))),
-				jen.Id("i").Dot("retain").Call(jen.Lit(0)),
+				)).Block(jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("value"))),
+				jen.Id("i").Dot("heap").Dot("Inc").Call(jen.Lit(0), jen.Lit(1)),
 				jen.Id("co").Dot("value").Op("=").Qual(typesPkg, "BoxedNull"),
 			),
 			jen.Id("co").Dot("done").Op("=").True(),
 			jen.Id("co").Dot("image").Op("=").Id("co").Dot("image").Index(jen.Empty().Op(":").Lit(0)),
 			jen.Id("co").Dot("upvals").Op("=").Nil(),
-			jen.If(jen.Id("f").Dot("release")).Block(jen.Id("i").Dot("release").Call(jen.Id("f").Dot("ref"))),
+			jen.If(jen.Id("f").Dot("release")).Block(jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("f").Dot("ref"))),
 			jen.Id("co").Dot("ref").Op("=").Lit(0),
 			jen.Id("co").Dot("release").Op("=").False(),
 			jen.Id("bp").Op(":=").Id("f").Dot("bp"),
@@ -518,7 +518,7 @@ func retire(guard jen.Code) []jen.Code {
 			)),
 		),
 		jen.Id("i").Dot("sp").Op("=").Id("f").Dot("bp").Op("+").Id("f").Dot("returns"),
-		jen.If(jen.Id("f").Dot("release")).Block(jen.Id("i").Dot("release").Call(jen.Id("f").Dot("ref"))),
+		jen.If(jen.Id("f").Dot("release")).Block(jen.Id("i").Dot("heap").Dot("Dec").Call(jen.Id("f").Dot("ref"))),
 		jen.Id("f").Dot("code").Op("=").Nil(),
 		jen.Id("i").Dot("fp").Op("--"),
 		jen.Id("i").Dot("fr").Op("=").Op("&").Id("i").Dot("frames").Index(jen.Id("i").Dot("fp").Op("-").Lit(1)),

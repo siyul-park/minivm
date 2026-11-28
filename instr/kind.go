@@ -18,8 +18,9 @@ const (
 	KindI1              // 0b110
 
 	// KindAny is the verifier's top element over Kind: a required or produced
-	// operand whose concrete kind is not statically fixed. It is not a real value
-	// kind, so it sits outside the iota range and prints as "unknown".
+	// operand whose concrete kind is not statically fixed; types also uses it as
+	// MapType.KeyKind for an any key. It is not a real value kind, so it sits
+	// outside the iota range. It prints as "any".
 	KindAny Kind = 0xFF
 )
 
@@ -76,6 +77,8 @@ func (k Kind) String() string {
 		return "f64"
 	case KindRef:
 		return "ref"
+	case KindAny:
+		return "any"
 	default:
 		return "unknown"
 	}

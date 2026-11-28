@@ -74,21 +74,13 @@ type Interpreter struct {
 	module      *types.Function
 	dynamic     map[int]bool
 
-	frames  []frame
-	fr      *frame
-	stack   []types.Boxed
-	heap    []types.Value
-	source  []types.Value
-	base    int
-	target  int
-	owners  map[types.Value]int
-	free    []int
-	rc      []int
-	trial   []int
-	work    []int
-	refbuf  []types.Ref
-	arrays  freelist[*types.Array]
-	structs freelist[*types.Struct]
+	frames []frame
+	fr     *frame
+	stack  []types.Boxed
+	// heap is assigned once by build and never copied.
+	heap   types.Heap
+	source []types.Value
+	owners map[types.Value]int
 
 	// enc and dec are the scratch a host value converts through. A conversion
 	// takes a pointer, so building one per field access would allocate on every
@@ -113,9 +105,8 @@ type Interpreter struct {
 	floor int
 	gas   int64
 
-	tick  int
-	fuel  int64
-	limit int
+	tick int
+	fuel int64
 }
 
 // Option configures an Interpreter or Pool at construction. Only the With
@@ -163,7 +154,8 @@ const (
 	negZeroF64 = uint64(1) << 63
 )
 
-const heapRunway = 64
+// minHints is the fewest owner hints own keeps before it trims.
+const minHints = 64
 
 // WithHook installs an execution hook.
 func WithHook(fn func(*Interpreter) error) Option {
@@ -349,10 +341,10 @@ func (i *Interpreter) SetGlobal(idx int, val types.Boxed) error {
 	}
 	actual := val.Type()
 	if val.Kind() == types.KindRef {
-		if !i.alive(val.Ref()) {
+		if !i.heap.Alive(val.Ref()) {
 			return ErrSegmentationFault
 		}
-		actual = i.heap[val.Ref()].Type()
+		actual = i.heap.At(val.Ref()).Type()
 	}
 	if !i.globalTypes[idx].Cast(actual) {
 		return ErrTypeMismatch
@@ -363,7 +355,7 @@ func (i *Interpreter) SetGlobal(idx int, val types.Boxed) error {
 	}
 	i.globals[idx] = val
 	if old.Kind() == types.KindRef {
-		i.release(old.Ref())
+		i.heap.Dec(old.Ref())
 	}
 	return nil
 }
@@ -393,7 +385,7 @@ func (i *Interpreter) SetLocal(idx int, val types.Boxed) error {
 	if addr < 0 || addr >= i.sp {
 		return ErrSegmentationFault
 	}
-	if val.Kind() == types.KindRef && !i.alive(val.Ref()) {
+	if val.Kind() == types.KindRef && !i.heap.Alive(val.Ref()) {
 		return ErrSegmentationFault
 	}
 	old := i.stack[addr]
@@ -402,7 +394,7 @@ func (i *Interpreter) SetLocal(idx int, val types.Boxed) error {
 	}
 	i.stack[addr] = val
 	if old.Kind() == types.KindRef {
-		i.release(old.Ref())
+		i.heap.Dec(old.Ref())
 	}
 	return nil
 }
@@ -410,10 +402,10 @@ func (i *Interpreter) SetLocal(idx int, val types.Boxed) error {
 // Load borrows the heap value at addr: the reference count is unchanged, so the
 // value stays valid only while the caller or the VM holds a reference to it.
 func (i *Interpreter) Load(addr int) (types.Value, error) {
-	if !i.alive(addr) {
+	if !i.heap.Alive(addr) {
 		return nil, ErrSegmentationFault
 	}
-	val := i.heap[addr]
+	val := i.heap.At(addr)
 	i.own(addr, val)
 	return val, nil
 }
@@ -423,10 +415,11 @@ func (i *Interpreter) Load(addr int) (types.Value, error) {
 // it already names addr. A slot keeps its representation for its lifetime: val
 // must have the Go type and declared type of the value it replaces, else Store
 // returns ErrTypeMismatch. Only a scalar cell, which REF_SET also rewrites, may
-// change scalar kind.
+// change scalar kind. A String is immutable, so Store refuses to replace one: a
+// map keys a string by its cell.
 func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 	defer i.guard(&err)
-	if !i.alive(addr) {
+	if !i.heap.Alive(addr) {
 		return ErrSegmentationFault
 	}
 	ref, alias := 0, false
@@ -441,7 +434,7 @@ func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 		ref, alias = int(v), true
 	}
 	if alias {
-		if !i.alive(ref) {
+		if !i.heap.Alive(ref) {
 			return ErrSegmentationFault
 		}
 		if ref == addr {
@@ -455,17 +448,20 @@ func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 		}
 		return ErrTypeMismatch
 	}
-	old := i.heap[addr]
+	old := i.heap.At(addr)
 	switch old.(type) {
-	case *types.Function, *types.Closure, *coroutine:
+	case *types.Function, *types.Closure, *coroutine, types.String:
 		return ErrTypeMismatch
 	}
 	if !(scalar(old) && scalar(val)) && (reflect.TypeOf(old) != reflect.TypeOf(val) || !old.Type().Equals(val.Type())) {
 		return ErrTypeMismatch
 	}
-	i.heap[addr] = val
+	if !i.heap.Adopt(val) {
+		return ErrTypeMismatch
+	}
+	i.heap.Set(addr, val)
 	i.own(addr, val)
-	i.dispose(addr, old)
+	i.heap.Dispose(addr, old)
 	if fn, ok := val.(*types.Function); ok {
 		i.bind(addr, fn, true)
 	}
@@ -482,25 +478,25 @@ func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 	case types.Boxed:
 		if v.Kind() == types.KindRef {
 			addr = v.Ref()
-			if !i.alive(addr) {
+			if !i.heap.Alive(addr) {
 				return 0, ErrSegmentationFault
 			}
-			i.retain(addr)
+			i.heap.Inc(addr, 1)
 			return addr, nil
 		}
 		val = types.Unbox(v)
 	case types.Ref:
 		addr = int(v)
-		if !i.alive(addr) {
+		if !i.heap.Alive(addr) {
 			return 0, ErrSegmentationFault
 		}
-		i.retain(addr)
+		i.heap.Inc(addr, 1)
 		return addr, nil
 	}
-	if i.owner(val) >= 0 {
+	if i.owner(val) >= 0 || !i.heap.Adopt(val) {
 		return 0, ErrTypeMismatch
 	}
-	addr = i.alloc(val)
+	addr = i.heap.Add(val)
 	i.own(addr, val)
 	if fn, ok := val.(*types.Function); ok {
 		i.bind(addr, fn, true)
@@ -511,11 +507,11 @@ func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 // Retain retains addr for the caller, who owns the added reference and MUST
 // release it or hand it to the VM.
 func (i *Interpreter) Retain(addr int) (types.Value, error) {
-	if !i.alive(addr) {
+	if !i.heap.Alive(addr) {
 		return nil, ErrSegmentationFault
 	}
-	i.retain(addr)
-	val := i.heap[addr]
+	i.heap.Inc(addr, 1)
+	val := i.heap.At(addr)
 	i.own(addr, val)
 	return val, nil
 }
@@ -523,10 +519,10 @@ func (i *Interpreter) Retain(addr int) (types.Value, error) {
 // Release releases one reference the caller owns; the value is reclaimed with
 // its last reference.
 func (i *Interpreter) Release(addr int) error {
-	if !i.alive(addr) {
+	if !i.heap.Alive(addr) {
 		return ErrSegmentationFault
 	}
-	i.release(addr)
+	i.heap.Dec(addr)
 	return nil
 }
 
@@ -535,10 +531,10 @@ func (i *Interpreter) Release(addr int) error {
 // passes references across the host boundary with Retain and Release has no
 // other way to verify that the two stayed balanced.
 func (i *Interpreter) RefCount(addr int) (int, error) {
-	if !i.alive(addr) {
+	if !i.heap.Alive(addr) {
 		return 0, ErrSegmentationFault
 	}
-	return i.rc[addr], nil
+	return i.heap.Count(addr), nil
 }
 
 // HeapLen returns one past the highest heap address the interpreter has
@@ -548,7 +544,14 @@ func (i *Interpreter) RefCount(addr int) (int, error) {
 // capacity, which runs ahead of it. Watching it grow against WithHeapLimit is
 // the only way to observe memory pressure before allocation fails.
 func (i *Interpreter) HeapLen() int {
-	return len(i.heap)
+	return i.heap.Len()
+}
+
+// Heap returns the interpreter's heap, whose unchecked methods are for the
+// runtime that owns it: Alloc, Load, Retain, and Release validate addresses
+// for the host.
+func (i *Interpreter) Heap() *types.Heap {
+	return &i.heap
 }
 
 // Push transfers val to the operand stack. The reference of a heap ref val
@@ -559,7 +562,7 @@ func (i *Interpreter) Push(val types.Value) (err error) {
 	if i.sp == len(i.stack) {
 		return ErrStackOverflow
 	}
-	if i.owner(val) >= 0 {
+	if i.owner(val) >= 0 || !i.heap.Adopt(val) {
 		return ErrTypeMismatch
 	}
 	boxed := i.box(val)
@@ -620,20 +623,7 @@ func (i *Interpreter) Flush() {
 
 // Reset restores the initial interpreter state.
 func (i *Interpreter) Reset() {
-	// Keep what the ending run peaked at.
-	dynamic := len(i.heap) - i.base
-	i.structs.trim(dynamic)
-	i.arrays.trim(dynamic)
-	for addr := i.base; addr < len(i.heap); addr++ {
-		value := i.heap[addr]
-		if i.rc[addr] <= 0 {
-			continue
-		}
-		i.finalize(addr, value)
-		i.recycle(value, false)
-	}
-	i.structs.reset()
-	i.arrays.reset()
+	i.heap.Reset()
 	// Drop every frame above the module's and return it to its first
 	// instruction with its locals zeroed.
 	for i.fp > 1 {
@@ -660,19 +650,10 @@ func (i *Interpreter) Reset() {
 
 	// Constants reload from the program into the same addresses, so no
 	// mutable constant keeps a ref into the freed dynamic region.
-	clear(i.heap[:cap(i.heap)])
-	i.heap = i.heap[:0]
-	clear(i.rc[:cap(i.rc)])
-	i.rc = i.rc[:0]
-	i.free = i.free[:0]
 	i.tail = nil
-	target := i.target
-	i.target = 0
 	i.load(i.source)
-	i.target = target
 
 	i.seed()
-	i.pace()
 }
 
 // Marshal transfers the heap refs of the returned value to the caller, which
@@ -696,8 +677,7 @@ func (i *Interpreter) Close() error {
 	}
 	i.flush()
 	i.Reset()
-	i.arrays.clear()
-	i.structs.clear()
+	i.heap.Drain()
 	i.closed = true
 	if i.jit == nil {
 		return nil
@@ -754,21 +734,27 @@ func build(prog *program.Program, opts ...Option) (*Interpreter, error) {
 		dynamic:     map[int]bool{},
 		frames:      make([]frame, opt.frame),
 		stack:       make([]types.Boxed, opt.stack),
-		heap:        make([]types.Value, 0, opt.heap),
 		owners:      make(map[types.Value]int),
-		free:        make([]int, 0, opt.heap),
-		rc:          make([]int, 0, opt.heap),
 		tick:        opt.tick,
 		fuel:        fuel,
 		gas:         fuel,
-		limit:       opt.maxHeap,
 	}
+	i.heap = *types.NewHeap(opt.heap, opt.maxHeap, types.Hooks{
+		Exhaust: func() {
+			if i.jit != nil && i.jit.tcache.flush(i) {
+				return
+			}
+			panic(ErrHeapExhausted)
+		},
+		Fault:    func() { panic(ErrSegmentationFault) },
+		Finalize: i.finalize,
+		Collect: func(slots, _ int) {
+			metric(i, "vm_gc_cycles_total", 1)
+			metric(i, "vm_gc_slots_total", float64(slots))
+		},
+	})
 	if err := i.preload(prog.Constants); err != nil {
 		return nil, err
-	}
-	i.target = max(cap(i.heap), i.base+heapRunway)
-	if i.limit > 0 {
-		i.target = max(min(i.target, i.limit), i.base)
 	}
 
 	i.module = &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
@@ -783,8 +769,8 @@ func build(prog *program.Program, opts ...Option) (*Interpreter, error) {
 
 	// Functions nested in array, map, or struct constants live in the constant
 	// region too, so the region is scanned rather than the top-level list.
-	for addr := 1; addr < i.base; addr++ {
-		if fn, ok := i.heap[addr].(*types.Function); ok {
+	for addr := 1; addr < i.heap.Len(); addr++ {
+		if fn, ok := i.heap.At(addr).(*types.Function); ok {
 			i.bind(addr, fn, false)
 		}
 	}
@@ -797,7 +783,7 @@ func build(prog *program.Program, opts ...Option) (*Interpreter, error) {
 	}
 	i.fp = 1
 	i.fr = &i.frames[0]
-	i.retain(0)
+	i.heap.Inc(0, 1)
 
 	i.threshold = -1
 	if jitEnabled(opt) {
@@ -840,16 +826,16 @@ func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []type
 		// already owns, else to a new one.
 		if boxed, ok := val.(types.Boxed); ok {
 			addr = boxed.Ref()
-			i.retain(addr)
+			i.heap.Inc(addr, 1)
 		} else if addr = i.owner(target); addr >= 0 {
-			i.retain(addr)
+			i.heap.Inc(addr, 1)
 		} else {
 			addr, err = i.Alloc(target)
 		}
 	}
 	if err != nil {
 		for _, param := range params {
-			i.releaseBox(param)
+			i.heap.Release(param)
 		}
 		return nil, err
 	}
@@ -869,12 +855,12 @@ func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []type
 			for i.fp > 1 {
 				f := &i.frames[i.fp-1]
 				if f.release {
-					i.release(f.ref)
+					i.heap.Dec(f.ref)
 				}
 				i.fp--
 			}
 			for _, value := range i.stack[base:i.sp] {
-				i.releaseBox(value)
+				i.heap.Release(value)
 			}
 		}
 		i.sp = base
@@ -914,7 +900,7 @@ func (i *Interpreter) nest(ctx context.Context, base int, call []func(*Interpret
 			i.fp--
 		}
 		for _, value := range i.stack[base:i.sp] {
-			i.releaseBox(value)
+			i.heap.Release(value)
 		}
 	} else {
 		returns = append([]types.Boxed(nil), i.stack[base:i.sp]...)
@@ -1078,14 +1064,14 @@ func (i *Interpreter) function(addr int) *types.Function {
 	if addr == 0 {
 		return i.module
 	}
-	return i.heap[addr].(*types.Function)
+	return i.heap.At(addr).(*types.Function)
 }
 
 // upvals returns the upvals a frame running addr through ref reads: the
 // closure's own when ref is a closure over addr, none otherwise.
 func (i *Interpreter) upvals(ref, addr int) []types.Boxed {
-	if ref > 0 && ref < len(i.heap) {
-		if cl, ok := i.heap[ref].(*types.Closure); ok && int(cl.Fn) == addr {
+	if ref > 0 && ref < i.heap.Len() {
+		if cl, ok := i.heap.At(ref).(*types.Closure); ok && int(cl.Fn) == addr {
 			return cl.Upvals
 		}
 	}
@@ -1104,20 +1090,20 @@ func (i *Interpreter) retire(sweep bool) {
 	}
 	if f.coro != 0 {
 		coAddr := f.coro
-		co, ok := i.heap[coAddr].(*coroutine)
+		co, ok := i.heap.At(coAddr).(*coroutine)
 		if !ok {
 			panic(ErrTypeMismatch)
 		}
 		if f.returns > 0 {
 			for _, value := range i.stack[f.bp : i.sp-1] {
-				i.releaseBox(value)
+				i.heap.Release(value)
 			}
 			co.value = i.stack[i.sp-1]
 		} else {
 			for _, value := range i.stack[f.bp:i.sp] {
-				i.releaseBox(value)
+				i.heap.Release(value)
 			}
-			i.retain(0)
+			i.heap.Inc(0, 1)
 			co.value = types.BoxedNull
 		}
 		co.done = true
@@ -1133,7 +1119,7 @@ func (i *Interpreter) retire(sweep bool) {
 	}
 	if sweep {
 		for _, value := range i.stack[f.bp : i.sp-f.returns] {
-			i.releaseBox(value)
+			i.heap.Release(value)
 		}
 	}
 	switch f.returns {
@@ -1154,7 +1140,7 @@ func (i *Interpreter) retire(sweep bool) {
 func (i *Interpreter) leave(f *frame, sp int) {
 	i.sp = sp
 	if f.release {
-		i.release(f.ref)
+		i.heap.Dec(f.ref)
 	}
 	f.code = nil
 	i.fp--
@@ -1188,7 +1174,7 @@ func (i *Interpreter) preload(constants []types.Value) (err error) {
 // the constant region as the baseline. Mutable constants are copied so the
 // interpreter owns every object it mutates.
 func (i *Interpreter) load(constants []types.Value) {
-	i.alloc(types.Null)
+	i.heap.Add(types.Null)
 
 	// Constants load into the heap through a queue, so nested values are
 	// allocated before the slot that holds them is filled.
@@ -1202,10 +1188,13 @@ func (i *Interpreter) load(constants []types.Value) {
 		}
 	}
 
-	// A map literal can repeat a key. The entry it replaces is reconciled once
-	// the counts are established, because a deduplicated string may be shared
-	// with the entry that replaced it.
-	var replaced []types.Boxed
+	// A map literal is filled once the counts are established, because the
+	// edges of an empty map are what Recount counts.
+	type literal struct {
+		m     *types.Map
+		words []types.Boxed
+	}
+	var literals []literal
 	dedup := make(map[string]types.Ref)
 	// An object reachable from several positions is copied once, so every
 	// position shares the interpreter-owned copy as the program shared the source.
@@ -1225,46 +1214,64 @@ func (i *Interpreter) load(constants []types.Value) {
 		case types.String:
 			ref, seen := dedup[string(value)]
 			if !seen {
-				ref = types.Ref(i.alloc(value))
+				ref = types.Ref(i.heap.Add(value))
 				dedup[string(value)] = ref
 			}
 			boxed = types.BoxRef(int(ref))
 		case *types.ArrayLiteral:
-			array := types.NewArray(value.Typ, make([]types.Boxed, len(value.Elems))...)
-			boxed = types.BoxRef(i.alloc(array))
+			array := types.NewArray(&i.heap, value.Typ, len(value.Elems))
+			boxed = types.BoxRef(i.heap.Add(array))
 			for index, elem := range value.Elems {
 				queue = append(queue, elem)
 				slots = append(slots, func(value types.Boxed) {
-					array.Elems[index] = value
+					array.SetIndex(index, value)
 				})
 			}
 		case *types.MapLiteral:
-			m := types.NewMap(value.Typ)
-			boxed = types.BoxRef(i.alloc(m))
+			m := types.NewMap(&i.heap, value.Typ, len(value.Keys))
+			boxed = types.BoxRef(i.heap.Add(m))
+			words := make([]types.Boxed, 2*len(value.Keys))
+			literals = append(literals, literal{m, words})
 			for index, key := range value.Keys {
-				var mapKey types.MapKey
-				var storedKey types.Boxed
 				queue = append(queue, key)
 				slots = append(slots, func(value types.Boxed) {
-					mapKey, storedKey = i.mapKey(value)
+					words[2*index] = value
 				})
 				queue = append(queue, value.Values[index])
 				slots = append(slots, func(value types.Boxed) {
-					old, ok := m.Set(mapKey, types.MapEntry{Key: storedKey, Value: value})
-					if ok {
-						replaced = append(replaced, old.Key, old.Value)
-					}
+					words[2*index+1] = value
 				})
 			}
+		case *types.Map:
+			// The words are copied before Recount, which holds only for scalar keys and values.
+			m := types.NewMap(&i.heap, value.Typ, value.Len())
+			value.Range(func(key, val types.Boxed) bool {
+				m.Store(key, val)
+				return true
+			})
+			boxed = types.BoxRef(i.heap.Add(m))
 		case *types.StructLiteral:
-			structure := types.NewStruct(value.Typ)
-			boxed = types.BoxRef(i.alloc(structure))
+			structure := types.NewStruct(&i.heap, value.Typ)
+			boxed = types.BoxRef(i.heap.Add(structure))
 			for index, elem := range value.Fields {
 				queue = append(queue, elem)
 				slots = append(slots, func(value types.Boxed) {
 					structure.SetField(index, value)
 				})
 			}
+		case *types.Array:
+			// The words are copied uncounted; Recount counts them.
+			array := types.NewArray(&i.heap, value.Typ, 0)
+			for index := range value.Len() {
+				array.Append(value.Index(index))
+			}
+			boxed = types.BoxRef(i.heap.Add(array))
+		case *types.Struct:
+			structure := types.NewStruct(&i.heap, value.Typ)
+			for index := range value.Typ.Fields {
+				structure.SetRaw(index, value.Raw(index))
+			}
+			boxed = types.BoxRef(i.heap.Add(structure))
 		default:
 			boxed = i.box(types.Clone(value))
 		}
@@ -1281,13 +1288,21 @@ func (i *Interpreter) load(constants []types.Value) {
 		}
 	}
 
-	i.base = len(i.heap)
-	i.recount()
-	// Holding each replaced ref across its release frees only what the map no
-	// longer reaches.
-	for _, old := range replaced {
-		i.retainBox(old)
-		i.releaseBox(old)
+	i.heap.Recount(i.constants)
+	// Each entry is retained, then stored, so a repeated key keeps its first
+	// place and last value and releases exactly what it replaces.
+	for _, l := range literals {
+		for _, word := range l.words {
+			i.heap.Retain(word)
+		}
+	}
+	for _, l := range literals {
+		for at := 0; at < len(l.words); at += 2 {
+			if !l.m.Accepts(l.words[at]) {
+				panic(ErrTypeMismatch)
+			}
+			l.m.Store(l.words[at], l.words[at+1])
+		}
 	}
 }
 
@@ -1298,36 +1313,12 @@ func (i *Interpreter) fit(n int) {
 	i.coros = slices.Grow(i.coros, max(n-len(i.coros), 0))[:max(n, len(i.coros))]
 }
 
-// recount rebuilds baseline counts from constant roots and heap edges after
-// construction or reset has removed all dynamic slots.
-func (i *Interpreter) recount() {
-	clear(i.rc)
-	i.rc[0] = 1
-	for _, val := range i.constants {
-		if val.Kind() != types.KindRef {
-			continue
-		}
-		addr := val.Ref()
-		if addr >= 0 && addr < len(i.rc) {
-			i.rc[addr]++
-		}
-	}
-	for addr := 1; addr < len(i.heap); addr++ {
-		for _, ref := range i.refs(i.heap[addr]) {
-			child := int(ref)
-			if child >= 0 && child < len(i.rc) {
-				i.rc[child]++
-			}
-		}
-	}
-}
-
 // seed restores each global from its declaration rather than its previous value.
 func (i *Interpreter) seed() {
 	for idx, typ := range i.globalTypes {
 
 		if typ.Kind() == types.KindRef {
-			i.retain(0)
+			i.heap.Inc(0, 1)
 		}
 		i.globals[idx] = types.Zero(typ.Kind())
 	}
@@ -1387,7 +1378,7 @@ func (i *Interpreter) compile(fn *types.Function, exact bool) ([]func(*Interpret
 	c := &threader{
 		types:       i.types,
 		constants:   i.constants,
-		heap:        i.heap,
+		heap:        &i.heap,
 		coros:       i.coros,
 		globals:     i.globalDecls(),
 		globalTypes: i.globalTypes,
@@ -1428,20 +1419,29 @@ func (i *Interpreter) concat(left, right types.Boxed) types.String {
 	return types.String(unsafe.String(unsafe.SliceData(i.tail), len(i.tail)))
 }
 
-// slice is a new array of the elements start through end of the array array
-// refers to, in the array's own representation. It retains nothing: the caller
-// allocates the result and then shares it.
+// slice is a new array shaped like the elements start through end of the array
+// array refers to. A scalar array comes back cut; a reference array comes back
+// sized but unfilled, since window fills it once it is in the heap, so a trap
+// while allocating leaves every operand as it was.
 func (i *Interpreter) slice(array types.Boxed, start, end int) types.Value {
 	if array.Kind() != types.KindRef {
 		panic(ErrTypeMismatch)
 	}
-	source := i.heap[array.Ref()]
+	source := i.heap.At(array.Ref())
 	if view, ok := source.(*HostArray); ok {
-		value, err := view.Array(i)
-		if err != nil {
-			panic(err)
+		switch view.typ.ElemKind {
+		case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64:
+			value, err := view.Array(i)
+			if err != nil {
+				panic(err)
+			}
+			source = value
+		default:
+			if start < 0 || end > view.Len() || start > end {
+				panic(ErrIndexOutOfRange)
+			}
+			return types.NewArray(&i.heap, view.typ, 0)
 		}
-		source = value
 	}
 	switch source := source.(type) {
 	case types.TypedArray[bool]:
@@ -1457,23 +1457,40 @@ func (i *Interpreter) slice(array types.Boxed, start, end int) types.Value {
 	case types.TypedArray[float64]:
 		return cut(source, start, end)
 	case *types.Array:
-		if start < 0 || end > len(source.Elems) || start > end {
+		if start < 0 || end > source.Len() || start > end {
 			panic(ErrIndexOutOfRange)
 		}
-		out := i.newArray(source.Typ, end-start)
-		copy(out.Elems, source.Elems[start:end])
-		return out
+		return types.NewArray(&i.heap, source.Typ, end-start)
 	default:
 		panic(ErrTypeMismatch)
 	}
 }
 
-// share retains each reference an array value holds once more, for the new
-// owner an allocation gave it.
-func (i *Interpreter) share(value types.Value) {
-	if array, ok := value.(*types.Array); ok {
-		for _, v := range array.Elems {
-			i.retainBox(v)
+// window fills the array allocated at addr by slice with the elements start
+// through end of the array array refers to, each one more reference for its new
+// owner. A scalar array is already cut. When a host element fails to convert,
+// the new array is released with the elements it holds.
+func (i *Interpreter) window(addr int, array types.Boxed, start, end int) {
+	out, ok := i.heap.At(addr).(*types.Array)
+	if !ok {
+		return
+	}
+	switch source := i.heap.At(array.Ref()).(type) {
+	case *types.Array:
+		out.Copy(0, source, start, end-start)
+	case *HostArray:
+		defer func() {
+			if r := recover(); r != nil {
+				i.heap.Dec(addr)
+				panic(r)
+			}
+		}()
+		for at := start; at < end; at++ {
+			elem, err := source.Element(i, at)
+			if err != nil {
+				panic(err)
+			}
+			out.Append(elem)
 		}
 	}
 }
@@ -1484,16 +1501,16 @@ func (i *Interpreter) runes(text types.Boxed) types.TypedArray[int32] {
 }
 
 // newMapDefault is a new empty map of typ sized for capacity entries.
-func (i *Interpreter) newMapDefault(typ *types.MapType, capacity types.Boxed) types.Value {
+func (i *Interpreter) newMapDefault(typ *types.MapType, capacity types.Boxed) *types.Map {
 	n := capacity.I32()
 	if n < 0 {
 		panic(ErrIndexOutOfRange)
 	}
-	return types.NewMapForType(typ, int(n))
+	return types.NewMap(&i.heap, typ, int(n))
 }
 
-// newArrayDefault is a new array of typ's element kind holding size zero elements; a
-// []any's are null, each one more reference to null.
+// newArrayDefault is a new array of typ's element kind holding size zero
+// elements; a []any's are null.
 func (i *Interpreter) newArrayDefault(typ *types.ArrayType, size types.Boxed) types.Value {
 	n := size.I32()
 	if n < 0 {
@@ -1513,12 +1530,7 @@ func (i *Interpreter) newArrayDefault(typ *types.ArrayType, size types.Boxed) ty
 	case types.KindF64:
 		return make(types.TypedArray[float64], n)
 	default:
-		val := i.newArray(typ, int(n))
-		for j := range val.Elems {
-			val.Elems[j] = types.BoxedNull
-		}
-		i.retains(0, int(n))
-		return val
+		return types.NewArray(&i.heap, typ, int(n))
 	}
 }
 
@@ -1526,7 +1538,7 @@ func (i *Interpreter) newArrayDefault(typ *types.ArrayType, size types.Boxed) ty
 // Generic refs are retained on read; the container address itself is owned
 // and released by the caller.
 func (i *Interpreter) arrayGet(addr, at int) types.Boxed {
-	switch array := i.heap[addr].(type) {
+	switch array := i.heap.At(addr).(type) {
 	case types.TypedArray[bool]:
 		if at < 0 || at >= len(array) {
 			panic(ErrIndexOutOfRange)
@@ -1558,11 +1570,11 @@ func (i *Interpreter) arrayGet(addr, at int) types.Boxed {
 		}
 		return types.BoxF64(array[at])
 	case *types.Array:
-		if at < 0 || at >= len(array.Elems) {
+		if at < 0 || at >= array.Len() {
 			panic(ErrIndexOutOfRange)
 		}
-		result := array.Elems[at]
-		i.retainBox(result)
+		result := array.Index(at)
+		i.heap.Retain(result)
 		return result
 	case *HostArray:
 
@@ -1579,7 +1591,7 @@ func (i *Interpreter) arrayGet(addr, at int) types.Boxed {
 // arraySet writes val to the array at addr and index.
 // Reference elements transfer ownership to the array.
 func (i *Interpreter) arraySet(addr, at int, val types.Boxed) {
-	switch array := i.heap[addr].(type) {
+	switch array := i.heap.At(addr).(type) {
 	case types.TypedArray[bool]:
 		if at < 0 || at >= len(array) {
 			panic(ErrIndexOutOfRange)
@@ -1611,12 +1623,10 @@ func (i *Interpreter) arraySet(addr, at int, val types.Boxed) {
 		}
 		array[at] = val.F64()
 	case *types.Array:
-		if at < 0 || at >= len(array.Elems) {
+		if at < 0 || at >= array.Len() {
 			panic(ErrIndexOutOfRange)
 		}
-		elem := array.Elems[at]
-		array.Elems[at] = val
-		i.releaseBox(elem)
+		i.heap.Release(array.SwapIndex(at, val))
 	case *HostArray:
 		if err := array.SetElement(i, at, val); err != nil {
 			panic(err)
@@ -1629,12 +1639,12 @@ func (i *Interpreter) arraySet(addr, at int, val types.Boxed) {
 // structGet is the generic STRUCT_GET path for VM and host structs. Ref fields
 // are retained; the caller owns and releases the container address.
 func (i *Interpreter) structGet(addr, at int) types.Boxed {
-	switch value := i.heap[addr].(type) {
+	switch value := i.heap.At(addr).(type) {
 	case *types.Struct:
 		if at < 0 || at >= len(value.Typ.Fields) {
 			panic(ErrSegmentationFault)
 		}
-		data, kind := value.Data[at], value.Typ.Fields[at].Kind
+		data, kind := value.Raw(at), value.Typ.Fields[at].Kind
 		switch kind {
 		case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64:
 			return types.BoxWord(kind, data)
@@ -1642,7 +1652,7 @@ func (i *Interpreter) structGet(addr, at int) types.Boxed {
 			return i.boxI64(int64(data))
 		case types.KindRef:
 			result := types.Boxed(data)
-			i.retainBox(result)
+			i.heap.Retain(result)
 			return result
 		default:
 			panic(ErrTypeMismatch)
@@ -1659,47 +1669,12 @@ func (i *Interpreter) structGet(addr, at int) types.Boxed {
 	}
 }
 
-// mapKey defines the canonical map key: i1/i8 normalize to i32, strings key
-// by content, and other refs by heap address. The optional second result is
-// the owned stored key when normalization alone cannot reconstruct it.
-func (i *Interpreter) mapKey(key types.Boxed) (types.MapKey, types.Boxed) {
-	switch key.Kind() {
-	case types.KindI1, types.KindI8, types.KindI32:
-		bits := uint64(uint32(key.I32()))
-		return types.MapKey{Kind: types.KindI32, Bits: bits}, types.BoxI32(int32(bits))
-	case types.KindI64:
-		return types.MapKey{Kind: types.KindI64, Bits: uint64(i.unboxI64(key))}, 0
-	case types.KindF32:
-		bits := math.Float32bits(key.F32())
-		if bits == negZeroF32 {
-			bits = 0
-		}
-		return types.MapKey{Kind: types.KindF32, Bits: uint64(bits)}, types.BoxF32(math.Float32frombits(bits))
-	case types.KindF64:
-		bits := math.Float64bits(key.F64())
-		if bits == negZeroF64 {
-			bits = 0
-		}
-		return types.MapKey{Kind: types.KindF64, Bits: bits}, types.BoxF64(math.Float64frombits(bits))
-	case types.KindRef:
-		switch value := i.heap[key.Ref()].(type) {
-		case types.I64:
-			return types.MapKey{Kind: types.KindI64, Bits: uint64(i.unboxI64(key))}, 0
-		case types.String:
-			return types.MapKey{Kind: types.KindText, Text: string(value)}, key
-		}
-		return types.MapKey{Kind: types.KindRef, Bits: uint64(key.Ref())}, key
-	default:
-		panic(ErrTypeMismatch)
-	}
-}
-
 // uncaught renders an escaped throw as a Go error. A thrown Error surfaces
 // directly (preserving its Unwrap chain); any other value is wrapped with its
 // rendered form under ErrUncaughtException.
 func (i *Interpreter) uncaught(exc types.Boxed) error {
 	if exc.Kind() == types.KindRef {
-		v := i.heap[exc.Ref()]
+		v := i.heap.At(exc.Ref())
 		if e, ok := v.(*types.Error); ok {
 			return e
 		}
@@ -1712,10 +1687,10 @@ func (i *Interpreter) uncaught(exc types.Boxed) error {
 // value's rendered form.
 func (i *Interpreter) errorMessage(v types.Boxed) string {
 	if v.Kind() == types.KindRef {
-		if s, ok := i.heap[v.Ref()].(types.String); ok {
+		if s, ok := i.heap.At(v.Ref()).(types.String); ok {
 			return string(s)
 		}
-		return i.heap[v.Ref()].String()
+		return i.heap.At(v.Ref()).String()
 	}
 	return types.Unbox(v).String()
 }
@@ -1766,7 +1741,7 @@ func (i *Interpreter) handler() (int, instr.Handler, bool) {
 // wrap allocates a heap Error wrapping a Go failure so a recovered trap or
 // host error becomes a catchable guest value while staying errors.Is/As aware.
 func (i *Interpreter) wrap(err error) types.Boxed {
-	return types.BoxRef(i.alloc(types.WrapError(ErrorCode(err), err)))
+	return types.BoxRef(i.heap.Add(types.WrapError(ErrorCode(err), err)))
 }
 
 // land unwinds to the handler frame, discarding the frames and operand values
@@ -1777,7 +1752,7 @@ func (i *Interpreter) wrap(err error) types.Boxed {
 // of its first raise.
 func (i *Interpreter) land(fp int, h instr.Handler, exc types.Boxed) {
 	if exc.Kind() == types.KindRef {
-		if e, ok := i.heap[exc.Ref()].(*types.Error); ok && e.Frames() == nil {
+		if e, ok := i.heap.At(exc.Ref()).(*types.Error); ok && e.Frames() == nil {
 			e.SetFrames(i.trace())
 		}
 	}
@@ -1788,7 +1763,7 @@ func (i *Interpreter) land(fp int, h instr.Handler, exc types.Boxed) {
 	f := &i.frames[fp-1]
 	base := f.bp + h.Depth
 	for s := i.sp - 1; s >= base; s-- {
-		i.releaseBox(i.stack[s])
+		i.heap.Release(i.stack[s])
 	}
 	i.stack[base] = exc
 	i.sp = base + 1
@@ -1800,10 +1775,10 @@ func (i *Interpreter) land(fp int, h instr.Handler, exc types.Boxed) {
 // in-flight coroutine handle. Operand slots are released by land in one sweep.
 func (i *Interpreter) discard(f *frame) {
 	if f.release {
-		i.release(f.ref)
+		i.heap.Dec(f.ref)
 	}
 	if f.coro != 0 {
-		i.release(f.coro)
+		i.heap.Dec(f.coro)
 	}
 	f.code = nil
 	f.upvals = nil
@@ -1886,7 +1861,7 @@ func (i *Interpreter) box(val types.Value) types.Boxed {
 	case types.Ref:
 		return types.BoxRef(int(v))
 	default:
-		return types.BoxRef(i.alloc(v))
+		return types.BoxRef(i.heap.Add(v))
 	}
 }
 
@@ -1895,7 +1870,7 @@ func (i *Interpreter) boxI64(val int64) types.Boxed {
 	if types.IsBoxable(val) {
 		return types.BoxI64(val)
 	}
-	return types.BoxRef(i.alloc(types.I64(val)))
+	return types.BoxRef(i.heap.Add(types.I64(val)))
 }
 
 func (i *Interpreter) unbox(val types.Boxed) types.Value {
@@ -1903,8 +1878,8 @@ func (i *Interpreter) unbox(val types.Boxed) types.Value {
 		return types.Unbox(val)
 	}
 	addr := val.Ref()
-	v := i.heap[addr]
-	i.release(addr)
+	v := i.heap.At(addr)
+	i.heap.Dec(addr)
 	return v
 }
 
@@ -1915,11 +1890,11 @@ func (i *Interpreter) unboxI64(val types.Boxed) int64 {
 		return val.I64()
 	}
 	addr := val.Ref()
-	v, ok := i.heap[addr].(types.I64)
+	v, ok := i.heap.At(addr).(types.I64)
 	if !ok {
 		panic(ErrTypeMismatch)
 	}
-	i.release(addr)
+	i.heap.Dec(addr)
 	return int64(v)
 }
 
@@ -1930,31 +1905,11 @@ func (i *Interpreter) borrowI64(val types.Boxed) int64 {
 	if val.Kind() != types.KindRef {
 		return val.I64()
 	}
-	v, ok := i.heap[val.Ref()].(types.I64)
+	v, ok := i.heap.At(val.Ref()).(types.I64)
 	if !ok {
 		panic(ErrTypeMismatch)
 	}
 	return int64(v)
-}
-
-func (i *Interpreter) retainBox(v types.Boxed) {
-	if v.Kind() == types.KindRef {
-		i.retain(v.Ref())
-	}
-}
-
-func (i *Interpreter) releaseBox(v types.Boxed) {
-	if v.Kind() == types.KindRef && v.Ref() != 0 {
-		i.release(v.Ref())
-	}
-}
-
-func (i *Interpreter) retain(addr int) {
-	i.rc[addr]++
-}
-
-func (i *Interpreter) retains(addr int, n int) {
-	i.rc[addr] += n
 }
 
 // owner returns the slot that already holds val, or -1 when val is unowned.
@@ -1983,7 +1938,7 @@ func (i *Interpreter) own(addr int, val types.Value) {
 		return
 	}
 
-	if len(i.owners) >= max(2*(len(i.heap)-len(i.free)), heapRunway) {
+	if len(i.owners) >= max(2*i.heap.Live(), minHints) {
 		i.trim()
 	}
 	i.owners[val] = addr
@@ -2003,235 +1958,7 @@ func (i *Interpreter) trim() {
 // holds reports whether addr still stores val. The heap decides ownership, so
 // every hint is confirmed against it before it is trusted or kept.
 func (i *Interpreter) holds(addr int, val types.Value) bool {
-	return i.alive(addr) && i.heap[addr] == val
-}
-
-func (i *Interpreter) alive(addr int) bool {
-	return addr >= 0 && addr < len(i.heap) && i.rc[addr] > 0
-}
-
-func (i *Interpreter) alloc(val types.Value) int {
-	collected := i.target > 0 && len(i.heap)-len(i.free) >= i.target
-	if collected {
-		i.gc()
-	}
-	if addr, ok := i.reuse(val); ok {
-		i.track(val)
-		return addr
-	}
-
-	full := len(i.heap) == cap(i.heap)
-	limited := i.limit > 0 && len(i.heap) >= i.limit
-	if !collected && (full || limited) {
-		i.gc()
-		if addr, ok := i.reuse(val); ok {
-			i.track(val)
-			return addr
-		}
-	}
-	if limited {
-		if i.jit != nil && i.jit.tcache.flush(i) {
-			return i.alloc(val)
-		}
-		panic(ErrHeapExhausted)
-	}
-
-	if full {
-		c := 2 * cap(i.heap)
-		if c == 0 {
-			c = 1
-		}
-		heap := make([]types.Value, len(i.heap), c)
-		copy(heap, i.heap)
-		i.heap = heap
-
-		rc := make([]int, len(i.rc), c)
-		copy(rc, i.rc)
-		i.rc = rc
-	}
-
-	i.heap = append(i.heap, val)
-	i.rc = append(i.rc, 1)
-	i.track(val)
-	return len(i.heap) - 1
-}
-
-// shrink drops from the heap the slots free[mark:] hold that end it, which only
-// grew to hold them.
-func (i *Interpreter) shrink(mark int) {
-	tail := i.free[mark:]
-	slices.Sort(tail)
-	for len(tail) > 0 && tail[len(tail)-1] == len(i.heap)-1 {
-		i.heap, i.rc = i.heap[:len(i.heap)-1], i.rc[:len(i.rc)-1]
-		tail = tail[:len(tail)-1]
-	}
-	i.free = i.free[:mark+len(tail)]
-}
-
-func (i *Interpreter) reuse(val types.Value) (int, bool) {
-	if len(i.free) == 0 {
-		return 0, false
-	}
-	addr := i.free[len(i.free)-1]
-	i.free = i.free[:len(i.free)-1]
-	i.heap[addr] = val
-	i.rc[addr] = 1
-	return addr, true
-}
-
-// newStruct reuses a small struct a reclaim or Reset kept. Larger structs keep
-// their normal path.
-func (i *Interpreter) newStruct(typ *types.StructType) *types.Struct {
-	if len(typ.Fields) <= 4 {
-		if s, ok := i.structs.get(); ok {
-			s.Reset(typ)
-			return s
-		}
-	}
-	return types.NewStruct(typ)
-}
-
-// newArray reuses a header Reset kept, with its retained backing storage when
-// it fits size.
-func (i *Interpreter) newArray(typ *types.ArrayType, size int) *types.Array {
-	array, ok := i.arrays.get()
-	if !ok {
-		return &types.Array{Typ: typ, Elems: make([]types.Boxed, size)}
-	}
-	if cap(array.Elems) < size {
-		array.Elems = make([]types.Boxed, size)
-	} else {
-		array.Elems = array.Elems[:size]
-	}
-	array.Typ = typ
-	return array
-}
-
-// track counts a newly allocated value the free lists may later keep.
-func (i *Interpreter) track(v types.Value) {
-	switch v := v.(type) {
-	case *types.Struct:
-		if len(v.Typ.Fields) <= 4 {
-			i.structs.add()
-		}
-	case *types.Array:
-		i.arrays.add()
-	}
-}
-
-// dispose releases the refs owned by v and finalizes its non-heap resources.
-// The containing slot stays allocated, so Store can replace a value without
-// changing the address or its external refcount.
-func (i *Interpreter) dispose(addr int, v types.Value) {
-	var local [8]int
-	children := local[:0]
-	for _, ref := range i.refs(v) {
-		children = append(children, int(ref))
-	}
-	for _, child := range children {
-		i.release(child)
-	}
-	i.finalize(addr, v)
-}
-
-// gc collects one cycle. Every pass walks the whole heap.
-func (i *Interpreter) gc() {
-	metric(i, "vm_gc_cycles_total", 1)
-	metric(i, "vm_gc_slots_total", float64(len(i.heap)))
-	i.scan()
-	i.mark()
-	i.sweep()
-	i.pace()
-}
-
-// scan derives each object's external incoming count. Exact rc includes both
-// heap edges and owners outside the heap; subtracting every heap-to-heap edge
-// leaves a positive value only for objects owned by the stack, constants,
-// globals, frames, temporary construction state, or the host.
-func (i *Interpreter) scan() {
-	n := len(i.rc)
-	if cap(i.trial) < n {
-		i.trial = make([]int, n)
-	} else {
-		i.trial = i.trial[:n]
-	}
-	copy(i.trial, i.rc)
-
-	for addr := 1; addr < n; addr++ {
-		if i.rc[addr] <= 0 {
-			continue
-		}
-		for _, ref := range i.refs(i.heap[addr]) {
-			child := int(ref)
-			if child == 0 {
-				continue
-			}
-			if child < 0 || child >= n || i.rc[child] <= 0 {
-				panic(ErrSegmentationFault)
-			}
-			i.trial[child]--
-		}
-	}
-	for addr := 1; addr < n; addr++ {
-		if i.rc[addr] > 0 && i.trial[addr] < 0 {
-			panic(ErrSegmentationFault)
-		}
-	}
-}
-
-// mark traces from every positive external count. A negative trial value marks
-// a survivor; zero remains an unreachable cycle candidate.
-func (i *Interpreter) mark() {
-	var work []int
-	push := func(addr int) {
-		if addr <= 0 || addr >= len(i.rc) || i.rc[addr] <= 0 || i.trial[addr] < 0 {
-			return
-		}
-		i.trial[addr] = -i.trial[addr] - 1
-		work = append(work, addr)
-	}
-
-	for addr := 1; addr < len(i.rc); addr++ {
-		if i.rc[addr] > 0 && i.trial[addr] > 0 {
-			push(addr)
-		}
-	}
-	for len(work) > 0 {
-		addr := work[len(work)-1]
-		work = work[:len(work)-1]
-		for _, ref := range i.refs(i.heap[addr]) {
-			push(int(ref))
-		}
-	}
-}
-
-// sweep reclaims every allocated unmarked slot. Edges from dead objects to
-// survivors are removed from exact rc; dead-to-dead edges need no adjustment
-// because both slots are discarded by this pass.
-func (i *Interpreter) sweep() {
-	for addr := 1; addr < len(i.heap); addr++ {
-		if i.rc[addr] <= 0 || i.trial[addr] < 0 {
-			continue
-		}
-		v := i.heap[addr]
-		for _, ref := range i.refs(v) {
-			child := int(ref)
-			if child > 0 && child < len(i.rc) && i.rc[child] > 0 && i.trial[child] < 0 {
-				i.rc[child]--
-			}
-		}
-		i.rc[addr] = 0
-		i.reclaim(addr, v)
-	}
-}
-
-func (i *Interpreter) pace() {
-	live := len(i.heap) - len(i.free)
-	target := live + max(live-i.base, heapRunway)
-	if i.limit > 0 {
-		target = min(target, i.limit)
-	}
-	i.target = max(target, live)
+	return i.heap.Alive(addr) && i.heap.At(addr) == val
 }
 
 // deref follows a value to the one it stands for, so a caller that accepts any
@@ -2294,89 +2021,6 @@ func (i *Interpreter) wake() {
 	}
 }
 
-func unboxRef[T types.Value](i *Interpreter, val types.Boxed) T {
-	v := deref[T](i, val)
-	i.release(val.Ref())
-	return v
-}
-
-func (i *Interpreter) release(addr int) {
-
-	if i.rc[addr] > 1 {
-		i.rc[addr]--
-		return
-	}
-
-	base := len(i.work)
-	i.work = append(i.work, addr)
-	for len(i.work) > base {
-		next := i.work[len(i.work)-1]
-		i.work = i.work[:len(i.work)-1]
-
-		i.rc[next]--
-		if i.rc[next] == 0 {
-			v := i.heap[next]
-			for _, r := range i.refs(v) {
-				i.work = append(i.work, int(r))
-			}
-			i.reclaim(next, v)
-		}
-	}
-}
-
-// reclaim finalizes slot addr holding v, clears it, and returns the stable
-// address to the free list. The caller has already settled its referents.
-func (i *Interpreter) reclaim(addr int, v types.Value) {
-	i.finalize(addr, v)
-	i.recycle(v, true)
-	i.heap[addr] = nil
-	i.free = append(i.free, addr)
-}
-
-// undo returns the allocation at addr that no one ever published: a value
-// alloc made and nothing yet took. It owns the only reference, so the slot is
-// freed without finalize or a walk of its refs, and recycle keeps the value
-// whole, an array included, for the next allocation. A generic array holds only
-// the nulls newArrayDefault gave it, whose references go with it.
-func (i *Interpreter) undo(addr int) {
-	v := i.heap[addr]
-	if array, ok := v.(*types.Array); ok {
-		i.rc[0] -= len(array.Elems)
-	}
-	i.recycle(v, false)
-	i.heap[addr] = nil
-	i.rc[addr] = 0
-	i.free = append(i.free, addr)
-}
-
-// recycle keeps a freed value for reuse. A struct of up to four fields is
-// kept whenever it is freed; an array only once no one can hold it, because a
-// host may hold an *Array it loaded. escaped reports that someone may still
-// hold v, which Reset and an allocation that was never published know not.
-func (i *Interpreter) recycle(v types.Value, escaped bool) {
-	switch v := v.(type) {
-	case *types.Struct:
-		if len(v.Typ.Fields) > 4 {
-			return
-		}
-		i.structs.remove()
-		if escaped {
-			i.structs.put(v)
-		} else if i.structs.room() {
-			*v = types.Struct{}
-			i.structs.put(v)
-		}
-	case *types.Array:
-		i.arrays.remove()
-		if !escaped && i.arrays.room() {
-			clear(v.Elems[:cap(v.Elems)])
-			v.Typ = nil
-			v.Elems = v.Elems[:0]
-			i.arrays.put(v)
-		}
-	}
-}
-
 func (i *Interpreter) finalize(addr int, v types.Value) {
 	if _, ok := v.(*types.Function); ok {
 		i.remove(addr)
@@ -2408,17 +2052,6 @@ func (i *Interpreter) remove(addr int) {
 	delete(i.dynamic, addr)
 }
 
-// refs returns v's nested refs using the interpreter's reused scratch buffer,
-// or nil if v is not Traceable. The result is only valid until the next call.
-func (i *Interpreter) refs(v types.Value) []types.Ref {
-	t, ok := v.(types.Traceable)
-	if !ok {
-		return nil
-	}
-	i.refbuf = t.Refs(i.refbuf[:0])
-	return i.refbuf
-}
-
 // aliasable reports whether val is a pointer, the only shape two slots can
 // share. A pointer is stored directly in the interface word and is comparable,
 // so the interface itself keys the index.
@@ -2437,12 +2070,18 @@ func scalar(v types.Value) bool {
 	return false
 }
 
+func unboxRef[T types.Value](i *Interpreter, val types.Boxed) T {
+	v := deref[T](i, val)
+	i.heap.Dec(val.Ref())
+	return v
+}
+
 // deref is the T val references, keeping val's reference.
 func deref[T types.Value](i *Interpreter, val types.Boxed) T {
 	if val.Kind() != types.KindRef {
 		panic(ErrTypeMismatch)
 	}
-	v, ok := i.heap[val.Ref()].(T)
+	v, ok := i.heap.At(val.Ref()).(T)
 	if !ok {
 		panic(ErrTypeMismatch)
 	}

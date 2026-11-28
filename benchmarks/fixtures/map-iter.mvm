@@ -1,0 +1,105 @@
+.code
+0000:	i32.const 0x00000400
+0005:	map.new_default 0x0000
+0008:	local.set 0x00
+0010:	i32.const 0x00000000
+0015:	local.set 0x01
+L0017:
+0017:	local.get 0x01
+0019:	i32.const 0x00000400
+0024:	i32.ge_s
+0025:	br_if L0060
+0028:	local.get 0x00
+0030:	local.get 0x01
+0032:	i32.const 0x00001EEF
+0037:	i32.mul
+0038:	i32.const 0x0000FFF1
+0043:	i32.rem_s
+0044:	local.get 0x01
+0046:	map.set
+0047:	local.get 0x01
+0049:	i32.const 0x00000001
+0054:	i32.add
+0055:	local.set 0x01
+0057:	br L0017
+L0060:
+0060:	i32.const 0x00000000
+0065:	local.set 0x01
+L0067:
+0067:	local.get 0x01
+0069:	i32.const 0x00000400
+0074:	i32.ge_s
+0075:	br_if L0108
+0078:	local.get 0x00
+0080:	local.get 0x01
+0082:	i32.const 0x00001EEF
+0087:	i32.mul
+0088:	i32.const 0x0000FFF1
+0093:	i32.rem_s
+0094:	map.delete
+0095:	local.get 0x01
+0097:	i32.const 0x00000004
+0102:	i32.add
+0103:	local.set 0x01
+0105:	br L0067
+L0108:
+0108:	i32.const 0x00000000
+0113:	local.set 0x01
+L0115:
+0115:	local.get 0x01
+0117:	i32.const 0x00000020
+0122:	i32.ge_s
+0123:	br_if L0150
+0126:	local.get 0x02
+0128:	local.get 0x00
+0130:	const.get 0x0000
+0133:	call
+0134:	i32.add
+0135:	local.set 0x02
+0137:	local.get 0x01
+0139:	i32.const 0x00000001
+0144:	i32.add
+0145:	local.set 0x01
+0147:	br L0115
+L0150:
+0150:	local.get 0x02
+0152:	local.get 0x00
+0154:	map.len
+0155:	i32.add
+.locals
+0000:	map[i32]i32
+0001:	i32
+0002:	i32
+.constants
+0000:	func(map[i32]i32) i32
+	iterator[i32]
+	i32
+	i32
+	0000:	local.get 0x00
+	0002:	map.iter
+	0003:	local.set 0x01
+	L0005:
+	0005:	local.get 0x01
+	0007:	coro.done
+	0008:	br_if L0041
+	0011:	local.get 0x01
+	0013:	coro.value
+	0014:	local.set 0x03
+	0016:	local.get 0x02
+	0018:	local.get 0x03
+	0020:	i32.add
+	0021:	local.get 0x00
+	0023:	local.get 0x03
+	0025:	map.get
+	0026:	i32.add
+	0027:	local.set 0x02
+	0029:	local.get 0x01
+	0031:	i32.const 0x00000000
+	0036:	resume
+	0037:	drop
+	0038:	br L0005
+	L0041:
+	0041:	local.get 0x02
+	0043:	return
+.types
+0000:	map[i32]i32

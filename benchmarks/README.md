@@ -38,23 +38,23 @@ Yaegi supplies the compiled `registry.Register` and dependency symbols, evaluate
 
 ## Runtimes
 
-The corpus contains 30 workloads.
+The corpus contains 33 workloads.
 
 | Runtime | Coverage | Notes |
 |---|---:|---|
-| Threaded | 30 | minivm interpreter with JIT disabled |
-| Optimized | 30 | minivm interpreter with JIT disabled, after the O3 bytecode optimizer (`optimize.New(optimize.O3)`) runs on a separately parsed program |
-| JIT | 30 | minivm default execution |
-| Native Go | 30 | direct compiled Go implementation |
+| Threaded | 33 | minivm interpreter with JIT disabled |
+| Optimized | 33 | minivm interpreter with JIT disabled, after the O3 bytecode optimizer (`optimize.New(optimize.O3)`) runs on a separately parsed program |
+| JIT | 33 | minivm default execution |
+| Native Go | 33 | direct compiled Go implementation |
 | Wazero | 7 | exact WebAssembly implementations |
-| Tengo | 28 | string-keyed maps only; `map-ops` and `coroutine-gen` have no Tengo equivalent |
-| GopherLua | 27 | I32 workloads; exact I64 values are outside Lua's numeric model |
-| Goja | 30 | I32 plus BigInt-based I64 fixtures |
-| gpython | 30 | Python fixture; one case is intentionally unmeasured |
-| CPython | 30 | same Python fixture through `python3.13`; one case is intentionally unmeasured |
-| Yaegi | 30 | Go fixture; three cases are intentionally unmeasured |
+| Tengo | 29 | string-keyed maps only; `map-ops`, `map-churn`, `map-iter`, and `coroutine-gen` have no Tengo equivalent |
+| GopherLua | 30 | I32 workloads; exact I64 values are outside Lua's numeric model |
+| Goja | 33 | I32 plus BigInt-based I64 fixtures |
+| gpython | 33 | Python fixture; three cases are intentionally unmeasured |
+| CPython | 33 | same Python fixture through `python3.13`; one case is intentionally unmeasured |
+| Yaegi | 33 | Go fixture; three cases are intentionally unmeasured |
 
-A runtime cell is `—` only when no meaningful implementation exists or the benchmark is intentionally inapplicable. Yaegi skips `typed-array-sum` because its generic typed-array program is outside Yaegi's supported syntax, `recursive-fib-35` because the interpreted workload is impractical, and `coroutine-gen` because Yaegi's standard library has no `iter` package. gpython skips `map-ops` because its dicts accept only string keys. CPython skips `host-call` because it runs out of process and cannot call a Go function.
+A runtime cell is `—` only when no meaningful implementation exists or the benchmark is intentionally inapplicable. Yaegi skips `typed-array-sum` because its generic typed-array program is outside Yaegi's supported syntax, `recursive-fib-35` because the interpreted workload is impractical, and `coroutine-gen` because Yaegi's standard library has no `iter` package. gpython skips `map-ops`, `map-churn`, and `map-iter` because its dicts accept only string keys. CPython skips `host-call` because it runs out of process and cannot call a Go function.
 
 ## Measurement
 

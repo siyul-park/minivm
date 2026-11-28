@@ -475,21 +475,48 @@ func TestHostMap_Clear(t *testing.T) {
 }
 
 func TestHostMap_Map(t *testing.T) {
-	i := interp.MustNew(program.New(nil))
-	r := interp.NewRegistry()
-	defer i.Close()
-	src := map[int32]int32{1: 7}
+	t.Run("copies the Go map into the VM", func(t *testing.T) {
+		i := interp.MustNew(program.New(nil))
+		r := interp.NewRegistry()
+		defer i.Close()
+		src := map[int32]int32{1: 7}
 
-	value, err := r.Marshal(i, src)
-	require.NoError(t, err)
+		value, err := r.Marshal(i, src)
+		require.NoError(t, err)
 
-	// The copy is VM-owned, so a later write to the Go map leaves it alone.
-	out, err := value.(*interp.HostMap).Map(i)
-	require.NoError(t, err)
-	require.Equal(t, 1, out.(*types.TypedMap[int32]).Len())
+		// The copy is VM-owned, so a later write to the Go map leaves it alone.
+		out, err := value.(*interp.HostMap).Map(i)
+		require.NoError(t, err)
+		require.Equal(t, 1, out.Len())
 
-	src[2] = 8
-	require.Equal(t, 1, out.(*types.TypedMap[int32]).Len())
+		src[2] = 8
+		require.Equal(t, 1, out.Len())
+	})
+
+	t.Run("map.keys and map.iter over a view leave the heap as they found it", func(t *testing.T) {
+		typ := types.NewMapType(types.TypeString(), types.TypeString())
+		for _, op := range []instr.Opcode{instr.MAP_KEYS, instr.MAP_ITER} {
+			t.Run(instr.TypeOf(op).Mnemonic, func(t *testing.T) {
+				for _, rounds := range []int{1, 8} {
+					b := program.NewBuilder()
+					b.Globals(typ)
+					for range rounds {
+						b.Emit(instr.GLOBAL_GET, 0).Emit(op).Emit(instr.DROP)
+					}
+					i := interp.MustNew(b.MustBuild(), interp.WithThreshold(-1))
+					value, err := interp.NewRegistry().Marshal(i, map[string]string{"a": "x", "b": "y"})
+					require.NoError(t, err)
+					addr, err := i.Alloc(value)
+					require.NoError(t, err)
+					require.NoError(t, i.SetGlobal(0, types.BoxRef(addr)))
+					before := liveOf(i)
+					require.NoError(t, i.Run(context.Background()))
+					require.Equal(t, before, liveOf(i), "rounds %d", rounds)
+					require.NoError(t, i.Close())
+				}
+			})
+		}
+	})
 }
 
 func TestHostFunction_Kind(t *testing.T) {

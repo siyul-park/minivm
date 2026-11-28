@@ -108,9 +108,9 @@ func (c *tcache) fill(i *Interpreter, t, length int) {
 		if was != unset {
 			c.changes[b]++
 		}
-		mark := len(i.free)
+		mark := i.heap.Mark()
 		c.drop(i, b)
-		i.shrink(mark)
+		i.heap.Shrink(mark)
 		if c.changes[b] > 1 {
 			return
 		}
@@ -120,9 +120,7 @@ func (c *tcache) fill(i *Interpreter, t, length int) {
 	// A fill must not collect: it builds at most half of what the heap holds
 	// before the collection threaded code would run at this live count, and
 	// leaves the rest to the program's own allocations.
-	if i.target > 0 {
-		size = min(size, (i.target-(len(i.heap)-len(i.free)))/2)
-	}
+	size = min(size, i.heap.Room()/2)
 	if size <= 0 {
 		return
 	}
@@ -149,9 +147,9 @@ func (c *tcache) fill(i *Interpreter, t, length int) {
 		if array != nil {
 			v = i.newArrayDefault(array, types.BoxI32(int32(length)))
 		} else {
-			v = i.newStruct(i.types[t].(*types.StructType))
+			v = types.NewStruct(&i.heap, i.types[t].(*types.StructType))
 		}
-		refs = append(refs, types.BoxRef(i.alloc(v)))
+		refs = append(refs, types.BoxRef(i.heap.Add(v)))
 	}
 }
 
@@ -165,7 +163,7 @@ func (c *tcache) flush(i *Interpreter) bool {
 	}
 	returned := c.held
 	c.dirty, c.held = false, false
-	mark := len(i.free)
+	mark := i.heap.Mark()
 	for b := range c.table {
 		c.drop(i, b)
 		if c.built[b] > 0 {
@@ -173,7 +171,7 @@ func (c *tcache) flush(i *Interpreter) bool {
 		}
 		c.batch[b], c.built[b], c.left[b], c.missed[b], c.changes[b], c.table[b].Len = 0, 0, 0, 0, 0, unset
 	}
-	i.shrink(mark)
+	i.heap.Shrink(mark)
 	return returned
 }
 
@@ -183,6 +181,6 @@ func (c *tcache) drop(i *Interpreter, b int) {
 	c.left[b] += int(c.table[b].N)
 	for e := &c.table[b]; e.N > 0; {
 		e.N--
-		i.undo(c.refs[b][e.N].Ref())
+		i.heap.Undo(c.refs[b][e.N].Ref())
 	}
 }

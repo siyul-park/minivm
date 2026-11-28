@@ -113,7 +113,7 @@ func selectOp() jen.Code {
 		jen.Id("discarded").Op(":=").Id("v2"),
 		jen.If(jen.Id("cond").Op("==").Lit(0)).Block(jen.Id("selected").Op("=").Id("v2"),
 			jen.Id("discarded").Op("=").Id("v1")),
-		jen.Id("i").Dot("releaseBox").Call(jen.Id("discarded")),
+		jen.Id("i").Dot("heap").Dot("Release").Call(jen.Id("discarded")),
 		top(3).Op("=").Id("selected"),
 		jen.Id("i").Dot("sp").Op("-=").Lit(2),
 		next())

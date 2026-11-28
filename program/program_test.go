@@ -62,6 +62,18 @@ func TestProgram_Clone(t *testing.T) {
 		require.Nil(t, prog.Clone())
 	})
 
+	t.Run("leaves a container bound to a heap uncounted and uncopied", func(t *testing.T) {
+		heap := types.NewHeap(4, 0, types.Hooks{})
+		heap.Add(types.Null)
+		key := heap.Add(types.String("k"))
+		m := types.NewMap(heap, types.NewMapType(types.TypeString(), types.TypeI32()), 0)
+		m.Store(types.BoxRef(key), types.BoxI32(1))
+
+		clone := program.New(nil, program.WithConstants(m)).Clone()
+		require.Same(t, m, clone.Constants[0])
+		require.Equal(t, 1, heap.Count(key))
+	})
+
 	t.Run("copies program slices", func(t *testing.T) {
 		h := instr.Handler{Start: 0, End: 1, Catch: 2}
 		prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)},
@@ -142,7 +154,8 @@ func TestProgram_Clone(t *testing.T) {
 	})
 
 	t.Run("copies raw mutable constants in literals", func(t *testing.T) {
-		raw := types.NewArray(types.NewArrayType(types.TypeI32()), types.BoxI32(1))
+		raw := types.NewArray(nil, types.NewArrayType(types.TypeI32()), 1)
+		raw.SwapIndex(0, types.BoxI32(1))
 		lit := &types.StructLiteral{
 			Typ:    types.NewStructType(types.NewStructField(raw.Type())),
 			Fields: []types.Value{raw},
@@ -151,13 +164,14 @@ func TestProgram_Clone(t *testing.T) {
 
 		got := clone.Constants[0].(*types.StructLiteral).Fields[0].(*types.Array)
 		require.NotSame(t, raw, got)
-		got.Elems[0] = types.BoxI32(9)
-		require.Equal(t, types.BoxI32(1), raw.Elems[0])
+		got.SwapIndex(0, types.BoxI32(9))
+		require.Equal(t, types.BoxI32(1), raw.Index(0))
 	})
 
 	t.Run("keeps aliasing", func(t *testing.T) {
 		fn := types.NewFunction(nil, nil, []instr.Instruction{instr.MustNew(instr.NOP)})
-		raw := types.NewArray(types.NewArrayType(types.TypeI32()), types.BoxI32(1))
+		raw := types.NewArray(nil, types.NewArrayType(types.TypeI32()), 1)
+		raw.SwapIndex(0, types.BoxI32(1))
 		typed := types.TypedArray[int32]{1}
 		lit := &types.ArrayLiteral{Typ: types.NewArrayType(types.TypeAny()), Elems: []types.Value{fn, raw, typed}}
 		prog := program.New(nil, program.WithConstants(fn, raw, typed, lit, lit))

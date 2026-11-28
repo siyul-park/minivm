@@ -87,7 +87,8 @@ func benchmarkScripts(b *testing.B, spec registry.Spec, want int32) {
 	}
 	if source.Python != "" {
 		b.Run("gpython", func(b *testing.B) {
-			if spec.Name == "map-ops" {
+			switch spec.Name {
+			case "map-ops", "map-churn", "map-iter":
 				b.Skip("gpython dicts accept only string keys")
 			}
 			benchmarkGpython(b, source.Python, spec.Host, want)

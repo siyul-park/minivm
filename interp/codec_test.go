@@ -164,7 +164,7 @@ func TestWithUnmarshaler(t *testing.T) {
 		i := interp.MustNew(program.New(nil))
 		r := interp.NewRegistry(millis)
 		defer i.Close()
-		src := types.NewStruct(
+		src := types.NewStruct(nil,
 			types.NewStructType(
 				types.NewStructField(types.TypeI64(), types.FieldWithName("Delay")),
 				types.NewStructField(types.TypeI32(), types.FieldWithName("Count"))),
@@ -294,6 +294,79 @@ func TestRegistry_Marshal(t *testing.T) {
 		refs, counts = live(i)
 		require.Equal(t, baseRefs, refs, "Alloc then Release drops an unused value")
 		require.Equal(t, baseCounts, counts)
+	})
+
+	t.Run("a failed map conversion releases a duplicate key once", func(t *testing.T) {
+		type name string
+		type broken struct{ fail bool }
+		errBroken := errors.New("broken")
+		i := interp.MustNew(program.New(nil))
+		defer i.Close()
+		r := interp.NewRegistry(interp.WithMarshaler(
+			reflect.TypeFor[broken](), types.TypeString(),
+			interp.MarshalerFunc(func(_ *interp.Encoder, p unsafe.Pointer) (types.Value, error) {
+				if (*broken)(p).fail {
+					return nil, errBroken
+				}
+				return types.String("ok"), nil
+			})))
+		base := i.HeapLen()
+
+		for range 50 {
+			view, err := r.Marshal(i, map[any]broken{"a": {}, name("a"): {}, "z": {fail: true}})
+			require.NoError(t, err)
+			_, err = view.(*interp.HostMap).Map(i)
+			require.ErrorIs(t, err, errBroken)
+			for addr := 1; addr < i.HeapLen(); addr++ {
+				require.GreaterOrEqual(t, i.Heap().Count(addr), 0, "slot %d", addr)
+				if addr >= base {
+					require.False(t, i.Heap().Alive(addr), "slot %d leaked", addr)
+				}
+			}
+		}
+	})
+
+	t.Run("containers end bound to the VM heap", func(t *testing.T) {
+		live := func(i *interp.Interpreter) (refs int) {
+			for addr := 1; addr < i.HeapLen(); addr++ {
+				if n, err := i.RefCount(addr); err == nil && n > 0 {
+					refs++
+				}
+			}
+			return refs
+		}
+		r := interp.NewRegistry()
+		for _, tt := range []struct {
+			name  string
+			value any
+			drop  func(types.Value)
+		}{
+			{name: "array", value: [2]string{"a", "b"}, drop: func(v types.Value) {
+				v.(*types.Array).SetIndex(0, types.BoxedNull)
+				v.(*types.Array).SetIndex(1, types.BoxedNull)
+			}},
+			{name: "struct", value: codecStrings{A: "a", B: "b", C: "c"}, drop: func(v types.Value) {
+				for idx := range 3 {
+					v.(*types.Struct).SetField(idx, types.BoxedNull)
+				}
+			}},
+			{name: "complex", value: complex(1, 2)},
+		} {
+			i, other := interp.MustNew(program.New(nil)), interp.MustNew(program.New(nil))
+			base := live(i)
+
+			value, err := r.Marshal(i, tt.value)
+			require.NoError(t, err, tt.name)
+			require.False(t, other.Heap().Adopt(value), tt.name)
+			require.True(t, i.Heap().Adopt(value), tt.name)
+			if tt.drop != nil {
+				require.Greater(t, live(i), base, tt.name)
+				tt.drop(value)
+				require.Equal(t, base, live(i), tt.name)
+			}
+			require.NoError(t, i.Close(), tt.name)
+			require.NoError(t, other.Close(), tt.name)
+		}
 	})
 
 	t.Run("function receives active context", func(t *testing.T) {
@@ -882,7 +955,7 @@ func TestRegistry_Marshal(t *testing.T) {
 		// Not a host value: the receiver decodes into a fresh Go struct, so the
 		// call still runs and the mutation stays on that copy.
 		typ := types.NewStructType(types.NewStructField(types.TypeI32(), types.FieldWithName("Count")))
-		recv, err := i.Alloc(types.NewStruct(typ, types.BoxI32(5)))
+		recv, err := i.Alloc(types.NewStruct(nil, typ, types.BoxI32(5)))
 		require.NoError(t, err)
 
 		got, err := fn.(*interp.HostFunction).Fn(i, []types.Boxed{types.BoxRef(recv), types.BoxI32(2)})

@@ -109,6 +109,7 @@ Validation should start with the smallest useful falsification and expand only a
 - Run the smallest falsifying check first.
 - Apply package, race, coverage, architecture, and repository checks when relevant.
 - Skip only genuinely inapplicable checks, and state the reason.
+- A function that MUST inline at its call sites ends its doc comment with `//gcassert:inline`; the `local/inline-calls` decision runs `gcassert` over the module in `make check`.
 
 ## Completeness
 

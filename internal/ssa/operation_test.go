@@ -139,6 +139,10 @@ func TestCond_Invert(t *testing.T) {
 func TestShape_Serves(t *testing.T) {
 	i32 := ssa.Shape{Form: ssa.FormMap, Key: types.KindI32, Elem: types.KindRef}
 	i64 := ssa.Shape{Form: ssa.FormMap, Key: types.KindI64, Elem: types.KindI64}
+	f32 := ssa.Shape{Form: ssa.FormMap, Key: types.KindF32, Elem: types.KindI32}
+	f64 := ssa.Shape{Form: ssa.FormMap, Key: types.KindF64, Elem: types.KindI32}
+	str := ssa.Shape{Form: ssa.FormMap, Key: types.KindRef, Elem: types.KindI32}
+	anyMap := ssa.Shape{Form: ssa.FormMap, Key: types.KindAny, Elem: types.KindI32}
 	tests := []struct {
 		name   string
 		shape  ssa.Shape
@@ -157,7 +161,35 @@ func TestShape_Serves(t *testing.T) {
 		{"delete of an i64 key", i64, ssa.OpMapDelete, types.KindI64, 0, true},
 		{"i64 key held in a 32-bit lane", i64, ssa.OpMapDelete, types.KindI32, 0, false},
 		{"i32 key held in a 64-bit word", i32, ssa.OpMapDelete, types.KindI64, 0, false},
-		{"float key", ssa.Shape{Form: ssa.FormMap, Key: types.KindF64, Elem: types.KindI32}, ssa.OpMapLen, 0, 0, false},
+		{"len of an f64 map", f64, ssa.OpMapLen, 0, 0, true},
+		{"get of an f64 key", f64, ssa.OpMapGet, types.KindF64, 0, true},
+		{"set of an f64 key", f64, ssa.OpMapSet, types.KindF64, types.KindI32, true},
+		{"delete of an f64 key", f64, ssa.OpMapDelete, types.KindF64, 0, true},
+		{"lookup of an f32 key", f32, ssa.OpMapLookup, types.KindF32, 0, true},
+		{"f32 map with an f64 operand", f32, ssa.OpMapGet, types.KindF64, 0, false},
+		{"f64 map with an f32 operand", f64, ssa.OpMapSet, types.KindF32, types.KindI32, false},
+		{"f64 map with an i64 operand", f64, ssa.OpMapDelete, types.KindI64, 0, false},
+		{"i32 map with an f32 operand", i32, ssa.OpMapGet, types.KindF32, 0, false},
+		{"f64 map with an i64 element", ssa.Shape{Form: ssa.FormMap, Key: types.KindF64, Elem: types.KindI64}, ssa.OpMapGet, types.KindF64, 0, false},
+		{"len of a string map", str, ssa.OpMapLen, 0, 0, true},
+		{"get of a string key", str, ssa.OpMapGet, types.KindRef, 0, true},
+		{"lookup of a string key", str, ssa.OpMapLookup, types.KindRef, 0, true},
+		{"set of a string key", str, ssa.OpMapSet, types.KindRef, types.KindI32, true},
+		{"delete of a string key", str, ssa.OpMapDelete, types.KindRef, 0, true},
+		{"string map with an i32 operand", str, ssa.OpMapGet, types.KindI32, 0, false},
+		{"string map with an i64 operand", str, ssa.OpMapDelete, types.KindI64, 0, false},
+		{"string map with an f64 operand", str, ssa.OpMapSet, types.KindF64, types.KindI32, false},
+		{"i32 map with a reference operand", i32, ssa.OpMapGet, types.KindRef, 0, false},
+		{"string map with an i64 element", ssa.Shape{Form: ssa.FormMap, Key: types.KindRef, Elem: types.KindI64}, ssa.OpMapGet, types.KindRef, 0, false},
+		{"len of an any map", anyMap, ssa.OpMapLen, 0, 0, true},
+		{"get of an i1 key in an any map", anyMap, ssa.OpMapGet, types.KindI1, 0, true},
+		{"get of an i8 key in an any map", anyMap, ssa.OpMapGet, types.KindI8, 0, true},
+		{"get of an i32 key in an any map", anyMap, ssa.OpMapGet, types.KindI32, 0, true},
+		{"lookup of an i64 key in an any map", anyMap, ssa.OpMapLookup, types.KindI64, 0, true},
+		{"get of an f32 key in an any map", anyMap, ssa.OpMapGet, types.KindF32, 0, true},
+		{"set of an f64 key in an any map", anyMap, ssa.OpMapSet, types.KindF64, types.KindI32, true},
+		{"delete of a reference key in an any map", anyMap, ssa.OpMapDelete, types.KindRef, 0, true},
+		{"any map with an i64 element", ssa.Shape{Form: ssa.FormMap, Key: types.KindAny, Elem: types.KindI64}, ssa.OpMapGet, types.KindRef, 0, false},
 		{"array shape", ssa.Shape{Form: ssa.FormArray, Elem: types.KindI32}, ssa.OpMapLen, 0, 0, false},
 	}
 	for _, tt := range tests {

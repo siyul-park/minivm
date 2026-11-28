@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +45,13 @@ type writerCloser struct {
 	called error
 }
 
+// observerCloser is a host value whose Close calls observe, the way a finalizer
+// reads the container that held it.
+type observerCloser struct {
+	trackedValue
+	observe func()
+}
+
 // sinkCloser is a host value whose Close calls sink, the way a host object that
 // shut down calls a Go func the VM bound to one of its functions.
 type sinkCloser struct {
@@ -57,6 +65,14 @@ func (c *sinkCloser) Close() error {
 	c.calls++
 	c.err = c.sink("closed")
 	return nil
+}
+
+// hostContainer builds an array, struct, or map holding one reference, and
+// drops that reference through the container's own methods.
+type hostContainer struct {
+	name  string
+	build func(heap *types.Heap, child types.Boxed) types.Value
+	drop  func(v types.Value)
 }
 
 type structGetHostFields struct {
@@ -1482,7 +1498,7 @@ var runTests = []struct {
 			[]instr.Instruction{instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 0)},
 			program.WithTypes(types.NewArrayType(types.TypeAny())),
 		),
-		values: []types.Value{types.NewArray(types.NewArrayType(types.TypeAny()), types.BoxedNull, types.BoxedNull)},
+		values: []types.Value{newArray(nil, types.NewArrayType(types.TypeAny()), types.BoxedNull, types.BoxedNull)},
 	},
 	{
 		program: program.New([]instr.Instruction{
@@ -1586,7 +1602,7 @@ var runTests = []struct {
 		program: program.New([]instr.Instruction{
 			instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.F64_CONST, math.Float64bits(2.5)), instr.MustNew(instr.STRUCT_NEW, 0),
 		}, program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64())))),
-		values: []types.Value{types.NewStruct(
+		values: []types.Value{types.NewStruct(nil,
 			types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64())),
 			types.BoxI32(7), types.BoxF64(2.5),
 		)},
@@ -1594,7 +1610,7 @@ var runTests = []struct {
 	{
 		program: program.New([]instr.Instruction{instr.MustNew(instr.STRUCT_NEW_DEFAULT, 0)},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64())))),
-		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64())))},
+		values: []types.Value{types.NewStruct(nil, types.NewStructType(types.NewStructField(types.TypeI32()), types.NewStructField(types.TypeF64())))},
 	},
 	{
 		program: program.New([]instr.Instruction{
@@ -1870,6 +1886,124 @@ var runTests = []struct {
 		values: []types.Value{types.I32(10)},
 	},
 	{
+		// A key deleted through a ref of equal content is gone.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT), instr.MustNew(instr.MAP_DELETE),
+			instr.MustNew(instr.MAP_LEN),
+		}, program.WithTypes(types.NewMapType(types.TypeString(), types.TypeI32())),
+			program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"))),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		// A key set through a ref of equal content replaces the value and keeps its place.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.CONST_GET, 3), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT), instr.MustNew(instr.I32_CONST, 30), instr.MustNew(instr.MAP_SET),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.MAP_LEN), instr.MustNew(instr.LOCAL_SET, 1),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.MAP_GET), instr.MustNew(instr.LOCAL_SET, 2),
+			instr.MustNew(instr.MAP_KEYS), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.LOCAL_GET, 2),
+		}, program.WithTypes(types.NewMapType(types.TypeString(), types.TypeI32())),
+			program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"), types.String("other")),
+			program.WithLocals(types.TypeI32(), types.TypeI32(), types.TypeI32())),
+		values: []types.Value{types.I32(30), types.I32(2), types.String("HiThere")},
+	},
+	{
+		// A key deleted and set again goes last, whichever ref sets it.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.CONST_GET, 3), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT), instr.MustNew(instr.MAP_DELETE),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.I32_CONST, 11), instr.MustNew(instr.MAP_SET),
+			instr.MustNew(instr.MAP_KEYS), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeString(), types.TypeI32())),
+			program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere"), types.String("other")),
+			program.WithLocals(types.NewArrayType(types.TypeString()))),
+		values: []types.Value{types.String("HiThere"), types.String("other")},
+	},
+	{
+		// An i8 key and an i32 key of the same value are one key of an any map.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW_DEFAULT, 1), instr.MustNew(instr.LOCAL_SET, 1),
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_SET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.MAP_SET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.MAP_LEN),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeAny(), types.TypeI32()), types.TypeI8Array()),
+			program.WithLocals(types.NewMapType(types.TypeAny(), types.TypeI32()), types.TypeI8Array())),
+		values: []types.Value{types.I32(20), types.I32(1)},
+	},
+	{
+		// -0 and +0 are one key of an any map.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.F64_CONST, 1<<63), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.F64_CONST, 0), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.MAP_SET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.MAP_LEN),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.F64_CONST, 1<<63), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeAny(), types.TypeI32())),
+			program.WithLocals(types.NewMapType(types.TypeAny(), types.TypeI32()))),
+		values: []types.Value{types.I32(20), types.I32(1)},
+	},
+	{
+		// A wide i64 key of an any map is found through another cell of equal value.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I64_CONST, 1<<60), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I64_CONST, 1<<60), instr.MustNew(instr.MAP_GET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I64_CONST, 7), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeAny(), types.TypeI32())),
+			program.WithLocals(types.NewMapType(types.TypeAny(), types.TypeI32()))),
+		values: []types.Value{types.I32(0), types.I32(10)},
+	},
+	{
+		// A null key of an any map is a key.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.REF_NULL), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.REF_NULL), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeAny(), types.TypeI32())),
+			program.WithLocals(types.NewMapType(types.TypeAny(), types.TypeI32()))),
+		values: []types.Value{types.I32(10)},
+	},
+	{
+		// A struct key of an any map is its identity: another struct of equal fields is another key.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.STRUCT_NEW_DEFAULT, 1), instr.MustNew(instr.LOCAL_SET, 1),
+			instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.MAP_GET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.STRUCT_NEW_DEFAULT, 1), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeAny(), types.TypeI32()), types.NewStructType(types.NewStructField(types.TypeI32()))),
+			program.WithLocals(types.NewMapType(types.TypeAny(), types.TypeI32()), types.NewStructType(types.NewStructField(types.TypeI32())))),
+		values: []types.Value{types.I32(0), types.I32(10)},
+	},
+	{
+		// A string key of an any map is found through a ref of equal content.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeAny(), types.TypeI32())),
+			program.WithConstants(types.String("Hi"), types.String("There"), types.String("HiThere")),
+			program.WithLocals(types.NewMapType(types.TypeAny(), types.TypeI32()))),
+		values: []types.Value{types.I32(10)},
+	},
+	{
+		// A scalar is no key of a string map.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeString(), types.TypeI32())), program.WithConstants(types.String("one"))),
+		err: interp.ErrTypeMismatch,
+	},
+	{
+		// An array is no key of a string map.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_NEW, 1), instr.MustNew(instr.MAP_DELETE),
+		}, program.WithTypes(types.NewMapType(types.TypeString(), types.TypeI32()), types.NewArrayType(types.TypeI32())), program.WithConstants(types.String("one"))),
+		err: interp.ErrTypeMismatch,
+	},
+	{
 		program: program.New([]instr.Instruction{
 			instr.MustNew(instr.CONST_GET, 2), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
 			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.CONST_GET, 1), instr.MustNew(instr.STRING_CONCAT),
@@ -1937,6 +2071,48 @@ var runTests = []struct {
 		values: []types.Value{types.I32(0)},
 	},
 	{
+		// A key set as -0 is found by +0.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.F64_CONST, math.Float64bits(math.Copysign(0, -1))), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.F64_CONST, 0), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeF64(), types.TypeI32()))),
+		values: []types.Value{types.I32(10)},
+	},
+	{
+		// -0 and +0 are one f32 key.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(float32(math.Copysign(0, -1))))), instr.MustNew(instr.I32_CONST, 10),
+			instr.MustNew(instr.F32_CONST, 0), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.MAP_LEN),
+		}, program.WithTypes(types.NewMapType(types.TypeF32(), types.TypeI32()))),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		// A key set as -0 is found by +0.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(float32(math.Copysign(0, -1))))), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.F32_CONST, 0), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeF32(), types.TypeI32()))),
+		values: []types.Value{types.I32(10)},
+	},
+	{
+		// NaN never matches, so both f32 entries stay.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(float32(math.NaN())))), instr.MustNew(instr.I32_CONST, 10),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(float32(math.NaN())))), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.MAP_LEN),
+		}, program.WithTypes(types.NewMapType(types.TypeF32(), types.TypeI32()))),
+		values: []types.Value{types.I32(2)},
+	},
+	{
+		// NaN never matches, so an f32 get misses.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(float32(math.NaN())))), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.F32_CONST, uint64(math.Float32bits(float32(math.NaN())))), instr.MustNew(instr.MAP_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeF32(), types.TypeI32()))),
+		values: []types.Value{types.I32(0)},
+	},
+	{
 		program: program.New([]instr.Instruction{
 			instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.MAP_NEW, 0),
 			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.MAP_GET),
@@ -1995,6 +2171,22 @@ var runTests = []struct {
 			instr.MustNew(instr.MAP_KEYS), instr.MustNew(instr.ARRAY_LEN),
 		}, program.WithTypes(types.NewMapType(types.TypeI32(), types.TypeI32()))),
 		values: []types.Value{types.I32(2)},
+	},
+	{
+		// Keys come back in insertion order: an update keeps its place, a deleted
+		// key set again goes last.
+		program: program.New([]instr.Instruction{
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_CONST, 30), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 10),
+			instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.I32_CONST, 20), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.MAP_DELETE),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_CONST, 11), instr.MustNew(instr.MAP_SET),
+			instr.MustNew(instr.DUP), instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.I32_CONST, 31), instr.MustNew(instr.MAP_SET),
+			instr.MustNew(instr.MAP_KEYS), instr.MustNew(instr.LOCAL_SET, 0),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 0), instr.MustNew(instr.ARRAY_GET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.ARRAY_GET),
+			instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.I32_CONST, 2), instr.MustNew(instr.ARRAY_GET),
+		}, program.WithTypes(types.NewMapType(types.TypeI32(), types.TypeI32())), program.WithLocals(types.NewArrayType(types.TypeI32()))),
+		values: []types.Value{types.I32(3), types.I32(2), types.I32(1)},
 	},
 	{
 		program: program.New([]instr.Instruction{
@@ -2058,7 +2250,7 @@ var runTests = []struct {
 			instr.MustNew(instr.CONST_GET, 0),
 			instr.MustNew(instr.I32_CONST, 0),
 			instr.MustNew(instr.STRUCT_GET),
-		}, program.WithConstants(types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32())), types.BoxI32(7)))),
+		}, program.WithConstants(types.NewStruct(nil, types.NewStructType(types.NewStructField(types.TypeI32())), types.BoxI32(7)))),
 		values: []types.Value{types.I32(7)},
 	},
 	{
@@ -2333,6 +2525,12 @@ func (v *trackedValue) Close() error {
 	return nil
 }
 
+func (c *observerCloser) Close() error {
+	c.closed++
+	c.observe()
+	return nil
+}
+
 func (*panicCloser) Close() error {
 	panic("close")
 }
@@ -2351,6 +2549,34 @@ func (h *structGetHostFields) Bump(n int32) int32 {
 	h.Count += n
 	h.hidden++
 	return h.Count
+}
+
+// hostContainers returns one hostContainer per container kind.
+func hostContainers() []hostContainer {
+	array := types.NewArrayType(types.TypeAny())
+	structure := types.NewStructType(types.NewStructField(types.TypeAny()))
+	table := types.NewMapType(types.TypeI32(), types.TypeAny())
+	return []hostContainer{
+		{
+			name:  "array",
+			build: func(h *types.Heap, child types.Boxed) types.Value { return newArray(h, array, child) },
+			drop:  func(v types.Value) { v.(*types.Array).SetIndex(0, types.BoxedNull) },
+		},
+		{
+			name:  "struct",
+			build: func(h *types.Heap, child types.Boxed) types.Value { return types.NewStruct(h, structure, child) },
+			drop:  func(v types.Value) { v.(*types.Struct).SetField(0, types.BoxedNull) },
+		},
+		{
+			name: "map",
+			build: func(h *types.Heap, child types.Boxed) types.Value {
+				m := types.NewMap(h, table, 0)
+				m.Store(types.BoxI32(1), child)
+				return m
+			},
+			drop: func(v types.Value) { v.(*types.Map).Store(types.BoxI32(1), types.BoxedNull) },
+		},
+	}
 }
 
 func (v *marshalBenchMethods) Bump(n int32) int32 {
@@ -2760,6 +2986,22 @@ func structGetHostLoop(repeats int32) *program.Program {
 	return prog
 }
 
+// words returns the elements of a in order.
+func words(a *types.Array) []types.Boxed {
+	out := make([]types.Boxed, a.Len())
+	for i := range out {
+		out[i] = a.Index(i)
+	}
+	return out
+}
+
+// newArray returns an array of type typ holding elems.
+func newArray(heap *types.Heap, typ *types.ArrayType, elems ...types.Boxed) *types.Array {
+	array := types.NewArray(heap, typ, 0)
+	array.Append(elems...)
+	return array
+}
+
 func TestWithHook(t *testing.T) {
 	tests := []struct {
 		name string
@@ -3023,6 +3265,51 @@ func TestWithHeap(t *testing.T) {
 }
 
 func TestWithHeapLimit(t *testing.T) {
+	t.Run("leaves every operand counted when a container allocation traps", func(t *testing.T) {
+		arr, rec := types.NewArrayType(types.TypeAny()), types.NewStructType(types.NewStructField(types.TypeAny()), types.NewStructField(types.TypeAny()))
+		tests := []struct {
+			name  string
+			limit int
+			build func(b *instr.Builder)
+		}{
+			{name: "array.new", limit: 2, build: func(b *instr.Builder) {
+				b.Emit(instr.CONST_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_NEW, 0)
+			}},
+			{name: "struct.new", limit: 2, build: func(b *instr.Builder) {
+				b.Emit(instr.CONST_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.STRUCT_NEW, 1)
+			}},
+			{name: "array.slice", limit: 3, build: func(b *instr.Builder) {
+				b.Emit(instr.CONST_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_NEW, 0)
+				b.Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SLICE)
+			}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				b := instr.NewBuilder()
+				tt.build(b)
+				code, err := b.Assemble()
+				require.NoError(t, err)
+				vm := interp.MustNew(program.New(code, program.WithConstants(types.String("s")), program.WithTypes(arr, rec)),
+					interp.WithThreshold(-1), interp.WithHeapLimit(tt.limit))
+				defer vm.Close()
+
+				require.ErrorIs(t, vm.Run(context.Background()), interp.ErrHeapExhausted)
+				text, err := vm.Const(0)
+				require.NoError(t, err)
+				for vm.Len() > 0 {
+					word, err := vm.PopBoxed()
+					require.NoError(t, err)
+					if word.Kind() == types.KindRef {
+						require.NoError(t, vm.Release(word.Ref()))
+					}
+				}
+				count, err := vm.RefCount(text.Ref())
+				require.NoError(t, err)
+				require.Equal(t, 1, count)
+			})
+		}
+	})
+
 	t.Run("rejects live heap at limit", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.REF_NEW)})
 		i := interp.MustNew(prog, interp.WithHeapLimit(1))
@@ -3049,13 +3336,13 @@ func TestWithHeapLimit(t *testing.T) {
 	})
 
 	t.Run("preserves duplicate nested constant edges", func(t *testing.T) {
-		const leafAddr = 1
-		const midAddr = 2
+		const leafAddr = 3
 
 		leaf := &trackedValue{}
-		mid := types.NewArray(types.NewArrayType(types.TypeAny()), types.BoxRef(leafAddr))
-		root := types.NewArray(types.NewArrayType(types.TypeAny()), types.BoxRef(midAddr), types.BoxRef(midAddr))
-		prog := program.New(nil, program.WithConstants(leaf, mid, root))
+		arrayType := types.NewArrayType(types.TypeAny())
+		mid := &types.ArrayLiteral{Typ: arrayType, Elems: []types.Value{leaf}}
+		root := &types.ArrayLiteral{Typ: arrayType, Elems: []types.Value{mid, mid}}
+		prog := program.New(nil, program.WithConstants(root))
 		i := interp.MustNew(prog, interp.WithHeap(4), interp.WithHeapLimit(4))
 		defer i.Close()
 
@@ -7851,7 +8138,7 @@ func TestWithThreshold(t *testing.T) {
 		sumFn := sum.MustBuild()
 		sumFn.Locals = []types.Type{types.TypeI32(), types.TypeI32()}
 
-		arr := types.NewArray(types.NewArrayType(types.TypeI32()), types.BoxI32(10), types.BoxI32(20), types.BoxI32(30), types.BoxI32(40))
+		arr := newArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(10), types.BoxI32(20), types.BoxI32(30), types.BoxI32(40))
 		b := instr.NewBuilder()
 		loop, loopDone := b.Label(), b.Label()
 		b.Bind(loop)
@@ -7985,6 +8272,51 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, wantCount, count)
 	})
 
+	t.Run("stores and overwrites null in containers as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		arr := types.NewArrayType(types.TypeAny())
+		rec := types.NewStructType(types.NewStructField(types.TypeAny()))
+		// mix stores null over a string, a string over null, and null over null in
+		// both containers, reading each element back.
+		m := instr.NewBuilder()
+		for _, at := range []uint64{0, 1, 1, 0, 1} {
+			m.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, at).Emit(instr.REF_NULL).Emit(instr.ARRAY_SET)
+			m.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, at).Emit(instr.CONST_GET, 1).Emit(instr.ARRAY_SET)
+			m.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, at).Emit(instr.ARRAY_GET).Emit(instr.DROP)
+			m.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, at).Emit(instr.REF_NULL).Emit(instr.ARRAY_SET)
+			m.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, at).Emit(instr.REF_NULL).Emit(instr.ARRAY_SET)
+			m.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, at).Emit(instr.ARRAY_GET).Emit(instr.DROP)
+		}
+		for range 2 {
+			m.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.REF_NULL).Emit(instr.STRUCT_SET)
+			m.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).Emit(instr.DROP)
+			m.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 1).Emit(instr.STRUCT_SET)
+			m.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).Emit(instr.DROP)
+		}
+		m.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.REF_NULL).Emit(instr.STRUCT_SET)
+		m.Emit(instr.RETURN)
+		body, err := m.Assemble()
+		require.NoError(t, err)
+		mix := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{arr, rec}})
+		mix.Append(body...)
+
+		b := instr.NewBuilder()
+		loop, done := b.Label(), b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2000).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.CONST_GET, 2).Emit(instr.CONST_GET, 3).Emit(instr.CONST_GET, 0).Emit(instr.CALL)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).Br(loop)
+		b.Bind(done).Emit(instr.LOCAL_GET, 0)
+		code, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(code, program.WithLocals(types.TypeI32()), program.WithTypes(arr, rec),
+			program.WithConstants(mix.MustBuild(), types.String("s"),
+				newArray(nil, arr, types.BoxedNull, types.BoxedNull), types.NewStruct(nil, rec, types.BoxedNull)))
+
+		compareNative(t, prog)
+	})
+
 	t.Run("walks a struct tree", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 
@@ -8023,7 +8355,7 @@ func TestWithThreshold(t *testing.T) {
 		})
 		at.Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.RETURN))
 		atFn := at.MustBuild()
-		arr := types.NewArray(types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
+		arr := newArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
 
 		b := instr.NewBuilder()
 		warmLoop, warmDone, start, end, catch := b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
@@ -8147,7 +8479,7 @@ func TestWithThreshold(t *testing.T) {
 		at.Bind(count).Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 8), instr.MustNew(instr.I32_GE_S)).BrIf(counted)
 		at.Append(instr.MustNew(instr.LOCAL_GET, 2), instr.MustNew(instr.I32_CONST, 1), instr.MustNew(instr.I32_ADD), instr.MustNew(instr.LOCAL_SET, 2)).Br(count)
 		at.Bind(counted).Append(instr.MustNew(instr.LOCAL_GET, 0), instr.MustNew(instr.LOCAL_GET, 1), instr.MustNew(instr.ARRAY_GET), instr.MustNew(instr.RETURN))
-		arr := types.NewArray(types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
+		arr := newArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))
 
 		b := instr.NewBuilder()
 		loop, done, live, start, end, catch, next, null, picked := b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label(), b.Label()
@@ -10157,8 +10489,332 @@ func TestWithThreshold(t *testing.T) {
 				typ := types.NewMapType(tt.key, types.TypeI32())
 				prog := mapProgram(t, typ, 128, 3000, nil, nil, mapBody(mapKey{tt.key, tt.shift, tt.wide}, tt.space, identity, identity))
 				exits := compareNative(t, prog)
-				require.Zero(t, exits["bridge"], "the map operations stay native")
+				require.LessOrEqual(t, exits["bridge"], float64(rehashes(128, 3000, 61)), "only a rehash bridges")
 				require.Zero(t, exits["deopt"])
+			})
+		}
+	})
+
+	t.Run("runs map operations natively for float keys, with -0 and +0 one key", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		for _, key := range []types.Type{types.TypeF32(), types.TypeF64()} {
+			t.Run(key.String(), func(t *testing.T) {
+				typ := types.NewMapType(key, types.TypeI32())
+				prog := mapProgram(t, typ, 128, 3000, nil, nil, mapBody(mapKey{key, 15, false}, 31, identity, identity))
+				exits := compareNative(t, prog)
+				require.LessOrEqual(t, exits["bridge"], float64(rehashes(128, 3000, 61)), "only a rehash bridges")
+				require.Zero(t, exits["deopt"])
+			})
+		}
+	})
+
+	t.Run("bridges a NaN float map key and serves it as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		for _, key := range []types.Type{types.TypeF32(), types.TypeF64()} {
+			t.Run(key.String(), func(t *testing.T) {
+				typ := types.NewMapType(key, types.TypeI32())
+				nan := func(b *instr.Builder) {
+					if key.Kind() == types.KindF32 {
+						b.Emit(instr.F32_CONST, uint64(math.Float32bits(float32(math.NaN()))))
+					} else {
+						b.Emit(instr.F64_CONST, math.Float64bits(math.NaN()))
+					}
+				}
+				prog := mapProgram(t, typ, 4096, 3000, nil, nil, func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0)
+					nan(b)
+					b.Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_SET)
+					b.Emit(instr.LOCAL_GET, 0)
+					nan(b)
+					b.Emit(instr.MAP_DELETE)
+					b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0)
+					nan(b)
+					b.Emit(instr.MAP_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+				})
+				exits := compareNative(t, prog)
+				require.Positive(t, exits["bridge"], "a NaN set leaves native code")
+				require.Zero(t, exits["deopt"])
+			})
+		}
+	})
+
+	t.Run("runs map operations natively for string keys behind refs of equal content, as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		// Two arrays name the same strings: one holds literals, the other
+		// strings string.concat built from two halves, so each key has two refs of
+		// equal content and every operation picks one of them. The strings differ
+		// in length from 1 to 20 bytes, which takes every path of the hash and of
+		// the content compare.
+		const space = 31
+		strs := types.NewArrayType(types.TypeString())
+		var constants []types.Value
+		for i := range space {
+			text := strings.Repeat("k", i%20) + strconv.Itoa(i)
+			constants = append(constants, types.String(text), types.String(text[:len(text)/2]), types.String(text[len(text)/2:]))
+		}
+		key := func(array uint64, mul uint64) func(b *instr.Builder) {
+			return func(b *instr.Builder) {
+				b.Emit(instr.LOCAL_GET, array).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, mul).Emit(instr.I32_MUL).Emit(instr.I32_CONST, space).Emit(instr.I32_REM_S).Emit(instr.ARRAY_GET)
+			}
+		}
+		typ := types.NewMapType(types.TypeString(), types.TypeI32())
+		for _, capacity := range []int{128, 4096} {
+			t.Run(strconv.Itoa(capacity), func(t *testing.T) {
+				prog := mapProgramFrom(t, typ, func(b *instr.Builder) {
+					b.Emit(instr.I32_CONST, uint64(capacity)).Emit(instr.MAP_NEW_DEFAULT, 0).Emit(instr.LOCAL_SET, 0)
+					for i := range space {
+						b.Emit(instr.CONST_GET, uint64(3*i))
+					}
+					b.Emit(instr.I32_CONST, space).Emit(instr.ARRAY_NEW, 1).Emit(instr.LOCAL_SET, 3)
+					for i := range space {
+						b.Emit(instr.CONST_GET, uint64(3*i+1)).Emit(instr.CONST_GET, uint64(3*i+2)).Emit(instr.STRING_CONCAT)
+					}
+					b.Emit(instr.I32_CONST, space).Emit(instr.ARRAY_NEW, 1).Emit(instr.LOCAL_SET, 4)
+				}, 3000, constants, []types.Type{strs, strs}, func(b *instr.Builder) {
+					skip, hit, next := b.Label(), b.Label(), b.Label()
+					b.Emit(instr.LOCAL_GET, 0)
+					key(3, 37)(b)
+					b.Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_SET)
+
+					b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 3).Emit(instr.I32_REM_S).BrIf(skip)
+					b.Emit(instr.LOCAL_GET, 0)
+					key(4, 5)(b)
+					b.Emit(instr.MAP_DELETE)
+					b.Bind(skip)
+
+					b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0)
+					key(4, 11)(b)
+					b.Emit(instr.MAP_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+
+					b.Emit(instr.LOCAL_GET, 0)
+					key(3, 13)(b)
+					b.Emit(instr.MAP_LOOKUP).BrIf(hit)
+					b.Emit(instr.DROP).Br(next)
+					b.Bind(hit)
+					b.Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+					b.Bind(next)
+				}, strs)
+				exits := compareNative(t, prog)
+				require.LessOrEqual(t, exits["bridge"], float64(rehashes(capacity, 3000, space)), "only a rehash bridges")
+				require.Zero(t, exits["deopt"])
+			})
+		}
+	})
+
+	t.Run("runs map operations natively for literal string keys against keys built at run time, as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		// Each key is a literal and the same text string.concat built from two
+		// halves, so a literal stored is probed through the built key and the
+		// reverse, in a string map and in an any map. The lengths take every path
+		// of the hash and of the content compare.
+		lengths := []int{1, 3, 8, 17, 20}
+		var constants []types.Value
+		for i, n := range lengths {
+			text := strings.Repeat("k", n-1) + strconv.Itoa(i)[:1]
+			constants = append(constants, types.String(text), types.String(text[:len(text)/2]), types.String(text[len(text)/2:]))
+		}
+		body := func(b *instr.Builder) {
+			built := func(j int) {
+				b.Emit(instr.CONST_GET, uint64(3*j+1)).Emit(instr.CONST_GET, uint64(3*j+2)).Emit(instr.STRING_CONCAT)
+			}
+			for j := range lengths {
+				skip, hit, next := b.Label(), b.Label(), b.Label()
+				// A literal key stored is probed through the built key.
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, uint64(3*j)).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_SET)
+				b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0)
+				built(j)
+				b.Emit(instr.MAP_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+				// A built key stored is probed through the literal.
+				b.Emit(instr.LOCAL_GET, 0)
+				built(j)
+				b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 2).Emit(instr.I32_ADD).Emit(instr.MAP_SET)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, uint64(3*j)).Emit(instr.MAP_LOOKUP).BrIf(hit)
+				b.Emit(instr.DROP).Br(next)
+				b.Bind(hit)
+				b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+				b.Bind(next)
+				// Every third iteration leaves the literal deleted.
+				b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 3).Emit(instr.I32_REM_S).BrIf(skip)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, uint64(3*j)).Emit(instr.MAP_DELETE)
+				b.Bind(skip)
+			}
+		}
+		for name, key := range map[string]types.Type{"string": types.TypeString(), "any": types.TypeAny()} {
+			t.Run(name, func(t *testing.T) {
+				exits := compareNative(t, mapProgram(t, types.NewMapType(key, types.TypeI32()), 128, 3000, constants, nil, body))
+				require.Zero(t, exits["deopt"])
+			})
+		}
+	})
+
+	t.Run("runs map operations natively for any keys of every kind, as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		// Two arrays of any hold the keys: strings (a literal and one string.concat
+		// built, so two refs of equal content), the integers below space, -0 and +0,
+		// 1.5, and a struct (each array its own, so another key). A set through an
+		// i32 operand lands on the same keys as the integers.
+		const space = 20
+		const count = 2*space + 3
+		anys := types.NewArrayType(types.TypeAny())
+		shape := types.NewStructType(types.NewStructField(types.TypeI32()))
+		var constants []types.Value
+		for i := range space {
+			text := strings.Repeat("k", i%12) + strconv.Itoa(i)
+			constants = append(constants, types.String(text), types.String(text[:len(text)/2]), types.String(text[len(text)/2:]))
+		}
+		key := func(array uint64, mul uint64) func(b *instr.Builder) {
+			return func(b *instr.Builder) {
+				b.Emit(instr.LOCAL_GET, array).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, mul).Emit(instr.I32_MUL).Emit(instr.I32_CONST, count).Emit(instr.I32_REM_S).Emit(instr.ARRAY_GET)
+			}
+		}
+		typ := types.NewMapType(types.TypeAny(), types.TypeI32())
+		for _, capacity := range []int{128, 4096} {
+			t.Run(strconv.Itoa(capacity), func(t *testing.T) {
+				prog := mapProgramFrom(t, typ, func(b *instr.Builder) {
+					b.Emit(instr.I32_CONST, uint64(capacity)).Emit(instr.MAP_NEW_DEFAULT, 0).Emit(instr.LOCAL_SET, 0)
+					for i := range space {
+						b.Emit(instr.CONST_GET, uint64(3*i))
+					}
+					for i := range space {
+						b.Emit(instr.I32_CONST, uint64(i))
+					}
+					b.Emit(instr.F64_CONST, 1<<63).Emit(instr.F64_CONST, math.Float64bits(1.5)).Emit(instr.STRUCT_NEW_DEFAULT, 2)
+					b.Emit(instr.I32_CONST, count).Emit(instr.ARRAY_NEW, 1).Emit(instr.LOCAL_SET, 3)
+					for i := range space {
+						b.Emit(instr.CONST_GET, uint64(3*i+1)).Emit(instr.CONST_GET, uint64(3*i+2)).Emit(instr.STRING_CONCAT)
+					}
+					for i := range space {
+						b.Emit(instr.I32_CONST, uint64(i))
+					}
+					b.Emit(instr.F64_CONST, 0).Emit(instr.F64_CONST, math.Float64bits(1.5)).Emit(instr.STRUCT_NEW_DEFAULT, 2)
+					b.Emit(instr.I32_CONST, count).Emit(instr.ARRAY_NEW, 1).Emit(instr.LOCAL_SET, 4)
+				}, 3000, constants, []types.Type{anys, anys}, func(b *instr.Builder) {
+					skip, hit, next := b.Label(), b.Label(), b.Label()
+					b.Emit(instr.LOCAL_GET, 0)
+					key(3, 37)(b)
+					b.Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_SET)
+
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 5).Emit(instr.I32_REM_S).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_SET)
+
+					b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 3).Emit(instr.I32_REM_S).BrIf(skip)
+					b.Emit(instr.LOCAL_GET, 0)
+					key(4, 5)(b)
+					b.Emit(instr.MAP_DELETE)
+					b.Bind(skip)
+
+					b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0)
+					key(4, 11)(b)
+					b.Emit(instr.MAP_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+
+					b.Emit(instr.LOCAL_GET, 0)
+					key(3, 13)(b)
+					b.Emit(instr.MAP_LOOKUP).BrIf(hit)
+					b.Emit(instr.DROP).Br(next)
+					b.Bind(hit)
+					b.Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+					b.Bind(next)
+				}, anys, shape)
+				exits := compareNative(t, prog)
+				require.LessOrEqual(t, exits["bridge"], float64(rehashes(capacity, 3000, count)), "only a rehash bridges")
+				require.Zero(t, exits["deopt"])
+			})
+		}
+	})
+
+	t.Run("bridges a key no string map accepts and traps as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		typ := types.NewMapType(types.TypeString(), types.TypeI32())
+		for _, tt := range []struct {
+			name string
+			key  func(b *instr.Builder)
+		}{
+			{"a scalar", func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1) }},
+			{"an array", func(b *instr.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW, 1) }},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				// The last iteration deletes the bad key, so native code runs first.
+				prog := mapProgramFrom(t, typ, func(b *instr.Builder) {
+					b.Emit(instr.I32_CONST, 128).Emit(instr.MAP_NEW_DEFAULT, 0).Emit(instr.LOCAL_SET, 0)
+				}, 3000, []types.Value{types.String("a")}, nil, func(b *instr.Builder) {
+					skip := b.Label()
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_SET)
+					b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 2999).Emit(instr.I32_NE).BrIf(skip)
+					b.Emit(instr.LOCAL_GET, 0)
+					tt.key(b)
+					b.Emit(instr.MAP_DELETE)
+					b.Bind(skip)
+				}, types.NewArrayType(types.TypeI32()))
+				threaded := interp.MustNew(prog, interp.WithThreshold(-1))
+				defer threaded.Close()
+				require.ErrorIs(t, threaded.Run(context.Background()), interp.ErrTypeMismatch)
+
+				profiler := prof.New()
+				vm := interp.MustNew(prog, interp.WithThreshold(1), interp.WithProfiler(profiler))
+				defer vm.Close()
+				poll(t, func() bool {
+					require.ErrorIs(t, vm.Run(context.Background()), interp.ErrTypeMismatch)
+					vm.Reset()
+					vm.Flush()
+					return nativeEntries(profiler) > 0
+				})
+			})
+		}
+	})
+
+	t.Run("bridges an i64 map key beyond the inline range and serves it as threaded does", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		typ := types.NewMapType(types.TypeI64(), types.TypeI32())
+		bridges := func(wide bool) float64 {
+			prog := mapProgram(t, typ, 128, 3000, nil, nil, mapBody(mapKey{types.TypeI64(), 0, wide}, 61, identity, identity))
+			return compareNative(t, prog)["bridge"]
+		}
+		require.Greater(t, bridges(true), bridges(false), "a wide key leaves native code for the interpreter")
+	})
+
+	t.Run("lists map keys in insertion order natively", func(t *testing.T) {
+		testenv.MustHaveJIT(t)
+
+		for _, key := range []types.Type{types.TypeI32(), types.TypeI8()} {
+			t.Run(key.String(), func(t *testing.T) {
+				mapType := types.NewMapType(key, types.TypeI32())
+				fn := types.NewFunctionBuilder(&types.FunctionType{Params: []types.Type{mapType}, Returns: []types.Type{types.NewArrayType(key)}})
+				fn.Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_CLEAR)
+				for _, k := range []uint64{3, 1, 2} {
+					fn.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, k).Emit(instr.I32_CONST, k).Emit(instr.MAP_SET)
+				}
+				fn.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 3).Emit(instr.MAP_DELETE)
+				fn.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 3).Emit(instr.I32_CONST, 30).Emit(instr.MAP_SET)
+				fn.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_CONST, 10).Emit(instr.MAP_SET)
+				fn.Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_KEYS).Emit(instr.RETURN)
+
+				b := program.NewBuilder()
+				b.Locals(mapType, types.TypeI32())
+				call := b.Const(fn.MustBuild())
+				loop, done := b.Label(), b.Label()
+				b.Emit(instr.I32_CONST, 0).Emit(instr.MAP_NEW_DEFAULT, uint64(b.Type(mapType))).Emit(instr.LOCAL_SET, 0)
+				b.Bind(loop)
+				b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 300).Emit(instr.I32_GE_S).BrIf(done)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, uint64(call)).Emit(instr.CALL).Emit(instr.DROP)
+				b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).Br(loop)
+				b.Bind(done)
+				b.Emit(instr.LOCAL_GET, 0).Emit(instr.CONST_GET, uint64(call)).Emit(instr.CALL)
+				prog := b.MustBuild()
+				require.NoError(t, program.Verify(prog))
+
+				want := runProgram(t, prog)
+				box := types.BoxI32
+				if key.Kind() == types.KindI8 {
+					box = func(v int32) types.Boxed { return types.BoxI8(int8(v)) }
+				}
+				require.Equal(t, []types.Boxed{box(1), box(2), box(3)}, words(want.(*types.Array)))
+				compareNative(t, prog)
 			})
 		}
 	})
@@ -10178,7 +10834,7 @@ func TestWithThreshold(t *testing.T) {
 				typ := types.NewMapType(types.TypeI32(), tt.elem)
 				prog := mapProgram(t, typ, 128, 3000, nil, nil, mapBody(mapKey{types.TypeI32(), 0, false}, 61, tt.in, tt.out))
 				exits := compareNative(t, prog)
-				require.Zero(t, exits["bridge"], "the map operations stay native")
+				require.LessOrEqual(t, exits["bridge"], float64(rehashes(128, 3000, 61)), "only a rehash bridges")
 			})
 		}
 	})
@@ -10235,7 +10891,7 @@ func TestWithThreshold(t *testing.T) {
 					b.Bind(next)
 				})
 				exits := compareNative(t, prog)
-				require.Zero(t, exits["bridge"], "the map operations stay native")
+				require.LessOrEqual(t, exits["bridge"], float64(rehashes(128, 3000, 61)), "only a rehash bridges")
 			})
 		}
 	})
@@ -10248,9 +10904,9 @@ func TestWithThreshold(t *testing.T) {
 			key    types.Type
 			actual types.Value
 		}{
-			{"a generic map", types.TypeI32(), types.NewMap(types.NewMapType(types.TypeI32(), types.TypeI32()))},
-			{"another key kind", types.TypeI32(), types.NewTypedMap[int8](types.NewMapType(types.TypeI8(), types.TypeI32()), 0)},
-			{"a wider key kind", types.TypeI8(), types.NewTypedMap[int32](types.NewMapType(types.TypeI32(), types.TypeI32()), 0)},
+			{"another element kind", types.TypeI32(), types.NewMap(nil, types.NewMapType(types.TypeI32(), types.TypeF64()), 0)},
+			{"another key kind", types.TypeI32(), types.NewMap(nil, types.NewMapType(types.TypeI8(), types.TypeI32()), 0)},
+			{"a wider key kind", types.TypeI8(), types.NewMap(nil, types.NewMapType(types.TypeI32(), types.TypeI32()), 0)},
 		} {
 			t.Run(tt.name, func(t *testing.T) {
 				typ := types.NewMapType(tt.key, types.TypeI32())
@@ -10266,7 +10922,7 @@ func TestWithThreshold(t *testing.T) {
 	t.Run("keeps ownership of a map read through a local declared with another element kind", func(t *testing.T) {
 		testenv.MustHaveJIT(t)
 
-		// One TypedMap[int32] of map[i32]string sits in two locals, the second
+		// One map[i32]string sits in two locals, the second
 		// declared map[i32]i32 (the verifier admits both through CONST_GET). The
 		// key kind alone would admit the second local's map.set, which would then
 		// overwrite a string reference without releasing it.
@@ -10289,7 +10945,7 @@ func TestWithThreshold(t *testing.T) {
 		prog := program.New(code,
 			program.WithLocals(strMap, types.TypeI32(), types.TypeI32(), intMap),
 			program.WithTypes(strMap, intMap),
-			program.WithConstants(types.NewTypedMap[int32](strMap, 0), types.String("a"), types.String("bb")))
+			program.WithConstants(types.NewMap(nil, strMap, 0), types.String("a"), types.String("bb")))
 		exits := compareNative(t, prog)
 		require.Positive(t, exits["deopt"], "the guard refuses the map declared with another element kind")
 	})
@@ -10412,6 +11068,47 @@ func TestNew(t *testing.T) {
 		require.Nil(t, i)
 	})
 
+	t.Run("rejects a container constant holding a reference", func(t *testing.T) {
+		other := interp.MustNew(program.New(nil))
+		defer other.Close()
+		mapType := types.NewMapType(types.TypeString(), types.TypeI32())
+		foreign := types.NewMap(other.Heap(), mapType, 0)
+		key := other.Heap().Add(types.String("k"))
+		foreign.Store(types.BoxRef(key), types.BoxI32(1))
+		structType := types.NewStructType(types.NewStructField(types.TypeAny()))
+		array := types.NewArray(nil, types.NewArrayType(types.TypeAny()), 0)
+		array.Append(types.BoxRef(3))
+
+		t.Run("map", func(t *testing.T) {
+			// A rejection must leave the source heap as it found it, so the
+			// same constant is refused every time without releasing its key.
+			for range 3 {
+				i, err := interp.New(program.New(nil, program.WithConstants(foreign)))
+				require.ErrorIs(t, err, program.ErrConstantRef)
+				require.Nil(t, i)
+				require.Equal(t, 1, other.Heap().Count(key))
+			}
+		})
+		for name, constant := range map[string]types.Value{
+			"array":         array,
+			"struct":        types.NewStruct(nil, structType, types.BoxRef(3)),
+			"bound to heap": types.NewArray(other.Heap(), types.NewArrayType(types.TypeAny()), 2),
+		} {
+			t.Run(name, func(t *testing.T) {
+				i, err := interp.New(program.New(nil, program.WithConstants(constant)))
+				require.ErrorIs(t, err, program.ErrConstantRef)
+				require.Nil(t, i)
+			})
+		}
+	})
+
+	t.Run("loads a container constant of nulls", func(t *testing.T) {
+		array := types.NewArray(nil, types.NewArrayType(types.TypeAny()), 2)
+		i, err := interp.New(program.New(nil, program.WithConstants(array)))
+		require.NoError(t, err)
+		require.NoError(t, i.Close())
+	})
+
 	t.Run("runs a program", func(t *testing.T) {
 		i := interp.MustNew(program.New([]instr.Instruction{instr.MustNew(instr.I32_CONST, 5)}))
 		defer i.Close()
@@ -10498,6 +11195,273 @@ func TestNew(t *testing.T) {
 }
 
 func TestInterpreter_Run(t *testing.T) {
+	t.Run("binds a constant container to its heap", func(t *testing.T) {
+		arr, rec := types.NewArrayType(types.TypeAny()), types.NewStructType(types.NewStructField(types.TypeAny()))
+		tests := []struct {
+			name     string
+			constant types.Value
+			build    func(b *instr.Builder)
+		}{
+			{name: "array", constant: newArray(nil, arr, types.BoxedNull), build: func(b *instr.Builder) {
+				b.Emit(instr.CONST_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_FILL)
+			}},
+			{name: "struct", constant: types.NewStruct(nil, rec, types.BoxedNull), build: func(b *instr.Builder) {
+				b.Emit(instr.CONST_GET, 0).Emit(instr.DUP).Emit(instr.I32_CONST, 0).Emit(instr.CONST_GET, 1).Emit(instr.STRUCT_SET)
+				b.Emit(instr.I32_CONST, 0).Emit(instr.REF_NULL).Emit(instr.STRUCT_SET)
+			}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				b := instr.NewBuilder()
+				tt.build(b)
+				code, err := b.Assemble()
+				require.NoError(t, err)
+				vm := interp.MustNew(program.New(code, program.WithConstants(tt.constant, types.String("s")), program.WithTypes(arr, rec)),
+					interp.WithThreshold(-1))
+				defer vm.Close()
+
+				require.NoError(t, vm.Run(context.Background()))
+			})
+		}
+	})
+
+	t.Run("leaves every operand with the stack when struct.new traps on a field", func(t *testing.T) {
+		tests := []struct {
+			name  string
+			typ   *types.StructType
+			first func(b *instr.Builder)
+		}{
+			{name: "after a reference field", typ: types.NewStructType(types.NewStructField(types.TypeAny()), types.NewStructField(types.TypeI64())),
+				first: func(b *instr.Builder) { b.Emit(instr.CONST_GET, 0) }},
+			{name: "after a wide i64 field", typ: types.NewStructType(types.NewStructField(types.TypeI64()), types.NewStructField(types.TypeI64())),
+				first: func(b *instr.Builder) { b.Emit(instr.I64_CONST, uint64(math.MaxInt64)) }},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				b := instr.NewBuilder()
+				tt.first(b)
+				code, err := b.Emit(instr.CONST_GET, 0).Emit(instr.STRUCT_NEW, 0).Assemble()
+				require.NoError(t, err)
+				vm := interp.MustNew(program.New(code, program.WithConstants(types.String("s")), program.WithTypes(tt.typ)),
+					interp.WithThreshold(-1))
+				defer vm.Close()
+
+				require.ErrorIs(t, vm.Run(context.Background()), interp.ErrTypeMismatch)
+				for vm.Len() > 0 {
+					word, err := vm.PopBoxed()
+					require.NoError(t, err)
+					if word.Kind() == types.KindRef {
+						require.NoError(t, vm.Release(word.Ref()))
+					}
+				}
+				heap := vm.Heap()
+				for addr := 1; addr < heap.Len(); addr++ {
+					require.NotContains(t, []string{"*types.Struct", "types.I64"}, fmt.Sprintf("%T", heap.At(addr)), "slot %d leaks", addr)
+				}
+			})
+		}
+	})
+
+	t.Run("slices a host array without leaking its elements", func(t *testing.T) {
+		code, err := instr.NewBuilder().Emit(instr.GLOBAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SLICE).Emit(instr.DROP).Assemble()
+		require.NoError(t, err)
+		vm := interp.MustNew(program.New(code, program.WithGlobals(types.TypeAny())), interp.WithThreshold(-1))
+		defer vm.Close()
+		names := []string{"a", "b"}
+		view, err := interp.NewRegistry().Marshal(vm, &names)
+		require.NoError(t, err)
+		require.IsType(t, &interp.HostArray{}, view)
+		addr, err := vm.Alloc(view)
+		require.NoError(t, err)
+		require.NoError(t, vm.SetGlobal(0, types.BoxRef(addr)))
+
+		require.NoError(t, vm.Run(context.Background()))
+		for slot := 1; slot < vm.HeapLen(); slot++ {
+			if slot == addr {
+				continue
+			}
+			if count, err := vm.RefCount(slot); err == nil {
+				require.Zero(t, count, "slot %d leaks", slot)
+			}
+		}
+	})
+
+	t.Run("finishes a container store before a replaced closer runs", func(t *testing.T) {
+		arr, rec := types.NewArrayType(types.TypeAny()), types.NewStructType(types.NewStructField(types.TypeAny()))
+		tests := []struct {
+			name  string
+			code  func(b *instr.Builder)
+			build func(vm *interp.Interpreter, closer types.Boxed) types.Value
+		}{
+			{
+				name: "struct.set",
+				code: func(b *instr.Builder) {
+					b.Emit(instr.GLOBAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.REF_NULL).Emit(instr.STRUCT_SET)
+				},
+				build: func(vm *interp.Interpreter, closer types.Boxed) types.Value {
+					return types.NewStruct(vm.Heap(), rec, closer)
+				},
+			},
+			{
+				name: "array.copy",
+				code: func(b *instr.Builder) {
+					b.Emit(instr.GLOBAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.GLOBAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_COPY)
+				},
+				build: func(vm *interp.Interpreter, closer types.Boxed) types.Value {
+					return newArray(vm.Heap(), arr, closer)
+				},
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				b := instr.NewBuilder()
+				tt.code(b)
+				code, err := b.Assemble()
+				require.NoError(t, err)
+				vm := interp.MustNew(program.New(code, program.WithGlobals(types.TypeAny(), types.TypeAny()), program.WithTypes(arr, rec)), interp.WithThreshold(-1))
+				defer vm.Close()
+
+				var holder int
+				var seen types.Boxed
+				closer := &observerCloser{observe: func() {
+					value, err := vm.Load(holder)
+					require.NoError(t, err)
+					switch value := value.(type) {
+					case *types.Struct:
+						seen = value.Field(0)
+					case *types.Array:
+						seen = value.Index(0)
+					}
+				}}
+				closerAddr, err := vm.Alloc(closer)
+				require.NoError(t, err)
+				holder, err = vm.Alloc(tt.build(vm, types.BoxRef(closerAddr)))
+				require.NoError(t, err)
+				require.NoError(t, vm.SetGlobal(0, types.BoxRef(holder)))
+				source, err := vm.Alloc(newArray(vm.Heap(), arr, types.BoxedNull))
+				require.NoError(t, err)
+				require.NoError(t, vm.SetGlobal(1, types.BoxRef(source)))
+
+				require.NoError(t, vm.Run(context.Background()))
+				require.Equal(t, 1, closer.closed)
+				require.Equal(t, types.BoxedNull, seen)
+			})
+		}
+	})
+
+	t.Run("keeps container reference counts exact", func(t *testing.T) {
+		arr, rec := types.NewArrayType(types.TypeAny()), types.NewStructType(types.NewStructField(types.TypeAny()), types.NewStructField(types.TypeI32()))
+		str := func(b *instr.Builder) *instr.Builder { return b.Emit(instr.CONST_GET, 0) }
+		// two builds a two-element array of the constant string.
+		two := func(b *instr.Builder) *instr.Builder {
+			return str(str(b)).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_NEW, 0)
+		}
+		// pair builds a struct holding the constant string and 7.
+		pair := func(b *instr.Builder) *instr.Builder {
+			return str(b).Emit(instr.I32_CONST, 7).Emit(instr.STRUCT_NEW, 1)
+		}
+		tests := []struct {
+			name  string
+			build func(b *instr.Builder)
+			// The constant string ends with its one reference and every other slot at zero.
+			err error
+		}{
+			{name: "array.new", build: func(b *instr.Builder) { two(b) }},
+			{name: "array.new_default", build: func(b *instr.Builder) { b.Emit(instr.I32_CONST, 3).Emit(instr.ARRAY_NEW_DEFAULT, 0) }},
+			{name: "array.get", build: func(b *instr.Builder) { two(b).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_GET) }},
+			{name: "array.get out of range", err: interp.ErrIndexOutOfRange, build: func(b *instr.Builder) { two(b).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_GET) }},
+			{name: "array.set", build: func(b *instr.Builder) {
+				two(b).Emit(instr.DUP).Emit(instr.I32_CONST, 0).Emit(instr.REF_NULL).Emit(instr.ARRAY_SET)
+			}},
+			{name: "array.set overwrites null", build: func(b *instr.Builder) {
+				b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.DUP).Emit(instr.I32_CONST, 0)
+				str(b).Emit(instr.ARRAY_SET)
+			}},
+			{name: "array.set out of range", err: interp.ErrIndexOutOfRange, build: func(b *instr.Builder) {
+				two(b).Emit(instr.I32_CONST, 2)
+				str(b).Emit(instr.ARRAY_SET)
+			}},
+			{name: "array.fill", build: func(b *instr.Builder) {
+				two(b).Emit(instr.DUP).Emit(instr.I32_CONST, 0)
+				str(b).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_FILL)
+			}},
+			{name: "array.fill out of range", err: interp.ErrIndexOutOfRange, build: func(b *instr.Builder) {
+				two(b).Emit(instr.I32_CONST, 1)
+				str(b).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_FILL)
+			}},
+			{name: "array.copy", build: func(b *instr.Builder) {
+				two(b).Emit(instr.I32_CONST, 0)
+				b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_COPY)
+			}},
+			{name: "array.copy within one array", build: func(b *instr.Builder) {
+				two(b).Emit(instr.DUP).Emit(instr.I32_CONST, 1).Emit(instr.SWAP).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_COPY)
+			}},
+			{name: "array.copy out of range", err: interp.ErrIndexOutOfRange, build: func(b *instr.Builder) {
+				two(b).Emit(instr.I32_CONST, 0)
+				two(b).Emit(instr.I32_CONST, 1).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_COPY)
+			}},
+			{name: "array.append", build: func(b *instr.Builder) {
+				two(b)
+				str(b).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_APPEND)
+			}},
+			{name: "array.delete", build: func(b *instr.Builder) { two(b).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_DELETE) }},
+			{name: "array.delete out of range", err: interp.ErrIndexOutOfRange, build: func(b *instr.Builder) { two(b).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_DELETE) }},
+			{name: "array.slice", build: func(b *instr.Builder) {
+				two(b).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SLICE)
+			}},
+			{name: "array.slice out of range", err: interp.ErrIndexOutOfRange, build: func(b *instr.Builder) {
+				two(b).Emit(instr.I32_CONST, 1).Emit(instr.I32_CONST, 3).Emit(instr.ARRAY_SLICE)
+			}},
+			{name: "struct.new", build: func(b *instr.Builder) { pair(b) }},
+			{name: "struct.new_default", build: func(b *instr.Builder) { b.Emit(instr.STRUCT_NEW_DEFAULT, 1) }},
+			{name: "struct.get", build: func(b *instr.Builder) { pair(b).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET) }},
+			{name: "struct.set", build: func(b *instr.Builder) {
+				pair(b).Emit(instr.DUP).Emit(instr.I32_CONST, 0).Emit(instr.REF_NULL).Emit(instr.STRUCT_SET)
+			}},
+			{name: "struct.set overwrites null", build: func(b *instr.Builder) {
+				b.Emit(instr.STRUCT_NEW_DEFAULT, 1).Emit(instr.DUP).Emit(instr.I32_CONST, 0)
+				str(b).Emit(instr.STRUCT_SET)
+			}},
+			{name: "struct.set out of range", err: interp.ErrSegmentationFault, build: func(b *instr.Builder) {
+				pair(b).Emit(instr.I32_CONST, 2)
+				str(b).Emit(instr.STRUCT_SET)
+			}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				b := instr.NewBuilder()
+				tt.build(b)
+				code, err := b.Assemble()
+				require.NoError(t, err)
+				vm := interp.MustNew(program.New(code, program.WithConstants(types.String("s")), program.WithTypes(arr, rec)), interp.WithThreshold(-1))
+				defer vm.Close()
+				text, err := vm.Const(0)
+				require.NoError(t, err)
+
+				require.ErrorIs(t, vm.Run(context.Background()), tt.err)
+				for vm.Len() > 0 {
+					word, err := vm.PopBoxed()
+					require.NoError(t, err)
+					if word.Kind() == types.KindRef {
+						require.NoError(t, vm.Release(word.Ref()))
+					}
+				}
+
+				got, err := vm.RefCount(text.Ref())
+				require.NoError(t, err)
+				require.Equal(t, 1, got)
+				for addr := 1; addr < vm.HeapLen(); addr++ {
+					if addr == text.Ref() {
+						continue
+					}
+					if count, err := vm.RefCount(addr); err == nil {
+						require.Zero(t, count, "slot %d leaks", addr)
+					}
+				}
+			})
+		}
+	})
+
 	t.Run("records the frames of its first raise on a caught Error", func(t *testing.T) {
 		throws := func(t *testing.T) *types.Function {
 			b := instr.NewBuilder()
@@ -10759,6 +11723,275 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, types.BoxI32(3), got)
 	})
 
+	t.Run("returns a wide i64 key of an any map as the i64 it was", func(t *testing.T) {
+		mapType := types.NewMapType(types.TypeAny(), types.TypeI32())
+		b := program.NewBuilder()
+		b.Locals(types.NewArrayType(types.TypeAny()))
+		b.Emit(instr.I64_CONST, 5).Emit(instr.I32_CONST, 1).Emit(instr.I64_CONST, 1<<50).Emit(instr.I32_CONST, 2).Emit(instr.I32_CONST, 2).Emit(instr.MAP_NEW, uint64(b.Type(mapType)))
+		b.Emit(instr.MAP_KEYS).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_GET)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+
+		vm := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer vm.Close()
+		require.NoError(t, vm.Run(context.Background()))
+		wide, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I64(1<<50), wide)
+		inline, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I64(5), inline)
+	})
+
+	t.Run("map.new leaves every count exact when a later allocation traps", func(t *testing.T) {
+		mapType := types.NewMapType(types.TypeAny(), types.TypeAny())
+		fn := types.NewFunctionBuilder(&types.FunctionType{}).Append(
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I32_CONST, 2),
+			instr.MustNew(instr.I64_CONST, 1<<50), instr.MustNew(instr.DUP), instr.MustNew(instr.I32_CONST, 3),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.MAP_NEW, 0), instr.MustNew(instr.DROP),
+			instr.MustNew(instr.RETURN),
+		).MustBuild()
+		for limit := 3; limit <= 14; limit++ {
+			t.Run(fmt.Sprintf("heap limit %d", limit), func(t *testing.T) {
+				prog := program.New(nil, program.WithConstants(types.String("a")), program.WithTypes(mapType))
+				vm, err := interp.New(prog, interp.WithThreshold(-1), interp.WithHeapLimit(limit))
+				require.NoError(t, err)
+				defer vm.Close()
+				var call func() error
+				if err := interp.NewRegistry().Unmarshal(vm, fn, &call); err != nil {
+					t.Skip("heap too small to bind the call")
+				}
+				if err := call(); err != nil {
+					t.Logf("limit %d: %v", limit, err)
+					require.ErrorIs(t, err, interp.ErrHeapExhausted)
+				}
+				_, counts := heapOf(vm)
+				require.Equal(t, 1, counts[0], "the constant a")
+				for addr, count := range counts[1:] {
+					require.Zero(t, count, "address %d", addr+2)
+				}
+			})
+		}
+	})
+
+	t.Run("map.keys leaves every count exact when a later allocation traps", func(t *testing.T) {
+		mapType := types.NewMapType(types.TypeAny(), types.TypeI32())
+		fn := types.NewFunctionBuilder(&types.FunctionType{}).Append(
+			instr.MustNew(instr.CONST_GET, 0), instr.MustNew(instr.I32_CONST, 1),
+			instr.MustNew(instr.I64_CONST, 1<<50), instr.MustNew(instr.I32_CONST, 2),
+			instr.MustNew(instr.I64_CONST, 1<<51), instr.MustNew(instr.I32_CONST, 3),
+			instr.MustNew(instr.I32_CONST, 3), instr.MustNew(instr.MAP_NEW, 0),
+			instr.MustNew(instr.MAP_KEYS), instr.MustNew(instr.DROP), instr.MustNew(instr.RETURN),
+		).MustBuild()
+		for limit := 3; limit <= 14; limit++ {
+			t.Run(fmt.Sprintf("heap limit %d", limit), func(t *testing.T) {
+				prog := program.New(nil, program.WithConstants(types.String("a")), program.WithTypes(mapType))
+				vm, err := interp.New(prog, interp.WithThreshold(-1), interp.WithHeapLimit(limit))
+				require.NoError(t, err)
+				defer vm.Close()
+				var call func() error
+				if err := interp.NewRegistry().Unmarshal(vm, fn, &call); err != nil {
+					t.Skip("heap too small to bind the call")
+				}
+				if err := call(); err != nil {
+					t.Logf("limit %d: %v", limit, err)
+					require.ErrorIs(t, err, interp.ErrHeapExhausted)
+				}
+				_, counts := heapOf(vm)
+				require.Equal(t, 1, counts[0], "the constant a")
+				for addr, count := range counts[1:] {
+					require.Zero(t, count, "address %d", addr+2)
+				}
+			})
+		}
+	})
+
+	t.Run("map.iter over a host map view leaves the view's count when a later allocation traps", func(t *testing.T) {
+		typ := types.NewMapType(types.TypeString(), types.TypeString())
+		fn := types.NewFunctionBuilder(&types.FunctionType{}).Append(
+			instr.MustNew(instr.GLOBAL_GET, 0), instr.MustNew(instr.MAP_ITER), instr.MustNew(instr.DROP), instr.MustNew(instr.RETURN),
+		).MustBuild()
+		for limit := 2; limit <= 8; limit++ {
+			t.Run(fmt.Sprintf("heap limit %d", limit), func(t *testing.T) {
+				vm, err := interp.New(program.New(nil, program.WithGlobals(typ)), interp.WithThreshold(-1), interp.WithHeapLimit(limit))
+				require.NoError(t, err)
+				defer vm.Close()
+				value, err := interp.NewRegistry().Marshal(vm, map[string]string{"a": "x"})
+				require.NoError(t, err)
+				addr, err := vm.Alloc(value)
+				if err != nil {
+					t.Skip("heap too small to alloc")
+				}
+				require.NoError(t, vm.SetGlobal(0, types.BoxRef(addr)))
+				var call func() error
+				if err := interp.NewRegistry().Unmarshal(vm, fn, &call); err != nil {
+					t.Skip("heap too small to bind the call")
+				}
+				if err := call(); err != nil {
+					t.Logf("limit %d: %v", limit, err)
+					require.ErrorIs(t, err, interp.ErrHeapExhausted)
+				}
+				count, err := vm.RefCount(addr)
+				require.NoError(t, err)
+				require.Equal(t, 1, count)
+			})
+		}
+	})
+
+	t.Run("keeps a string constant a map literal also holds as a key after the map deletes it", func(t *testing.T) {
+		b := program.NewBuilder()
+		b.ConstGet(&types.MapLiteral{
+			Typ:    types.NewMapType(types.TypeString(), types.TypeI32()),
+			Keys:   []types.Value{types.String("a")},
+			Values: []types.Value{types.I32(1)},
+		})
+		b.ConstGet(types.String("a")).Emit(instr.MAP_DELETE)
+		b.ConstGet(types.String("a")).Emit(instr.STRING_LEN)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+
+		vm := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer vm.Close()
+		require.NoError(t, vm.Run(context.Background()))
+		got, err := vm.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1), got)
+	})
+
+	t.Run("runs a map constant whose repeated key keeps its first place and last value", func(t *testing.T) {
+		b := program.NewBuilder()
+		literal := b.Const(&types.MapLiteral{
+			Typ:    types.NewMapType(types.TypeString(), types.TypeI32()),
+			Keys:   []types.Value{types.String("a"), types.String("b"), types.String("a")},
+			Values: []types.Value{types.I32(1), types.I32(2), types.I32(3)},
+		})
+		b.Emit(instr.CONST_GET, uint64(literal)).Emit(instr.MAP_KEYS).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET)
+		b.Emit(instr.CONST_GET, uint64(literal)).Emit(instr.MAP_LEN)
+		b.Emit(instr.CONST_GET, uint64(literal)).ConstGet(types.String("a")).Emit(instr.MAP_GET)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+
+		vm := interp.MustNew(prog, interp.WithThreshold(-1))
+		defer vm.Close()
+		require.NoError(t, vm.Run(context.Background()))
+		for _, want := range []types.Value{types.I32(3), types.I32(2), types.String("a")} {
+			got, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		}
+	})
+
+	t.Run("lists map keys in insertion order for every key kind", func(t *testing.T) {
+		// The keys 3, 1, 2 go in, 3 leaves and comes back, 1 is updated: an update
+		// keeps its place and a reinserted key goes last, so the order is 1, 2, 3.
+		tests := []struct {
+			name string
+			key  types.Type
+			push []func(b *program.Builder)
+			want []string
+		}{
+			{"i32", types.TypeI32(), []func(b *program.Builder){
+				func(b *program.Builder) { b.Emit(instr.I32_CONST, 1) },
+				func(b *program.Builder) { b.Emit(instr.I32_CONST, 2) },
+				func(b *program.Builder) { b.Emit(instr.I32_CONST, 3) },
+			}, []string{"1", "2", "3"}},
+			{"i8", types.TypeI8(), []func(b *program.Builder){
+				func(b *program.Builder) { b.Emit(instr.I32_CONST, 1) },
+				func(b *program.Builder) { b.Emit(instr.I32_CONST, 2) },
+				func(b *program.Builder) { b.Emit(instr.I32_CONST, 3) },
+			}, []string{"1", "2", "3"}},
+			{"f64", types.TypeF64(), []func(b *program.Builder){
+				func(b *program.Builder) { b.Emit(instr.I32_CONST, 1).Emit(instr.I32_TO_F64_S) },
+				func(b *program.Builder) { b.Emit(instr.I32_CONST, 2).Emit(instr.I32_TO_F64_S) },
+				func(b *program.Builder) { b.Emit(instr.I32_CONST, 3).Emit(instr.I32_TO_F64_S) },
+			}, []string{"1", "2", "3"}},
+			{"string", types.TypeString(), []func(b *program.Builder){
+				func(b *program.Builder) { b.ConstGet(types.String("one")) },
+				func(b *program.Builder) { b.ConstGet(types.String("two")) },
+				func(b *program.Builder) { b.ConstGet(types.String("three")) },
+			}, []string{`"one"`, `"two"`, `"three"`}},
+			{"any", types.TypeAny(), []func(b *program.Builder){
+				func(b *program.Builder) { b.Emit(instr.I32_CONST, 1) },
+				func(b *program.Builder) { b.ConstGet(types.String("two")) },
+				func(b *program.Builder) { b.Emit(instr.I64_CONST, 1<<50) },
+			}, []string{"1", `"two"`, "1125899906842624"}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				mapType := types.NewMapType(tt.key, types.TypeI32())
+				build := func() *program.Program {
+					b := program.NewBuilder()
+					b.Locals(mapType)
+					typ := b.Type(mapType)
+					b.Emit(instr.I32_CONST, 0).Emit(instr.MAP_NEW_DEFAULT, uint64(typ)).Emit(instr.LOCAL_SET, 0)
+					for _, at := range []int{2, 0, 1} {
+						b.Emit(instr.LOCAL_GET, 0)
+						tt.push[at](b)
+						b.Emit(instr.I32_CONST, uint64(at+1)).Emit(instr.MAP_SET)
+					}
+					b.Emit(instr.LOCAL_GET, 0)
+					tt.push[2](b)
+					b.Emit(instr.MAP_DELETE)
+					b.Emit(instr.LOCAL_GET, 0)
+					tt.push[2](b)
+					b.Emit(instr.I32_CONST, 30).Emit(instr.MAP_SET)
+					b.Emit(instr.LOCAL_GET, 0)
+					tt.push[0](b)
+					b.Emit(instr.I32_CONST, 10).Emit(instr.MAP_SET)
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.MAP_KEYS)
+					prog, err := b.Build()
+					require.NoError(t, err)
+					require.NoError(t, program.Verify(prog))
+					return prog
+				}
+				keys := func(vm *interp.Interpreter) []string {
+					boxed, err := vm.PopBoxed()
+					require.NoError(t, err)
+					got, err := vm.Load(boxed.Ref())
+					require.NoError(t, err)
+					var out []string
+					switch arr := got.(type) {
+					case *types.Array:
+						for _, elem := range words(arr) {
+							if elem.Kind() != types.KindRef {
+								out = append(out, types.Unbox(elem).String())
+								continue
+							}
+							v, err := vm.Load(elem.Ref())
+							require.NoError(t, err)
+							out = append(out, v.String())
+						}
+					case types.TypedArray[int32]:
+						for _, v := range arr {
+							out = append(out, types.I32(v).String())
+						}
+					case types.TypedArray[int8]:
+						for _, v := range arr {
+							out = append(out, types.I8(v).String())
+						}
+					case types.TypedArray[float64]:
+						for _, v := range arr {
+							out = append(out, types.F64(v).String())
+						}
+					default:
+						t.Fatalf("unexpected keys %T", got)
+					}
+					return out
+				}
+				vm := interp.MustNew(build(), interp.WithThreshold(-1))
+				defer vm.Close()
+				require.NoError(t, vm.Run(context.Background()))
+				require.Equal(t, tt.want, keys(vm))
+			})
+		}
+	})
+
 	t.Run("runs a map constant with a repeated key and equal values", func(t *testing.T) {
 		b := program.NewBuilder()
 		b.ConstGet(&types.MapLiteral{
@@ -10812,7 +12045,7 @@ func TestInterpreter_Run(t *testing.T) {
 		nested := types.NewFunctionBuilder(fnType).
 			Append(instr.MustNew(instr.I32_CONST, 7), instr.MustNew(instr.RETURN)).
 			MustBuild()
-		raw := types.NewArray(types.NewArrayType(types.TypeI32()), types.BoxI32(1))
+		raw := newArray(nil, types.NewArrayType(types.TypeI32()), types.BoxI32(1))
 		lit := &types.ArrayLiteral{Typ: types.NewArrayType(fnType), Elems: []types.Value{nested}}
 
 		prog := program.New([]instr.Instruction{
@@ -10824,7 +12057,7 @@ func TestInterpreter_Run(t *testing.T) {
 		defer vm.Close()
 
 		nested.Code[1] = byte(instr.NOP)
-		raw.Elems[0] = types.BoxI32(100)
+		raw.SwapIndex(0, types.BoxI32(100))
 		lit.Elems[0] = types.I32(0)
 
 		for range 2 {
@@ -10849,7 +12082,7 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("shares one mutable constant between its positions", func(t *testing.T) {
 		typ := types.NewArrayType(types.TypeI32())
-		shared := types.NewArray(typ, types.BoxI32(1))
+		shared := newArray(nil, typ, types.BoxI32(1))
 		typed := types.TypedArray[int32]{1}
 
 		tests := []struct {
@@ -10898,7 +12131,7 @@ func TestInterpreter_Run(t *testing.T) {
 					require.Equal(t, types.BoxI32(9), got)
 					vm.Reset()
 				}
-				require.Equal(t, types.BoxI32(1), shared.Elems[0])
+				require.Equal(t, types.BoxI32(1), shared.Index(0))
 				require.Equal(t, int32(1), typed[0])
 			})
 		}
@@ -11091,7 +12324,7 @@ func TestInterpreter_Run(t *testing.T) {
 				for _, want := range tt.values {
 					got, err := i.Pop()
 					require.NoError(t, err, name)
-					require.Equal(t, want, got, name)
+					requireEqualValue(t, want, got, name)
 				}
 				require.Equal(t, len(tt.program.Locals), i.Len(), name)
 				require.NoError(t, i.Close(), name)
@@ -12249,6 +13482,31 @@ func TestInterpreter_Run(t *testing.T) {
 	})
 }
 
+// requireEqualValue compares want with got. An array or struct is compared by
+// type and words, since the interpreter binds the containers it builds to its
+// heap.
+func requireEqualValue(t *testing.T, want, got types.Value, msgAndArgs ...any) {
+	t.Helper()
+	if w, ok := want.(*types.Array); ok {
+		g, ok := got.(*types.Array)
+		require.True(t, ok, msgAndArgs...)
+		require.Equal(t, w.Typ, g.Typ, msgAndArgs...)
+		require.Equal(t, words(w), words(g), msgAndArgs...)
+		return
+	}
+	if w, ok := want.(*types.Struct); ok {
+		g, ok := got.(*types.Struct)
+		require.True(t, ok, msgAndArgs...)
+		require.Equal(t, w.Typ, g.Typ, msgAndArgs...)
+		require.Equal(t, len(w.Typ.Fields), len(g.Typ.Fields), msgAndArgs...)
+		for i := range w.Typ.Fields {
+			require.Equal(t, w.Raw(i), g.Raw(i), msgAndArgs...)
+		}
+		return
+	}
+	require.Equal(t, want, got, msgAndArgs...)
+}
+
 func TestInterpreter_Context(t *testing.T) {
 	var got context.Context
 	prog := program.New([]instr.Instruction{instr.MustNew(instr.NOP)})
@@ -12503,6 +13761,25 @@ func TestInterpreter_Load(t *testing.T) {
 	v, err := i.Load(addr)
 	require.NoError(t, err)
 	require.Equal(t, types.I32(5), v)
+
+	t.Run("a host holding a counted reference mutates a container through its methods", func(t *testing.T) {
+		for _, c := range hostContainers() {
+			i := interp.MustNew(program.New(nil))
+			child, err := i.Alloc(types.String("x"))
+			require.NoError(t, err, c.name)
+			value := c.build(nil, types.BoxRef(child))
+			addr, err := i.Alloc(value)
+			require.NoError(t, err, c.name)
+
+			loaded, err := i.Load(addr)
+			require.NoError(t, err, c.name)
+			c.drop(loaded)
+			_, err = i.RefCount(child)
+			require.ErrorIs(t, err, interp.ErrSegmentationFault, c.name)
+			require.NoError(t, i.Release(addr), c.name)
+			require.NoError(t, i.Close(), c.name)
+		}
+	})
 }
 
 func TestInterpreter_Store(t *testing.T) {
@@ -12637,12 +13914,13 @@ func TestInterpreter_Store(t *testing.T) {
 			old  types.Value
 			val  types.Value
 		}{
-			{"struct to string", types.NewStruct(structU, types.BoxI32(1)), types.String("s")},
-			{"struct T to struct U", types.NewStruct(structU, types.BoxI32(1)), types.NewStruct(structT, types.BoxF64(1))},
+			{"struct to string", types.NewStruct(nil, structU, types.BoxI32(1)), types.String("s")},
+			{"struct T to struct U", types.NewStruct(nil, structU, types.BoxI32(1)), types.NewStruct(nil, structT, types.BoxF64(1))},
 			{"i32 array to f64 array", types.TypedArray[int32]{1}, types.TypedArray[float64]{1}},
-			{"map type to map type", types.NewMap(types.NewMapType(types.TypeString(), types.TypeI32())), types.NewMap(types.NewMapType(types.TypeString(), types.TypeF64()))},
+			{"map type to map type", types.NewMap(nil, types.NewMapType(types.TypeString(), types.TypeI32()), 0), types.NewMap(nil, types.NewMapType(types.TypeString(), types.TypeF64()), 0)},
 			{"string to scalar", types.String("s"), types.I32(1)},
 			{"scalar to string", types.I32(1), types.String("s")},
+			{"string is immutable", types.String("a"), types.String("b")},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -12667,10 +13945,9 @@ func TestInterpreter_Store(t *testing.T) {
 			old  types.Value
 			val  types.Value
 		}{
-			{"struct", types.NewStruct(typ, types.BoxI32(1)), types.NewStruct(typ, types.BoxI32(2))},
+			{"struct", types.NewStruct(nil, typ, types.BoxI32(1)), types.NewStruct(nil, typ, types.BoxI32(2))},
 			{"array", types.TypedArray[int32]{1}, types.TypedArray[int32]{2, 3}},
-			{"map", types.NewMap(mapTyp), types.NewMap(mapTyp)},
-			{"string", types.String("a"), types.String("b")},
+			{"map", types.NewMap(nil, mapTyp, 0), types.NewMap(nil, mapTyp, 0)},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -12697,6 +13974,44 @@ func TestInterpreter_Store(t *testing.T) {
 		v, err := i.Load(addr)
 		require.NoError(t, err)
 		require.Equal(t, types.F64(1.5), v)
+	})
+
+	t.Run("adopts an unbound container", func(t *testing.T) {
+		for _, c := range hostContainers() {
+			i := interp.MustNew(program.New(nil))
+			addr, err := i.Alloc(c.build(i.Heap(), types.BoxedNull))
+			require.NoError(t, err, c.name)
+			child, err := i.Alloc(types.String("x"))
+			require.NoError(t, err, c.name)
+
+			value := c.build(nil, types.BoxRef(child))
+			require.NoError(t, i.Store(addr, value), c.name)
+			c.drop(value)
+			_, err = i.RefCount(child)
+			require.ErrorIs(t, err, interp.ErrSegmentationFault, c.name)
+			require.NoError(t, i.Close(), c.name)
+		}
+	})
+
+	t.Run("rejects a container bound to another heap and leaves the slot unchanged", func(t *testing.T) {
+		for _, c := range hostContainers() {
+			i, other := interp.MustNew(program.New(nil)), interp.MustNew(program.New(nil))
+			old := c.build(i.Heap(), types.BoxedNull)
+			addr, err := i.Alloc(old)
+			require.NoError(t, err, c.name)
+			nulls, err := i.RefCount(0)
+			require.NoError(t, err, c.name)
+
+			require.ErrorIs(t, i.Store(addr, c.build(other.Heap(), types.BoxedNull)), interp.ErrTypeMismatch, c.name)
+			loaded, err := i.Load(addr)
+			require.NoError(t, err, c.name)
+			require.Same(t, old, loaded, c.name)
+			count, err := i.RefCount(0)
+			require.NoError(t, err, c.name)
+			require.Equal(t, nulls, count, c.name)
+			require.NoError(t, i.Close(), c.name)
+			require.NoError(t, other.Close(), c.name)
+		}
 	})
 }
 
@@ -12789,6 +14104,45 @@ func TestInterpreter_Alloc(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEqual(t, 0, reused)
 	})
+
+	t.Run("adopts an unbound container", func(t *testing.T) {
+		for _, c := range hostContainers() {
+			i := interp.MustNew(program.New(nil))
+			child, err := i.Alloc(types.String("x"))
+			require.NoError(t, err, c.name)
+
+			value := c.build(nil, types.BoxRef(child))
+			addr, err := i.Alloc(value)
+			require.NoError(t, err, c.name)
+			c.drop(value)
+			_, err = i.RefCount(child)
+			require.ErrorIs(t, err, interp.ErrSegmentationFault, c.name)
+			require.NoError(t, i.Release(addr), c.name)
+			require.NoError(t, i.Close(), c.name)
+		}
+	})
+
+	t.Run("rejects a container bound to another heap", func(t *testing.T) {
+		for _, c := range hostContainers() {
+			i, other := interp.MustNew(program.New(nil)), interp.MustNew(program.New(nil))
+			value := c.build(other.Heap(), types.BoxedNull)
+			length := i.HeapLen()
+			nulls, err := i.RefCount(0)
+			require.NoError(t, err, c.name)
+
+			_, err = i.Alloc(value)
+			require.ErrorIs(t, err, interp.ErrTypeMismatch, c.name)
+			require.Equal(t, length, i.HeapLen(), c.name)
+			count, err := i.RefCount(0)
+			require.NoError(t, err, c.name)
+			require.Equal(t, nulls, count, c.name)
+
+			_, err = other.Alloc(value)
+			require.NoError(t, err, c.name)
+			require.NoError(t, i.Close(), c.name)
+			require.NoError(t, other.Close(), c.name)
+		}
+	})
 }
 
 func TestInterpreter_Retain(t *testing.T) {
@@ -12843,6 +14197,31 @@ func TestInterpreter_RefCount(t *testing.T) {
 		count, err = i.RefCount(addr)
 		require.NoError(t, err)
 		require.Equal(t, 1, count)
+	})
+
+	t.Run("balances a map constant whose key repeats", func(t *testing.T) {
+		b := program.NewBuilder()
+		b.ConstGet(&types.MapLiteral{
+			Typ:    types.NewMapType(types.TypeString(), types.TypeString()),
+			Keys:   []types.Value{types.String("a"), types.String("b"), types.String("a")},
+			Values: []types.Value{types.String("x"), types.String("z"), types.String("y")},
+		})
+		i := interp.MustNew(b.MustBuild())
+		defer i.Close()
+
+		live := map[string]int{}
+		for addr := 1; addr < i.HeapLen(); addr++ {
+			count, err := i.RefCount(addr)
+			if err != nil {
+				continue
+			}
+			v, err := i.Load(addr)
+			require.NoError(t, err)
+			if text, ok := v.(types.String); ok {
+				live[string(text)] = count
+			}
+		}
+		require.Equal(t, map[string]int{"a": 1, "b": 1, "z": 1, "y": 1}, live, "the replaced value is freed")
 	})
 
 	t.Run("rejects a dead address", func(t *testing.T) {
@@ -12904,6 +14283,19 @@ func TestInterpreter_HeapLen(t *testing.T) {
 	})
 }
 
+func TestInterpreter_Heap(t *testing.T) {
+	t.Run("returns the heap the interpreter allocates in", func(t *testing.T) {
+		i := interp.MustNew(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.String("hi"))
+		require.NoError(t, err)
+		require.Same(t, i.Heap(), i.Heap())
+		require.Equal(t, types.String("hi"), i.Heap().At(addr))
+		require.Equal(t, i.HeapLen(), i.Heap().Len())
+	})
+}
+
 func TestInterpreter_Push(t *testing.T) {
 	t.Run("pushes scalar", func(t *testing.T) {
 		i := interp.MustNew(program.New(nil))
@@ -12923,6 +14315,40 @@ func TestInterpreter_Push(t *testing.T) {
 		require.ErrorIs(t, i.Push(value), interp.ErrTypeMismatch)
 		require.Equal(t, 0, i.Len())
 		require.Equal(t, 0, value.closed)
+	})
+
+	t.Run("adopts an unbound container", func(t *testing.T) {
+		for _, c := range hostContainers() {
+			i := interp.MustNew(program.New(nil))
+			child, err := i.Alloc(types.String("x"))
+			require.NoError(t, err, c.name)
+
+			value := c.build(nil, types.BoxRef(child))
+			require.NoError(t, i.Push(value), c.name)
+			c.drop(value)
+			_, err = i.RefCount(child)
+			require.ErrorIs(t, err, interp.ErrSegmentationFault, c.name)
+			require.NoError(t, i.Close(), c.name)
+		}
+	})
+
+	t.Run("rejects a container bound to another heap", func(t *testing.T) {
+		for _, c := range hostContainers() {
+			i, other := interp.MustNew(program.New(nil)), interp.MustNew(program.New(nil))
+			value := c.build(other.Heap(), types.BoxedNull)
+			length := i.HeapLen()
+			nulls, err := i.RefCount(0)
+			require.NoError(t, err, c.name)
+
+			require.ErrorIs(t, i.Push(value), interp.ErrTypeMismatch, c.name)
+			require.Equal(t, 0, i.Len(), c.name)
+			require.Equal(t, length, i.HeapLen(), c.name)
+			count, err := i.RefCount(0)
+			require.NoError(t, err, c.name)
+			require.Equal(t, nulls, count, c.name)
+			require.NoError(t, i.Close(), c.name)
+			require.NoError(t, other.Close(), c.name)
+		}
 	})
 }
 
@@ -13144,13 +14570,13 @@ func TestInterpreter_Reset(t *testing.T) {
 		require.NoError(t, i.Run(context.Background()))
 		first, _, err := popString(i)
 		require.NoError(t, err)
-		require.NotEqual(t, types.BoxedNull, array().Elems[0])
+		require.NotEqual(t, types.BoxedNull, array().Index(0))
 
 		i.Reset()
 		after, err := i.Const(3)
 		require.NoError(t, err)
 		require.Equal(t, constant, after)
-		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, array().Elems)
+		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, words(array()))
 
 		require.NoError(t, i.Run(context.Background()))
 		second, _, err := popString(i)
@@ -13173,8 +14599,8 @@ func TestInterpreter_Reset(t *testing.T) {
 		value, err := b.Load(constant.Ref())
 		require.NoError(t, err)
 		require.NotSame(t, original, value)
-		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, value.(*types.Array).Elems)
-		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, original.Elems)
+		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, words(value.(*types.Array)))
+		require.Equal(t, []types.Boxed{types.BoxedNull, types.BoxedNull}, words(original))
 	})
 
 	t.Run("finalizes and clears dynamic values", func(t *testing.T) {
@@ -13218,7 +14644,7 @@ func TestInterpreter_Reset(t *testing.T) {
 		second := value.(*types.Array)
 		require.NotSame(t, first, second)
 		require.Same(t, typ, first.Typ)
-		require.Equal(t, []types.Boxed{types.BoxedNull}, first.Elems)
+		require.Equal(t, []types.Boxed{types.BoxedNull}, words(first))
 	})
 
 	t.Run("preserves arrays reclaimed before reset", func(t *testing.T) {
@@ -13245,7 +14671,7 @@ func TestInterpreter_Reset(t *testing.T) {
 		second := value.(*types.Array)
 		require.NotSame(t, first, second)
 		require.Same(t, typ, first.Typ)
-		require.Equal(t, []types.Boxed{types.BoxedNull}, first.Elems)
+		require.Equal(t, []types.Boxed{types.BoxedNull}, words(first))
 	})
 }
 

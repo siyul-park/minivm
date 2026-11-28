@@ -88,6 +88,10 @@ var (
 	ErrHandlerTarget = errors.New("invalid exception handler target")
 	// ErrPosition reports a source position that is unsorted, off an instruction boundary, or past the code.
 	ErrPosition = errors.New("invalid source position")
+	// ErrConstantRef reports an Array, Struct, or Map constant bound to a heap
+	// or holding a reference other than null: either names slots of some other
+	// heap, so nested references go through the literal forms.
+	ErrConstantRef = errors.New("constant holds a reference")
 	// ErrNil reports a nil program.
 	ErrNil = errors.New("nil program")
 )
@@ -142,6 +146,9 @@ func verifyConstant(prog *Program, slot int, v types.Value, seen map[any]bool) e
 	}
 	if fn, ok := v.(*types.Function); ok {
 		return newChecker(prog, slot, fn).run()
+	}
+	if heap(v) != nil || !nullOnly(v) {
+		return &VerifyError{Slot: slot, Err: ErrConstantRef}
 	}
 	elems, _ := children(v)
 	for _, elem := range elems {
@@ -758,4 +765,34 @@ func unify(a, b types.Kind) types.Kind {
 		return a
 	}
 	return anyKind
+}
+
+// nullOnly reports whether a container constant holds no reference word except
+// null. Other values are not containers and pass.
+func nullOnly(v types.Value) bool {
+	null := func(word types.Boxed) bool {
+		return word.Kind() != types.KindRef || word.Ref() == 0
+	}
+	switch v := v.(type) {
+	case *types.Array:
+		for i := range v.Len() {
+			if !null(v.Index(i)) {
+				return false
+			}
+		}
+	case *types.Struct:
+		for i := range v.Typ.Fields {
+			if v.Typ.Fields[i].Kind == types.KindRef && !null(types.Boxed(v.Raw(i))) {
+				return false
+			}
+		}
+	case *types.Map:
+		ok := true
+		v.Range(func(key, val types.Boxed) bool {
+			ok = null(key) && null(val)
+			return ok
+		})
+		return ok
+	}
+	return true
 }

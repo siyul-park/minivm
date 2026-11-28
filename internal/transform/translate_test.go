@@ -1299,11 +1299,69 @@ blk0: ()
 			require.Contains(t, sequence(out), fmt.Sprintf("guard map key %s elem i32", key.Kind()))
 		}
 
-		for _, key := range []types.Type{types.TypeF32(), types.TypeF64(), types.TypeString()} {
+		// The operations here push i32 keys, which no float map serves, so only the
+		// length of a float map is guarded.
+		for _, key := range []types.Type{types.TypeF32(), types.TypeF64()} {
 			out, _, err = transform.Translate(transform.Module{}, nil, 1, mapped(key, types.TypeI32()), 0)
 			require.NoError(t, err)
-			require.Equal(t, []string{"map.len", "map.set", "map.delete", "map.get", "map.lookup"}, sequence(out))
+			require.Equal(t, []string{fmt.Sprintf("guard map key %s elem i32", key.Kind()), "map.len", "map.set", "map.delete", "map.get", "map.lookup"}, sequence(out))
 		}
+
+		// A string map is guarded for its length, since an i32 key is no string; a
+		// map of another reference type is not guarded at all, and an any map is
+		// guarded before every operation, since it serves every key kind.
+		out, _, err = transform.Translate(transform.Module{}, nil, 1, mapped(types.TypeString(), types.TypeI32()), 0)
+		require.NoError(t, err)
+		require.Equal(t, []string{"guard map key ref elem i32", "map.len", "map.set", "map.delete", "map.get", "map.lookup"}, sequence(out))
+
+		out, _, err = transform.Translate(transform.Module{}, nil, 1, mapped(types.NewArrayType(types.TypeI32()), types.TypeI32()), 0)
+		require.NoError(t, err)
+		require.Equal(t, []string{"map.len", "map.set", "map.delete", "map.get", "map.lookup"}, sequence(out))
+
+		out, _, err = transform.Translate(transform.Module{}, nil, 1, mapped(types.TypeAny(), types.TypeI32()), 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, []string{
+			"guard map key any elem i32", "map.len",
+			"guard map key any elem i32", "map.set",
+			"guard map key any elem i32", "map.delete",
+			"guard map key any elem i32", "map.get",
+			"guard map key any elem i32", "map.lookup",
+		}, sequence(out))
+	})
+
+	t.Run("guards a string map before each operation of a string key and no other reference-keyed map", func(t *testing.T) {
+		mapped := func(key types.Type) *types.Function {
+			return &types.Function{
+				Typ: &types.FunctionType{Params: []types.Type{types.NewMapType(key, types.TypeI32()), key}, Returns: []types.Type{types.TypeI32()}},
+				Code: assemble(t, func(b *instr.Builder) {
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 2).Emit(instr.MAP_SET)
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_DELETE)
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_GET).Emit(instr.DROP)
+					b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_LOOKUP).Emit(instr.DROP).Emit(instr.DROP)
+					b.Emit(instr.I32_CONST, 0).Emit(instr.RETURN)
+				}),
+			}
+		}
+		guards := func(out *ssa.Function) (n int) {
+			for _, op := range out.Block(0).Operations {
+				if op.Op == ssa.OpGuardShape && op.Shape.Form == ssa.FormMap {
+					require.Equal(t, types.KindRef, op.Shape.Key)
+					n++
+				}
+			}
+			return n
+		}
+
+		out, _, err := transform.Translate(transform.Module{}, nil, 1, mapped(types.TypeString()), 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		require.Equal(t, 4, guards(out))
+
+		out, _, err = transform.Translate(transform.Module{}, nil, 1, mapped(types.NewArrayType(types.TypeI32())), 0)
+		require.NoError(t, err)
+		require.NoError(t, ssa.Verify(out))
+		require.Zero(t, guards(out))
 	})
 
 	t.Run("does not guard a map set of an i64 value, which always bridges", func(t *testing.T) {

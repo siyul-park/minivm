@@ -60,7 +60,7 @@ An unmarshalled Go func returns a failed call as its trailing `error`. A func ty
 | `Retain` | adds one caller-owned ref |
 | `Release` | drops one caller-owned ref |
 | `Load` | borrows; the count is unchanged |
-| `Store` | transfers a concrete value of the slot's representation (Go type and declared type; a scalar cell may change scalar kind) to the slot and releases the replaced value; any other value is `ErrTypeMismatch` |
+| `Store` | transfers a concrete value of the slot's representation (Go type and declared type; a scalar cell may change scalar kind) to the slot and releases the replaced value; any other value is `ErrTypeMismatch`, and so is any value stored over a `String`, which is immutable because a map keys a string by its cell |
 | `Push` | transfers the value or its ref to the stack |
 | `Pop` | releases the stack ref and returns the detached value |
 | `PopBoxed` | transfers the stack ref to the caller |
@@ -70,6 +70,10 @@ An unmarshalled Go func returns a failed call as its trailing `error`. A func ty
 A value from `Marshal` owns the refs of its fields until the VM takes it. The caller `MUST` hand it to `Push`, `Alloc`, or `Store`, or drop it with `Alloc` then `Release`. Values with no refs, such as scalars, strings, slices, maps, and funcs, need nothing.
 
 `Pop` frees the refs a value holds with its last reference, so read them before `Pop` or `Retain` them.
+
+## Containers
+
+A host builds a VM container with the interpreter's heap: `types.NewArray(vm.Heap(), typ, size)` and `Append`, `types.NewStruct(vm.Heap(), typ, fields...)`, or `types.NewMap(vm.Heap(), types.NewMapType(key, elem), capacity)`. A container owns the refs its words hold (`memory-model.md`, Container Ownership, owns the per-method contract). One built with a nil heap is unbound until `Alloc`, `Push`, or `Store` takes it; a container bound to another interpreter's heap is `ErrTypeMismatch` there. A host `MAY` change a container through its methods while it holds a counted ref to it. `HostMap.Map` returns a VM-owned copy of the Go map, which iterates in Go's order.
 
 ## Host Functions
 
@@ -95,16 +99,16 @@ Calling a Go func bound to a VM function from inside a host function runs the VM
 
 Wrong-kind unboxing is invalid.
 
-`PopBoxed` returns the raw stack word. For `KindRef` the caller `MUST` release the transferred ref when finished, or `Retain` first when another ownership is required. `Load` does not change ownership. A value from `Load` is borrowed: the caller `MUST NOT` change its type or storage (for an array, its length, capacity, or backing array) except through `Store`, since the optimizer reads arrays and guards shapes on that representation.
+`PopBoxed` returns the raw stack word. For `KindRef` the caller `MUST` release the transferred ref when finished, or `Retain` first when another ownership is required. `Load` does not change ownership. A value from `Load` is borrowed: the caller `MUST NOT` change its type, and changes a container only through its methods while it holds a counted ref (Containers above), since the optimizer reads arrays and guards shapes on that representation.
 
 A hook's `Local` and `SetLocal` are exact only on threaded code. On optimized code (bytecode `optimize.O3` or native), locals are not program semantics: a pass or the JIT may hold or drop a local's value, so a hook's `Local` need not see the program's value and its `SetLocal` need not change the program's computation.
 
 ## Heap API
 
 ```go
-addr, err := vm.Alloc(types.String("hello"))
+addr, err := vm.Alloc(types.I32(1))
 obj, err := vm.Load(addr)
-err = vm.Store(addr, types.String("world"))
+err = vm.Store(addr, types.I32(2))
 obj, err = vm.Retain(addr)
 err = vm.Release(addr)
 ```
@@ -115,6 +119,7 @@ Additional rules:
 - Storing another heap address returns `ErrTypeMismatch`; share it with `Alloc(ref)`.
 - Concrete pointers passed to `Alloc`, `Store`, or `Push` transfer unique ownership and `MUST NOT` already be VM-owned.
 - Owned refs `MUST` transfer or release; leaked host ownership keeps objects alive.
+- `vm.Heap()` returns the interpreter's `*types.Heap`, which a container binds to and takes its storage from (`types.NewArray`, `types.NewStruct`, `types.NewMap`). Its address methods are unchecked and serve the runtime: a host `MUST` use the checked `Interpreter` methods above to read, write, or count a slot.
 
 `Store`/`Alloc` track crossed pointers to reject double ownership. Heap-stored dynamic functions receive callable dispatch slots and follow normal heap lifetime.
 

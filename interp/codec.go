@@ -587,7 +587,7 @@ func (r *Registry) unmarshalFunc(t reflect.Type, fn *types.FunctionType) Unmarsh
 			}
 			defer func() {
 				for _, value := range returns {
-					d.interp.releaseBox(value)
+					d.interp.heap.Release(value)
 				}
 			}()
 			for idx := range returns {
@@ -737,9 +737,9 @@ func defaults() []RegistryOption {
 				return nil
 			})),
 		WithMarshaler(reflect.TypeFor[complex64](), complexF32, MarshalerFunc(
-			func(_ *Encoder, p unsafe.Pointer) (types.Value, error) {
+			func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
 				c := *(*complex64)(p)
-				return types.NewStruct(complexF32, types.BoxF32(real(c)), types.BoxF32(imag(c))), nil
+				return types.NewStruct(&e.interp.heap, complexF32, types.BoxF32(real(c)), types.BoxF32(imag(c))), nil
 			})),
 		WithUnmarshaler(reflect.TypeFor[complex64](), UnmarshalerFunc(
 			func(d *Decoder, val types.Value, p unsafe.Pointer) error {
@@ -754,9 +754,9 @@ func defaults() []RegistryOption {
 				return nil
 			})),
 		WithMarshaler(reflect.TypeFor[complex128](), complexF64, MarshalerFunc(
-			func(_ *Encoder, p unsafe.Pointer) (types.Value, error) {
+			func(e *Encoder, p unsafe.Pointer) (types.Value, error) {
 				c := *(*complex128)(p)
-				return types.NewStruct(complexF64, types.BoxF64(real(c)), types.BoxF64(imag(c))), nil
+				return types.NewStruct(&e.interp.heap, complexF64, types.BoxF64(real(c)), types.BoxF64(imag(c))), nil
 			})),
 		WithUnmarshaler(reflect.TypeFor[complex128](), UnmarshalerFunc(
 			func(d *Decoder, val types.Value, p unsafe.Pointer) error {

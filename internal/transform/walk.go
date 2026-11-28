@@ -373,8 +373,13 @@ func (w *walker) instruction(inst instr.Instruction) bool {
 
 // guardMap guards the map of operation, which pops pops operands, when native
 // code lowers the operation on it (ssa.Shape.Serves): any other operation keeps
-// the interpreter's, and a guard it never uses would only cost a deopt.
+// the interpreter's, and a guard it never uses would only cost a deopt. A map of
+// a reference type other than string gets none: the guard compares key kinds, so
+// it could not tell it from a string map.
 func (w *walker) guardMap(operation instr.Opcode, m *types.MapType, pops int) {
+	if m.KeyKind == types.KindRef && !m.Key.Equals(types.TypeString()) {
+		return
+	}
 	top := len(w.stack)
 	var key, value types.Kind
 	if pops > 1 {

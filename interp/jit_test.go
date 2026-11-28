@@ -18,7 +18,8 @@ import (
 )
 
 // mapKey is the key expression a map program pushes for iteration i: i times mul,
-// modulo space, shifted by shift, converted to the map's key kind.
+// modulo space, shifted by shift, converted to the map's key kind; a float key's
+// sign alternates with each run of space iterations, so zero is both +0 and -0.
 type mapKey struct {
 	kind  types.Type
 	shift uint64
@@ -625,7 +626,7 @@ func refArrayProgram(t *testing.T, warm int) *program.Program {
 	)
 	rwFn := rw.MustBuild()
 
-	arr := types.NewArray(types.NewArrayType(types.TypeAny()), types.BoxedNull, types.BoxedNull)
+	arr := types.NewArray(nil, types.NewArrayType(types.TypeAny()), 2)
 	b := instr.NewBuilder()
 	loop, done := b.Label(), b.Label()
 	b.Bind(loop)
@@ -666,9 +667,9 @@ func structTreeProgram(t *testing.T, warm int) *program.Program {
 	walkFn := walk.MustBuild()
 	walkFn.Locals = []types.Type{record, types.TypeI32()}
 
-	leaf := types.NewStruct(record, types.BoxI32(10), types.BoxedNull)
-	mid := types.NewStruct(record, types.BoxI32(20), types.BoxedNull)
-	root := types.NewStruct(record, types.BoxI32(30), types.BoxedNull)
+	leaf := types.NewStruct(nil, record, types.BoxI32(10), types.BoxedNull)
+	mid := types.NewStruct(nil, record, types.BoxI32(20), types.BoxedNull)
+	root := types.NewStruct(nil, record, types.BoxI32(30), types.BoxedNull)
 
 	b := instr.NewBuilder()
 	b.Emit(instr.CONST_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.CONST_GET, 2).Emit(instr.STRUCT_SET)
@@ -1198,7 +1199,7 @@ func compareNative(t *testing.T, prog *program.Program) map[string]float64 {
 		got, err := vm.Pop()
 		require.NoError(t, err)
 		_, counts := heapOf(vm)
-		require.Equal(t, want, got)
+		requireEqualValue(t, want, got)
 		require.Equal(t, wantCounts, counts)
 		vm.Reset()
 		vm.Flush()
@@ -1240,6 +1241,17 @@ func (k mapKey) emit(b *instr.Builder, mul, space uint64) {
 	if k.wide {
 		b.Emit(instr.I64_CONST, 1<<50+3).Emit(instr.I64_MUL)
 	}
+	switch k.kind.Kind() {
+	case types.KindF32:
+		// The sign flips with each run of space iterations. Each run meets every
+		// residue once when mul and space are coprime, so a zero key takes both
+		// signs whatever the iteration's parity.
+		b.Emit(instr.I32_TO_F32_S).Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, space).Emit(instr.I32_DIV_S).Emit(instr.I32_CONST, 1).Emit(instr.I32_AND)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.I32_SHL).Emit(instr.I32_SUB).Emit(instr.I32_TO_F32_S).Emit(instr.F32_MUL)
+	case types.KindF64:
+		b.Emit(instr.I32_TO_F64_S).Emit(instr.I32_CONST, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, space).Emit(instr.I32_DIV_S).Emit(instr.I32_CONST, 1).Emit(instr.I32_AND)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.I32_SHL).Emit(instr.I32_SUB).Emit(instr.I32_TO_F64_S).Emit(instr.F64_MUL)
+	}
 }
 
 // mapProgram runs iterations of body over local 0, a map of typ made with
@@ -1253,8 +1265,8 @@ func mapProgram(t *testing.T, typ *types.MapType, capacity, iterations int, cons
 }
 
 // mapProgramFrom is mapProgram with the module's first instructions, which
-// leave the map in local 0, given by start.
-func mapProgramFrom(t *testing.T, typ *types.MapType, start func(b *instr.Builder), iterations int, constants []types.Value, extra []types.Type, body func(b *instr.Builder)) *program.Program {
+// leave the map in local 0, given by start, and the types declared after typ.
+func mapProgramFrom(t *testing.T, typ *types.MapType, start func(b *instr.Builder), iterations int, constants []types.Value, extra []types.Type, body func(b *instr.Builder), declared ...types.Type) *program.Program {
 	t.Helper()
 	b := instr.NewBuilder()
 	loop, done := b.Label(), b.Label()
@@ -1268,7 +1280,16 @@ func mapProgramFrom(t *testing.T, typ *types.MapType, start func(b *instr.Builde
 	code, err := b.Assemble()
 	require.NoError(t, err)
 	locals := append([]types.Type{typ, types.TypeI32(), types.TypeI32()}, extra...)
-	return program.New(code, program.WithLocals(locals...), program.WithTypes(typ), program.WithConstants(constants...))
+	return program.New(code, program.WithLocals(locals...), program.WithTypes(append([]types.Type{typ}, declared...)...), program.WithConstants(constants...))
+}
+
+// rehashes bounds how often a mapProgram loop of iterations steps over at most
+// space keys can rehash a map built with capacity: an insert never reuses a
+// deleted slot, so the table rehashes once its order fills, and the order of a
+// table built for capacity holds at least capacity entries, of which at most
+// space stay live across a rehash.
+func rehashes(capacity, iterations int, space uint64) int {
+	return iterations / (capacity - int(space))
 }
 
 // mapBody is one iteration over local 0 that sets, deletes every third time,

@@ -28,7 +28,7 @@ Static validation of untrusted bytecode.
 
 Order: structure → control flow → termination → stack → calls.
 
-Dynamic arity `MUST` use statically known counts/metadata and never a guessed count. An op whose pop count is a runtime value (`array.new`, `map.new`, `closure.new`, `struct.new` of a non-struct type) ends stack tracking on its path; its runtime underflow guard covers the rest. Every function reachable from a constant is verified, including one nested in an array, map, or struct literal; it reports slot `j+1` of its top-level constant `j`. Errors `MUST` identify the location and violated rule. Heap, dynamic refs, and host state remain runtime concerns.
+Dynamic arity `MUST` use statically known counts/metadata and never a guessed count. An op whose pop count is a runtime value (`array.new`, `map.new`, `closure.new`, `struct.new` of a non-struct type) ends stack tracking on its path; its runtime underflow guard covers the rest. Every function reachable from a constant is verified, including one nested in an array, map, or struct literal; it reports slot `j+1` of its top-level constant `j`. Errors `MUST` identify the location and violated rule. A constant `Array`, `Struct`, or `Map` bound to a heap or holding a reference other than null is rejected with `ErrConstantRef` at its top-level slot. Heap, dynamic refs, and host state remain runtime concerns.
 
 ## Source Positions
 
