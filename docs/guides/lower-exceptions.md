@@ -43,7 +43,7 @@ catch:                       ; stack: exc
 after:
 ```
 
-A `return` or `break` that leaves the `try` body emits the `finally` body before its jump.
+A `return` or `break` that leaves the `try` body emits the `finally` body before its jump, outside `[start, end)`: end the protected range before that copy and start a new range after it, or jump to a cleanup block placed outside the range. A copy inside the range would run again in `catch` if it threw.
 
 ## Generators
 
